@@ -1,0 +1,11 @@
+{
+    "dependencies": [
+        "glfw3",
+        "glm",
+        "fmt",
+        "spdlog",
+        "stb",
+        "tinyobjloader",
+        "vulkan-memory-allocator"
+    ]
+}
