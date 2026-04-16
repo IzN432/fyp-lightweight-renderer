@@ -2,7 +2,9 @@
 
 #include <vulkan/vulkan.h>
 
+#include <array>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace lr
@@ -16,6 +18,7 @@ public:
         std::string appName = "App";
         bool enableValidation = true;
         bool enableRayTracing = false;
+        bool enableDebugNames = true;
         int numGraphicsQueues = 1;
         bool enableTransferQueue = true;
         std::vector<const char *> extraInstanceExtensions;
@@ -68,6 +71,14 @@ public:
     // Sync
     void waitIdle() const;
 
+    // Debug — no-op if enableDebugNames is false or the extension isn't loaded.
+    void setDebugName(VkObjectType type, uint64_t handle, std::string_view name) const;
+    void beginDebugLabel(VkCommandBuffer cmd,
+                         std::string_view name,
+                         const std::array<float, 4> &color = {1.0f, 1.0f, 1.0f, 1.0f}) const;
+    void endDebugLabel(VkCommandBuffer cmd) const;
+    bool debugNamesEnabled() const { return m_config.enableDebugNames; }
+
 private:
     void createInstance();
     void createDebugMessenger();
@@ -108,6 +119,10 @@ private:
 
     Config m_config;
     uint32_t m_apiVersion = VK_API_VERSION_1_0;
+
+    PFN_vkSetDebugUtilsObjectNameEXT m_vkSetDebugUtilsObjectName = nullptr;
+    PFN_vkCmdBeginDebugUtilsLabelEXT m_vkCmdBeginDebugUtilsLabel = nullptr;
+    PFN_vkCmdEndDebugUtilsLabelEXT m_vkCmdEndDebugUtilsLabel = nullptr;
 };
 
 }  // namespace lr

@@ -1,0 +1,47 @@
+/**
+ * G-Buffer Reconstruction Utilities
+ * * This set of functions is designed for a deferred rendering pipeline where:
+ * 1. World positions are reconstructed from the Hardware Depth Buffer.
+ * 2. Surface normals are stored in View Space (View-Normal) within the G-Buffer.
+ * * Requirement: The following matrices must be provided (e.g., via Push Constants or UBO):
+ * - N: The Normal Matrix (transpose(inverse(mat3(View)))).
+ * - invP: The Inverse Projection Matrix.
+ * - invV: The Inverse View Matrix.
+ */
+
+vec3 unpackViewNormal(vec2 gbufferNormal)
+{
+    float z = sqrt(max(0.0, 1.0 - gbufferNormal.x * gbufferNormal.x - gbufferNormal.y * gbufferNormal.y));
+    return normalize(vec3(gbufferNormal, z));
+}
+
+vec2 packViewNormal(vec3 viewNormal)
+{
+    return viewNormal.xy;
+}
+
+vec3 worldToViewNormal(vec3 worldSpaceNormal, mat3 N)
+{
+    return normalize(N * worldSpaceNormal);
+}
+
+vec3 depthToViewPosition(float depth, vec2 screenUV, mat4 invP)
+{
+  vec2 ndcXY = screenUV * 2.0f - vec2(1.0f);
+  vec4 clipPos = vec4(ndcXY, depth, 1.0f);
+  vec4 viewPos = invP * clipPos;
+
+  return viewPos.xyz / viewPos.w;
+}
+
+vec3 depthToWorldPosition(float depth, vec2 screenUV, mat4 invP, mat4 invV)
+{
+  vec3 viewPos = depthToViewPosition(depth, screenUV, invP);
+
+  return (invV * vec4(viewPos, 1.0)).xyz;
+}
+
+vec3 viewToWorldNormal(vec3 normal, mat4 invV)
+{
+  return (invV * vec4(normal, 0.0)).xyz;
+}

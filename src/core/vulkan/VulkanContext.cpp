@@ -91,6 +91,44 @@ void VulkanContext::waitIdle() const
     vkDeviceWaitIdle(m_device);
 }
 
+void VulkanContext::setDebugName(VkObjectType type, uint64_t handle, std::string_view name) const
+{
+    if (!m_vkSetDebugUtilsObjectName || handle == 0)
+        return;
+
+    VkDebugUtilsObjectNameInfoEXT info{};
+    info.sType        = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    info.objectType   = type;
+    info.objectHandle = handle;
+    info.pObjectName  = name.data();
+    m_vkSetDebugUtilsObjectName(m_device, &info);
+}
+
+void VulkanContext::beginDebugLabel(VkCommandBuffer cmd,
+                                    std::string_view name,
+                                    const std::array<float, 4> &color) const
+{
+    if (!m_vkCmdBeginDebugUtilsLabel || cmd == VK_NULL_HANDLE)
+        return;
+
+    VkDebugUtilsLabelEXT label{};
+    label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    label.pLabelName = name.data();
+    label.color[0] = color[0];
+    label.color[1] = color[1];
+    label.color[2] = color[2];
+    label.color[3] = color[3];
+    m_vkCmdBeginDebugUtilsLabel(cmd, &label);
+}
+
+void VulkanContext::endDebugLabel(VkCommandBuffer cmd) const
+{
+    if (!m_vkCmdEndDebugUtilsLabel || cmd == VK_NULL_HANDLE)
+        return;
+
+    m_vkCmdEndDebugUtilsLabel(cmd);
+}
+
 uint32_t VulkanContext::findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags flags) const
 {
     for (uint32_t i = 0; i < m_memProperties.memoryTypeCount; ++i)
@@ -100,6 +138,7 @@ uint32_t VulkanContext::findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags 
         if (typeMatch && propMatch)
             return i;
     }
+    spdlog::error("Runtime error: throwing std::runtime_error");
     throw std::runtime_error("VulkanContext: no suitable memory type found");
 }
 
@@ -119,6 +158,7 @@ VkFormat VulkanContext::findSupportedFormat(const std::vector<VkFormat> &candida
         if (supported)
             return fmt;
     }
+    spdlog::error("Runtime error: throwing std::runtime_error");
     throw std::runtime_error("VulkanContext: no supported format found in candidates");
 }
 
@@ -138,17 +178,23 @@ void VulkanContext::createInstance()
         m_layers.push_back(layer);
 
     if (!checkLayerSupport(m_layers))
+    {
+        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: requested Vulkan layers not available");
+    }
 
     // Required instance extensions
-    if (m_config.enableValidation)
+    if (m_config.enableValidation || m_config.enableDebugNames)
         m_instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
     for (const char *ext : m_config.extraInstanceExtensions)
         m_instanceExtensions.push_back(ext);
 
     if (!checkInstanceExtensionSupport(m_instanceExtensions))
+    {
+        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: requested instance extensions not available");
+    }
 
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -167,7 +213,10 @@ void VulkanContext::createInstance()
     ci.ppEnabledExtensionNames = m_instanceExtensions.data();
 
     if (vkCreateInstance(&ci, nullptr, &m_instance) != VK_SUCCESS)
+    {
+        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: failed to create VkInstance");
+    }
 
     spdlog::info("VulkanContext: instance created (API {}.{}.{})",
                  VK_VERSION_MAJOR(m_apiVersion),
@@ -276,7 +325,10 @@ void VulkanContext::pickPhysicalDevice(VkSurfaceKHR surface)
     uint32_t count = 0;
     vkEnumeratePhysicalDevices(m_instance, &count, nullptr);
     if (count == 0)
+    {
+        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: no Vulkan-capable GPUs found");
+    }
 
     std::vector<VkPhysicalDevice> devices(count);
     vkEnumeratePhysicalDevices(m_instance, &count, devices.data());
@@ -293,7 +345,10 @@ void VulkanContext::pickPhysicalDevice(VkSurfaceKHR surface)
     }
 
     if (bestScore < 0)
+    {
+        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: no suitable GPU found");
+    }
 
     // Query properties via pNext chain
     m_deviceProperties11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES;
@@ -363,6 +418,8 @@ void VulkanContext::createDevice()
     features12.pNext = &features13;
     features12.bufferDeviceAddress = VK_TRUE;
     features12.descriptorIndexing = VK_TRUE;
+    features12.runtimeDescriptorArray = VK_TRUE;
+    features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
 
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -380,7 +437,10 @@ void VulkanContext::createDevice()
     // Note: pEnabledFeatures must be null when using VkPhysicalDeviceFeatures2 in pNext
 
     if (vkCreateDevice(m_physicalDevice, &ci, nullptr, &m_device) != VK_SUCCESS)
+    {
+        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: failed to create logical device");
+    }
 
     // Retrieve queue handles
     m_graphicsQueues.resize(1);
@@ -390,6 +450,24 @@ void VulkanContext::createDevice()
 
     if (m_hasDedicatedTransfer)
         vkGetDeviceQueue(m_device, static_cast<uint32_t>(m_transferQueueFamily), 0, &m_transferQueue);
+
+    if (m_config.enableDebugNames)
+    {
+        m_vkSetDebugUtilsObjectName =
+            reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
+                vkGetInstanceProcAddr(m_instance, "vkSetDebugUtilsObjectNameEXT"));
+        if (!m_vkSetDebugUtilsObjectName)
+            spdlog::warn("VulkanContext: vkSetDebugUtilsObjectNameEXT not available — debug names disabled");
+
+        m_vkCmdBeginDebugUtilsLabel =
+            reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
+                vkGetDeviceProcAddr(m_device, "vkCmdBeginDebugUtilsLabelEXT"));
+        m_vkCmdEndDebugUtilsLabel =
+            reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
+                vkGetDeviceProcAddr(m_device, "vkCmdEndDebugUtilsLabelEXT"));
+        if (!m_vkCmdBeginDebugUtilsLabel || !m_vkCmdEndDebugUtilsLabel)
+            spdlog::warn("VulkanContext: debug label commands unavailable — pass labels disabled");
+    }
 
     spdlog::info("VulkanContext: logical device created");
 }

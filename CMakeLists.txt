@@ -11,6 +11,10 @@ find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin REQUIRED)
 
 function(add_shaders TARGET)
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/shaders")
+    
+    # Collect all shader headers (.glslh files) as implicit dependencies
+    file(GLOB_RECURSE SHADER_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/passes/*.glslh")
+    
     set(SPV_FILES)
     foreach(GLSL ${ARGN})
         get_filename_component(FNAME ${GLSL} NAME)
@@ -18,7 +22,7 @@ function(add_shaders TARGET)
         add_custom_command(
             OUTPUT ${SPV}
             COMMAND ${GLSLC} ${CMAKE_CURRENT_SOURCE_DIR}/${GLSL} -o ${SPV}
-            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${GLSL}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${GLSL} ${SHADER_HEADERS}
             COMMENT "Compiling shader ${GLSL}"
         )
         list(APPEND SPV_FILES ${SPV})
@@ -32,6 +36,7 @@ find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(tinyobjloader CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h" REQUIRED)
 
 # MSVC flags
 add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/EHsc>)
@@ -46,21 +51,57 @@ add_library(lr_core STATIC
     src/core/vulkan/VulkanContext.cpp
     src/core/vulkan/ShaderLoader.cpp
     src/core/vulkan/Allocator.cpp
+    src/core/vulkan/CommandBuffer.cpp
+    src/core/vulkan/DescriptorAllocator.cpp
+    src/core/vulkan/Swapchain.cpp
+    src/core/vulkan/Renderer.cpp
+
+    src/core/framegraph/ResourceRegistry.cpp
+    src/core/framegraph/FrameGraph.cpp
+
+    src/core/pipeline/GraphicsPipeline.cpp
+    src/core/pipeline/ComputePipeline.cpp
+
     src/core/window/Window.cpp
+
+    src/core/passes/imgui/ImguiPass.cpp
+
+    src/core/scene/Mesh.cpp
+
+    src/core/loaders/ObjLoader.cpp
+    src/core/loaders/GltfLoader.cpp
+
+    src/core/upload/CameraUploader.cpp
+    src/core/upload/MeshUploader.cpp
+
+    src/core/utility/ImageLoader.cpp
+    src/core/app/GuiManager.cpp
+    src/core/app/InputHandler.cpp
+    src/core/app/Viewer.cpp
 )
 target_include_directories(lr_core PUBLIC src)
+target_include_directories(lr_core PUBLIC ${TINYGLTF_INCLUDE_DIRS})
 target_link_libraries(lr_core PUBLIC
     Vulkan::Vulkan
     glfw
+    glm::glm
     spdlog::spdlog
+    tinyobjloader::tinyobjloader
     GPUOpen::VulkanMemoryAllocator
+    imgui
 )
 target_compile_definitions(lr_core PUBLIC
     LR_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/"
 )
 
 add_shaders(lr_core
-    src/core/passes/test.vert
+    src/core/passes/fullscreen.vert
+    src/core/passes/geometry/geometry.vert
+    src/core/passes/geometry/geometry.frag
+    src/core/passes/ibl/hdritocubemap.comp
+    src/core/passes/ibl/irradiance.comp
+    src/core/passes/ibl/prefilter.comp
+    src/core/passes/final/final.frag
 )
 
 # Test executable
