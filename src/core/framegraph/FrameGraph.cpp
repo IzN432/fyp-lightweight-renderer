@@ -116,7 +116,7 @@ void FrameGraph::destroyCompiledPasses()
 
 void FrameGraph::compile()
 {
-    spdlog::info("FrameGraph: compiling {} pass(es)...", m_passes.size());
+    spdlog::info("FrameGraph: compiling {} passes...", m_passes.size());
 
     destroyCompiledPasses();
     m_compiled.clear();
