@@ -23,7 +23,6 @@ Allocator::Allocator(const VulkanContext &ctx)
 
     if (vmaCreateAllocator(&ci, &m_allocator) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Allocator: failed to create VmaAllocator");
     }
 
@@ -58,7 +57,6 @@ AllocatedBuffer Allocator::createBuffer(VkDeviceSize size,
     if (vmaCreateBuffer(m_allocator, &bufferCI, &allocCI,
                         &result.buffer, &result.allocation, &result.info) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Allocator: failed to create buffer");
     }
 
@@ -104,7 +102,6 @@ AllocatedImage Allocator::createImage(const ImageConfig &cfg)
     if (vmaCreateImage(m_allocator, &imageCI, &allocCI,
                        &result.image, &result.allocation, nullptr) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Allocator: failed to create image");
     }
 
@@ -126,7 +123,6 @@ AllocatedImage Allocator::createImage(const ImageConfig &cfg)
 
     if (vkCreateImageView(device, &viewCI, nullptr, &result.view) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Allocator: failed to create image view");
     }
 

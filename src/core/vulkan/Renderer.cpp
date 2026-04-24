@@ -113,7 +113,6 @@ Renderer::FrameResult Renderer::beginFrame(Swapchain &swapchain)
 
     if (vkBeginCommandBuffer(frame.commandBuffer, &beginInfo) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Renderer: failed to begin command buffer");
     }
 
@@ -126,7 +125,6 @@ bool Renderer::endFrame(Swapchain &swapchain, uint32_t imageIndex)
 
     if (vkEndCommandBuffer(frame.commandBuffer) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Renderer: failed to end command buffer");
     }
 
@@ -156,7 +154,6 @@ bool Renderer::endFrame(Swapchain &swapchain, uint32_t imageIndex)
 
     if (vkQueueSubmit2(m_ctx.getGraphicsQueue(), 1, &submitInfo, frame.inFlight) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Renderer: failed to submit command buffer");
     }
 

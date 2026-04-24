@@ -35,7 +35,6 @@ inline uint32_t vkFormatByteSize(VkFormat fmt)
     case VK_FORMAT_R16G16_SFLOAT:        return 4;
     case VK_FORMAT_R16G16B16A16_SFLOAT:  return 8;
     default:
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error(
             "vkFormatByteSize: unsupported format " + std::to_string(static_cast<int>(fmt)));
     }

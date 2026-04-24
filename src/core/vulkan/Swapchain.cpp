@@ -20,7 +20,6 @@ Swapchain::Swapchain(const VulkanContext &ctx, const Window &window)
     if (glfwCreateWindowSurface(ctx.getInstance(), window.getHandle(),
                                 nullptr, &m_surface) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Swapchain: failed to create window surface");
     }
 
@@ -49,7 +48,6 @@ uint32_t Swapchain::acquireNextImage(VkSemaphore imageAvailable)
 
     if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Swapchain: failed to acquire next image");
     }
 
@@ -73,7 +71,6 @@ bool Swapchain::present(uint32_t imageIndex, VkSemaphore renderFinished)
 
     if (result != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Swapchain: failed to present");
     }
 
@@ -146,7 +143,6 @@ void Swapchain::create()
     VkSwapchainKHR newSwapchain;
     if (vkCreateSwapchainKHR(device, &ci, nullptr, &newSwapchain) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Swapchain: failed to create swapchain");
     }
 

@@ -179,7 +179,6 @@ void VulkanContext::createInstance()
 
     if (!checkLayerSupport(m_layers))
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: requested Vulkan layers not available");
     }
 
@@ -192,7 +191,6 @@ void VulkanContext::createInstance()
 
     if (!checkInstanceExtensionSupport(m_instanceExtensions))
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: requested instance extensions not available");
     }
 
@@ -214,7 +212,6 @@ void VulkanContext::createInstance()
 
     if (vkCreateInstance(&ci, nullptr, &m_instance) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: failed to create VkInstance");
     }
 
@@ -326,7 +323,6 @@ void VulkanContext::pickPhysicalDevice(VkSurfaceKHR surface)
     vkEnumeratePhysicalDevices(m_instance, &count, nullptr);
     if (count == 0)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: no Vulkan-capable GPUs found");
     }
 
@@ -346,7 +342,6 @@ void VulkanContext::pickPhysicalDevice(VkSurfaceKHR surface)
 
     if (bestScore < 0)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: no suitable GPU found");
     }
 
@@ -438,7 +433,6 @@ void VulkanContext::createDevice()
 
     if (vkCreateDevice(m_physicalDevice, &ci, nullptr, &m_device) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("VulkanContext: failed to create logical device");
     }
 

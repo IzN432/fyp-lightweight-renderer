@@ -22,7 +22,6 @@ LoadedImage loadImageFromFile(const std::filesystem::path &path)
     img.pixels = stbi_load(path.string().c_str(), &w, &h, &channels, STBI_rgb_alpha);
     if (!img.pixels)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ImageLoader: failed to load '" + path.string() +
                                  "': " + stbi_failure_reason());
     }

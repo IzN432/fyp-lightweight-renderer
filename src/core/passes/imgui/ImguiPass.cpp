@@ -50,7 +50,6 @@ ImguiPass::ImguiPass(const VulkanContext &ctx, const Window &window,
 
     if (!ImGui_ImplVulkan_Init(&initInfo))
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ImguiPass: ImGui_ImplVulkan_Init failed");
     }
 }

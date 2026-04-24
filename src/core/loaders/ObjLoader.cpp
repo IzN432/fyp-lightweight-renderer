@@ -1,404 +1,250 @@
-#include "ObjLoader.hpp"
+#include "core/loaders/ObjLoader.hpp"
+#include "core/utility/ImageLoader.hpp"
 
-#include <spdlog/spdlog.h>
 #include <tiny_obj_loader.h>
-
-#include <spdlog/spdlog.h>
-#include <glm/glm.hpp>
-
-#include <spdlog/spdlog.h>
-#include <cstdint>
-#include <spdlog/spdlog.h>
-#include <limits>
-#include <spdlog/spdlog.h>
-#include <stdexcept>
-#include <spdlog/spdlog.h>
-#include <string>
-#include <spdlog/spdlog.h>
-#include <unordered_map>
-#include <spdlog/spdlog.h>
-#include <unordered_set>
-#include <spdlog/spdlog.h>
-#include <vector>
-
 #include <spdlog/spdlog.h>
 namespace lr
 {
-
 namespace
 {
 
-std::filesystem::path resolveTexturePath(const std::filesystem::path &objPath,
-									const std::string &tex)
+MaterialImage loadMaterialImage(const std::filesystem::path &objDirectoryPath,
+                                const std::string &texName)
 {
-	if (tex.empty())
-		return {};
+    if (texName.empty())
+        return {};
 
-	std::filesystem::path p(tex);
-	if (p.is_absolute())
-		return p.lexically_normal();
+    std::filesystem::path p(texName);
+    if (!p.is_absolute())
+        p = (objDirectoryPath / p).lexically_normal();
 
-	return (objPath.parent_path() / p).lexically_normal();
+    if (!std::filesystem::exists(p))
+        return {};
+
+    LoadedImage loaded = loadImageFromFile(p);
+    if (loaded.empty())
+        return {};
+
+    const size_t byteCount = static_cast<size_t>(loaded.width) * loaded.height * 4;
+    MaterialImage out;
+    out.width  = loaded.width;
+    out.height = loaded.height;
+    out.pixels.assign(loaded.pixels, loaded.pixels + byteCount);
+    return out;
 }
 
-std::vector<MaterialInfo> buildMaterialTable(const std::filesystem::path &objPath,
-										 const std::vector<tinyobj::material_t> &materials)
+std::vector<Material> extractMaterials(const tinyobj::ObjReader &reader, const std::filesystem::path &objDirectoryPath, const ObjLoaderConfig &config)
 {
-	std::vector<MaterialInfo> out;
-	out.reserve(materials.size());
+    std::vector<Material> out;
 
-	for (const tinyobj::material_t &m : materials)
-	{
-		MaterialInfo info{};
-		info.name = m.name;
+    const auto &materials = reader.GetMaterials();
+    out.reserve(materials.size() + 1);
 
-		info.baseColorFactor = glm::vec3(m.diffuse[0], m.diffuse[1], m.diffuse[2]);
-		info.emissiveFactor = glm::vec3(m.emission[0], m.emission[1], m.emission[2]);
-		info.roughnessFactor = m.roughness;
-		info.metallicFactor = m.metallic;
+    auto &defaultMat = out.emplace_back();
+    defaultMat.name = "Default Material";
+    defaultMat.parameters[config.baseDiffuseName] = glm::vec4(1.0f);
+    defaultMat.parameters[config.baseAmbientName] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    defaultMat.parameters[config.baseSpecularName] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    defaultMat.parameters[config.shininessName] = 1.0f;
+    defaultMat.parameters[config.baseRoughnessName] = 1.0f;
+    defaultMat.parameters[config.baseMetallicName] = 0.0f;
+    defaultMat.parameters[config.baseEmissiveName] = glm::vec3(0.0f);
+    defaultMat.textures[config.diffuseTextureName] = MaterialImage::singlePixel(glm::vec4(1.0f));
+    defaultMat.textures[config.ambientTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
+    defaultMat.textures[config.specularTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
+    defaultMat.textures[config.normalTextureName] = MaterialImage::singlePixel(glm::vec4(0.5f, 0.5f, 1.0f, 1.0f));
+    defaultMat.textures[config.metallicTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
+    defaultMat.textures[config.roughnessTextureName] = MaterialImage::singlePixel(glm::vec4(1.0f));
+    defaultMat.textures[config.emissiveTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
 
-		info.textures.baseColor = resolveTexturePath(objPath, m.diffuse_texname);
-		info.textures.specular  = resolveTexturePath(objPath, m.specular_texname);
-		info.textures.normal    = resolveTexturePath(objPath,
-			!m.normal_texname.empty() ? m.normal_texname : m.bump_texname);
-		info.textures.roughness = resolveTexturePath(objPath, m.roughness_texname);
-		info.textures.metallic  = resolveTexturePath(objPath, m.metallic_texname);
-		info.textures.emissive  = resolveTexturePath(objPath, m.emissive_texname);
+    for (const auto &m : materials)
+    {
+        auto &mat = out.emplace_back();
+        mat.name = m.name;
+        mat.parameters[config.baseDiffuseName] = glm::vec4(m.diffuse[0], m.diffuse[1], m.diffuse[2], 1.0f);
+        mat.parameters[config.baseAmbientName] = glm::vec4(m.ambient[0], m.ambient[1], m.ambient[2], 1.0f);
+        mat.parameters[config.baseSpecularName] = glm::vec4(m.specular[0], m.specular[1], m.specular[2], 1.0f);
+        mat.parameters[config.shininessName] = m.shininess;
+        mat.parameters[config.baseRoughnessName] = m.roughness;
+        mat.parameters[config.baseMetallicName] = m.metallic;
+        mat.parameters[config.baseEmissiveName] = glm::vec3(m.emission[0], m.emission[1], m.emission[2]);
+        mat.textures[config.diffuseTextureName] = loadMaterialImage(objDirectoryPath, m.diffuse_texname);
+        mat.textures[config.ambientTextureName] = loadMaterialImage(objDirectoryPath, m.ambient_texname);
+        mat.textures[config.specularTextureName] = loadMaterialImage(objDirectoryPath, m.specular_texname);
+        mat.textures[config.normalTextureName] = loadMaterialImage(objDirectoryPath, m.normal_texname);
+        mat.textures[config.metallicTextureName] = loadMaterialImage(objDirectoryPath, m.metallic_texname);
+        mat.textures[config.roughnessTextureName] = loadMaterialImage(objDirectoryPath, m.roughness_texname); 
+        mat.textures[config.emissiveTextureName] = loadMaterialImage(objDirectoryPath, m.emissive_texname);
+    }
 
-		out.push_back(std::move(info));
-	}
-
-	return out;
+    return out;
 }
 
-std::vector<std::filesystem::path> gatherUniqueTextures(const std::vector<MaterialInfo> &materials)
+tinyobj::ObjReader loadObjFile(const std::filesystem::path &path)
 {
-	std::vector<std::filesystem::path> textures;
-	std::unordered_set<std::string> seen;
+    tinyobj::ObjReader reader;
+    tinyobj::ObjReaderConfig config;
+    config.triangulate = true;
 
-	auto addIfValid = [&](const std::filesystem::path &p) {
-		if (p.empty())
-			return;
-		const std::string key = p.generic_string();
-		if (seen.insert(key).second)
-			textures.push_back(p);
-	};
+    if (!reader.ParseFromFile(path.string(), config))
+    {
+        std::string msg = "ObjLoader: failed to parse '" + path.string() + "'";
+        if (!reader.Error().empty())
+            msg += ": " + reader.Error();
+        throw std::runtime_error(msg);
+    }
 
-	for (const MaterialInfo &m : materials)
-	{
-		addIfValid(m.textures.baseColor);
-		addIfValid(m.textures.specular);
-		addIfValid(m.textures.normal);
-		addIfValid(m.textures.roughness);
-		addIfValid(m.textures.metallic);
-		addIfValid(m.textures.emissive);
-	}
+    if (!reader.Warning().empty())
+        spdlog::warn("ObjLoader warning while parsing '{}': {}", path.string(), reader.Warning());
 
-	return textures;
+    return reader;
 }
 
-std::vector<tinyobj::material_t> loadObjMaterials(const std::filesystem::path &path)
+struct MeshData
 {
-	tinyobj::ObjReader reader;
-	tinyobj::ObjReaderConfig config;
-	config.triangulate = true;
-
-	if (!reader.ParseFromFile(path.string(), config))
-	{
-		std::string msg = "ObjLoader: failed to parse materials from '" + path.string() + "'";
-		if (!reader.Error().empty())
-			msg += ": " + reader.Error();
-		spdlog::error("Runtime error: throwing std::runtime_error");
-		throw std::runtime_error(msg);
-	}
-
-	return reader.GetMaterials();
-}
+    std::vector<glm::vec3> positions;
+    std::vector<glm::vec3> normals;
+    std::vector<glm::vec2> uvs;
+    std::vector<glm::uvec3> faces;
+    std::vector<uint32_t> faceGroups;
+};
 
 struct VertexKey
 {
-	int v  = -1;
-	int vt = -1;
-	int vn = -1;
+    int positionIdx = -1;
+    int uvIdx = -1;
+    int normalIdx = -1;
 
-	bool operator==(const VertexKey &o) const
-	{
-		return v == o.v && vt == o.vt && vn == o.vn;
-	}
+    bool operator==(const VertexKey &other) const
+    {
+        return positionIdx == other.positionIdx &&
+               uvIdx == other.uvIdx &&
+               normalIdx == other.normalIdx;
+    }
 };
 
 struct VertexKeyHash
 {
-	std::size_t operator()(const VertexKey &k) const
-	{
-		const std::size_t h1 = std::hash<int>{}(k.v);
-		const std::size_t h2 = std::hash<int>{}(k.vt);
-		const std::size_t h3 = std::hash<int>{}(k.vn);
-		return h1 ^ (h2 << 1) ^ (h3 << 2);
-	}
+    std::size_t operator()(const VertexKey &key) const
+    {
+        std::size_t seed = 0;
+        auto combine = [&](int val) {
+            std::size_t h = std::hash<int>{}(val);
+            seed ^= h + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        };
+
+        combine(key.positionIdx);
+        combine(key.uvIdx);
+        combine(key.normalIdx);
+        return seed;
+    }
 };
 
-Mesh loadObjMesh(const std::filesystem::path &path, const MeshLayout &layout)
+MeshData extractMeshData(const tinyobj::ObjReader &reader, const std::filesystem::path &path)
 {
-	tinyobj::ObjReader reader;
-	tinyobj::ObjReaderConfig config;
-	config.triangulate = true;
+    std::vector<glm::vec3> positions;
+    std::vector<glm::vec3> normals;
+    std::vector<glm::vec2> uvs;
+    std::vector<glm::uvec3> faces;
+    std::vector<uint32_t> faceGroups;
 
-	if (!reader.ParseFromFile(path.string(), config))
-	{
-		std::string msg = "ObjLoader: failed to parse '" + path.string() + "'";
-		if (!reader.Error().empty())
-			msg += ": " + reader.Error();
-		spdlog::error("Runtime error: throwing std::runtime_error");
-		throw std::runtime_error(msg);
-	}
+    std::unordered_map<VertexKey, uint32_t, VertexKeyHash> vertexMap;
 
-	if (!reader.Warning().empty())
-	{
-		// Keep warnings non-fatal. Callers can route logs as needed.
-	}
+    const tinyobj::attrib_t &attributes = reader.GetAttrib();
 
-	const tinyobj::attrib_t &attrib = reader.GetAttrib();
-	const auto &shapes = reader.GetShapes();
-	const auto &materials = reader.GetMaterials();
+    positions.reserve(attributes.vertices.size() / 3);
+    normals.reserve(attributes.normals.size() / 3);
+    uvs.reserve(attributes.texcoords.size() / 2);
 
-	if (attrib.vertices.empty())
-	{
-	    spdlog::error("Runtime error: throwing std::runtime_error");
-	    throw std::runtime_error("ObjLoader: OBJ has no vertex positions: '" + path.string() + "'");
-	}
+    size_t indicesCount = 0;
+    for (const auto &shape : reader.GetShapes())
+        indicesCount += shape.mesh.indices.size();
 
-	const auto *normalDesc = layout.findPerVertexAttr("normal");
-	const auto *uvDesc = layout.findPerVertexAttr("uv");
-	const auto *texcoordDesc = layout.findPerVertexAttr("texcoord");
-	const auto *materialIdDesc = layout.findPerFaceAttr("materialId");
-	const auto *faceGroupMaterialIdDesc = layout.findFaceGroupAttr("materialId");
+    faces.reserve(indicesCount / 3);
+    faceGroups.reserve(indicesCount / 3);
 
-	const bool hasNormalAttr = (normalDesc && normalDesc->type == std::type_index(typeid(glm::vec3)));
-	const bool hasUvAttr =
-		(uvDesc && uvDesc->type == std::type_index(typeid(glm::vec2))) ||
-		(texcoordDesc && texcoordDesc->type == std::type_index(typeid(glm::vec2)));
-	const bool hasMaterialIdAttr = materialIdDesc &&
-		(materialIdDesc->type == std::type_index(typeid(int32_t)) ||
-		 materialIdDesc->type == std::type_index(typeid(uint32_t)));
-	const bool hasFaceGroupMaterialIdAttr = faceGroupMaterialIdDesc &&
-		(faceGroupMaterialIdDesc->type == std::type_index(typeid(int32_t)) ||
-		 faceGroupMaterialIdDesc->type == std::type_index(typeid(uint32_t)));
-	const bool needsMaterialIds = hasMaterialIdAttr || layout.faceGroupsEnabled() || hasFaceGroupMaterialIdAttr;
+    auto getOrAddVertex = [&](const tinyobj::index_t &idx) -> uint32_t {
+        VertexKey key{ idx.vertex_index, idx.texcoord_index, idx.normal_index };
+        auto [it, inserted] = vertexMap.try_emplace(key, static_cast<uint32_t>(positions.size()));
+        if (!inserted)
+            return it->second;
 
-	const std::string uvAttrName = (uvDesc && uvDesc->type == std::type_index(typeid(glm::vec2)))
-		? "uv"
-		: "texcoord";
+        positions.emplace_back(
+            attributes.vertices[3 * idx.vertex_index + 0],
+            attributes.vertices[3 * idx.vertex_index + 1],
+            attributes.vertices[3 * idx.vertex_index + 2]
+        );
+        normals.emplace_back(
+            idx.normal_index >= 0
+                ? glm::vec3(
+                    attributes.normals[3 * idx.normal_index + 0],
+                    attributes.normals[3 * idx.normal_index + 1],
+                    attributes.normals[3 * idx.normal_index + 2])
+                : glm::vec3(0.0f, 0.0f, 1.0f)
+        );
+        uvs.emplace_back(
+            idx.texcoord_index >= 0
+                ? glm::vec2(
+                    attributes.texcoords[2 * idx.texcoord_index + 0],
+                    attributes.texcoords[2 * idx.texcoord_index + 1])
+                : glm::vec2(0.0f, 0.0f)
+        );
 
-	std::vector<glm::vec3> positions;
-	std::vector<glm::uvec3> faces;
-	std::vector<glm::vec3> normals;
-	std::vector<glm::vec2> uvs;
-	std::vector<int32_t> materialIds;
-	positions.reserve(attrib.vertices.size() / 3);
-	if (hasNormalAttr)
-		normals.reserve(attrib.vertices.size() / 3);
-	if (hasUvAttr)
-		uvs.reserve(attrib.vertices.size() / 3);
-	if (needsMaterialIds)
-		materialIds.reserve(attrib.vertices.size() / 3);
+        return it->second;
+    };
 
-	std::unordered_map<VertexKey, uint32_t, VertexKeyHash> keyToVertex;
-	keyToVertex.reserve(attrib.vertices.size() / 3);
+    for (const auto &shape : reader.GetShapes())
+    {
+        for (size_t faceIdx = 0; faceIdx < shape.mesh.num_face_vertices.size(); ++faceIdx)
+        {
+            faceGroups.emplace_back(
+                shape.mesh.material_ids.empty() ? 0 : (shape.mesh.material_ids[faceIdx] + 1)
+            );
+            const size_t base = faceIdx * 3;
+            faces.push_back({
+                getOrAddVertex(shape.mesh.indices[base + 0]),
+                getOrAddVertex(shape.mesh.indices[base + 1]),
+                getOrAddVertex(shape.mesh.indices[base + 2]),
+            });
+        }
+    }
 
-	for (const auto &shape : shapes)
-	{
-		size_t idxOffset = 0;
-		for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); ++f)
-		{
-			const uint8_t fv = shape.mesh.num_face_vertices[f];
-			if (fv != 3)
-			{
-			    spdlog::error("Runtime error: throwing std::runtime_error");
-			    throw std::runtime_error("ObjLoader: non-triangle face after triangulation in '" + path.string() + "'");
-			}
-
-			glm::uvec3 tri{};
-			for (uint32_t v = 0; v < 3; ++v)
-			{
-				const tinyobj::index_t idx = shape.mesh.indices[idxOffset + v];
-				const VertexKey key{idx.vertex_index, idx.texcoord_index, idx.normal_index};
-				if (key.v < 0)
-				{
-				    spdlog::error("Runtime error: throwing std::runtime_error");
-				    throw std::runtime_error("ObjLoader: invalid vertex index in '" + path.string() + "'");
-				}
-
-				auto it = keyToVertex.find(key);
-				if (it == keyToVertex.end())
-				{
-					const size_t base = static_cast<size_t>(key.v) * 3;
-					if (base + 2 >= attrib.vertices.size())
-					{
-					    spdlog::error("Runtime error: throwing std::runtime_error");
-					    throw std::runtime_error("ObjLoader: vertex index out of bounds in '" + path.string() + "'");
-					}
-
-					positions.emplace_back(attrib.vertices[base + 0],
-										   attrib.vertices[base + 1],
-										   attrib.vertices[base + 2]);
-
-					if (hasNormalAttr)
-					{
-						glm::vec3 n(0.0f);
-						if (key.vn >= 0)
-						{
-							const size_t nBase = static_cast<size_t>(key.vn) * 3;
-							if (nBase + 2 < attrib.normals.size())
-								n = glm::vec3(attrib.normals[nBase + 0],
-										  attrib.normals[nBase + 1],
-										  attrib.normals[nBase + 2]);
-						}
-						normals.push_back(n);
-					}
-
-					if (hasUvAttr)
-					{
-						glm::vec2 uv(0.0f);
-						if (key.vt >= 0)
-						{
-							const size_t uvBase = static_cast<size_t>(key.vt) * 2;
-							if (uvBase + 1 < attrib.texcoords.size())
-								uv = glm::vec2(attrib.texcoords[uvBase + 0],
-										       attrib.texcoords[uvBase + 1]);
-						}
-						uvs.push_back(uv);
-					}
-
-					const uint32_t newIndex = static_cast<uint32_t>(positions.size() - 1);
-					keyToVertex.emplace(key, newIndex);
-					tri[v] = newIndex;
-				}
-				else
-				{
-					tri[v] = it->second;
-				}
-			}
-
-			faces.push_back(tri);
-			if (needsMaterialIds)
-			{
-				int32_t mat = -1;
-				if (f < shape.mesh.material_ids.size())
-					mat = shape.mesh.material_ids[f];
-				if (mat >= static_cast<int32_t>(materials.size()))
-					mat = -1;
-				materialIds.push_back(mat);
-			}
-			idxOffset += fv;
-		}
-	}
-
-	Mesh mesh(layout);
-	mesh.setVertexCount(static_cast<uint32_t>(positions.size()));
-	mesh.setFaceCount(static_cast<uint32_t>(faces.size()));
-	mesh.positions = std::move(positions);
-	mesh.faces = std::move(faces);
-
-	if (hasNormalAttr)
-		mesh.setPerVertexArray<glm::vec3>("normal", normals);
-
-	if (hasUvAttr)
-		mesh.setPerVertexArray<glm::vec2>(uvAttrName, uvs);
-
-	if (hasMaterialIdAttr)
-	{
-		if (materialIdDesc->type == std::type_index(typeid(int32_t)))
-		{
-			mesh.setPerFaceArray<int32_t>("materialId", materialIds);
-		}
-		else
-		{
-			std::vector<uint32_t> mats;
-			mats.reserve(materialIds.size());
-			for (int32_t m : materialIds)
-				mats.push_back(m < 0 ? std::numeric_limits<uint32_t>::max() : static_cast<uint32_t>(m));
-			mesh.setPerFaceArray<uint32_t>("materialId", mats);
-		}
-	}
-
-	if (layout.faceGroupsEnabled())
-	{
-		bool hasInvalidMaterial = false;
-		for (int32_t materialId : materialIds)
-		{
-			if (materialId < 0)
-			{
-				hasInvalidMaterial = true;
-				break;
-			}
-		}
-
-		const uint32_t validGroupCount = static_cast<uint32_t>(materials.size());
-		const uint32_t invalidGroupIndex = validGroupCount;
-		const uint32_t faceGroupCount = hasInvalidMaterial
-			? invalidGroupIndex + 1u
-			: (validGroupCount > 0u ? validGroupCount : 1u);
-
-		mesh.setFaceGroupCount(faceGroupCount);
-		mesh.faceGroups.resize(mesh.faceCount(), invalidGroupIndex);
-		for (uint32_t faceIndex = 0; faceIndex < mesh.faceCount(); ++faceIndex)
-		{
-			const int32_t materialId = (faceIndex < materialIds.size()) ? materialIds[faceIndex] : -1;
-			mesh.faceGroups[faceIndex] = (materialId < 0)
-				? invalidGroupIndex
-				: static_cast<uint32_t>(materialId);
-		}
-
-		if (hasFaceGroupMaterialIdAttr)
-		{
-			if (faceGroupMaterialIdDesc->type == std::type_index(typeid(int32_t)))
-			{
-				std::vector<int32_t> groupMaterialIds(faceGroupCount, -1);
-				for (uint32_t materialIndex = 0; materialIndex < materials.size(); ++materialIndex)
-					groupMaterialIds[materialIndex] = static_cast<int32_t>(materialIndex);
-				mesh.setFaceGroupAttributeArray<int32_t>("materialId", groupMaterialIds);
-			}
-			else
-			{
-				std::vector<uint32_t> groupMaterialIds(faceGroupCount, std::numeric_limits<uint32_t>::max());
-				for (uint32_t materialIndex = 0; materialIndex < materials.size(); ++materialIndex)
-					groupMaterialIds[materialIndex] = materialIndex;
-				mesh.setFaceGroupAttributeArray<uint32_t>("materialId", groupMaterialIds);
-			}
-		}
-
-	}
-
-	return mesh;
+    return { std::move(positions), std::move(normals), std::move(uvs), std::move(faces), std::move(faceGroups) };
 }
 
-}  // namespace
+} // namespace
 
-MeshSequence ObjLoader::load(const std::filesystem::path &path,
-							 const MeshLayout &layout) const
+ObjMeshLoadResult ObjLoader::load(const std::filesystem::path &path, const ObjLoaderConfig &config) const
 {
-	if (path.empty())
-	{
-	    throw std::invalid_argument("ObjLoader: empty mesh path");
-	}
+    // SECTION 1 - Load the OBJ file
+    
+    if (path.empty()) throw std::invalid_argument("ObjLoader: empty path");
+    
+    tinyobj::ObjReader reader = loadObjFile(path);
 
-	const std::string ext = path.extension().string();
-	if (ext != ".obj" && ext != ".OBJ")
-	{
-	    spdlog::error("Runtime error: throwing std::runtime_error");
-	    throw std::runtime_error(
-			"ObjLoader: unsupported extension '" + ext + "' for file '" + path.string() + "'");
-	}
+    // SECTION 2 - Extract vertex / face data
 
-	MeshSequence seq;
-	seq.frames.push_back(loadObjMesh(path, layout));
-	seq.frameRate = 0.0f;
+    MeshLayout layout;
+    layout
+        .addPerVertexAttr<glm::vec3>(config.normalAttributeName)
+        .addPerVertexAttr<glm::vec2>(config.uvAttributeName);
 
-	const auto materials = loadObjMaterials(path);
-	seq.materials = buildMaterialTable(path, materials);
-	seq.textureFiles = gatherUniqueTextures(seq.materials);
-	return seq;
+    Mesh mesh(layout);
+    auto [positions, normals, uvs, faces, faceGroups] = extractMeshData(reader, path);
+    
+    mesh.setVertexCount(static_cast<uint32_t>(positions.size()));
+    mesh.setFaceCount(static_cast<uint32_t>(faces.size()));
+    mesh.positions = std::move(positions);
+    mesh.faces = std::move(faces);
+    mesh.faceGroups = std::move(faceGroups);
+    
+    mesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, normals);
+    mesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
+
+    // SECTION 3 - Extract material data from the tinyobj::ObjReader and convert it to our internal Material format
+    auto materials = extractMaterials(reader, path.parent_path(), config);
+
+    return { std::move(mesh), std::move(layout), std::move(materials) };
 }
 
-}  // namespace lr
+} // namespace lr

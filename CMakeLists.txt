@@ -64,6 +64,10 @@ add_library(lr_core STATIC
 
     src/core/window/Window.cpp
 
+    src/core/passes/final/FinalPass.cpp
+    src/core/passes/geometry/GeometryPass.cpp
+    src/core/passes/ibl/IblPass.cpp
+    src/core/passes/pbr/PbrPass.cpp
     src/core/passes/imgui/ImguiPass.cpp
 
     src/core/scene/Mesh.cpp
@@ -72,15 +76,16 @@ add_library(lr_core STATIC
     src/core/loaders/GltfLoader.cpp
 
     src/core/upload/CameraUploader.cpp
+    src/core/upload/MaterialUploader.cpp
     src/core/upload/MeshUploader.cpp
 
-    src/core/utility/ImageLoader.cpp
     src/core/app/GuiManager.cpp
     src/core/app/InputHandler.cpp
     src/core/app/Viewer.cpp
+    
+    src/core/utility/ImageLoader.cpp
 )
 target_include_directories(lr_core PUBLIC src)
-target_include_directories(lr_core PUBLIC ${TINYGLTF_INCLUDE_DIRS})
 target_link_libraries(lr_core PUBLIC
     Vulkan::Vulkan
     glfw
@@ -90,6 +95,7 @@ target_link_libraries(lr_core PUBLIC
     GPUOpen::VulkanMemoryAllocator
     imgui
 )
+target_include_directories(lr_core PUBLIC ${TINYGLTF_INCLUDE_DIRS})
 target_compile_definitions(lr_core PUBLIC
     LR_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/"
 )
@@ -102,6 +108,7 @@ add_shaders(lr_core
     src/core/passes/ibl/irradiance.comp
     src/core/passes/ibl/prefilter.comp
     src/core/passes/final/final.frag
+    src/core/passes/pbr/pbr.frag
 )
 
 # Test executable

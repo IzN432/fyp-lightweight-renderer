@@ -24,7 +24,6 @@ DescriptorAllocator::DescriptorAllocator(VkDevice device) : m_device(device)
 
     if (vkCreateDescriptorPool(m_device, &ci, nullptr, &m_pool) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("DescriptorAllocator: failed to create pool");
     }
 
@@ -51,7 +50,6 @@ VkDescriptorSetLayout DescriptorAllocator::createLayout(
     VkDescriptorSetLayout layout;
     if (vkCreateDescriptorSetLayout(m_device, &ci, nullptr, &layout) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("DescriptorAllocator: failed to create layout");
     }
 
@@ -81,7 +79,6 @@ VkPipelineLayout DescriptorAllocator::createPipelineLayout(VkDescriptorSetLayout
     VkPipelineLayout pipelineLayout;
     if (vkCreatePipelineLayout(m_device, &ci, nullptr, &pipelineLayout) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("DescriptorAllocator: failed to create pipeline layout");
     }
 
@@ -100,7 +97,6 @@ VkDescriptorSet DescriptorAllocator::allocate(VkDescriptorSetLayout layout)
     VkDescriptorSet set;
     if (vkAllocateDescriptorSets(m_device, &ai, &set) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("DescriptorAllocator: failed to allocate descriptor set");
     }
 
@@ -132,7 +128,6 @@ void DescriptorAllocator::writeImageArray(VkDescriptorSet set, uint32_t binding,
 {
     if (views.empty())
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("DescriptorAllocator: writeImageArray called with empty views");
     }
 

@@ -1,14 +1,6 @@
-#include "core/upload/MeshUploader.hpp"
+#include "MeshUploader.hpp"
 
-#include "core/utility/ImageLoader.hpp"
 #include "core/vulkan/VkFormatUtils.hpp"
-
-#include <algorithm>
-#include <array>
-#include <cstring>
-#include <filesystem>
-#include <unordered_map>
-#include <vector>
 
 namespace lr
 {
@@ -16,81 +8,74 @@ namespace lr
 namespace
 {
 
-// Interleaved vertex + index packing — formerly MeshPacker.
-struct PackedMesh
+
+struct PackedVertexAttributes
 {
-    std::unordered_map<uint32_t, std::vector<std::byte>> vertexData;
-    std::vector<std::byte> indexData;
-    uint32_t indexCount = 0;
+    // Buffers containing the packed vertex attributes
+    std::unordered_map<uint32_t, std::vector<std::byte>> vertexAttributeBufferMap;
 };
 
-PackedMesh packMesh(const Mesh &mesh, const GpuMeshLayout &layout)
+PackedVertexAttributes packVertexAttributes(const Mesh &mesh, const GpuMeshLayout &gpuLayout)
 {
-    const auto    &mappings    = layout.mappings();
+    PackedVertexAttributes out;
+    const auto &mappings = gpuLayout.mappings();
     const uint32_t vertexCount = mesh.vertexCount();
 
-    struct MappingInfo { size_t mappingIdx; uint32_t offsetInStride; };
-    std::unordered_map<uint32_t, std::vector<MappingInfo>> byBinding;
-    std::vector<uint32_t> bindingOrder;
+    out.vertexAttributeBufferMap.reserve(gpuLayout.bindingDescriptions().size());
+    const auto &bindingDescriptions = gpuLayout.bindingDescriptions();
+    const auto &attributeDescriptions = gpuLayout.attributeDescriptions();
+
+    std::unordered_map<uint32_t, uint32_t> bindingToStride;
+    for (const auto &binding : bindingDescriptions)
+    {
+        bindingToStride[binding.binding] = binding.stride;
+    }
+
+    for (const auto &description : bindingDescriptions)
+    {
+        auto &buffer = out.vertexAttributeBufferMap[description.binding];
+        buffer.resize(static_cast<size_t>(vertexCount) * description.stride);
+    }
 
     for (size_t i = 0; i < mappings.size(); ++i)
     {
-        const uint32_t b = mappings[i].binding;
-        if (byBinding.find(b) == byBinding.end())
-            bindingOrder.push_back(b);
+        const auto &mapping = mappings[i];
+        const uint32_t binding = mapping.binding;
+        const auto &attributeDescription = attributeDescriptions[i];
 
-        uint32_t offset = 0;
-        for (const auto &mi : byBinding[b])
-            offset += vkFormatByteSize(mappings[mi.mappingIdx].format);
-
-        byBinding[b].push_back({i, offset});
-    }
-
-    PackedMesh result;
-
-    for (uint32_t binding : bindingOrder)
-    {
-        const auto &infos = byBinding.at(binding);
-
-        uint32_t stride = 0;
-        for (const auto &mi : infos)
-            stride += vkFormatByteSize(mappings[mi.mappingIdx].format);
-
-        std::vector<std::byte> cpuBuf(static_cast<size_t>(vertexCount) * stride);
-
-        for (const auto &mi : infos)
+        std::span<const std::byte> data;
+        if (mapping.isPosition)
         {
-            const auto    &m        = mappings[mi.mappingIdx];
-            const uint32_t attrSize = vkFormatByteSize(m.format);
-
-            std::span<const std::byte> src;
-            if (m.isPosition)
-                src = { reinterpret_cast<const std::byte *>(mesh.positions.data()),
-                        mesh.positions.size() * sizeof(glm::vec3) };
-            else
-                src = mesh.rawPerVertexData(m.name);
-
-            if (src.size() < static_cast<size_t>(vertexCount) * attrSize)
-                throw std::runtime_error(
-                    "MeshUploader: attribute '" + m.name + "' has fewer elements than vertexCount");
-
-            for (uint32_t v = 0; v < vertexCount; ++v)
-            {
-                std::byte       *dst = cpuBuf.data() + v * stride + mi.offsetInStride;
-                const std::byte *s   = src.data()    + v * attrSize;
-                std::memcpy(dst, s, attrSize);
-            }
+            // Positions are a special case since they are stored explicitly as glm::vec3.
+            // So, we explicitly convert it into a span of bytes here.
+            data = { reinterpret_cast<const std::byte *>(mesh.positions.data()),
+                    mesh.positions.size() * sizeof(glm::vec3) };
+        }
+        else
+        {
+            data = mesh.rawPerVertexData(mapping.name);
         }
 
-        result.vertexData[binding] = std::move(cpuBuf);
+        const size_t currentStride = bindingToStride[binding];
+        const size_t currentAttributeOffset = attributeDescription.offset;
+        const size_t attributeSize = vkFormatByteSize(mapping.format);
+        if (data.size() < static_cast<size_t>(vertexCount) * attributeSize)
+        {
+            throw std::runtime_error(
+                "MeshUploader: attribute '" + mapping.name + "' has fewer elements than vertexCount");
+        }
+
+        auto &buffer = out.vertexAttributeBufferMap[binding];
+
+        for (uint32_t v = 0; v < vertexCount; ++v)
+        {
+            const std::byte *src = data.data() + (v * attributeSize);
+            std::byte *dst = buffer.data() + (v * currentStride) + currentAttributeOffset;
+            std::memcpy(dst, src, attributeSize);
+        }
     }
 
-    const uint32_t indexCount = mesh.faceCount() * 3;
-    result.indexData.resize(static_cast<size_t>(indexCount) * sizeof(uint32_t));
-    std::memcpy(result.indexData.data(), mesh.faces.data(), result.indexData.size());
-    result.indexCount = indexCount;
-
-    return result;
+    return out;
 }
 
 } // namespace
@@ -101,123 +86,60 @@ MeshUploader::MeshUploader(ResourceRegistry &registry)
 }
 
 MeshUploadResult MeshUploader::upload(const Mesh &mesh,
-                                      const GpuMeshLayout &gpuLayout,
-                                      const std::vector<MaterialInfo> &materials,
-                                      const std::string &namePrefix)
+                        const GpuMeshLayout &gpuLayout,
+                        const std::string &namePrefix)
 {
-    MeshUploadResult out;
+    MeshUploadResult result;
+    
+    // SECTION 1 - Add per-vertex attributes to GPU buffers
 
-    // -----------------------------------
-    // Vertex and index buffers
-    // -----------------------------------
-    const PackedMesh packed = packMesh(mesh, gpuLayout);
+    const auto packed = packVertexAttributes(mesh, gpuLayout);
 
-    for (const auto &[binding, bytes] : packed.vertexData)
+    for (const auto &[binding, bytes] : packed.vertexAttributeBufferMap)
     {
         const std::string name = namePrefix + "_vb_" + std::to_string(binding);
         m_registry.uploadBuffer(name,
                                 bytes.data(),
                                 static_cast<VkDeviceSize>(bytes.size()),
                                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-        out.vertexBufferNames.emplace(binding, name);
+        result.vertexBufferNames.emplace(binding, name);
     }
 
-    out.indexBufferName = namePrefix + "_ib";
-    m_registry.uploadBuffer(out.indexBufferName,
-                            packed.indexData.data(),
-                            static_cast<VkDeviceSize>(packed.indexData.size()),
+    // SECTION 2 - Add indices to GPU buffer
+
+    std::vector<std::byte> indexBuffer;
+
+    indexBuffer.resize(static_cast<size_t>(mesh.faces.size()) * sizeof(uint32_t) * 3);
+    std::memcpy(indexBuffer.data(), mesh.faces.data(), indexBuffer.size());
+
+    const std::string indexName = namePrefix + "_ib";
+    m_registry.uploadBuffer(indexName,
+                            indexBuffer.data(),
+                            static_cast<VkDeviceSize>(indexBuffer.size()),
                             VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-    out.indexCount = packed.indexCount;
+    result.indexBufferName = indexName;
+    result.indexCount = mesh.faceCount() * 3;
 
-    // -----------------------------------
-    // Per-face group index SSBO
-    // -----------------------------------
-    std::vector<uint32_t> faceGroupIndices(mesh.faceCount(), 0u);
-    if (mesh.faceGroups.size() == mesh.faceCount())
-        faceGroupIndices = mesh.faceGroups;
+    // SECTION 3 - Add vertex groups to GPU buffer
+    // TODO: Add vertex groups including weights
 
-    out.faceGroupIndexBufferName = namePrefix + "_face_group_indices";
-    m_registry.uploadBuffer(out.faceGroupIndexBufferName,
-                            faceGroupIndices.data(),
-                            static_cast<VkDeviceSize>(faceGroupIndices.size() * sizeof(uint32_t)),
-                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-
-    // -----------------------------------
-    // Texture arrays (one slot per material)
-    // -----------------------------------
-    out.diffuseTextureArrayName   = namePrefix + "_diffuse_array";
-    out.specularTextureArrayName  = namePrefix + "_specular_array";
-    out.normalTextureArrayName    = namePrefix + "_normal_array";
-    out.roughnessTextureArrayName = namePrefix + "_roughness_array";
-    out.metallicTextureArrayName  = namePrefix + "_metallic_array";
-    out.emissiveTextureArrayName  = namePrefix + "_emissive_array";
-
-    const std::array<uint8_t, 4> white           = {255, 255, 255, 255};  // diffuse/basecolor
-    const std::array<uint8_t, 4> black           = {0,   0,   0,   255};  // metallic, emissive
-    const std::array<uint8_t, 4> neutralNormal   = {128, 128, 255, 255};  // flat normal (0.5, 0.5, 1.0)
-    const std::array<uint8_t, 4> mediumRoughness = {128, 128, 128, 255};  // 0.5 roughness
-
-    uint32_t maxGroup = 0u;
-    for (uint32_t g : faceGroupIndices)
-        maxGroup = std::max(maxGroup, g);
-
-    const uint32_t materialCount = static_cast<uint32_t>(materials.size());
-    out.materialTextureCount = std::max(1u, std::max(materialCount, maxGroup + 1u));
-
-    auto uploadTextureArray = [&](const std::string &arrayName,
-                                  auto getPath,
-                                  const std::array<uint8_t, 4> &fallback)
+    // SECTION 4 - Add face group indices to GPU buffer (optional)
+    if (!mesh.faceGroups.empty())
     {
-        if (materials.empty())
-        {
-            m_registry.uploadArrayImage(arrayName, 0,
-                                        fallback.data(), 1, 1,
-                                        VK_FORMAT_R8G8B8A8_SRGB);
-            return;
-        }
+        std::vector<std::byte> faceGroupBuffer;
+    
+        faceGroupBuffer.resize(static_cast<size_t>(mesh.faceGroups.size()) * sizeof(uint32_t));
+        std::memcpy(faceGroupBuffer.data(), mesh.faceGroups.data(), faceGroupBuffer.size());
+    
+        const std::string faceGroupName = namePrefix + "_fg";
+        m_registry.uploadBuffer(faceGroupName,
+                                faceGroupBuffer.data(),
+                                static_cast<VkDeviceSize>(faceGroupBuffer.size()),
+                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        result.faceGroupBufferName = faceGroupName;
+    }
 
-        for (uint32_t i = 0; i < out.materialTextureCount; ++i)
-        {
-            const std::filesystem::path tex = (i < materialCount)
-                ? getPath(materials[i].textures)
-                : std::filesystem::path{};
-
-            if (!tex.empty() && std::filesystem::exists(tex))
-            {
-                LoadedImage img = loadImageFromFile(tex);
-                m_registry.uploadArrayImage(arrayName, i,
-                                            img.pixels, img.width, img.height,
-                                            LoadedImage::format, true);
-            }
-            else
-            {
-                m_registry.uploadArrayImage(arrayName, i,
-                                            fallback.data(), 1, 1,
-                                            VK_FORMAT_R8G8B8A8_SRGB);
-            }
-        }
-    };
-
-    uploadTextureArray(out.diffuseTextureArrayName,
-        [](const MaterialTextures &t) -> const std::filesystem::path & { return t.baseColor; },
-        white);
-    uploadTextureArray(out.specularTextureArrayName,
-        [](const MaterialTextures &t) -> const std::filesystem::path & { return t.specular; },
-        white);
-    uploadTextureArray(out.normalTextureArrayName,
-        [](const MaterialTextures &t) -> const std::filesystem::path & { return t.normal; },
-        neutralNormal);
-    uploadTextureArray(out.roughnessTextureArrayName,
-        [](const MaterialTextures &t) -> const std::filesystem::path & { return t.roughness; },
-        mediumRoughness);
-    uploadTextureArray(out.metallicTextureArrayName,
-        [](const MaterialTextures &t) -> const std::filesystem::path & { return t.metallic; },
-        black);
-    uploadTextureArray(out.emissiveTextureArrayName,
-        [](const MaterialTextures &t) -> const std::filesystem::path & { return t.emissive; },
-        black);
-
-    return out;
-}
+    return result;
+} 
 
 } // namespace lr

@@ -13,9 +13,8 @@ layout(set = 0, binding = 0) uniform CameraUbo
 layout(set = 0, binding = 1) uniform samplerCube skybox;
 
 layout(set = 0, binding = 2) uniform sampler2D gbufferDepth;
-layout(set = 0, binding = 3) uniform sampler2D gbufferAlbedo;
-layout(set = 0, binding = 4) uniform sampler2D gbufferNormal;
-layout(set = 0, binding = 5) uniform sampler2D gbufferMaterial;
+
+layout(set = 0, binding = 3) uniform sampler2D pbr;
 
 layout(location = 0) out vec4 outColor;
 
@@ -41,6 +40,6 @@ void main()
     }
     else
     {
-        outColor = vec4(texture(gbufferAlbedo, inUV).rgb, 1.0);
+        outColor = texture(pbr, inUV);
     }
 }

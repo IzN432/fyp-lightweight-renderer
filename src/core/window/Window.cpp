@@ -15,7 +15,6 @@ GlfwContext::GlfwContext()
 {
     if (!glfwInit())
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("GlfwContext: failed to initialise GLFW");
     }
 
@@ -33,7 +32,6 @@ std::vector<const char *> GlfwContext::getRequiredInstanceExtensions()
     const char **extensions = glfwGetRequiredInstanceExtensions(&count);
     if (!extensions)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("GlfwContext: could not get required Vulkan extensions");
     }
 
@@ -55,7 +53,6 @@ Window::Window(const Config &config)
     m_window = glfwCreateWindow(m_width, m_height, config.title.c_str(), nullptr, nullptr);
     if (!m_window)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("Window: failed to create GLFW window");
     }
 

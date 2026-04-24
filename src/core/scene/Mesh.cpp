@@ -11,11 +11,6 @@ namespace lr
 // MeshLayout
 // =============================================================================
 
-MeshLayout &MeshLayout::enableFaceGroups()
-{
-    m_faceGroupsEnabled = true;
-    return *this;
-}
 
 MeshLayout &MeshLayout::enableVertexGroups()
 {
@@ -210,17 +205,11 @@ void Mesh::setFaceCount(uint32_t count)
     faces.resize(count);
     allocateDomain(m_perFace, m_layout.perFaceAttrs(), count);
 
-    if (m_layout.faceGroupsEnabled())
-        faceGroups.resize(count, 0u);
+    faceGroups.resize(count, 0u);
 }
 
 void Mesh::setFaceGroupCount(uint32_t count)
 {
-    if (!m_layout.faceGroupsEnabled())
-    {
-        throw std::logic_error("Mesh: face groups not enabled in layout");
-    }
-
     m_faceGroupCount         = count;
     m_faceGroupCountExplicit = true;
 

@@ -51,7 +51,6 @@ void ResourceRegistry::initCommandPool()
 
     if (vkCreateCommandPool(m_ctx.getDevice(), &ci, nullptr, &m_uploadPool) != VK_SUCCESS)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ResourceRegistry: failed to create upload command pool");
     }
 }
@@ -68,7 +67,6 @@ void ResourceRegistry::registerImage(const std::string &name,
 {
     if (m_images.count(name))
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ResourceRegistry: duplicate image '" + name + "'");
     }
 
@@ -91,7 +89,6 @@ void ResourceRegistry::registerExternalImage(const std::string &name,
 {
     if (m_images.count(name))
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ResourceRegistry: duplicate image '" + name + "'");
     }
 
@@ -120,7 +117,6 @@ void ResourceRegistry::registerPersistentImage(const std::string &name,
 {
     if (m_images.count(name))
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ResourceRegistry: duplicate image '" + name + "'");
     }
 
@@ -145,7 +141,6 @@ void ResourceRegistry::registerCubemap(const std::string &name,
 {
     if (m_images.count(name))
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ResourceRegistry: duplicate image '" + name + "'");
     }
 
@@ -176,7 +171,6 @@ void ResourceRegistry::uploadImage(const std::string &name,
 {
     if (m_images.count(name))
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ResourceRegistry: duplicate image '" + name + "'");
     }
 
@@ -336,7 +330,6 @@ void ResourceRegistry::registerDynamicBuffer(const std::string &name,
 {
     if (m_buffers.count(name))
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ResourceRegistry: duplicate buffer '" + name + "'");
     }
 
@@ -356,7 +349,6 @@ void ResourceRegistry::registerStaticBuffer(const std::string &name,
 {
     if (m_buffers.count(name))
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ResourceRegistry: duplicate buffer '" + name + "'");
     }
 
@@ -417,12 +409,10 @@ void ResourceRegistry::updateBuffer(const std::string &name,
     auto it = m_buffers.find(name);
     if (it == m_buffers.end())
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ResourceRegistry: updateBuffer '" + name + "' not found");
     }
     if (size > it->second.size)
     {
-        spdlog::error("Runtime error: throwing std::runtime_error");
         throw std::runtime_error("ResourceRegistry: updateBuffer '" + name + "' size overflow");
     }
     std::memcpy(it->second.buffer.info.pMappedData, data, size);

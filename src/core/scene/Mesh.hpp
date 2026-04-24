@@ -40,10 +40,6 @@ public:
     template<typename T>
     MeshLayout &addPerFaceAttr(const std::string &name);
 
-    // Enable face groups. Each face will carry a uint32_t group index.
-    // Use addFaceGroupAttr() to attach per-group data (e.g. material params).
-    MeshLayout &enableFaceGroups();
-
     template<typename T>
     MeshLayout &addFaceGroupAttr(const std::string &name);
 
@@ -61,7 +57,6 @@ public:
     const std::vector<AttributeDesc> &faceGroupAttrs()   const { return m_faceGroup;   }
     const std::vector<AttributeDesc> &vertexGroupAttrs() const { return m_vertexGroup; }
 
-    bool faceGroupsEnabled()   const { return m_faceGroupsEnabled;   }
     bool vertexGroupsEnabled() const { return m_vertexGroupsEnabled; }
 
     const AttributeDesc *findPerVertexAttr(const std::string &name)   const;
@@ -78,7 +73,6 @@ private:
     std::vector<AttributeDesc> m_faceGroup;
     std::vector<AttributeDesc> m_vertexGroup;
 
-    bool m_faceGroupsEnabled   = false;
     bool m_vertexGroupsEnabled = false;
 };
 
@@ -91,11 +85,12 @@ class GpuMeshLayout
 public:
     struct AttributeMapping
     {
-        std::string name;           // must match a name registered in MeshLayout;
-                                    // empty when isPosition == true
+        // must match a name registered in MeshLayout, empty when isPosition == true
+        std::string name;
+        // buffer index, same binding -> interleave
         uint32_t    binding;
         uint32_t    location;
-        VkFormat    format;         // VkFormat can't be derived from sizeof alone
+        VkFormat    format;
         bool        isPosition = false;
     };
 
