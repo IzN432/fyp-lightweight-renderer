@@ -20,7 +20,7 @@ void FinalPass::build(FrameGraph &fg) const
         .fragShader((shaderDir / "final.frag.spv").string())
         .bind({
             {
-                .resourceName = CameraUploader::kBufferName,
+                .resourceName = m_cfg.cameraBufferResourceName,
                 .binding      = 0,
                 .type         = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -39,26 +39,12 @@ void FinalPass::build(FrameGraph &fg) const
                 .imageLayout  = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
             },
             {
-                .resourceName = "gbufferAlbedo",
+                .resourceName = "pbr",
                 .binding      = 3,
                 .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
                 .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            },
-            {
-                .resourceName = "gbufferNormal",
-                .binding      = 4,
-                .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            },
-            {
-                .resourceName = "gbufferMaterial",
-                .binding      = 5,
-                .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            },
+            }
         })
         .writes({
             {.name = "swapchain", .format = m_cfg.swapchainFormat},

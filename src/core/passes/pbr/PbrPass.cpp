@@ -5,6 +5,11 @@
 namespace lr
 {
 
+struct PbrPC
+{
+    uint32_t numLights;
+};
+
 PbrPass::PbrPass(Config cfg)
     : m_cfg(std::move(cfg))
 {
@@ -14,13 +19,16 @@ void PbrPass::build(FrameGraph &fg) const
 {
     const auto &shaderDir = m_cfg.shaderDir;
 
+    const PbrPC pbrPC{.numLights = m_cfg.numLights};
+
     fg.addPass("pbr")
         .type(PassType::Fullscreen)
         .vertShader((shaderDir / "fullscreen.vert.spv").string())
         .fragShader((shaderDir / "pbr.frag.spv").string())
+        .pushConstantSize(sizeof(PbrPC), VK_SHADER_STAGE_FRAGMENT_BIT) // numLights as push constant
         .bind({
             {
-                .resourceName = CameraUploader::kBufferName,
+                .resourceName = m_cfg.cameraBufferResourceName,
                 .binding      = 0,
                 .type         = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -65,11 +73,18 @@ void PbrPass::build(FrameGraph &fg) const
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
                 .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             },
+            {
+                .resourceName = m_cfg.lightBufferResourceName,
+                .binding      = 7,
+                .type         = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
+            }
         })
         .writes({
             {.name = "pbr",   .format = VK_FORMAT_R16G16B16A16_SFLOAT},
         })
-        .execute([](CommandBuffer &cmd, VkPipelineLayout) {
+        .execute([pbrPC](CommandBuffer &cmd, VkPipelineLayout layout) {
+            cmd.pushConstants(layout, VK_SHADER_STAGE_FRAGMENT_BIT, pbrPC);
             cmd.draw(3);
         });
 }

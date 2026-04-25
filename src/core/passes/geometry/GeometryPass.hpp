@@ -18,6 +18,8 @@ public:
     {
         std::filesystem::path shaderDir;
         
+        std::string cameraBufferResourceName;
+        
         std::string vertexAttributeBufferResourceName;
         std::string indexBufferResourceName;
         uint32_t    indexCount;

@@ -1,6 +1,7 @@
 #include "core/loaders/GltfLoader.hpp"
 
 #include "glm/glm.hpp"
+#include "core/loaders/LoaderUtils.hpp"
 
 #define TINYGLTF_IMPLEMENTATION
 #define TINYGLTF_NO_STB_IMAGE_WRITE
@@ -139,19 +140,23 @@ std::vector<Material> extractMaterials(const tinygltf::Model &model, const GltfL
         material.textures[config.normalTextureName] = extractImage(m.normalTexture, model);
         material.textures[config.metallicRoughnessTextureName] = extractImage(m.pbrMetallicRoughness.metallicRoughnessTexture, model);
         material.textures[config.emissiveTextureName] = extractImage(m.emissiveTexture, model);
+
+        // Replace with the default if it is missing any of the required textures
+        if (material.textures[config.diffuseTextureName].pixels.empty())
+            material.textures[config.diffuseTextureName] = defaultMaterial.textures[config.diffuseTextureName];
+        if (material.textures[config.normalTextureName].pixels.empty())
+            material.textures[config.normalTextureName] = defaultMaterial.textures[config.normalTextureName];
+        if (material.textures[config.metallicRoughnessTextureName].pixels.empty())
+            material.textures[config.metallicRoughnessTextureName] = defaultMaterial.textures[config.metallicRoughnessTextureName];
+        if (material.textures[config.emissiveTextureName].pixels.empty())
+            material.textures[config.emissiveTextureName] = defaultMaterial.textures[config.emissiveTextureName];
     }
     return materials;
 }
 
-struct MeshData
-{
-    std::vector<glm::vec3> positions;
-    std::vector<glm::vec3> normals;
-    std::vector<glm::vec2> uvs;
-    std::vector<glm::uvec3> faces;
-    std::vector<uint32_t> faceGroups;
-};
-
+/**
+ * Helper functions complementing extractMeshData
+ */
 float normalizeToFloat(const unsigned char *p, int componentType)
 {
     switch (componentType)
@@ -201,39 +206,26 @@ AccessorView getAccessorView(const tinygltf::Model &model, int accessorIndex)
     return view;
 }
 
-glm::vec2 readVec2(AccessorView &view, size_t index)
+template <typename T>
+T readVec(const AccessorView &view, size_t index)
 {
     const unsigned char *data = view.data + index * view.stride;
-    if (view.normalized)
-    {
-        float x = normalizeToFloat(data, view.componentType);
-        float y = normalizeToFloat(data + tinygltf::GetComponentSizeInBytes(view.componentType), view.componentType);
-        return glm::vec2(x, y);
-    }
-    else
-    {
-        if (view.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT)
-            throw std::runtime_error("Non-normalized attributes must be of type FLOAT");
-        return *reinterpret_cast<const glm::vec2 *>(data);
-    }
-}
+    const size_t componentSize = tinygltf::GetComponentSizeInBytes(view.componentType);
+    const int numComponents = T::length();
 
-glm::vec3 readVec3(AccessorView &view, size_t index)
-{
-    const unsigned char *data = view.data + index * view.stride;
+    T result;
     if (view.normalized)
     {
-        float x = normalizeToFloat(data, view.componentType);
-        float y = normalizeToFloat(data + tinygltf::GetComponentSizeInBytes(view.componentType), view.componentType);
-        float z = normalizeToFloat(data + 2 * tinygltf::GetComponentSizeInBytes(view.componentType), view.componentType);
-        return glm::vec3(x, y, z);
+        for (int i = 0; i < numComponents; ++i)
+            result[i] = normalizeToFloat(data + i * componentSize, view.componentType);
     }
     else
     {
         if (view.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT)
             throw std::runtime_error("Non-normalized attributes must be of type FLOAT");
-        return *reinterpret_cast<const glm::vec3 *>(data);
+        std::memcpy(&result, data, sizeof(T));
     }
+    return result;
 }
 
 uint32_t readIndex(const AccessorView &view, size_t i)
@@ -255,26 +247,45 @@ uint32_t readIndex(const AccessorView &view, size_t i)
 static const std::string POSITION_ATTR_NAME = "POSITION";
 static const std::string NORMAL_ATTR_NAME   = "NORMAL";
 static const std::string UV_ATTR_NAME       = "TEXCOORD_0";
+static const std::string TANGENT_ATTR_NAME  = "TANGENT";
 
 MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &model)
 {
-    std::vector<glm::vec3> positions;
-    std::vector<glm::vec3> normals;
-    std::vector<glm::vec2> uvs;
-    std::vector<glm::uvec3> faces;
-    std::vector<glm::uint32_t> faceGroups;
+    MeshData meshData;
+    auto &positions = meshData.positions;
+    auto &normals = meshData.normals;
+    auto &tangents = meshData.tangents;
+    auto &uvs = meshData.uvs;
+    auto &faces = meshData.faces;
+    auto &faceGroups = meshData.faceGroups;
 
     size_t totalVertexCount = 0;
     size_t totalFaceCount = 0;
+
+    bool hasTangents = true;
+
     for (const auto &primitive : mesh.primitives)
     {
         AccessorView posView = getAccessorView(model, primitive.attributes.at(POSITION_ATTR_NAME));
         totalVertexCount += posView.count;
         totalFaceCount += primitive.indices >= 0 ? getAccessorView(model, primitive.indices).count / 3 : posView.count / 3;
+
+        // We only use the provided tangents if they are present for every vertex. Otherwise, we will generate them ourselves
+        if (primitive.attributes.find(TANGENT_ATTR_NAME) == primitive.attributes.end())
+        {
+            hasTangents = false;
+            continue;
+        }
+        AccessorView tanView = getAccessorView(model, primitive.attributes.at(TANGENT_ATTR_NAME));
+        if (tanView.count < posView.count)
+        {
+            hasTangents = false;
+        }
     }
 
     positions.reserve(totalVertexCount);
     normals.reserve(totalVertexCount);
+    tangents.reserve(totalVertexCount);
     uvs.reserve(totalVertexCount);
     faces.reserve(totalFaceCount);
     faceGroups.reserve(totalFaceCount);
@@ -312,7 +323,7 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
 
         for (size_t j = 0; j < vertexCount; ++j)
         {
-            positions.push_back(readVec3(posView, j));
+            positions.push_back(readVec<glm::vec3>(posView, j));
         }
 
         // ATTRIBUTE 2 - Normal
@@ -331,7 +342,7 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
             AccessorView normView = getAccessorView(model, primitive.attributes.at(NORMAL_ATTR_NAME));
             for (size_t j = 0; j < vertexCount; ++j)
             {
-                normals.push_back(readVec3(normView, j));
+                normals.push_back(readVec<glm::vec3>(normView, j));
             }
         }
 
@@ -351,7 +362,22 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
             
             for (size_t j = 0; j < vertexCount; ++j)
             {
-                uvs.push_back(readVec2(uvView, j));
+                uvs.push_back(readVec<glm::vec2>(uvView, j));
+            }
+        }
+
+         // ATTRIBUTE 4 - Tangent
+        if (!hasTangents)
+        {
+            // Do nothing, we will calculate them later.
+        }
+        else
+        {
+            AccessorView tanView = getAccessorView(model, primitive.attributes.at(TANGENT_ATTR_NAME));
+            
+            for (size_t j = 0; j < vertexCount; ++j)
+            {
+                tangents.push_back(readVec<glm::vec4>(tanView, j));
             }
         }
 
@@ -384,7 +410,15 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
         }
     }
 
-    return { std::move(positions), std::move(normals), std::move(uvs), std::move(faces), std::move(faceGroups) };
+    // Generate tangents using mikktspace.
+
+    if (!hasTangents)
+    {
+        tangents.resize(positions.size(), glm::vec4(0.0f));
+        generateTangents(meshData);
+    }
+
+    return meshData;
 }
 
 } // namespace
@@ -402,6 +436,7 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, const Glt
     MeshLayout layout;
     layout
         .addPerVertexAttr<glm::vec3>(config.normalAttributeName)
+        .addPerVertexAttr<glm::vec4>(config.tangentAttributeName)
         .addPerVertexAttr<glm::vec2>(config.uvAttributeName);
     
     MeshSequence seq;
@@ -414,7 +449,7 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, const Glt
         if (mesh.primitives.empty())
             throw std::runtime_error("GltfLoader: mesh has no primitives");
 
-        auto [positions, normals, uvs, faces, faceGroups] = extractMeshData(mesh, model);
+        auto [positions, normals, tangents, uvs, faces, faceGroups] = extractMeshData(mesh, model);
         
         outMesh.setFaceCount(faces.size());
         outMesh.setVertexCount(positions.size());
@@ -423,6 +458,7 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, const Glt
         outMesh.faceGroups = std::move(faceGroups);
 
         outMesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, normals);
+        outMesh.setPerVertexArray<glm::vec4>(config.tangentAttributeName, tangents);
         outMesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
     }
 

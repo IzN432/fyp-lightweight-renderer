@@ -1,7 +1,9 @@
 #include "core/loaders/ObjLoader.hpp"
 #include "core/utility/ImageLoader.hpp"
+#include "core/loaders/LoaderUtils.hpp"
 
 #include <tiny_obj_loader.h>
+#include <mikktspace.h>
 #include <spdlog/spdlog.h>
 namespace lr
 {
@@ -75,6 +77,21 @@ std::vector<Material> extractMaterials(const tinyobj::ObjReader &reader, const s
         mat.textures[config.metallicTextureName] = loadMaterialImage(objDirectoryPath, m.metallic_texname);
         mat.textures[config.roughnessTextureName] = loadMaterialImage(objDirectoryPath, m.roughness_texname); 
         mat.textures[config.emissiveTextureName] = loadMaterialImage(objDirectoryPath, m.emissive_texname);
+
+        if (mat.textures[config.diffuseTextureName].pixels.empty())
+            mat.textures[config.diffuseTextureName] = defaultMat.textures[config.diffuseTextureName];
+        if (mat.textures[config.ambientTextureName].pixels.empty())
+            mat.textures[config.ambientTextureName] = defaultMat.textures[config.ambientTextureName];
+        if (mat.textures[config.specularTextureName].pixels.empty())    
+            mat.textures[config.specularTextureName] = defaultMat.textures[config.specularTextureName];
+        if (mat.textures[config.normalTextureName].pixels.empty())
+            mat.textures[config.normalTextureName] = defaultMat.textures[config.normalTextureName];
+        if (mat.textures[config.metallicTextureName].pixels.empty())
+            mat.textures[config.metallicTextureName] = defaultMat.textures[config.metallicTextureName];
+        if (mat.textures[config.roughnessTextureName].pixels.empty())
+            mat.textures[config.roughnessTextureName] = defaultMat.textures[config.roughnessTextureName];
+        if (mat.textures[config.emissiveTextureName].pixels.empty())
+            mat.textures[config.emissiveTextureName] = defaultMat.textures[config.emissiveTextureName];
     }
 
     return out;
@@ -100,14 +117,8 @@ tinyobj::ObjReader loadObjFile(const std::filesystem::path &path)
     return reader;
 }
 
-struct MeshData
-{
-    std::vector<glm::vec3> positions;
-    std::vector<glm::vec3> normals;
-    std::vector<glm::vec2> uvs;
-    std::vector<glm::uvec3> faces;
-    std::vector<uint32_t> faceGroups;
-};
+
+
 
 struct VertexKey
 {
@@ -142,11 +153,13 @@ struct VertexKeyHash
 
 MeshData extractMeshData(const tinyobj::ObjReader &reader, const std::filesystem::path &path)
 {
-    std::vector<glm::vec3> positions;
-    std::vector<glm::vec3> normals;
-    std::vector<glm::vec2> uvs;
-    std::vector<glm::uvec3> faces;
-    std::vector<uint32_t> faceGroups;
+    MeshData meshData;
+    auto &positions = meshData.positions;
+    auto &normals = meshData.normals;
+    auto &tangents = meshData.tangents;
+    auto &uvs = meshData.uvs;
+    auto &faces = meshData.faces;
+    auto &faceGroups = meshData.faceGroups;
 
     std::unordered_map<VertexKey, uint32_t, VertexKeyHash> vertexMap;
 
@@ -209,7 +222,10 @@ MeshData extractMeshData(const tinyobj::ObjReader &reader, const std::filesystem
         }
     }
 
-    return { std::move(positions), std::move(normals), std::move(uvs), std::move(faces), std::move(faceGroups) };
+    tangents.resize(positions.size(), glm::vec4(0.0f));
+    generateTangents(meshData);
+
+    return meshData;
 }
 
 } // namespace
@@ -227,10 +243,11 @@ ObjMeshLoadResult ObjLoader::load(const std::filesystem::path &path, const ObjLo
     MeshLayout layout;
     layout
         .addPerVertexAttr<glm::vec3>(config.normalAttributeName)
+        .addPerVertexAttr<glm::vec4>(config.tangentAttributeName)
         .addPerVertexAttr<glm::vec2>(config.uvAttributeName);
 
     Mesh mesh(layout);
-    auto [positions, normals, uvs, faces, faceGroups] = extractMeshData(reader, path);
+    auto [positions, normals, tangents, uvs, faces, faceGroups] = extractMeshData(reader, path);
     
     mesh.setVertexCount(static_cast<uint32_t>(positions.size()));
     mesh.setFaceCount(static_cast<uint32_t>(faces.size()));
@@ -239,6 +256,7 @@ ObjMeshLoadResult ObjLoader::load(const std::filesystem::path &path, const ObjLo
     mesh.faceGroups = std::move(faceGroups);
     
     mesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, normals);
+    mesh.setPerVertexArray<glm::vec4>(config.tangentAttributeName, tangents);
     mesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
 
     // SECTION 3 - Extract material data from the tinyobj::ObjReader and convert it to our internal Material format

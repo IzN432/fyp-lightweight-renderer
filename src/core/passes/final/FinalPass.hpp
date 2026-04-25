@@ -14,8 +14,9 @@ class FinalPass
 public:
     struct Config
     {
-        std::filesystem::path shaderDir;
-        VkFormat              swapchainFormat;
+        std::filesystem::path   shaderDir;
+        std::string             cameraBufferResourceName;
+        VkFormat                swapchainFormat;
     };
 
     explicit FinalPass(Config cfg);

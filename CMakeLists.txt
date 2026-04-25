@@ -36,6 +36,7 @@ find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(tinyobjloader CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+find_package(mikktspace CONFIG REQUIRED)
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h" REQUIRED)
 
 # MSVC flags
@@ -74,8 +75,10 @@ add_library(lr_core STATIC
 
     src/core/loaders/ObjLoader.cpp
     src/core/loaders/GltfLoader.cpp
+    src/core/loaders/LoaderUtils.cpp
 
     src/core/upload/CameraUploader.cpp
+    src/core/upload/LightUploader.cpp
     src/core/upload/MaterialUploader.cpp
     src/core/upload/MeshUploader.cpp
 
@@ -94,6 +97,7 @@ target_link_libraries(lr_core PUBLIC
     tinyobjloader::tinyobjloader
     GPUOpen::VulkanMemoryAllocator
     imgui
+    mikktspace::mikktspace
 )
 target_include_directories(lr_core PUBLIC ${TINYGLTF_INCLUDE_DIRS})
 target_compile_definitions(lr_core PUBLIC

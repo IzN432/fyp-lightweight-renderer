@@ -18,6 +18,7 @@ struct GltfLoaderConfig
 {
 	// Per-vertex attributes
 	std::string normalAttributeName = "normal";
+	std::string tangentAttributeName = "tangent";
 	std::string uvAttributeName = "uv";
 
 	// Material
@@ -38,6 +39,7 @@ struct GltfLoaderConfig
  * Per-vertex attributes (names from config):
  *   - normalAttr  (vec3)  vertex normal
  *   - uvAttr      (vec2)  primary texture coordinate
+ *   - tangentAttr (vec3)  vertex tangent
  *
  * Material scalars:
  *   - baseDiffuse    (vec4)   from baseColorFactor

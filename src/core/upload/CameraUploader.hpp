@@ -15,23 +15,31 @@ struct CameraGpuData
     glm::mat4 view;
     glm::mat4 proj;
     glm::mat4 viewProj;
-    glm::vec4 position;  // .xyz = world position; .w unused
+    glm::mat4 invView;
+    glm::mat4 invProj;
+    glm::vec3 position;
+    float padding;     // pad to 16 bytes for std140
 };
 
-static_assert(sizeof(CameraGpuData) == 3 * 64 + 16,
+struct CameraUploadResult
+{
+    std::string bufferName;
+};
+
+static_assert(sizeof(CameraGpuData) == 5 * 64 + 16,
               "CameraGpuData layout does not match expected std140 size");
 
 class CameraUploader
 {
 public:
-    static constexpr const char *kBufferName = "camera";
-
-    explicit CameraUploader(ResourceRegistry &registry);
+    explicit CameraUploader(ResourceRegistry &registry, const std::string name = "camera");
 
     void upload(const Camera &camera, float aspectRatio);
 
+    const std::string &bufferName() const { return m_bufferName; }
 private:
     ResourceRegistry &m_registry;
+    std::string m_bufferName;
 };
 
 }  // namespace lr

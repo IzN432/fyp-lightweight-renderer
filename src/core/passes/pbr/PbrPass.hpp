@@ -14,8 +14,11 @@ class PbrPass
 public:
     struct Config
     {
-        std::filesystem::path shaderDir;
-        VkFormat              swapchainFormat;
+        std::filesystem::path   shaderDir;
+        std::string             cameraBufferResourceName;
+        std::string             lightBufferResourceName;
+        uint32_t                numLights;
+        VkFormat                swapchainFormat;
     };
 
     explicit PbrPass(Config cfg);

@@ -5,11 +5,12 @@
 #include "core/passes/ibl/IblPass.hpp"
 #include "core/passes/pbr/PBRPass.hpp"
 #include "core/scene/Camera.hpp"
+#include "core/scene/Light.hpp"
 #include "core/scene/Mesh.hpp"
 #include "core/upload/CameraUploader.hpp"
+#include "core/upload/LightUploader.hpp"
 #include "core/upload/MaterialUploader.hpp"
 #include "core/upload/MeshUploader.hpp"
-
 #include <imgui.h>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec4.hpp>
@@ -22,7 +23,7 @@
 int main()
 try
 {
-    spdlog::set_level(spdlog::level::debug);
+    spdlog::set_level(spdlog::level::info);
 
     lr::Viewer viewer({.title = "lr"});
 
@@ -44,6 +45,7 @@ try
     // Scene setup
     // -------------------------------------------------------------------------
 
+    // CAMERA
     const glm::vec3 cameraTarget(0.0f, 0.0f, 0.0f);
     const float     cameraOrbitRadius = 5.0f;
 
@@ -56,11 +58,25 @@ try
         camera.transform.rotation = glm::conjugate(glm::quat_cast(view));
     }
 
+    // LIGHT
+    lr::PointLight light;
+    light.transform.position = glm::vec3(0.0f, 5.0f, 0.0f);
+    light.color = glm::vec3(1.0f, 0.0f, 0.0f);
+    light.intensity = 1.0f;
+    
+    std::vector<lr::LightVariant> lights;
+    lights.emplace_back(light);
+
+    lr::LightUploader lightUploader(viewer.resources());
+    lightUploader.upload(lights);
+
+    // MESH
     const fs::path meshPath = "C:\\Users\\seani\\Documents\\monke.glb";
 
     lr::GltfLoader gltfLoader;
     lr::GltfLoaderConfig config{
         .normalAttributeName = "normal",
+        .tangentAttributeName = "tangent",
         .uvAttributeName = "uv",
         .diffuseTextureName = "baseColorTexture",
         .normalTextureName = "normalTexture",
@@ -86,7 +102,8 @@ try
     lr::GpuMeshLayout gpuMeshLayout(layout);
     gpuMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
     gpuMeshLayout.map(config.normalAttributeName, 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
-    gpuMeshLayout.map(config.uvAttributeName, 0, 2, VK_FORMAT_R32G32_SFLOAT);
+    gpuMeshLayout.map(config.tangentAttributeName, 0, 2, VK_FORMAT_R32G32B32A32_SFLOAT);
+    gpuMeshLayout.map(config.uvAttributeName, 0, 3, VK_FORMAT_R32G32_SFLOAT);
 
     lr::MeshUploader meshUploader(viewer.resources());
     const lr::MeshUploadResult mesh = meshUploader.upload(
@@ -123,6 +140,8 @@ try
     lr::GeometryPass geometryPass({
         .shaderDir = shaderDir,
 
+        .cameraBufferResourceName = cameraUploader.bufferName(),
+
         .vertexAttributeBufferResourceName = mesh.vertexBufferNames.at(0),
         .indexBufferResourceName = mesh.indexBufferName,
         .indexCount = mesh.indexCount,
@@ -143,12 +162,16 @@ try
 
     lr::PbrPass pbrPass({
         .shaderDir = shaderDir,
+        .cameraBufferResourceName = cameraUploader.bufferName(),
+        .lightBufferResourceName = lightUploader.bufferName(),
+        .numLights = lightUploader.numLights(),
         .swapchainFormat = swapchainFormat,
     });
     pbrPass.build(viewer.frameGraph());
     
     lr::FinalPass finalPass({
         .shaderDir = shaderDir,
+        .cameraBufferResourceName = cameraUploader.bufferName(),
         .swapchainFormat = swapchainFormat,
     });
     finalPass.build(viewer.frameGraph());
@@ -157,8 +180,23 @@ try
     // Per-frame callbacks
     // -------------------------------------------------------------------------
 
-    viewer.onGui([]() {
-        ImGui::ShowDemoWindow();
+    viewer.onGui([&lights, &lightUploader]() {
+        ImGui::Begin("Sample");
+        ImGui::Text("This is a sample ImGui window.");
+        bool changed = false;
+        for (auto &light : lights)
+        {
+            changed |= std::visit([](auto &&l) -> bool
+            {
+                return ImGui::SliderFloat("Light Intensity", &l.intensity, 0.0f, 1.0f)
+                    || ImGui::ColorEdit3("Light Color", &l.color.x)
+                    || ImGui::DragFloat3("Light Position", &l.transform.position.x, 0.1f);
+            }, light);
+        }
+        if (changed) {
+            lightUploader.upload(lights);
+        }
+        ImGui::End();
     });
 
     float orbitAngle = 0.0f;
@@ -189,5 +227,6 @@ try
 catch (const std::exception &e)
 {
     spdlog::error("Fatal: {}", e.what());
+    throw;
     return 1;
 }

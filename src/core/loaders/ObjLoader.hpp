@@ -18,6 +18,7 @@ struct ObjLoaderConfig
 {
 	// Per-vertex attributes
 	std::string normalAttributeName = "normal";
+	std::string tangentAttributeName = "tangent";
 	std::string uvAttributeName = "uv";
 
 	// Material

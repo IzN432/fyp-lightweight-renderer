@@ -1,3 +1,5 @@
+#pragma once
+
 #include "core/framegraph/ResourceRegistry.hpp"
 
 #include "core/loaders/Material.hpp"
