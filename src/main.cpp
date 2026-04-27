@@ -57,7 +57,6 @@ try
     const glm::vec3 cameraTarget(0.0f, 0.0f, 0.0f);
     const float     cameraOrbitRadius = 5.0f;
 
-    lr::Camera& cameraComponent = camera->addComponent<lr::Camera>();
     camera->getComponent<lr::Transform>().position = glm::vec3(0.0f, 0.0f, cameraOrbitRadius);
     {
         const glm::mat4 view = glm::lookAt(camera->getComponent<lr::Transform>().position,
