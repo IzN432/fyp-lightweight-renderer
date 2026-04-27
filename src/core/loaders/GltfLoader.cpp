@@ -271,7 +271,7 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
         totalFaceCount += primitive.indices >= 0 ? getAccessorView(model, primitive.indices).count / 3 : posView.count / 3;
 
         // We only use the provided tangents if they are present for every vertex. Otherwise, we will generate them ourselves
-        if (primitive.attributes.find(TANGENT_ATTR_NAME) == primitive.attributes.end())
+        if (!primitive.attributes.contains(TANGENT_ATTR_NAME))
         {
             hasTangents = false;
             continue;
@@ -328,7 +328,7 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
 
         // ATTRIBUTE 2 - Normal
         
-        if (primitive.attributes.find(NORMAL_ATTR_NAME) == primitive.attributes.end())
+        if (!primitive.attributes.contains(NORMAL_ATTR_NAME))
         {
             // If the normal accessor has fewer elements than the position accessor, we consider it as missing and fill with default value.
             spdlog::warn("GltfLoader: NORMAL attribute has fewer elements than POSITION attribute, filling with default value");
@@ -347,7 +347,7 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
         }
 
         // ATTRIBUTE 3 - UVs
-        if (primitive.attributes.find(UV_ATTR_NAME) == primitive.attributes.end())
+        if (!primitive.attributes.contains(UV_ATTR_NAME))
         {
             // If the UV accessor has fewer elements than the position accessor, we consider it as missing and fill with default value.
             spdlog::warn("GltfLoader: {} attribute has fewer elements than POSITION attribute, filling with default value", UV_ATTR_NAME);

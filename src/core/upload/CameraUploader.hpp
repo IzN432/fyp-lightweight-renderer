@@ -34,7 +34,7 @@ class CameraUploader
 public:
     explicit CameraUploader(ResourceRegistry &registry, const std::string name = "camera");
 
-    void upload(const Camera &camera, float aspectRatio);
+    void upload(const SceneObject &camera, float aspectRatio);
 
     const std::string &bufferName() const { return m_bufferName; }
 private:

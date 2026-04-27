@@ -7,6 +7,7 @@
 #include "core/scene/Camera.hpp"
 #include "core/scene/Light.hpp"
 #include "core/scene/Mesh.hpp"
+#include "core/scene/SceneObject.hpp"
 #include "core/upload/CameraUploader.hpp"
 #include "core/upload/LightUploader.hpp"
 #include "core/upload/MaterialUploader.hpp"
@@ -45,30 +46,45 @@ try
     // Scene setup
     // -------------------------------------------------------------------------
 
+    std::vector<std::unique_ptr<lr::SceneObject>> sceneObjects;
+
+    lr::SceneObject* camera = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
+    camera->addComponent<lr::Camera>();
+    camera->addComponent<lr::Transform>();
+    camera->name = "Main Camera";
+
     // CAMERA
     const glm::vec3 cameraTarget(0.0f, 0.0f, 0.0f);
     const float     cameraOrbitRadius = 5.0f;
 
-    lr::Camera camera;
-    camera.transform.position = glm::vec3(0.0f, 0.0f, cameraOrbitRadius);
+    lr::Camera& cameraComponent = camera->addComponent<lr::Camera>();
+    camera->getComponent<lr::Transform>().position = glm::vec3(0.0f, 0.0f, cameraOrbitRadius);
     {
-        const glm::mat4 view = glm::lookAt(camera.transform.position,
+        const glm::mat4 view = glm::lookAt(camera->getComponent<lr::Transform>().position,
                                            cameraTarget,
                                            glm::vec3(0.0f, 1.0f, 0.0f));
-        camera.transform.rotation = glm::conjugate(glm::quat_cast(view));
+        camera->getComponent<lr::Transform>().setRotation(glm::conjugate(glm::quat_cast(view)));
     }
 
     // LIGHT
-    lr::PointLight light;
-    light.transform.position = glm::vec3(0.0f, 5.0f, 0.0f);
+    lr::DirectionalLight light;
     light.color = glm::vec3(1.0f, 0.0f, 0.0f);
     light.intensity = 1.0f;
     
-    std::vector<lr::LightVariant> lights;
-    lights.emplace_back(light);
+    lr::SceneObject* editorLight = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
+    editorLight->addComponent<lr::Transform>();
+    editorLight->addComponent<lr::EditorLight>(light);
+    editorLight->name = "Directional Light";
 
     lr::LightUploader lightUploader(viewer.resources());
-    lightUploader.upload(lights);
+    std::vector<lr::SceneObject*> sceneLights;
+    for (const auto &sceneObject : sceneObjects) {
+        if (sceneObject->hasComponent<lr::EditorLight>()) {
+            sceneLights.push_back(sceneObject.get());
+        }
+    }
+
+    lightUploader.upload(sceneLights);
 
     // MESH
     const fs::path meshPath = "C:\\Users\\seani\\Documents\\monke.glb";
@@ -180,22 +196,27 @@ try
     // Per-frame callbacks
     // -------------------------------------------------------------------------
 
-    viewer.onGui([&lights, &lightUploader]() {
-        ImGui::Begin("Sample");
-        ImGui::Text("This is a sample ImGui window.");
+    viewer.onGui([&sceneObjects, &lightUploader]() {
+        ImGui::Begin("Scene Hierarchy");
+        
+        int id = 0;
         bool changed = false;
-        for (auto &light : lights)
+        for (auto &object : sceneObjects)
         {
-            changed |= std::visit([](auto &&l) -> bool
-            {
-                return ImGui::SliderFloat("Light Intensity", &l.intensity, 0.0f, 1.0f)
-                    || ImGui::ColorEdit3("Light Color", &l.color.x)
-                    || ImGui::DragFloat3("Light Position", &l.transform.position.x, 0.1f);
-            }, light);
+            ImGui::PushID(id++);
+            changed |= object->onGUI();
+            ImGui::PopID();
         }
-        if (changed) {
-            lightUploader.upload(lights);
+        
+        std::vector<lr::SceneObject*> sceneLights;
+        for (const auto &object : sceneObjects) {
+            if (object->hasComponent<lr::EditorLight>()) {
+                sceneLights.push_back(object.get());
+            }
         }
+
+        lightUploader.upload(sceneLights);
+        
         ImGui::End();
     });
 
@@ -207,18 +228,18 @@ try
             : static_cast<float>(extent.width) / static_cast<float>(extent.height);
 
         orbitAngle += dt * 0.5f;
-        camera.transform.position = glm::vec3(
+        camera->getComponent<lr::Transform>().position = glm::vec3(
             std::sin(orbitAngle) * cameraOrbitRadius,
             0.0f,
             std::cos(orbitAngle) * cameraOrbitRadius);
         {
-            const glm::mat4 view = glm::lookAt(camera.transform.position,
+            const glm::mat4 view = glm::lookAt(camera->getComponent<lr::Transform>().position,
                                                cameraTarget,
                                                glm::vec3(0.0f, 1.0f, 0.0f));
-            camera.transform.rotation = glm::conjugate(glm::quat_cast(view));
+            camera->getComponent<lr::Transform>().setRotation(glm::conjugate(glm::quat_cast(view)));
         }
 
-        cameraUploader.upload(camera, aspect);
+        cameraUploader.upload(*camera, aspect);
     });
 
     viewer.run();

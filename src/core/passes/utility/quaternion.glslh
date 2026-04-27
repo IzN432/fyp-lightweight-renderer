@@ -1,0 +1,12 @@
+/**
+ * Quaternion utility functions for shader code.
+ */
+
+vec3 quaternionToForwardVector(vec4 q)
+{
+    float w = q.w;
+    vec3 u = q.xyz;
+    vec3 v = vec3(0.0, 0.0, -1.0);
+
+    return v + cross(2 * u, (cross(u, v) + w * v));
+}

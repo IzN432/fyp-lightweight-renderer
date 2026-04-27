@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core/scene/Transform.hpp"
+#include "core/scene/Component.hpp"
+#include "core/scene/SceneObject.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -18,10 +20,8 @@ enum class ProjectionType
 
 // Scene camera data. Input/control systems can mutate this state,
 // and render systems can consume view/projection matrices from it.
-struct Camera
+struct Camera : public Component
 {
-    Transform transform{};
-
     ProjectionType projectionType = ProjectionType::Perspective;
 
     // Perspective settings
@@ -32,8 +32,11 @@ struct Camera
     // Orthographic settings (vertical size in world units)
     float orthoHeight = 10.0f;
 
+    explicit Camera() : Component("Camera") {}
+
     [[nodiscard]] glm::mat4 viewMatrix() const
     {
+        const lr::Transform& transform = getOwningObject().getComponent<Transform>();
         const glm::vec3 eye = transform.position;
         return glm::lookAt(eye, eye + transform.forward(), transform.up());
     }
@@ -68,6 +71,33 @@ struct Camera
     [[nodiscard]] glm::mat4 viewProjectionMatrix(float aspectRatio) const
     {
         return projectionMatrix(aspectRatio) * viewMatrix();
+    }
+
+    bool onGUIImpl() override
+    {
+        bool changed = false;
+
+        const char* projectionTypes[] = { "Perspective", "Orthographic" };
+        int currentProjection = static_cast<int>(projectionType);
+        if (ImGui::Combo("Projection Type", &currentProjection, projectionTypes, IM_ARRAYSIZE(projectionTypes)))
+        {
+            projectionType = static_cast<ProjectionType>(currentProjection);
+            changed = true;
+        }
+
+        if (projectionType == ProjectionType::Perspective)
+        {
+            changed |= ImGui::SliderFloat("FOV Y (Degrees)", &fovYDegrees, 1.0f, 179.0f);
+        }
+        else
+        {
+            changed |= ImGui::SliderFloat("Orthographic Height", &orthoHeight, 0.1f, 100.0f);
+        }
+
+        changed |= ImGui::SliderFloat("Near Plane", &nearPlane, 0.01f, farPlane - 0.01f);
+        changed |= ImGui::SliderFloat("Far Plane", &farPlane, nearPlane + 0.01f, 10000.0f);
+
+        return changed;
     }
 };
 

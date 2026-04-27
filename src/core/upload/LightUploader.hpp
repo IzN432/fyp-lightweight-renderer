@@ -29,7 +29,7 @@ class LightUploader
 public:
     explicit LightUploader(ResourceRegistry &registry, const std::string name = "lights", uint32_t maxLights = 16);
     
-    void upload(std::vector<LightVariant> &lights);
+    void upload(std::vector<SceneObject*> &lights);
 
     const std::string &bufferName() const { return m_bufferName; }
     const uint32_t &numLights() const { return m_numLights; }

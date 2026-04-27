@@ -1,6 +1,7 @@
 #version 450
 
 #include "../utility/geometry.glslh"
+#include "../utility/quaternion.glslh"
 
 struct LightData
 {
@@ -44,6 +45,39 @@ layout(push_constant) uniform PC {
 
 layout(location = 0) out vec4 outColor;
 
+#define LIGHT_TYPE_POINT 0
+#define LIGHT_TYPE_SPOT 1
+#define LIGHT_TYPE_AREA 2
+#define LIGHT_TYPE_DIRECTIONAL 3
+
+
+vec3 CalcPointLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic)
+{
+    vec3 lightViewPos = (cameraUbo.view * vec4(light.position, 1.0)).xyz;
+    vec3 L = normalize(lightViewPos - position);
+    vec3 N = normal;
+    float L_dot_N = max(0.0, dot(L, N));
+    return light.color * light.intensity * L_dot_N;
+}
+
+vec3 CalcDirectionalLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic)
+{
+    vec3 L = normalize((cameraUbo.view * vec4(-quaternionToForwardVector(light.rotation), 0.0)).xyz);
+    vec3 N = normal;
+    float N_dot_L = max(0.0, dot(N, L));
+    return light.color * light.intensity * N_dot_L;
+}
+
+vec3 CalcSpotLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic)
+{
+    return vec3(0.0); // Placeholder, implement spot light calculations here
+}
+
+vec3 CalcAreaLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic)
+{
+    return vec3(0.0); // Placeholder, implement area light calculations here
+}
+
 void main()
 {
     // Screen space UV coordinates for sampling G-buffer textures
@@ -61,13 +95,21 @@ void main()
     for (uint i = 0; i < pc.numLights; ++i)
     {
         LightData light = lights[i];
-
-        vec3 lightViewPos = (cameraUbo.view * vec4(light.position, 1.0)).xyz;
-        vec3 L = normalize(lightViewPos - position);
-        vec3 N = normal;
-        float L_dot_N = max(0.0, dot(L, N));
-        
-        outColor += vec4(light.color * light.intensity * L_dot_N, 1.0);
+        switch (light.type)
+        {
+        case LIGHT_TYPE_POINT:
+            outColor += vec4(CalcPointLight(light, position, normal, albedo, roughness, metallic), 1.0);
+            break;
+        case LIGHT_TYPE_DIRECTIONAL:
+            outColor += vec4(CalcDirectionalLight(light, position, normal, albedo, roughness, metallic), 1.0);
+            break;
+        case LIGHT_TYPE_SPOT:
+            outColor += vec4(CalcSpotLight(light, position, normal, albedo, roughness, metallic), 1.0);
+            break;
+        case LIGHT_TYPE_AREA:
+            outColor += vec4(CalcAreaLight(light, position, normal, albedo, roughness, metallic), 1.0);
+            break;
+        }
     }
     outColor = vec4(outColor.rgb * albedo, 1.0);
 }

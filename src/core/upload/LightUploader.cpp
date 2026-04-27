@@ -1,5 +1,8 @@
 #include "core/upload/LightUploader.hpp"
 
+#include "core/scene/Transform.hpp"
+#include "core/scene/SceneObject.hpp"
+
 namespace lr
 {
 
@@ -12,21 +15,24 @@ LightUploader::LightUploader(ResourceRegistry &registry, const std::string name,
                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 }
 
-void LightUploader::upload(std::vector<LightVariant> &lights)
+void LightUploader::upload(std::vector<SceneObject*> &lights)
 {
     std::vector<LightGpuData> data;    
     data.reserve(lights.size());
-
+    
     for (const auto &light : lights)
     {
+        Transform &transform = light->getComponent<Transform>();
+        EditorLight &editorLight = light->getComponent<EditorLight>();
+
         LightGpuData &gpuData = data.emplace_back();
         
-        std::visit([&gpuData](auto &&l)
+        std::visit([&gpuData, &transform](auto &&l)
         {
             using T = std::decay_t<decltype(l)>;
 
-            gpuData.position = l.transform.position;
-            gpuData.rotation = l.transform.rotation;
+            gpuData.position = transform.position;
+            gpuData.rotation = transform.rotation();
             gpuData.color = l.color;
             gpuData.intensity = l.intensity;
             gpuData.innerConeAngle = 0.0f; // default for point and directional
@@ -52,7 +58,7 @@ void LightUploader::upload(std::vector<LightVariant> &lights)
             {
                 gpuData.type = 3;
             }
-        }, light);
+        }, editorLight.light);
     }
 
     m_numLights = static_cast<uint32_t>(lights.size());

@@ -31,7 +31,7 @@ void InputHandler::update()
 
 bool InputHandler::isKeyPressed(int key) const
 {
-    return m_pressedKeys.find(key) != m_pressedKeys.end();
+    return m_pressedKeys.contains(key);
 }
 
 void InputHandler::getMousePos(double &x, double &y) const
