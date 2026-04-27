@@ -72,13 +72,13 @@ try
     
     lr::SceneObject* editorLight = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
     editorLight->addComponent<lr::Transform>();
-    editorLight->addComponent<lr::EditorLight>(light);
+    editorLight->addComponent<lr::Light>(light);
     editorLight->name = "Directional Light";
 
     lr::LightUploader lightUploader(viewer.resources());
     std::vector<lr::SceneObject*> sceneLights;
     for (const auto &sceneObject : sceneObjects) {
-        if (sceneObject->hasComponent<lr::EditorLight>()) {
+        if (sceneObject->hasComponent<lr::Light>()) {
             sceneLights.push_back(sceneObject.get());
         }
     }
@@ -209,7 +209,7 @@ try
         
         std::vector<lr::SceneObject*> sceneLights;
         for (const auto &object : sceneObjects) {
-            if (object->hasComponent<lr::EditorLight>()) {
+            if (object->hasComponent<lr::Light>()) {
                 sceneLights.push_back(object.get());
             }
         }

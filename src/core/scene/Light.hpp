@@ -8,28 +8,28 @@
 namespace lr
 {
 
-struct Light
+struct BaseLight
 {
     glm::vec3 color{1.0f, 1.0f, 1.0f};
     float intensity = 1.0f;
 };
 
-struct PointLight : public Light
+struct PointLight : public BaseLight
 {
 };
 
-struct SpotLight : public Light
+struct SpotLight : public BaseLight
 {
     float innerConeAngleDegrees = 15.0f;
     float outerConeAngleDegrees = 30.0f;
 };
 
-struct AreaLight : public Light
+struct AreaLight : public BaseLight
 {
     glm::vec2 size{1.0f, 1.0f}; // width and height in world units
 };
 
-struct DirectionalLight : public Light
+struct DirectionalLight : public BaseLight
 {
 };
 
@@ -73,11 +73,11 @@ struct LightGUICallbacks
     }
 };
 
-struct EditorLight : public Component
+struct Light : public Component
 {
     LightVariant light;
     
-    explicit EditorLight(const LightVariant &lightVariant)
+    explicit Light(const LightVariant &lightVariant)
         : light(lightVariant), Component("Light") {}
 
     bool onGUIImpl() override

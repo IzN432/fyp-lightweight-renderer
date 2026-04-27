@@ -20,10 +20,10 @@ void LightUploader::upload(std::vector<SceneObject*> &lights)
     std::vector<LightGpuData> data;    
     data.reserve(lights.size());
     
-    for (const auto &light : lights)
+    for (const auto &lightObject : lights)
     {
-        Transform &transform = light->getComponent<Transform>();
-        EditorLight &editorLight = light->getComponent<EditorLight>();
+        Transform &transform = lightObject->getComponent<Transform>();
+        Light &light = lightObject->getComponent<Light>();
 
         LightGpuData &gpuData = data.emplace_back();
         
@@ -58,7 +58,7 @@ void LightUploader::upload(std::vector<SceneObject*> &lights)
             {
                 gpuData.type = 3;
             }
-        }, editorLight.light);
+        }, light.light);
     }
 
     m_numLights = static_cast<uint32_t>(lights.size());
