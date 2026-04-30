@@ -109,10 +109,10 @@ std::vector<Material> extractMaterials(const tinygltf::Model &model, const GltfL
     // Add a default material at index 0 for primitives that don't have a material
     Material &defaultMaterial = materials.emplace_back();
     defaultMaterial.name = "Default Material";
-    defaultMaterial.parameters[config.baseDiffuseName] = glm::vec4(1.0f);
-    defaultMaterial.parameters[config.baseRoughnessName] = 1.0f;
-    defaultMaterial.parameters[config.baseMetallicName] = 0.0f;
-    defaultMaterial.parameters[config.baseEmissiveName] = glm::vec3(0.0f);
+    defaultMaterial.parameters[config.baseDiffuseName] = MaterialParam::ColorRGBA{glm::vec4(1.0f)};
+    defaultMaterial.parameters[config.baseRoughnessName] = MaterialParam::RangedFloat{1.0f, 0.0f, 1.0f};
+    defaultMaterial.parameters[config.baseMetallicName] = MaterialParam::NormalizedFloat{0.0f};
+    defaultMaterial.parameters[config.baseEmissiveName] = MaterialParam::ColorRGB{glm::vec3(0.0f)};
 
     defaultMaterial.textures[config.diffuseTextureName] = MaterialImage::singlePixel(glm::vec4(1.0f));
     // Default normal texture points straight up. 0.5f is the "zero" value for normal maps, and the Z channel is usually stored in the B channel, so we set it to 1.0f.
@@ -128,10 +128,10 @@ std::vector<Material> extractMaterials(const tinygltf::Model &model, const GltfL
 
         // The values in the Model are stored as doubles and vectors of doubles,
         // so we need to convert them to floats and glm::vec3/vec4.
-        material.parameters[config.baseDiffuseName] = toVec4(m.pbrMetallicRoughness.baseColorFactor);
-        material.parameters[config.baseRoughnessName] = static_cast<float>(m.pbrMetallicRoughness.roughnessFactor);
-        material.parameters[config.baseMetallicName] = static_cast<float>(m.pbrMetallicRoughness.metallicFactor);
-        material.parameters[config.baseEmissiveName] = toVec3(m.emissiveFactor);
+        material.parameters[config.baseDiffuseName] = MaterialParam::ColorRGBA{toVec4(m.pbrMetallicRoughness.baseColorFactor)};
+        material.parameters[config.baseRoughnessName] = MaterialParam::RangedFloat{static_cast<float>(m.pbrMetallicRoughness.roughnessFactor), 0.0f, 1.0f};
+        material.parameters[config.baseMetallicName] = MaterialParam::NormalizedFloat{static_cast<float>(m.pbrMetallicRoughness.metallicFactor)};
+        material.parameters[config.baseEmissiveName] = MaterialParam::ColorRGB{toVec3(m.emissiveFactor)};
 
         // The textures are stored in the material as tinygltf::TextureInfo, which contains a pointer to the actual texture
         material.textures[config.diffuseTextureName] = extractImage(m.pbrMetallicRoughness.baseColorTexture, model);

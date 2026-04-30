@@ -4,8 +4,6 @@
 
 #include <vulkan/vulkan.h>
 
-#include <filesystem>
-
 namespace lr
 {
 
@@ -14,7 +12,6 @@ class FinalPass
 public:
     struct Config
     {
-        std::filesystem::path   shaderDir;
         std::string             cameraBufferResourceName;
         VkFormat                swapchainFormat;
     };

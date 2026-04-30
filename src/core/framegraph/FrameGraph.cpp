@@ -202,6 +202,7 @@ void FrameGraph::execute(CommandBuffer &cmd)
         {
             if (pass.executeCallback)
                 pass.executeCallback(cmd, compiled.pipelineLayout);
+
             if (useDebugLabels)
                 m_ctx.endDebugLabel(cmd.get());
             continue;
@@ -334,10 +335,11 @@ void FrameGraph::sortPasses()
     for (size_t j = 0; j < n; ++j)
         for (const auto &b : m_passes[j].bindings)
         {
-            // find the pass that produces the resource this pass reads, if any
+            // only readers depend on the producer — skip write bindings
+            if (b.access != BindingAccess::Read)
+                continue;
             auto it = resourceProducers.find(b.resourceName);
             if (it != resourceProducers.end() && it->second != j)
-                // add an out edge from the producer to this consumer
                 outEdges[it->second].insert(j);
         }
 
@@ -666,7 +668,9 @@ void FrameGraph::buildBarriers()
                 continue;
 
             auto it = resourceStates.find(b.resourceName);
-            ResourceState current = (it != resourceStates.end()) ? it->second : ResourceState{};
+            ResourceState current = (it != resourceStates.end())
+                ? it->second
+                : ResourceState{ m_registry.getImageLayout(b.resourceName), VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE };
 
             if (current.layout == required.layout)
                 continue;  // already correct, no barrier needed
@@ -699,7 +703,9 @@ void FrameGraph::buildBarriers()
                 continue;
 
             auto it = resourceStates.find(write.name);
-            ResourceState current = (it != resourceStates.end()) ? it->second : ResourceState{};
+            ResourceState current = (it != resourceStates.end())
+                ? it->second
+                : ResourceState{ m_registry.getImageLayout(write.name), VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE };
 
             if (current.layout != required.layout)
             {
@@ -724,6 +730,9 @@ void FrameGraph::buildBarriers()
             resourceStates[write.name] = required;
         }
     }
+
+    for (const auto &[name, state] : resourceStates)
+        m_registry.setImageLayout(name, state.layout);
 }
 
 void FrameGraph::setExternalImage(const std::string &name, VkImage image, VkImageView view)
@@ -731,7 +740,7 @@ void FrameGraph::setExternalImage(const std::string &name, VkImage image, VkImag
     m_externalImages[name] = {image, view};
 }
 
-void FrameGraph::executeOnce()
+void FrameGraph::executeOnce(std::vector<FinalLayoutDesc> finalLayouts)
 {
     compile();
 
@@ -762,6 +771,50 @@ void FrameGraph::executeOnce()
 
     CommandBuffer cmd(vkCmd);
     execute(cmd);
+
+    if (!finalLayouts.empty())
+    {
+        std::vector<VkImageMemoryBarrier2> barriers;
+        barriers.reserve(finalLayouts.size());
+
+        for (const auto &fl : finalLayouts)
+        {
+            const AllocatedImage *img = m_registry.getImage(fl.resourceName);
+            if (!img)
+                continue;
+
+            VkImageLayout current = m_registry.getImageLayout(fl.resourceName);
+            if (current == fl.layout)
+                continue;
+
+            VkImageAspectFlags aspect = isDepthFormat(img->format)
+                ? VK_IMAGE_ASPECT_DEPTH_BIT
+                : VK_IMAGE_ASPECT_COLOR_BIT;
+
+            VkImageMemoryBarrier2 barrier{};
+            barrier.sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            barrier.srcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            barrier.srcAccessMask    = VK_ACCESS_2_SHADER_WRITE_BIT;
+            barrier.dstStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            barrier.dstAccessMask    = VK_ACCESS_2_SHADER_READ_BIT;
+            barrier.oldLayout        = current;
+            barrier.newLayout        = fl.layout;
+            barrier.image            = img->image;
+            barrier.subresourceRange = { aspect, 0, img->mipLevels, 0, img->arrayLayers };
+            barriers.push_back(barrier);
+
+            m_registry.setImageLayout(fl.resourceName, fl.layout);
+        }
+
+        if (!barriers.empty())
+        {
+            VkDependencyInfo dep{};
+            dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            dep.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
+            dep.pImageMemoryBarriers    = barriers.data();
+            vkCmdPipelineBarrier2(vkCmd, &dep);
+        }
+    }
 
     vkEndCommandBuffer(vkCmd);
 

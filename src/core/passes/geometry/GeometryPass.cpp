@@ -1,5 +1,7 @@
 #include "GeometryPass.hpp"
 
+#include "core/Paths.hpp"
+
 namespace lr
 {
 
@@ -10,16 +12,14 @@ GeometryPass::GeometryPass(Config cfg)
 
 void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
 {
-    const auto &shaderDir = m_cfg.shaderDir;
-
     fg.addPass("geometry")
         .type(PassType::Geometry)
         .vertexLayout(layout)
         .vertexBuffer(0, m_cfg.vertexAttributeBufferResourceName)
         .indexBuffer(m_cfg.indexBufferResourceName)
         .indexCount(m_cfg.indexCount)
-        .vertShader((shaderDir / "geometry.vert.spv").string())
-        .fragShader((shaderDir / "geometry.frag.spv").string())
+        .vertShader((paths::shaderDir / "geometry.vert.spv").string())
+        .fragShader((paths::shaderDir / "geometry.frag.spv").string())
         .bind({
             {
                 .resourceName = m_cfg.cameraBufferResourceName,
@@ -33,6 +33,7 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                 .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .descriptorCount = m_cfg.materialCount,
                 .stages          = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .imageLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             },
             {
                 .resourceName    = m_cfg.normalTextureArrayResourceName,
@@ -40,6 +41,7 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                 .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .descriptorCount = m_cfg.materialCount,
                 .stages          = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .imageLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             },
             {
                 .resourceName    = m_cfg.metallicRoughnessTextureArrayResourceName,
@@ -47,6 +49,7 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                 .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .descriptorCount = m_cfg.materialCount,
                 .stages          = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .imageLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             },
             {
                 .resourceName    = m_cfg.emissiveTextureArrayResourceName,
@@ -54,6 +57,7 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                 .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .descriptorCount = m_cfg.materialCount,
                 .stages          = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .imageLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             },
             {
                 .resourceName = m_cfg.faceGroupBufferResourceName,

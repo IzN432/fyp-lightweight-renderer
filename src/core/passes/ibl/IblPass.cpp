@@ -1,5 +1,6 @@
 #include "IblPass.hpp"
 
+#include "core/Paths.hpp"
 #include "core/utility/ImageLoader.hpp"
 
 #include <glm/vec4.hpp>
@@ -36,11 +37,13 @@ IBLPass::IBLPass(Config cfg)
 
 void IBLPass::uploadResources(ResourceRegistry &resources) const
 {
-    {
-        LoadedHdrImage hdri = loadHdrFromFile(m_cfg.hdriPath);
-        resources.uploadImage("hdri", hdri.pixels, hdri.width, hdri.height,
-                              LoadedHdrImage::format);
-    }
+    LoadedHdrImage hdri = loadHdrFromFile(m_cfg.hdriPath);
+    resources.uploadImage("hdri", hdri.pixels, hdri.width, hdri.height,
+                            LoadedHdrImage::format);
+
+    // This LUT is used in the PBR shader, but we upload it here since it is most relevant...
+    LoadedImage lut = loadImageFromFile(paths::brdfLutPath, glm::vec4(1.0f, 0.0f, 1.0f, 1.0f));
+    resources.uploadImage("ibl_brdf_lut", lut.pixels, lut.width, lut.height, VK_FORMAT_R8G8B8A8_UNORM);
 
     resources.registerCubemap("ibl_env",
         VK_FORMAT_R16G16B16A16_SFLOAT, m_cfg.envRes, 1,
@@ -55,7 +58,6 @@ void IBLPass::uploadResources(ResourceRegistry &resources) const
 
 void IBLPass::preprocess(FrameGraph &fg) const
 {
-    const auto    &shaderDir = m_cfg.shaderDir;
     const uint32_t envRes    = m_cfg.envRes;
     const uint32_t irrRes    = m_cfg.irrRes;
     const uint32_t pfRes     = m_cfg.pfRes;
@@ -63,11 +65,12 @@ void IBLPass::preprocess(FrameGraph &fg) const
 
     fg.addPass("ibl_hdri_to_cube")
         .type(PassType::Compute)
-        .computeShader((shaderDir / "hdritocubemap.comp.spv").string())
+        .computeShader((paths::shaderDir / "hdritocubemap.comp.spv").string())
         .bind({
             {.resourceName = "hdri",    .binding = 0,
-             .type   = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-             .stages = VK_SHADER_STAGE_COMPUTE_BIT},
+             .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+             .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
+             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             {.resourceName = "ibl_env", .binding = 1,
              .type   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
              .stages = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -84,12 +87,13 @@ void IBLPass::preprocess(FrameGraph &fg) const
 
     fg.addPass("ibl_irradiance")
         .type(PassType::Compute)
-        .computeShader((shaderDir / "irradiance.comp.spv").string())
+        .computeShader((paths::shaderDir / "irradiance.comp.spv").string())
         .pushConstantSize(sizeof(IrradiancePC))
         .bind({
             {.resourceName = "ibl_env",        .binding = 0,
-             .type   = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-             .stages = VK_SHADER_STAGE_COMPUTE_BIT},
+             .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+             .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
+             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             {.resourceName = "ibl_irradiance", .binding = 1,
              .type   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
              .stages = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -113,12 +117,13 @@ void IBLPass::preprocess(FrameGraph &fg) const
 
         fg.addPass("ibl_prefilter_mip" + std::to_string(mip))
             .type(PassType::Compute)
-            .computeShader((shaderDir / "prefilter.comp.spv").string())
+            .computeShader((paths::shaderDir / "prefilter.comp.spv").string())
             .pushConstantSize(sizeof(PrefilterPC))
             .bind({
                 {.resourceName = "ibl_env",        .binding = 0,
-                 .type   = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                 .stages = VK_SHADER_STAGE_COMPUTE_BIT},
+                 .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                 .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
+                 .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {.resourceName = "ibl_prefiltered", .binding = 1,
                  .type     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                  .stages   = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -131,7 +136,12 @@ void IBLPass::preprocess(FrameGraph &fg) const
             });
     }
 
-    fg.executeOnce();
+
+
+    fg.executeOnce({
+        {"ibl_irradiance",  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {"ibl_prefiltered", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+    });
 }
 
 }  // namespace lr

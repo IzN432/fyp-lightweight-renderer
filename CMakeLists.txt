@@ -102,6 +102,7 @@ target_link_libraries(lr_core PUBLIC
 target_include_directories(lr_core PUBLIC ${TINYGLTF_INCLUDE_DIRS})
 target_compile_definitions(lr_core PUBLIC
     LR_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/"
+    LR_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/"
 )
 
 add_shaders(lr_core

@@ -22,18 +22,17 @@ void LightUploader::upload(std::vector<SceneObject*> &lights)
     
     for (const auto &lightObject : lights)
     {
-        Transform &transform = lightObject->getComponent<Transform>();
         Light &light = lightObject->getComponent<Light>();
 
         LightGpuData &gpuData = data.emplace_back();
         
-        std::visit([&gpuData, &transform](auto &&l)
+        std::visit([&gpuData, &lightObject](auto &&l)
         {
             using T = std::decay_t<decltype(l)>;
 
-            gpuData.position = transform.position;
-            gpuData.rotation = transform.rotation();
             gpuData.color = l.color;
+            gpuData.position = glm::vec3(0.0f); // default for directional and area lights
+            gpuData.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f); // default for directional and area lights
             gpuData.intensity = l.intensity;
             gpuData.innerConeAngle = 0.0f; // default for point and directional
             gpuData.outerConeAngle = 0.0f; // default for point and directional
@@ -41,22 +40,36 @@ void LightUploader::upload(std::vector<SceneObject*> &lights)
             
             if constexpr (std::is_same_v<T, PointLight>)
             {
+                Transform &transform = lightObject->getComponent<Transform>();
+                gpuData.position = transform.position;
                 gpuData.type = 0;
             }
             else if constexpr (std::is_same_v<T, SpotLight>)
             {
+                Transform &transform = lightObject->getComponent<Transform>();
+                gpuData.position = transform.position;
+                gpuData.rotation = transform.rotation();
                 gpuData.type = 1;
                 gpuData.innerConeAngle = glm::radians(l.innerConeAngleDegrees);
                 gpuData.outerConeAngle = glm::radians(l.outerConeAngleDegrees);
             }
             else if constexpr (std::is_same_v<T, AreaLight>)
             {
+                Transform &transform = lightObject->getComponent<Transform>();
+                gpuData.position = transform.position;
+                gpuData.rotation = transform.rotation();
                 gpuData.type = 2;
                 gpuData.areaSize = l.size;
             }
             else if constexpr (std::is_same_v<T, DirectionalLight>)
             {
+                Transform &transform = lightObject->getComponent<Transform>();
+                gpuData.rotation = transform.rotation();
                 gpuData.type = 3;
+            }
+            else if constexpr (std::is_same_v<T, ImageLight>)
+            {
+                gpuData.type = 4;
             }
         }, light.light);
     }

@@ -45,22 +45,18 @@ public:
         return components.contains(std::type_index(typeid(T)));
     };
 
-    bool onGUI()
+    void onGUI()
     {
         int id = 0;
-        bool changed = false;
-        
         if (ImGui::CollapsingHeader(name.c_str()))
         {
             for (auto& [type, component] : components)
             {
                 ImGui::PushID(id++);
-                changed |= component->onGUI();
+                component->onGUI();
                 ImGui::PopID();
             }
         }
-        
-        return changed;
     }
 };
 

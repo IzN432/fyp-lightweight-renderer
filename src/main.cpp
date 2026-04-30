@@ -7,6 +7,7 @@
 #include "core/scene/Camera.hpp"
 #include "core/scene/Light.hpp"
 #include "core/scene/Mesh.hpp"
+#include "core/scene/StaticMesh.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "core/upload/CameraUploader.hpp"
 #include "core/upload/LightUploader.hpp"
@@ -24,12 +25,11 @@
 int main()
 try
 {
-    spdlog::set_level(spdlog::level::info);
+    spdlog::set_level(spdlog::level::debug);
 
     lr::Viewer viewer({.title = "lr"});
 
     namespace fs = std::filesystem;
-    const fs::path shaderDir = LR_SHADER_DIR;
 
     // -------------------------------------------------------------------------
     // IBL preprocessing  (runs once before the frame loop)
@@ -37,7 +37,6 @@ try
 
     lr::IBLPass iblPass({
         .hdriPath  = "C:\\Users\\seani\\Downloads\\cedar_bridge_sunset_2_4k.hdr",
-        .shaderDir = shaderDir,
     });
     iblPass.uploadResources(viewer.resources());
     iblPass.preprocess(viewer.frameGraph());
@@ -67,7 +66,7 @@ try
 
     // LIGHT
     lr::DirectionalLight light;
-    light.color = glm::vec3(1.0f, 0.0f, 0.0f);
+    light.color = glm::vec3(1.0f, 1.0f, 1.0f);
     light.intensity = 1.0f;
     
     lr::SceneObject* editorLight = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
@@ -76,14 +75,6 @@ try
     editorLight->name = "Directional Light";
 
     lr::LightUploader lightUploader(viewer.resources());
-    std::vector<lr::SceneObject*> sceneLights;
-    for (const auto &sceneObject : sceneObjects) {
-        if (sceneObject->hasComponent<lr::Light>()) {
-            sceneLights.push_back(sceneObject.get());
-        }
-    }
-
-    lightUploader.upload(sceneLights);
 
     // MESH
     const fs::path meshPath = "C:\\Users\\seani\\Documents\\monke.glb";
@@ -107,13 +98,45 @@ try
     if (sequence.empty())
         throw std::runtime_error("GltfLoader returned empty sequence for '" + meshPath.string() + "'");
 
-        
+    lr::SceneObject* meshObject = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
+    meshObject->addComponent<lr::Transform>();
+    auto &staticMesh = meshObject->addComponent<lr::StaticMesh>(sequence.frames.front(), layout, materials);
+    meshObject->name = "Mesh Object";
+
     // -------------------------------------------------------------------------
     // Resource uploads
     // -------------------------------------------------------------------------
         
     lr::CameraUploader cameraUploader(viewer.resources());
 
+    float aspect = 1600.0f / 900.0f;
+    std::function<void()> updateCameraUpload = [&camera, &cameraUploader, &aspect]() {
+        cameraUploader.upload(*camera, aspect);
+    };
+    camera->getComponent<lr::Camera>().addChangeListener(updateCameraUpload);
+    camera->getComponent<lr::Transform>().addChangeListener(updateCameraUpload);
+
+    std::function<void()> updateLightList = [&sceneObjects, &lightUploader]() {
+        std::vector<lr::SceneObject*> sceneLights;
+        for (const auto &object : sceneObjects) {
+            if (object->hasComponent<lr::Light>()) {
+                sceneLights.push_back(object.get());
+            }
+        }
+        lightUploader.upload(sceneLights);
+    };
+
+    std::vector<lr::SceneObject*> sceneLights;
+    for (const auto &sceneObject : sceneObjects) {
+        if (sceneObject->hasComponent<lr::Light>()) {
+            sceneLights.push_back(sceneObject.get());
+            sceneObject->getComponent<lr::Light>().addChangeListener(updateLightList);
+            sceneObject->getComponent<lr::Transform>().addChangeListener(updateLightList);
+        }
+    }
+
+    lightUploader.upload(sceneLights);
+    
     lr::GpuMeshLayout gpuMeshLayout(layout);
     gpuMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
     gpuMeshLayout.map(config.normalAttributeName, 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
@@ -122,7 +145,7 @@ try
 
     lr::MeshUploader meshUploader(viewer.resources());
     const lr::MeshUploadResult mesh = meshUploader.upload(
-        sequence.frames.front(),
+        staticMesh.mesh(),
         gpuMeshLayout,
         "mesh");
 
@@ -141,10 +164,17 @@ try
 
     lr::MaterialUploader materialUploader(viewer.resources());
     const lr::MaterialUploadResult material = materialUploader.upload(
-        materials,
+        staticMesh.materials(),
         gpuMaterialLayout,
         "material");
     
+    staticMesh.addChangeListener([&staticMesh, &materialUploader, &gpuMaterialLayout, &material]() {
+        materialUploader.update(
+            staticMesh.materials(),
+            gpuMaterialLayout,
+            material);
+    });
+
     // -------------------------------------------------------------------------
     // Frame graph passes
     // -------------------------------------------------------------------------
@@ -153,8 +183,6 @@ try
         viewer.frameGraph().resources().getImage("swapchain")->format;
 
     lr::GeometryPass geometryPass({
-        .shaderDir = shaderDir,
-
         .cameraBufferResourceName = cameraUploader.bufferName(),
 
         .vertexAttributeBufferResourceName = mesh.vertexBufferNames.at(0),
@@ -169,23 +197,18 @@ try
         .emissiveTextureArrayResourceName = material.textureNameMap.at(config.emissiveTextureName),
         .materialBufferResourceName = material.materialInfoBufferName,
         
-        .materialCount = static_cast<uint32_t>(materials.size()),
-
-        .swapchainFormat = swapchainFormat,
+        .materialCount = static_cast<uint32_t>(staticMesh.materials().size()),
     });
     geometryPass.build(viewer.frameGraph(), gpuMeshLayout);
 
     lr::PbrPass pbrPass({
-        .shaderDir = shaderDir,
         .cameraBufferResourceName = cameraUploader.bufferName(),
         .lightBufferResourceName = lightUploader.bufferName(),
         .numLights = lightUploader.numLights(),
-        .swapchainFormat = swapchainFormat,
     });
     pbrPass.build(viewer.frameGraph());
     
     lr::FinalPass finalPass({
-        .shaderDir = shaderDir,
         .cameraBufferResourceName = cameraUploader.bufferName(),
         .swapchainFormat = swapchainFormat,
     });
@@ -194,27 +217,17 @@ try
     // -------------------------------------------------------------------------
     // Per-frame callbacks
     // -------------------------------------------------------------------------
-
+    
     viewer.onGui([&sceneObjects, &lightUploader]() {
         ImGui::Begin("Scene Hierarchy");
         
         int id = 0;
-        bool changed = false;
         for (auto &object : sceneObjects)
         {
             ImGui::PushID(id++);
-            changed |= object->onGUI();
+            object->onGUI();
             ImGui::PopID();
         }
-        
-        std::vector<lr::SceneObject*> sceneLights;
-        for (const auto &object : sceneObjects) {
-            if (object->hasComponent<lr::Light>()) {
-                sceneLights.push_back(object.get());
-            }
-        }
-
-        lightUploader.upload(sceneLights);
         
         ImGui::End();
     });
@@ -222,7 +235,7 @@ try
     float orbitAngle = 0.0f;
 
     viewer.onUpdate([&](float dt, VkExtent2D extent) {
-        const float aspect = (extent.height == 0)
+        aspect = (extent.height == 0)
             ? 1.0f
             : static_cast<float>(extent.width) / static_cast<float>(extent.height);
 
@@ -233,12 +246,11 @@ try
             std::cos(orbitAngle) * cameraOrbitRadius);
         {
             const glm::mat4 view = glm::lookAt(camera->getComponent<lr::Transform>().position,
-                                               cameraTarget,
+                                               cameraTarget, 
                                                glm::vec3(0.0f, 1.0f, 0.0f));
             camera->getComponent<lr::Transform>().setRotation(glm::conjugate(glm::quat_cast(view)));
         }
-
-        cameraUploader.upload(*camera, aspect);
+        updateCameraUpload();
     });
 
     viewer.run();

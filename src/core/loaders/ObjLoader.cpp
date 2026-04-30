@@ -44,13 +44,13 @@ std::vector<Material> extractMaterials(const tinyobj::ObjReader &reader, const s
 
     auto &defaultMat = out.emplace_back();
     defaultMat.name = "Default Material";
-    defaultMat.parameters[config.baseDiffuseName] = glm::vec4(1.0f);
-    defaultMat.parameters[config.baseAmbientName] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-    defaultMat.parameters[config.baseSpecularName] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-    defaultMat.parameters[config.shininessName] = 1.0f;
-    defaultMat.parameters[config.baseRoughnessName] = 1.0f;
-    defaultMat.parameters[config.baseMetallicName] = 0.0f;
-    defaultMat.parameters[config.baseEmissiveName] = glm::vec3(0.0f);
+    defaultMat.parameters[config.baseDiffuseName] = MaterialParam::ColorRGBA{glm::vec4(1.0f)};
+    defaultMat.parameters[config.baseAmbientName] = MaterialParam::ColorRGBA{glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)};
+    defaultMat.parameters[config.baseSpecularName] = MaterialParam::ColorRGBA{glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)};
+    defaultMat.parameters[config.shininessName] = MaterialParam::RangedFloat{1.0f, 0.0f, 128.0f};
+    defaultMat.parameters[config.baseRoughnessName] = MaterialParam::NormalizedFloat{1.0f};
+    defaultMat.parameters[config.baseMetallicName] = MaterialParam::NormalizedFloat{0.0f};
+    defaultMat.parameters[config.baseEmissiveName] = MaterialParam::ColorRGB{glm::vec3(0.0f)};
     defaultMat.textures[config.diffuseTextureName] = MaterialImage::singlePixel(glm::vec4(1.0f));
     defaultMat.textures[config.ambientTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
     defaultMat.textures[config.specularTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
@@ -63,13 +63,13 @@ std::vector<Material> extractMaterials(const tinyobj::ObjReader &reader, const s
     {
         auto &mat = out.emplace_back();
         mat.name = m.name;
-        mat.parameters[config.baseDiffuseName] = glm::vec4(m.diffuse[0], m.diffuse[1], m.diffuse[2], 1.0f);
-        mat.parameters[config.baseAmbientName] = glm::vec4(m.ambient[0], m.ambient[1], m.ambient[2], 1.0f);
-        mat.parameters[config.baseSpecularName] = glm::vec4(m.specular[0], m.specular[1], m.specular[2], 1.0f);
-        mat.parameters[config.shininessName] = m.shininess;
-        mat.parameters[config.baseRoughnessName] = m.roughness;
-        mat.parameters[config.baseMetallicName] = m.metallic;
-        mat.parameters[config.baseEmissiveName] = glm::vec3(m.emission[0], m.emission[1], m.emission[2]);
+        mat.parameters[config.baseDiffuseName] = MaterialParam::ColorRGBA{glm::vec4(m.diffuse[0], m.diffuse[1], m.diffuse[2], 1.0f)};
+        mat.parameters[config.baseAmbientName] = MaterialParam::ColorRGBA{glm::vec4(m.ambient[0], m.ambient[1], m.ambient[2], 1.0f)};
+        mat.parameters[config.baseSpecularName] = MaterialParam::ColorRGBA{glm::vec4(m.specular[0], m.specular[1], m.specular[2], 1.0f)};
+        mat.parameters[config.shininessName] = MaterialParam::RangedFloat{m.shininess, 0.0f, 128.0f};
+        mat.parameters[config.baseRoughnessName] = MaterialParam::NormalizedFloat{m.roughness};
+        mat.parameters[config.baseMetallicName] = MaterialParam::NormalizedFloat{m.metallic};
+        mat.parameters[config.baseEmissiveName] = MaterialParam::ColorRGB{glm::vec3(m.emission[0], m.emission[1], m.emission[2])};
         mat.textures[config.diffuseTextureName] = loadMaterialImage(objDirectoryPath, m.diffuse_texname);
         mat.textures[config.ambientTextureName] = loadMaterialImage(objDirectoryPath, m.ambient_texname);
         mat.textures[config.specularTextureName] = loadMaterialImage(objDirectoryPath, m.specular_texname);

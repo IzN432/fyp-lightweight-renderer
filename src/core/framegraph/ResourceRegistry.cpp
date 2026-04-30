@@ -194,12 +194,11 @@ void ResourceRegistry::uploadImage(const std::string &name,
     entry.extent = {width, height};
     entry.persistent = true;
     entry.mipLevels = mipLevels;
-    entry.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    entry.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    entry.currentLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     allocateImageEntry(name, entry);
     m_images.emplace(name, std::move(entry));
-
-    AllocatedImage *dest = getImage(name);
 
     VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * bpp;
     AllocatedBuffer staging = m_allocator.createBuffer(
@@ -209,9 +208,7 @@ void ResourceRegistry::uploadImage(const std::string &name,
     PendingUpload upload{};
     upload.staging = staging;
     upload.type = PendingUpload::Type::Image;
-    upload.destImage = dest;
-    upload.imageExtent = {width, height, 1};
-    upload.generateMipmaps = generateMipmaps;
+    upload.resourceName = name;
     m_pendingUploads.push_back(upload);
 
     spdlog::debug("ResourceRegistry: queued image upload '{}' ({} mips)", name, mipLevels);
@@ -296,6 +293,7 @@ void ResourceRegistry::rebuild(VkExtent2D newExtent)
 
         m_allocator.destroy(entry.image);
         entry.extent = newExtent;
+        entry.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         allocateImageEntry(name, entry);
         spdlog::debug("ResourceRegistry: rebuilt image '{}'", name);
     }
@@ -370,8 +368,6 @@ void ResourceRegistry::uploadBuffer(const std::string &name,
     // Register as GPU_ONLY with transfer dst
     registerStaticBuffer(name, size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
-    AllocatedBuffer *dest = getBuffer(name);
-
     // Create staging buffer and copy data in
     AllocatedBuffer staging = m_allocator.createBuffer(
         size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
@@ -380,7 +376,7 @@ void ResourceRegistry::uploadBuffer(const std::string &name,
     PendingUpload upload{};
     upload.staging = staging;
     upload.type = PendingUpload::Type::Buffer;
-    upload.destBuffer = dest;
+    upload.resourceName = name;
     m_pendingUploads.push_back(upload);
 
     spdlog::debug("ResourceRegistry: queued buffer upload '{}'", name);
@@ -410,6 +406,10 @@ void ResourceRegistry::updateBuffer(const std::string &name,
     if (it == m_buffers.end())
     {
         throw std::runtime_error("ResourceRegistry: updateBuffer '" + name + "' not found");
+    }
+    if (it->second.memoryUsage != VMA_MEMORY_USAGE_CPU_TO_GPU)
+    {
+        throw std::runtime_error("ResourceRegistry: updateBuffer '" + name + "' is not a dynamic buffer — use registerDynamicBuffer() to create updatable buffers");
     }
     if (size > it->second.size)
     {
@@ -450,24 +450,25 @@ void ResourceRegistry::flushUploads()
     {
         if (upload.type == PendingUpload::Type::Buffer)
         {
+            AllocatedBuffer *dest = getBuffer(upload.resourceName);
             VkBufferCopy region{};
-            region.size = upload.destBuffer->size;
-            vkCmdCopyBuffer(cmd, upload.staging.buffer, upload.destBuffer->buffer, 1, &region);
+            region.size = dest->size;
+            vkCmdCopyBuffer(cmd, upload.staging.buffer, dest->buffer, 1, &region);
         }
         else
         {
-            AllocatedImage *img = upload.destImage;
+            AllocatedImage *img = getImage(upload.resourceName);
             const uint32_t layers = img->arrayLayers;
             const uint32_t mips = img->mipLevels;
 
-            // Transition mip 0: PREINITIALIZED → TRANSFER_DST_OPTIMAL
+            // Transition mip 0: UNDEFINED → TRANSFER_DST_OPTIMAL
             VkImageMemoryBarrier2 barrier{};
             barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
             barrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
             barrier.srcAccessMask = VK_ACCESS_2_NONE;
             barrier.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
             barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-            barrier.oldLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             barrier.image = img->image;
             barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers};
@@ -481,15 +482,15 @@ void ResourceRegistry::flushUploads()
             // Copy CPU data into mip 0
             VkBufferImageCopy region{};
             region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, layers};
-            region.imageExtent = upload.imageExtent;
+            region.imageExtent = img->extent;
             vkCmdCopyBufferToImage(cmd, upload.staging.buffer, img->image,
                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-            if (upload.generateMipmaps && mips > 1)
+            if (mips > 1)
             {
                 // Blit chain: mip 0 → 1 → 2 → ... → N-1
-                int32_t mipW = static_cast<int32_t>(upload.imageExtent.width);
-                int32_t mipH = static_cast<int32_t>(upload.imageExtent.height);
+                int32_t mipW = static_cast<int32_t>(img->extent.width);
+                int32_t mipH = static_cast<int32_t>(img->extent.height);
 
                 for (uint32_t mip = 1; mip < mips; ++mip)
                 {
@@ -510,7 +511,7 @@ void ResourceRegistry::flushUploads()
                     barriers[1].srcAccessMask = VK_ACCESS_2_NONE;
                     barriers[1].dstStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT;
                     barriers[1].dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-                    barriers[1].oldLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+                    barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
                     barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
                     barriers[1].image = img->image;
                     barriers[1].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, layers};
@@ -619,7 +620,11 @@ void ResourceRegistry::flushUploads()
     vkFreeCommandBuffers(device, m_uploadPool, 1, &cmd);
 
     for (auto &upload : m_pendingUploads)
+    {
         m_allocator.destroy(upload.staging);
+        if (upload.type == PendingUpload::Type::Image)
+            setImageLayout(upload.resourceName, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
 
     m_pendingUploads.clear();
 
@@ -629,6 +634,19 @@ void ResourceRegistry::flushUploads()
 // ---------------------------------------------------------------------------
 // Debug utils
 // ---------------------------------------------------------------------------
+
+VkImageLayout ResourceRegistry::getImageLayout(const std::string &name) const
+{
+    auto it = m_images.find(name);
+    return (it != m_images.end()) ? it->second.currentLayout : VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
+void ResourceRegistry::setImageLayout(const std::string &name, VkImageLayout layout)
+{
+    auto it = m_images.find(name);
+    if (it != m_images.end())
+        it->second.currentLayout = layout;
+}
 
 void ResourceRegistry::setDebugName(VkObjectType objectType, uint64_t objectHandle, const std::string &name)
 {

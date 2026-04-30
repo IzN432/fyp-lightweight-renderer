@@ -51,11 +51,16 @@ public:
     // Used by Viewer to build the imgui pass's dependsOn list.
     std::vector<std::string> passNames() const;
 
+    // Describes a resource layout that the GPU image should be left in after executeOnce().
+    // Used to transition preprocessing outputs (e.g. GENERAL storage writes) into
+    // a layout suitable for the main pipeline (e.g. SHADER_READ_ONLY_OPTIMAL).
+    struct FinalLayoutDesc { std::string resourceName; VkImageLayout layout; };
+
     // Compile and execute all currently declared passes exactly once,
     // then discard them. Resources in the registry are preserved.
-    // Use for one-shot preprocessing work (IBL generation, etc.)
-    // before adding per-frame passes and calling run().
-    void executeOnce();
+    // finalLayouts: optional list of resources to transition at the very end,
+    // after all passes have run. The registry is updated to reflect these layouts.
+    void executeOnce(std::vector<FinalLayoutDesc> finalLayouts = {});
 
     // Inject the current frame's swapchain image before execute().
     // The resource must have been registered via resources().registerExternalImage().

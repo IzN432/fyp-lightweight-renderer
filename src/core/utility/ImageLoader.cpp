@@ -1,15 +1,11 @@
+#include "core/utility/ImageLoader.hpp"
+
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
 #include <spdlog/spdlog.h>
-#include "core/utility/ImageLoader.hpp"
 
-#include <spdlog/spdlog.h>
 #include <stdexcept>
-#include <spdlog/spdlog.h>
-#include <string>
-
-#include <spdlog/spdlog.h>
 namespace lr
 {
 
@@ -23,12 +19,25 @@ LoadedImage loadImageFromFile(const std::filesystem::path &path)
     if (!img.pixels)
     {
         throw std::runtime_error("ImageLoader: failed to load '" + path.string() +
-                                 "': " + stbi_failure_reason());
+                                    "': " + stbi_failure_reason());
     }
     stbi_set_flip_vertically_on_load(false); // Reset to default for any future loads
     img.width  = static_cast<uint32_t>(w);
     img.height = static_cast<uint32_t>(h);
     return img;
+}
+
+LoadedImage loadImageFromFile(const std::filesystem::path &path, glm::vec4 defaultColor)
+{
+    try
+    {
+        return loadImageFromFile(path);
+    }
+    catch (const std::exception &e)
+    {
+        spdlog::warn("Failed to load image '{}': {}. Using default color.", path.string(), e.what());
+        return LoadedImage::singlePixel(defaultColor);
+    }
 }
 
 LoadedHdrImage loadHdrFromFile(const std::filesystem::path &path)

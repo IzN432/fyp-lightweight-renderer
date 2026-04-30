@@ -47,7 +47,8 @@ MaterialUploadResult MaterialUploader::upload(const std::vector<Material> &mater
             const auto &materialParameter = material.parameters.at(scalar.name);
             std::byte *dst = materialInfoBuffer.data() + (i * gpuLayout.stride()) + scalar.byteOffset;
 
-            std::visit([&](const auto &value) {
+            std::visit([&](const auto &param) {
+                auto &value = param.value;
                 using T = std::decay_t<decltype(value)>;
                 if (scalar.scalarSize != sizeof(T))
                 {
@@ -61,10 +62,12 @@ MaterialUploadResult MaterialUploader::upload(const std::vector<Material> &mater
     }
 
     const std::string name = namePrefix + "_info";
-    m_registry.uploadBuffer(name, 
-                            materialInfoBuffer.data(), 
-                            static_cast<VkDeviceSize>(materialInfoBuffer.size()),
-                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    m_registry.registerDynamicBuffer(name,
+                                     static_cast<VkDeviceSize>(materialInfoBuffer.size()),
+                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    m_registry.updateBuffer(name,
+                            materialInfoBuffer.data(),
+                            static_cast<VkDeviceSize>(materialInfoBuffer.size()));
     result.materialInfoBufferName = name;
     
     // SECTION 2 - Upload images to GPU textures
@@ -98,6 +101,38 @@ MaterialUploadResult MaterialUploader::upload(const std::vector<Material> &mater
     }
 
     return result;
+}
+
+void MaterialUploader::update(const std::vector<Material> &materials,
+                              const GpuMaterialLayout &gpuLayout,
+                              const MaterialUploadResult &result)
+{
+    auto &scalars = gpuLayout.scalars();
+
+    std::vector<std::byte> materialInfoBuffer;
+    materialInfoBuffer.resize(materials.size() * gpuLayout.stride());
+
+    for (size_t i = 0; i < materials.size(); ++i)
+    {
+        const auto &material = materials[i];
+
+        for (const auto &scalar : scalars)
+        {
+            if (!material.parameters.contains(scalar.name))
+                throw std::runtime_error("Material is missing parameter: " + scalar.name);
+
+            const auto &materialParameter = material.parameters.at(scalar.name);
+            std::byte *dst = materialInfoBuffer.data() + (i * gpuLayout.stride()) + scalar.byteOffset;
+
+            std::visit([&](const auto &param) {
+                std::memcpy(dst, &param.value, sizeof(param.value));
+            }, materialParameter);
+        }
+    }
+
+    m_registry.updateBuffer(result.materialInfoBufferName,
+                            materialInfoBuffer.data(),
+                            static_cast<VkDeviceSize>(materialInfoBuffer.size()));
 }
 
 } // namespace lr

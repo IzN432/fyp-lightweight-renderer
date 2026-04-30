@@ -2,6 +2,8 @@
 
 #include <string>
 #include <imgui.h>
+#include <vector>
+#include <functional>
 
 namespace lr
 {
@@ -12,22 +14,27 @@ private:
 friend class SceneObject;
     SceneObject *m_owningObject = nullptr;
     std::string m_name;
+    std::vector<std::function<void()>> m_listeners;
 protected:
     const SceneObject& getOwningObject() const { return *m_owningObject; }
+    void notifyChanged() { for (const auto& listener : m_listeners) listener(); }
 public:
-    Component(std::string name = "") : m_name(std::move(name)) {}
+    Component(std::string name = "")
+        : m_name(std::move(name)) {}
     virtual ~Component() = default;
 
-    bool onGUI() 
+    void onGUI() 
     { 
         ImGui::Text("Component: %s", m_name.c_str());
         return onGUIImpl();
     }
 
-    virtual bool onGUIImpl() 
+    virtual void onGUIImpl() {}
+
+    void addChangeListener(std::function<void()> listener)
     {
-        return false; // return true if this component's data was changed
-    };
+        m_listeners.push_back(std::move(listener));
+    }
 };
 
 }

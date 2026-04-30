@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
-
+#include <glm/vec4.hpp>
 #include <vulkan/vulkan.h>
 
 namespace lr
@@ -17,9 +17,22 @@ struct LoadedImage
     uint8_t  *pixels = nullptr;
     uint32_t   width  = 0;
     uint32_t   height = 0;
-
-    // Always VK_FORMAT_R8G8B8A8_SRGB — stb forces 4 channels.
-    static constexpr VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
+    
+    static LoadedImage singlePixel(glm::vec4 color)
+    {
+        LoadedImage defaultImage;
+        defaultImage.width = 1;
+        defaultImage.height = 1;
+        defaultImage.pixels = static_cast<uint8_t *>(std::malloc(4 * sizeof(uint8_t)));
+        if (defaultImage.pixels)
+        {
+            defaultImage.pixels[0] = static_cast<uint8_t>(color.r * 255.0f);
+            defaultImage.pixels[1] = static_cast<uint8_t>(color.g * 255.0f);
+            defaultImage.pixels[2] = static_cast<uint8_t>(color.b * 255.0f);
+            defaultImage.pixels[3] = static_cast<uint8_t>(color.a * 255.0f);
+        }
+        return defaultImage;
+    }
 
     LoadedImage() = default;
 
@@ -66,6 +79,8 @@ struct LoadedImage
 // Load PNG/JPG/BMP/TGA from disk. Always decodes to RGBA8.
 // Throws std::runtime_error if the file cannot be loaded.
 LoadedImage loadImageFromFile(const std::filesystem::path &path);
+
+LoadedImage loadImageFromFile(const std::filesystem::path &path, glm::vec4 defaultColor);
 
 // Decoded HDR image. Pixel data is 4-channel float (RGBA), 32 bits per channel.
 // Upload with VK_FORMAT_R32G32B32A32_SFLOAT.

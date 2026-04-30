@@ -73,7 +73,7 @@ struct Camera : public Component
         return projectionMatrix(aspectRatio) * viewMatrix();
     }
 
-    bool onGUIImpl() override
+    void onGUIImpl() override
     {
         bool changed = false;
 
@@ -97,7 +97,10 @@ struct Camera : public Component
         changed |= ImGui::SliderFloat("Near Plane", &nearPlane, 0.01f, farPlane - 0.01f);
         changed |= ImGui::SliderFloat("Far Plane", &farPlane, nearPlane + 0.01f, 10000.0f);
 
-        return changed;
+        if (changed)
+        {
+            notifyChanged();
+        }
     }
 };
 

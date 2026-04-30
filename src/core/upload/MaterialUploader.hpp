@@ -25,6 +25,10 @@ public:
                                 const GpuMaterialLayout &gpuLayout,
                                 const std::string &namePrefix = "material");
 
+    void update(const std::vector<Material> &materials,
+                const GpuMaterialLayout &gpuLayout,
+                const MaterialUploadResult &result);
+
 private:
     ResourceRegistry &m_registry;
 };

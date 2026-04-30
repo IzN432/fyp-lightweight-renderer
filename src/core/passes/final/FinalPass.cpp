@@ -1,5 +1,6 @@
 #include "FinalPass.hpp"
 
+#include "core/Paths.hpp"
 #include "core/upload/CameraUploader.hpp"
 
 namespace lr
@@ -12,12 +13,10 @@ FinalPass::FinalPass(Config cfg)
 
 void FinalPass::build(FrameGraph &fg) const
 {
-    const auto &shaderDir = m_cfg.shaderDir;
-
     fg.addPass("final")
         .type(PassType::Fullscreen)
-        .vertShader((shaderDir / "fullscreen.vert.spv").string())
-        .fragShader((shaderDir / "final.frag.spv").string())
+        .vertShader((paths::shaderDir / "fullscreen.vert.spv").string())
+        .fragShader((paths::shaderDir / "final.frag.spv").string())
         .bind({
             {
                 .resourceName = m_cfg.cameraBufferResourceName,
@@ -30,6 +29,7 @@ void FinalPass::build(FrameGraph &fg) const
                 .binding      = 1,
                 .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             },
             {
                 .resourceName = "gbufferDepth",

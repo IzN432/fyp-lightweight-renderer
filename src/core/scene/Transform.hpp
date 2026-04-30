@@ -43,7 +43,7 @@ public:
         m_rotation = glm::quat(glm::radians(degrees));
     }
 
-    bool onGUIImpl() override
+    void onGUIImpl() override
     {
         bool changed = false;
         changed |= ImGui::DragFloat3("Position", &position.x, 0.1f);
@@ -53,7 +53,10 @@ public:
             changed = true;
         }
         changed |= ImGui::DragFloat3("Scale", &scale.x, 0.1f);
-        return changed;
+        if (changed)
+        {
+            notifyChanged();
+        }
     }
 
     [[nodiscard]] glm::mat4 localMatrix() const

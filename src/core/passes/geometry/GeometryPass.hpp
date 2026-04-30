@@ -6,8 +6,6 @@
 
 #include <vulkan/vulkan.h>
 
-#include <filesystem>
-
 namespace lr
 {
 
@@ -16,8 +14,6 @@ class GeometryPass
 public:
     struct Config
     {
-        std::filesystem::path shaderDir;
-        
         std::string cameraBufferResourceName;
         
         std::string vertexAttributeBufferResourceName;
@@ -33,8 +29,6 @@ public:
         std::string materialBufferResourceName;
 
         uint32_t materialCount;
-
-        VkFormat swapchainFormat;
     };
 
     explicit GeometryPass(Config cfg);

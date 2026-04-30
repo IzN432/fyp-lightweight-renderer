@@ -85,6 +85,9 @@ public:
     const AllocatedImage *getImage(const std::string &name) const;
     bool hasImage(const std::string &name) const;
 
+    VkImageLayout getImageLayout(const std::string &name) const;
+    void          setImageLayout(const std::string &name, VkImageLayout layout);
+
     std::vector<const AllocatedImage *> getImageArray(const std::string &arrayName) const;
     bool hasImageArray(const std::string &arrayName) const;
 
@@ -145,7 +148,8 @@ private:
         VkImageCreateFlags imageFlags = 0;
         VkImageViewType viewType = VK_IMAGE_VIEW_TYPE_2D;
         bool hasMipViews = false;
-        VkImageLayout initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VkImageLayout initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+        VkImageLayout currentLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
     };
 
     struct BufferEntry
@@ -159,16 +163,8 @@ private:
     struct PendingUpload
     {
         AllocatedBuffer staging;
-
+        std::string resourceName;
         enum class Type { Buffer, Image } type;
-
-        // Buffer upload
-        AllocatedBuffer *destBuffer = nullptr;
-
-        // Image upload
-        AllocatedImage *destImage = nullptr;
-        VkExtent3D imageExtent{};
-        bool generateMipmaps = false;
     };
 
     void allocateImageEntry(const std::string &name, ImageEntry &entry);

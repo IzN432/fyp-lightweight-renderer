@@ -35,7 +35,20 @@ struct MaterialImage
     }
 };
 
-using MaterialValue = std::variant<float, glm::vec2, glm::vec3, glm::vec4>;
+namespace MaterialParam
+{
+struct ColorRGBA { glm::vec4 value; };
+struct ColorRGB { glm::vec3 value; };
+struct NormalizedFloat { float value; };
+struct RangedFloat { float value; float floor; float ceiling; };
+}
+
+using MaterialValue = 
+    std::variant<
+        MaterialParam::ColorRGBA, 
+        MaterialParam::ColorRGB, 
+        MaterialParam::NormalizedFloat, 
+        MaterialParam::RangedFloat>;
 
 struct Material
 {

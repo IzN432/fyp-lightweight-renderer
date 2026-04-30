@@ -13,7 +13,6 @@ public:
     struct Config
     {
         std::filesystem::path hdriPath;
-        std::filesystem::path shaderDir;
         uint32_t envRes = 2048;
         uint32_t irrRes = 32;
         uint32_t pfRes  = 512;

@@ -33,7 +33,11 @@ struct DirectionalLight : public BaseLight
 {
 };
 
-using LightVariant = std::variant<PointLight, SpotLight, AreaLight, DirectionalLight>;
+struct ImageLight : public BaseLight
+{
+};
+
+using LightVariant = std::variant<PointLight, SpotLight, AreaLight, DirectionalLight, ImageLight>;
 
 struct LightGUICallbacks
 {
@@ -71,6 +75,14 @@ struct LightGUICallbacks
         changed |= ImGui::DragFloat2("Size", &light.size.x, 0.1f);
         return changed;
     }
+
+    bool operator()(ImageLight &light) const
+    {
+        bool changed = false;
+        changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 1.0f);
+        changed |= ImGui::ColorEdit3("Light Color", &light.color.x);
+        return changed;
+    }
 };
 
 struct Light : public Component
@@ -80,11 +92,12 @@ struct Light : public Component
     explicit Light(const LightVariant &lightVariant)
         : light(lightVariant), Component("Light") {}
 
-    bool onGUIImpl() override
+    void onGUIImpl() override
     {
-        return std::visit([&](auto &&l) -> bool {
-            return LightGUICallbacks{}(l);
-        }, light);
+        if (std::visit(LightGUICallbacks{}, light))
+        {
+            notifyChanged();
+        }
     }
     
 };
