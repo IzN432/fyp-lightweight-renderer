@@ -24,11 +24,13 @@ struct MaterialGUICallbacks
     }
     bool operator()(MaterialParam::RangedFloat &param) const
     {
-        return ImGui::DragFloat(m_materialName.c_str(), &param.value, 0.1f, param.floor, param.ceiling);
+        float range = param.ceiling - param.floor;
+        float increment = powf(10.0f, floor(log10(range / 100.0f)));
+        return ImGui::DragFloat(m_materialName.c_str(), &param.value, increment, param.floor, param.ceiling);
     }
     bool operator()(MaterialParam::NormalizedFloat &param) const
     {
-        return ImGui::DragFloat(m_materialName.c_str(), &param.value, 0.1f, 0.0f, 1.0f);
+        return ImGui::DragFloat(m_materialName.c_str(), &param.value, 0.01f, 0.0f, 1.0f);
     }
 private:
     std::string m_materialName;

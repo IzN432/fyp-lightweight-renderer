@@ -55,22 +55,25 @@ const float epsilon = 1e-7;
 #define LIGHT_TYPE_SPOT 1
 #define LIGHT_TYPE_AREA 2
 #define LIGHT_TYPE_DIRECTIONAL 3
+#define LIGHT_TYPE_IMAGE 4
 
 vec3 CalcPointLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic);\
 vec3 CalcDirectionalLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic);
 vec3 CalcSpotLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic);
 vec3 CalcAreaLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic);
+vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic);
 
 float DistributionGGX(float N_dot_H, float roughness);
-float GeometrySchlick(float N_dot_V, float roughness);
-vec3 FresnelSchlick(float V_dot_H, vec3 F0);
+float VisibilitySmithGGX(float N_dot_V, float N_dot_L, float roughness);
+vec3 FresnelSchlick(float cosTheta, vec3 F0);
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness);
 
 void main()
 {
     // Screen space UV coordinates for sampling G-buffer textures
     vec3 albedo = texture(gbufferAlbedo, inUV).rgb;
     vec3 normal = unpackViewNormal(texture(gbufferNormal, inUV).rg);
-    float roughness = max(texture(gbufferRoughnessMetallic, inUV).r, 0.02); // Safe roughness
+    float roughness = max(texture(gbufferRoughnessMetallic, inUV).r, 0.045);
     float metallic = texture(gbufferRoughnessMetallic, inUV).g;
     float depth = texture(gbufferDepth, inUV).r;
 
@@ -94,9 +97,12 @@ void main()
         case LIGHT_TYPE_AREA:
             outColor += vec4(CalcAreaLight(light, position, normal, albedo, roughness, metallic), 1.0);
             break;
+        case LIGHT_TYPE_IMAGE:
+            outColor += vec4(CalcImageLight(light, position, normal, albedo, roughness, metallic), 1.0);
+            break;
         }
     }
-    outColor = vec4(outColor.rgb * albedo, 1.0);
+    outColor = vec4(outColor.rgb, 1.0);
 }
 
 vec3 CalcPointLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic)
@@ -111,11 +117,11 @@ vec3 CalcPointLight(LightData light, vec3 position, vec3 normal, vec3 albedo, fl
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
     float D = DistributionGGX(max(dot(N, H), 0.0), roughness);
-    float G = pow(GeometrySchlick(max(dot(N, V), 0.0), roughness), 2.0);
-    
-    vec3 Diffuse = (1.0 - F) * albedo / PI;
-    vec3 Specular = (D * F * G) / (4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + epsilon);
-    
+    float Vis = VisibilitySmithGGX(max(dot(N, V), 0.0), max(dot(N, L), 0.0), roughness);
+
+    vec3 Diffuse = (1.0 - F) * (1.0 - metallic) * albedo / PI;
+    vec3 Specular = D * F * Vis;
+
     vec3 BRDF = Diffuse + Specular;
 
     // Point lights are treated as a dirac delta function. Using the sifting property, we get that
@@ -135,11 +141,11 @@ vec3 CalcDirectionalLight(LightData light, vec3 position, vec3 normal, vec3 albe
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
     float D = DistributionGGX(max(dot(N, H), 0.0), roughness);
-    float G = pow(GeometrySchlick(max(dot(N, V), 0.0), roughness), 2.0);
-    
-    vec3 Diffuse = (1.0 - F) * albedo / PI;
-    vec3 Specular = (D * F * G) / (4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + epsilon);
-    
+    float Vis = VisibilitySmithGGX(max(dot(N, V), 0.0), max(dot(N, L), 0.0), roughness);
+
+    vec3 Diffuse = (1.0 - F) * (1.0 - metallic) * albedo / PI;
+    vec3 Specular = D * F * Vis;
+
     vec3 BRDF = Diffuse + Specular;
 
     // Directional lights are also treated as a dirac delta function. Using the sifting property, we get that
@@ -150,12 +156,66 @@ vec3 CalcDirectionalLight(LightData light, vec3 position, vec3 normal, vec3 albe
 
 vec3 CalcSpotLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic)
 {
-    return vec3(0.0); // Placeholder, implement spot light calculations here
+    vec3 lightViewPos = (cameraUbo.view * vec4(light.position, 1.0)).xyz;
+    vec3 L = normalize(lightViewPos - position);
+    vec3 N = normal;
+    
+    vec3 V = normalize(-position);
+    vec3 H = normalize(L + V);
+
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
+    float D = DistributionGGX(max(dot(N, H), 0.0), roughness);
+    float Vis = VisibilitySmithGGX(max(dot(N, V), 0.0), max(dot(N, L), 0.0), roughness);
+
+    vec3 Diffuse = (1.0 - F) * (1.0 - metallic) * albedo / PI;
+    vec3 Specular = D * F * Vis;
+
+    vec3 BRDF = Diffuse + Specular;
+
+    // Spot lights are treated as a dirac delta function. Using the sifting property, we get that
+    // the ingtegral over the hemisphere is just the value of the function at the spot light direction
+    float L_dot_N = max(dot(L, N), 0.0);
+
+    // Spot lights differ from point lights in that they fall off from inner cone to outer cone.
+    vec3 Dir = normalize((cameraUbo.view * vec4(quaternionToForwardVector(light.rotation), 0.0)).xyz);
+    float L_dot_Dir = dot(-L, Dir);
+
+    float cosOuter = cos(radians(light.outerConeAngle));
+    float cosInner = cos(radians(light.innerConeAngle));
+
+    float spotlightIntensity = smoothstep(cosOuter, cosInner, L_dot_Dir);
+
+    return light.color * light.intensity * BRDF * L_dot_N * spotlightIntensity;
 }
 
 vec3 CalcAreaLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic)
 {
     return vec3(0.0); // Placeholder, implement area light calculations here
+}
+
+vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic)
+{
+    vec3 V_world = normalize(vec3(cameraUbo.invView * vec4(-position, 0.0)));
+    vec3 N_world = normalize(vec3(cameraUbo.invView * vec4(normal, 0.0)));
+    vec3 R_world = reflect(-V_world, N_world);
+
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 F = FresnelSchlickRoughness(max(dot(N_world, V_world), 0.0), F0, roughness);
+    
+    vec3 kS = F;
+    vec3 kD = 1.0 - kS;
+    kD *= 1.0 - metallic;
+
+    vec3 irradiance = texture(irradianceMap, N_world).rgb;
+    vec3 Diffuse = kD * irradiance * albedo;
+
+    const float MAX_REFLECTION_LOD = 4.0;
+    vec3 prefilteredColor = textureLod(prefilterMap, R_world, roughness * MAX_REFLECTION_LOD).rgb;
+    vec2 envBRDF = texture(brdfLut, vec2(max(dot(normalize(R_world + V_world), V_world), 0.0), roughness)).rg;
+    vec3 Specular = prefilteredColor * (F * envBRDF.x + envBRDF.y);
+
+    return Diffuse + Specular;
 }
 
 float DistributionGGX(float N_dot_H, float roughness)
@@ -169,16 +229,22 @@ float DistributionGGX(float N_dot_H, float roughness)
     return numerator / denominator;
 }
 
-float GeometrySchlick(float N_dot_V, float roughness)
+// Combined height-correlated Smith GGX visibility: G(NdotV, NdotL) / (4 * NdotV * NdotL)
+// Analytically combines the geometry term and denominator, avoiding the division singularity.
+float VisibilitySmithGGX(float N_dot_V, float N_dot_L, float roughness)
 {
-    float k = (roughness + 1.0);
-    k = (k * k) / 8.0;
-    float numerator = N_dot_V;
-    float denominator = N_dot_V * (1.0 - k) + k + epsilon;
-    return numerator / denominator;
+    float a2 = roughness * roughness * roughness * roughness;
+    float GGXV = N_dot_L * sqrt(N_dot_V * N_dot_V * (1.0 - a2) + a2);
+    float GGXL = N_dot_V * sqrt(N_dot_L * N_dot_L * (1.0 - a2) + a2);
+    return 0.5 / (GGXV + GGXL + epsilon);
 }
 
 vec3 FresnelSchlick(float V_dot_H, vec3 F0)
 {
-    return F0 + (1.0 - F0) * exp2(-5.55473 * V_dot_H - 6.98316 * V_dot_H);   
+    return F0 + (1.0 - F0) * exp2((-5.55473 * V_dot_H - 6.98316) * V_dot_H);
+}
+
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
+{
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * exp2((-5.55473 * cosTheta - 6.98316) * cosTheta);
 }

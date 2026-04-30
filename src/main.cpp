@@ -77,7 +77,7 @@ try
     lr::LightUploader lightUploader(viewer.resources());
 
     // MESH
-    const fs::path meshPath = "C:\\Users\\seani\\Documents\\monke.glb";
+    const fs::path meshPath = "C:\\Users\\seani\\Documents\\sphere.glb";
 
     lr::GltfLoader gltfLoader;
     lr::GltfLoaderConfig config{

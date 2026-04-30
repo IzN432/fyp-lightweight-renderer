@@ -37,6 +37,15 @@ struct ImageLight : public BaseLight
 {
 };
 
+
+static const char* lightTypeNames[] = {
+    "Point",
+    "Spot",
+    "Area",
+    "Directional",
+    "Image"
+};
+
 using LightVariant = std::variant<PointLight, SpotLight, AreaLight, DirectionalLight, ImageLight>;
 
 struct LightGUICallbacks
@@ -94,7 +103,30 @@ struct Light : public Component
 
     void onGUIImpl() override
     {
+        bool changed = false;
+
+        int currentType = static_cast<int>(light.index());
+
+        if (ImGui::Combo("Light Type", &currentType, lightTypeNames, static_cast<int>(sizeof(lightTypeNames) / sizeof(lightTypeNames[0]))))
+        {
+            BaseLight &baseLight = std::visit([](auto &l) -> BaseLight& { return static_cast<BaseLight&>(l); }, light);
+            switch(currentType)
+            {
+                case 0: light = PointLight{static_cast<BaseLight>(baseLight)}; break;
+                case 1: light = SpotLight{static_cast<BaseLight>(baseLight)}; break;
+                case 2: light = AreaLight{static_cast<BaseLight>(baseLight)}; break;
+                case 3: light = DirectionalLight{static_cast<BaseLight>(baseLight)}; break;
+                case 4: light = ImageLight{static_cast<BaseLight>(baseLight)}; break;
+            }
+            changed |= true;
+        }
+    
         if (std::visit(LightGUICallbacks{}, light))
+        {
+            changed |= true;
+        }
+
+        if (changed)
         {
             notifyChanged();
         }

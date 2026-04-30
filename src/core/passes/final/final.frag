@@ -40,6 +40,8 @@ void main()
     }
     else
     {
-        outColor = texture(pbr, inUV);
+        vec3 color = texture(pbr, inUV).rgb;
+        vec3 mapped = color / (color + vec3(1.0));
+        outColor = vec4(mapped, 1.0);
     }
 }

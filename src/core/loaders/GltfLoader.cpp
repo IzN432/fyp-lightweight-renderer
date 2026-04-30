@@ -118,7 +118,7 @@ std::vector<Material> extractMaterials(const tinygltf::Model &model, const GltfL
     // Default normal texture points straight up. 0.5f is the "zero" value for normal maps, and the Z channel is usually stored in the B channel, so we set it to 1.0f.
     defaultMaterial.textures[config.normalTextureName] = MaterialImage::singlePixel(glm::vec4(0.5f, 0.5f, 1.0f, 1.0f));
     // Metallic is stored in the B channel and roughness is stored in the G channel, so we set metallic to 0.0f and roughness to 1.0f.
-    defaultMaterial.textures[config.metallicRoughnessTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
+    defaultMaterial.textures[config.metallicRoughnessTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f, 1.0f, 1.0f, 1.0f));
     defaultMaterial.textures[config.emissiveTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
 
     for (const auto &m : model.materials)
