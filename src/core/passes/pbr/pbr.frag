@@ -228,7 +228,7 @@ float DistributionGGX(float N_dot_H, float roughness)
     float N_dot_H2 = N_dot_H * N_dot_H;
     float numerator = alpha2;
     float d = (N_dot_H2 * (alpha2 - 1.0) + 1.0);
-    float denominator = PI * d * d + epsilon;
+    float denominator = PI * d * d;
     return numerator / denominator;
 }
 
