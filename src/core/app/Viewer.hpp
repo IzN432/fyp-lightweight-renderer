@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/app/InputHandler.hpp"
 #include "core/framegraph/FrameGraph.hpp"
 #include "core/framegraph/ResourceRegistry.hpp"
 #include "core/vulkan/Allocator.hpp"
@@ -44,6 +45,7 @@ public:
 
     FrameGraph       &frameGraph() { return *m_fg; }
     ResourceRegistry &resources()  { return m_fg->resources(); }
+    InputHandler     &input()      { return m_input; }
 
     // -----------------------------------------------------------------------
     // Callbacks — set before run()
@@ -69,6 +71,7 @@ private:
     // -----------------------------------------------------------------------
     // Systems — constructed in field order, destroyed in reverse
     // -----------------------------------------------------------------------
+    InputHandler                   m_input;
     std::unique_ptr<GlfwContext>   m_glfw;
     std::unique_ptr<Window>        m_window;
     std::unique_ptr<VulkanContext> m_ctx;

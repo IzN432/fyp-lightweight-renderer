@@ -24,9 +24,13 @@ void InputHandler::onMouseButton(std::function<void(int, int)> callback)
 
 void InputHandler::update()
 {
-    // This will be called each frame to poll input state and fire callbacks
-    // For now, this is a placeholder. In a full implementation, you'd check
-    // GLFW state here and fire callbacks based on state changes.
+    m_deltaMouseX = m_currentMouseX - m_prevMouseX;
+    m_deltaMouseY = m_currentMouseY - m_prevMouseY;
+    m_prevMouseX  = m_currentMouseX;
+    m_prevMouseY  = m_currentMouseY;
+
+    m_scrollDelta = m_scrollAccum;
+    m_scrollAccum = 0.0;
 }
 
 bool InputHandler::isKeyPressed(int key) const
@@ -34,10 +38,26 @@ bool InputHandler::isKeyPressed(int key) const
     return m_pressedKeys.contains(key);
 }
 
+bool InputHandler::isMouseButtonPressed(int button) const
+{
+    return m_pressedButtons.contains(button);
+}
+
+void InputHandler::getMouseDelta(double &dx, double &dy) const
+{
+    dx = m_deltaMouseX;
+    dy = m_deltaMouseY;
+}
+
+double InputHandler::getScrollDelta() const
+{
+    return m_scrollDelta;
+}
+
 void InputHandler::getMousePos(double &x, double &y) const
 {
-    x = m_lastMouseX;
-    y = m_lastMouseY;
+    x = m_currentMouseX;
+    y = m_currentMouseY;
 }
 
 void InputHandler::notifyKey(int key, int action)
@@ -53,8 +73,8 @@ void InputHandler::notifyKey(int key, int action)
 
 void InputHandler::notifyMouseMove(double x, double y)
 {
-    m_lastMouseX = x;
-    m_lastMouseY = y;
+    m_currentMouseX = x;
+    m_currentMouseY = y;
 
     for (auto &cb : m_mouseMoveCallbacks)
         cb(x, y);
@@ -62,8 +82,18 @@ void InputHandler::notifyMouseMove(double x, double y)
 
 void InputHandler::notifyMouseButton(int button, int action)
 {
+    if (action != 0)
+        m_pressedButtons.insert(button);
+    else
+        m_pressedButtons.erase(button);
+
     for (auto &cb : m_mouseButtonCallbacks)
         cb(button, action);
+}
+
+void InputHandler::notifyScroll(double delta)
+{
+    m_scrollAccum += delta;
 }
 
 }  // namespace lr

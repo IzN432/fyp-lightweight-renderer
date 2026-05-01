@@ -16,7 +16,7 @@ public:
         uint32_t envRes = 2048;
         uint32_t irrRes = 32;
         uint32_t pfRes  = 2048;
-        uint32_t pfMips = 12;
+        uint32_t pfMips = 8;
     };
 
     explicit IBLPass(Config cfg);

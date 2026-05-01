@@ -3,7 +3,7 @@
 #include "core/passes/final/FinalPass.hpp"
 #include "core/passes/geometry/GeometryPass.hpp"
 #include "core/passes/ibl/IblPass.hpp"
-#include "core/passes/pbr/PBRPass.hpp"
+#include "core/passes/pbr/PbrPass.hpp"
 #include "core/scene/Camera.hpp"
 #include "core/scene/Light.hpp"
 #include "core/scene/Mesh.hpp"
@@ -37,6 +37,10 @@ try
 
     lr::IBLPass iblPass({
         .hdriPath  = "C:\\Users\\seani\\Downloads\\cedar_bridge_sunset_2_4k.hdr",
+        .envRes    = 2048,
+        .irrRes    = 32,
+        .pfRes     = 2048,
+        .pfMips    = 8
     });
     iblPass.uploadResources(viewer.resources());
     iblPass.preprocess(viewer.frameGraph());
@@ -52,17 +56,11 @@ try
     camera->addComponent<lr::Transform>();
     camera->name = "Main Camera";
 
-    // CAMERA
-    const glm::vec3 cameraTarget(0.0f, 0.0f, 0.0f);
-    const float     cameraOrbitRadius = 5.0f;
-
-    camera->getComponent<lr::Transform>().position = glm::vec3(0.0f, 0.0f, cameraOrbitRadius);
-    {
-        const glm::mat4 view = glm::lookAt(camera->getComponent<lr::Transform>().position,
-                                           cameraTarget,
-                                           glm::vec3(0.0f, 1.0f, 0.0f));
-        camera->getComponent<lr::Transform>().setRotation(glm::conjugate(glm::quat_cast(view)));
-    }
+    // CAMERA — spherical orbit state (Blender-style)
+    glm::vec3 orbitTarget(0.0f);
+    float orbitRadius    = 5.0f;
+    float orbitAzimuth   = 0.0f;   // radians; 0 = camera on +Z axis
+    float orbitElevation = 0.0f;   // radians; 0 = horizontal
 
     // LIGHT
     lr::DirectionalLight light;
@@ -205,6 +203,7 @@ try
         .cameraBufferResourceName = cameraUploader.bufferName(),
         .lightBufferResourceName = lightUploader.bufferName(),
         .numLights = lightUploader.numLights(),
+        .pfMips = 8,
     });
     pbrPass.build(viewer.frameGraph());
     
@@ -232,24 +231,55 @@ try
         ImGui::End();
     });
 
-    float orbitAngle = 0.0f;
-
     viewer.onUpdate([&](float dt, VkExtent2D extent) {
         aspect = (extent.height == 0)
             ? 1.0f
             : static_cast<float>(extent.width) / static_cast<float>(extent.height);
 
-        orbitAngle += dt * 0.5f;
-        camera->getComponent<lr::Transform>().position = glm::vec3(
-            std::sin(orbitAngle) * cameraOrbitRadius,
-            0.0f,
-            std::cos(orbitAngle) * cameraOrbitRadius);
-        {
-            const glm::mat4 view = glm::lookAt(camera->getComponent<lr::Transform>().position,
-                                               cameraTarget, 
-                                               glm::vec3(0.0f, 1.0f, 0.0f));
-            camera->getComponent<lr::Transform>().setRotation(glm::conjugate(glm::quat_cast(view)));
+        double dx, dy;
+        viewer.input().getMouseDelta(dx, dy);
+        double scroll = viewer.input().getScrollDelta();
+        bool mmb   = viewer.input().isMouseButtonPressed(GLFW_MOUSE_BUTTON_MIDDLE);
+        bool shift = viewer.input().isKeyPressed(GLFW_KEY_LEFT_SHIFT) ||
+                     viewer.input().isKeyPressed(GLFW_KEY_RIGHT_SHIFT);
+
+        bool reset = viewer.input().isKeyPressed(GLFW_KEY_R);
+        if (reset) {
+            orbitTarget = glm::vec3(0.0f);
+            orbitRadius = 5.0f;
+            orbitAzimuth = 0.0f;
+            orbitElevation = 0.0f;
         }
+        
+        if (!ImGui::GetIO().WantCaptureMouse) {
+            if (mmb && shift) {
+                // Pan: translate target in camera right/up plane
+                auto &t = camera->getComponent<lr::Transform>();
+                float panSpeed = orbitRadius * 0.002f;
+                orbitTarget -= t.right() * (float)dx * panSpeed;
+                orbitTarget += t.up()    * (float)dy * panSpeed;
+            } else if (mmb) {
+                orbitAzimuth   -= (float)dx * 0.01f;
+                orbitElevation -= (float)dy * 0.01f;
+                orbitElevation  = glm::clamp(orbitElevation,
+                                    glm::radians(-89.0f), glm::radians(89.0f));
+            }
+
+            if (scroll != 0.0) {
+                orbitRadius *= std::pow(1.0f / 1.1f, (float)scroll);
+                orbitRadius  = glm::clamp(orbitRadius, 0.01f, 1000.0f);
+            }
+        } // !WantCaptureMouse
+
+        glm::vec3 pos(
+            orbitTarget.x + orbitRadius * std::cos(orbitElevation) * std::sin(orbitAzimuth),
+            orbitTarget.y + orbitRadius * std::sin(orbitElevation),
+            orbitTarget.z + orbitRadius * std::cos(orbitElevation) * std::cos(orbitAzimuth));
+
+        camera->getComponent<lr::Transform>().position = pos;
+        const glm::mat4 view = glm::lookAt(pos, orbitTarget, glm::vec3(0.0f, 1.0f, 0.0f));
+        camera->getComponent<lr::Transform>().setRotation(glm::conjugate(glm::quat_cast(view)));
+
         updateCameraUpload();
     });
 

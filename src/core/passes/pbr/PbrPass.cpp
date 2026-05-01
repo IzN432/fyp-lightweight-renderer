@@ -8,6 +8,7 @@ namespace lr
 
 struct PbrPC
 {
+    uint32_t pfMips; // prefiltered environment map mip levels
     uint32_t numLights;
 };
 
@@ -18,7 +19,10 @@ PbrPass::PbrPass(Config cfg)
 
 void PbrPass::build(FrameGraph &fg) const
 {
-    const PbrPC pbrPC{.numLights = m_cfg.numLights};
+    const PbrPC pbrPC{
+        .pfMips = m_cfg.pfMips,
+        .numLights = m_cfg.numLights
+    };
 
     fg.addPass("pbr")
         .type(PassType::Fullscreen)

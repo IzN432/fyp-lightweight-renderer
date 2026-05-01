@@ -36,6 +36,19 @@ Viewer::Viewer(const Config &config)
     m_fg        = std::make_unique<FrameGraph>(*m_ctx, *m_allocator, m_swapchain->getExtent());
     m_imguiPass = std::make_unique<ImguiPass>(*m_ctx, *m_window, *m_swapchain);
 
+    m_window->setKeyCallback([this](int key, int action) {
+        m_input.notifyKey(key, action);
+    });
+    m_window->setCursorPosCallback([this](double x, double y) {
+        m_input.notifyMouseMove(x, y);
+    });
+    m_window->setMouseButtonCallback([this](int button, int action) {
+        m_input.notifyMouseButton(button, action);
+    });
+    m_window->setScrollCallback([this](double delta) {
+        m_input.notifyScroll(delta);
+    });
+
     m_fg->resources().registerExternalImage("swapchain", m_swapchain->getFormat());
 }
 
@@ -72,6 +85,7 @@ void Viewer::run()
     while (!m_window->shouldClose())
     {
         m_window->pollEvents();
+        m_input.update();
 
         if (m_window->wasResized())
         {

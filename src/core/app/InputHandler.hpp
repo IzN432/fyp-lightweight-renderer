@@ -25,8 +25,13 @@ public:
     // Call this each frame to poll input state
     void update();
 
-    // Query current key state
+    // Query current key/button state
     bool isKeyPressed(int key) const;
+    bool isMouseButtonPressed(int button) const;
+
+    // Per-frame polling — valid after update() is called each frame
+    void   getMouseDelta(double &dx, double &dy) const;
+    double getScrollDelta() const;
 
     // Get current mouse position
     void getMousePos(double &x, double &y) const;
@@ -35,16 +40,22 @@ public:
     void notifyKey(int key, int action);
     void notifyMouseMove(double x, double y);
     void notifyMouseButton(int button, int action);
+    void notifyScroll(double delta);
 
 private:
-    std::vector<std::function<void(int, int)>> m_keyPressCallbacks;
+    std::vector<std::function<void(int, int)>>    m_keyPressCallbacks;
     std::vector<std::function<void(double, double)>> m_mouseMoveCallbacks;
-    std::vector<std::function<void(int, int)>> m_mouseButtonCallbacks;
+    std::vector<std::function<void(int, int)>>    m_mouseButtonCallbacks;
 
     std::unordered_set<int> m_pressedKeys;
+    std::unordered_set<int> m_pressedButtons;
 
-    double m_lastMouseX = 0.0;
-    double m_lastMouseY = 0.0;
+    double m_currentMouseX = 0.0, m_currentMouseY = 0.0;
+    double m_prevMouseX    = 0.0, m_prevMouseY    = 0.0;
+    double m_deltaMouseX   = 0.0, m_deltaMouseY   = 0.0;
+
+    double m_scrollAccum = 0.0;
+    double m_scrollDelta = 0.0;
 };
 
 }  // namespace lr

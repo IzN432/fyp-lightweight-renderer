@@ -43,6 +43,7 @@ layout(set = 0, binding = 8) readonly buffer LightBuffer
 };
 
 layout(push_constant) uniform PC {
+    uint pfMips;
     uint numLights;
 } pc;
 
@@ -205,7 +206,7 @@ vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, fl
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 F = FresnelSchlickRoughness(N_dot_V, F0, roughness);
-    
+
     vec3 kS = F;
     vec3 kD = 1.0 - kS;
     kD *= 1.0 - metallic;
@@ -213,8 +214,7 @@ vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, fl
     vec3 irradiance = texture(irradianceMap, N_world).rgb;
     vec3 Diffuse = kD * irradiance * albedo;
 
-    const float MAX_REFLECTION_LOD = 11.0;
-    vec3 prefilteredColor = textureLod(prefilterMap, R_world, roughness * MAX_REFLECTION_LOD).rgb;
+    vec3 prefilteredColor = textureLod(prefilterMap, R_world, roughness * float(pc.pfMips - 1u)).rgb;
     vec2 envBRDF = texture(brdfLut, vec2(N_dot_V, roughness)).rg;
     vec3 Specular = prefilteredColor * (F * envBRDF.x + envBRDF.y);
 

@@ -55,17 +55,29 @@ public:
 
     GLFWwindow *getHandle() const { return m_window; }
 
-    void setResizeCallback(std::function<void(int, int)> cb) { m_resizeCallback = cb; }
+    void setResizeCallback(std::function<void(int, int)> cb)          { m_resizeCallback      = std::move(cb); }
+    void setKeyCallback(std::function<void(int, int)> cb)             { m_keyCallback         = std::move(cb); }
+    void setCursorPosCallback(std::function<void(double, double)> cb) { m_cursorPosCallback   = std::move(cb); }
+    void setMouseButtonCallback(std::function<void(int, int)> cb)     { m_mouseButtonCallback = std::move(cb); }
+    void setScrollCallback(std::function<void(double)> cb)            { m_scrollCallback      = std::move(cb); }
 
 private:
     static void glfwResizeCallback(GLFWwindow *window, int width, int height);
+    static void glfwKeyCallback(GLFWwindow *window, int key, int scancode, int action, int mods);
+    static void glfwCursorPosCallback(GLFWwindow *window, double x, double y);
+    static void glfwMouseButtonCallback(GLFWwindow *window, int button, int action, int mods);
+    static void glfwScrollCallback(GLFWwindow *window, double xoffset, double yoffset);
 
 private:
     GLFWwindow *m_window = nullptr;
     int m_width = 0;
     int m_height = 0;
     bool m_resized = false;
-    std::function<void(int, int)> m_resizeCallback;
+    std::function<void(int, int)>       m_resizeCallback;
+    std::function<void(int, int)>       m_keyCallback;
+    std::function<void(double, double)> m_cursorPosCallback;
+    std::function<void(int, int)>       m_mouseButtonCallback;
+    std::function<void(double)>         m_scrollCallback;
 };
 
 }  // namespace lr
