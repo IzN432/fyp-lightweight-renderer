@@ -75,7 +75,7 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         .writes({
             {.name = "gbufferAlbedo",   .format = VK_FORMAT_R16G16B16A16_SFLOAT},
             {.name = "gbufferNormal",   .format = VK_FORMAT_R16G16_SFLOAT},
-            {.name = "gbufferMaterial", .format = VK_FORMAT_R8G8B8A8_UNORM},
+            {.name = "gbufferMaterial", .format = VK_FORMAT_R16G16B16A16_UNORM},
             {.name = "gbufferDepth",    .format = VK_FORMAT_D32_SFLOAT, .clearValue = {.depthStencil = {1.0f, 0}}},
         })
         .execute([indexCount = m_cfg.indexCount](CommandBuffer &cmd, VkPipelineLayout) {

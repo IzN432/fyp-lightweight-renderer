@@ -6,12 +6,54 @@ layout(set = 0, binding = 1, rgba16f) writeonly uniform imageCube prefilteredMap
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(push_constant) uniform PC {
-    vec4  roughnessPadded; // x = roughness, yzw = unused
-    ivec4 nsamples;        // x = samplesX, y = samplesY, z = total (x*y)
-    vec4  sampleDelta;     // x/y = xguide perturbation, z = env cubemap resolution
+    float roughness;
+    uint sampleCount;
 } pc;
 
 const float PI = 3.14159265359;
+
+vec3 getCubeDirection(vec2 uv, uint face);
+
+vec2 Hammersley(uint i, uint N);
+
+vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness);
+
+// https://learnopengl.com/PBR/IBL/Specular-IBL
+
+void main()
+{
+    ivec3 coord = ivec3(gl_GlobalInvocationID);
+    ivec2 size = imageSize(prefilteredMap);
+    if (coord.x >= size.x || coord.y >= size.y)
+        return;
+
+    vec2 uv = (vec2(coord.xy) + 0.5) / vec2(size);
+    vec3 N = normalize(getCubeDirection(uv, uint(coord.z)));
+    vec3 R = N;
+    vec3 V = R;
+
+    float roughness = pc.roughness;
+    uint total = pc.sampleCount;
+
+    vec3 prefilteredColor = vec3(0.0);
+    float totalWeight = 0.0;
+
+    for (uint i = 0; i < total; ++i)
+    {
+        vec2 Xi = Hammersley(i, total);
+        vec3 H = ImportanceSampleGGX(Xi, N, roughness);
+        vec3 L = normalize(2.0 * dot(V, H) * H - V);
+
+        float N_dot_L = max(dot(N, L), 0.0);
+        if (N_dot_L > 0.0)
+        {
+            prefilteredColor += texture(environmentMap, L).rgb * N_dot_L;
+            totalWeight += N_dot_L;      
+        }
+    }
+    prefilteredColor = prefilteredColor / totalWeight;
+    imageStore(prefilteredMap, coord, vec4(prefilteredColor, 1.0));
+}
 
 vec3 getCubeDirection(vec2 uv, uint face)
 {
@@ -29,99 +71,41 @@ vec3 getCubeDirection(vec2 uv, uint face)
     return normalize(dir);
 }
 
-// Van der Corput low-discrepancy sequence
-float radicalInverseVdC(uint bits)
+float RadicalInverse_VdC(uint bits)
 {
     bits = (bits << 16u) | (bits >> 16u);
     bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
     bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
     bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
     bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
-    return float(bits) * 2.3283064365386963e-10;
+    return float(bits) * 2.3283064365386963e-10; // / 0x100000000   
 }
 
-vec2 hammersley(uint i, uint N)
+vec2 Hammersley(uint i, uint N)
 {
-    return vec2(float(i) / float(N), radicalInverseVdC(i));
+    return vec2(float(i) / float(N), RadicalInverse_VdC(i));
 }
 
-// GGX importance sampling — returns a half-vector H in world space
-vec3 importanceSampleGGX(vec2 s, vec3 n, float roughness)
+vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness)
 {
-    float r2       = roughness * roughness;
-    float phi      = 2.0 * PI * s.x;
-    float cosTheta = sqrt((1.0 - s.y) / (1.0 + (r2 * r2 - 1.0) * s.y));
-    float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
-    vec3  localDir = vec3(cos(phi) * sinTheta, cosTheta, sin(phi) * sinTheta);
+    float a = roughness * roughness;
 
-    // Build tangent basis; perturb xguide if n ≈ (1,0,0)
-    float cosSmall = max(cos(pc.sampleDelta.x), cos(pc.sampleDelta.y));
-    vec3  xguide   = vec3(1.0, 0.0, 0.0);
-    if (abs(dot(xguide, n)) > cosSmall)
-        xguide = vec3(1.0, pc.sampleDelta.x * 2.0, pc.sampleDelta.y * 2.0);
+    float phi = 2.0 * PI * Xi.x;
+    float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a * a - 1.0) * Xi.y));
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
 
-    vec3 right = normalize(cross(xguide, n));
-    vec3 up    = n;
-    vec3 fwd   = cross(up, right);
-    return normalize(right * localDir.x + up * localDir.y + fwd * localDir.z);
-}
+    // We tweak learn opengl's method to use y as the up vector instead of z
+    // Spherical to Cartesian
+    vec3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = cosTheta;
+    H.z = sin(phi) * sinTheta;
 
-float distributionGGX(float nDotH, float alpha)
-{
-    float a2     = alpha * alpha;
-    float nDotH2 = nDotH * nDotH;
-    float d      = nDotH2 * (a2 - 1.0) + 1.0;
-    return a2 / (PI * d * d);
-}
+    // Tangent space to world space
+    vec3 up        = abs(N.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent   = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
 
-// Solid-angle-based LOD selection for better filtering quality
-float computeLOD(float nDotH, float vDotH, float roughness, int totalSamples)
-{
-    float NDF      = distributionGGX(nDotH, roughness);
-    float PDF      = (NDF * nDotH / (4.0 * vDotH)) + 0.00001;
-    float envRes   = pc.sampleDelta.z;
-    float saTexel  = 4.0 * PI / (6.0 * envRes * envRes);
-    float saSample = 1.0 / (float(totalSamples) * PDF + 0.00001);
-    return roughness == 0.0 ? 0.0 : 0.5 * log2(saSample / saTexel);
-}
-
-void main()
-{
-    ivec3 coord = ivec3(gl_GlobalInvocationID);
-    ivec2 size  = imageSize(prefilteredMap);
-    if (coord.x >= size.x || coord.y >= size.y)
-        return;
-
-    vec2  uv        = (vec2(coord.xy) + 0.5) / vec2(size);
-    vec3  dir       = getCubeDirection(uv, uint(coord.z));
-    float roughness = pc.roughnessPadded.x;
-    int   total     = pc.nsamples.z;
-
-    float wAll     = 0.0;
-    vec3  accColor = vec3(0.0);
-
-    for (int i = 0; i < pc.nsamples.x; ++i)
-    {
-        for (int j = 0; j < pc.nsamples.y; ++j)
-        {
-            uint idx    = uint(i * pc.nsamples.y + j);
-            vec2 s      = hammersley(idx, uint(total));
-            vec3 H      = importanceSampleGGX(s, dir, roughness);
-
-            float nDotH = max(dot(dir, H), 0.0);
-            float vDotH = max(dot(dir, H), 0.0); // assume v == n (common IBL approximation)
-            float lod   = computeLOD(nDotH, vDotH, roughness, total);
-            vec3  L     = normalize(2.0 * dot(dir, H) * H - dir);
-            float nDotL = max(dot(dir, L), 0.0);
-
-            if (nDotL > 0.0)
-            {
-                accColor += textureLod(environmentMap, L, lod).rgb * nDotL;
-                wAll     += nDotL;
-            }
-        }
-    }
-
-    vec3 result = (wAll > 0.0) ? accColor / wAll : vec3(0.0);
-    imageStore(prefilteredMap, coord, vec4(result, 1.0));
+    vec3 sampleVec = tangent * H.x + bitangent * H.z + N * H.y;
+    return normalize(sampleVec);
 }

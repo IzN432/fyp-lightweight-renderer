@@ -157,10 +157,10 @@ try
         .addScalar(config.baseEmissiveName, 16, sizeof(glm::vec3))
         .addScalar(config.baseRoughnessName, 32, sizeof(float))
         .addScalar(config.baseMetallicName, 36, sizeof(float))
-        .addTexture(config.diffuseTextureName)
-        .addTexture(config.normalTextureName)
-        .addTexture(config.metallicRoughnessTextureName)
-        .addTexture(config.emissiveTextureName);
+        .addTexture(config.diffuseTextureName,            VK_FORMAT_R8G8B8A8_SRGB)
+        .addTexture(config.normalTextureName,             VK_FORMAT_R8G8B8A8_UNORM)
+        .addTexture(config.metallicRoughnessTextureName,  VK_FORMAT_R8G8B8A8_UNORM)
+        .addTexture(config.emissiveTextureName,           VK_FORMAT_R8G8B8A8_SRGB);
 
     lr::MaterialUploader materialUploader(viewer.resources());
     const lr::MaterialUploadResult material = materialUploader.upload(

@@ -23,9 +23,8 @@ struct IrradiancePC
 
 struct PrefilterPC
 {
-    glm::vec4  roughnessPadded;
-    glm::ivec4 nsamples;
-    glm::vec4  sampleDelta;
+    float roughness;
+    uint32_t sampleCount;
 };
 
 }  // namespace
@@ -110,9 +109,8 @@ void IBLPass::preprocess(FrameGraph &fg) const
         const uint32_t mipSize   = pfRes >> mip;
 
         const PrefilterPC pfPC = {
-            .roughnessPadded = {roughness, 0.0f, 0.0f, 0.0f},
-            .nsamples        = {32, 32, 32 * 32, 0},
-            .sampleDelta     = {0.1f, 0.1f, static_cast<float>(envRes), 0.0f},
+            .roughness = roughness,
+            .sampleCount = 4096,
         };
 
         fg.addPass("ibl_prefilter_mip" + std::to_string(mip))

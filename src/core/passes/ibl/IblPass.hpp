@@ -15,8 +15,8 @@ public:
         std::filesystem::path hdriPath;
         uint32_t envRes = 2048;
         uint32_t irrRes = 32;
-        uint32_t pfRes  = 512;
-        uint32_t pfMips = 10;
+        uint32_t pfRes  = 2048;
+        uint32_t pfMips = 12;
     };
 
     explicit IBLPass(Config cfg);
