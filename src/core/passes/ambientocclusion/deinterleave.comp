@@ -1,0 +1,41 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) uniform sampler2D depthTex;
+layout(set = 0, binding = 1) uniform sampler2D normalTex;
+
+layout(set = 0, binding = 2, r32f)   uniform writeonly image2D outDepth0;
+layout(set = 0, binding = 3, r32f)   uniform writeonly image2D outDepth1;
+layout(set = 0, binding = 4, r32f)   uniform writeonly image2D outDepth2;
+layout(set = 0, binding = 5, r32f)   uniform writeonly image2D outDepth3;
+layout(set = 0, binding = 6, rg32f)  uniform writeonly image2D outNormal0;
+layout(set = 0, binding = 7, rg32f)  uniform writeonly image2D outNormal1;
+layout(set = 0, binding = 8, rg32f)  uniform writeonly image2D outNormal2;
+layout(set = 0, binding = 9, rg32f)  uniform writeonly image2D outNormal3;
+
+void main()
+{
+    ivec2 halfPos  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 halfSize = imageSize(outDepth0);
+    if (halfPos.x >= halfSize.x || halfPos.y >= halfSize.y)
+        return;
+
+    ivec2 fullSize = textureSize(depthTex, 0);
+    ivec2 base     = halfPos * 2;
+
+    ivec2 p00 = min(base + ivec2(0, 0), fullSize - 1);
+    ivec2 p10 = min(base + ivec2(1, 0), fullSize - 1);
+    ivec2 p01 = min(base + ivec2(0, 1), fullSize - 1);
+    ivec2 p11 = min(base + ivec2(1, 1), fullSize - 1);
+
+    imageStore(outDepth0, halfPos, vec4(texelFetch(depthTex,  p00, 0).r,  0, 0, 0));
+    imageStore(outDepth1, halfPos, vec4(texelFetch(depthTex,  p10, 0).r,  0, 0, 0));
+    imageStore(outDepth2, halfPos, vec4(texelFetch(depthTex,  p01, 0).r,  0, 0, 0));
+    imageStore(outDepth3, halfPos, vec4(texelFetch(depthTex,  p11, 0).r,  0, 0, 0));
+
+    imageStore(outNormal0, halfPos, vec4(texelFetch(normalTex, p00, 0).rg, 0, 0));
+    imageStore(outNormal1, halfPos, vec4(texelFetch(normalTex, p10, 0).rg, 0, 0));
+    imageStore(outNormal2, halfPos, vec4(texelFetch(normalTex, p01, 0).rg, 0, 0));
+    imageStore(outNormal3, halfPos, vec4(texelFetch(normalTex, p11, 0).rg, 0, 0));
+}

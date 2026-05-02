@@ -41,6 +41,7 @@ layout(set = 0, binding = 8) readonly buffer LightBuffer
 {
     LightData lights[];
 };
+layout(set = 0, binding = 9) uniform sampler2D ao;
 
 layout(push_constant) uniform PC {
     uint pfMips;
@@ -62,7 +63,7 @@ vec3 CalcPointLight(LightData light, vec3 position, vec3 normal, vec3 albedo, fl
 vec3 CalcDirectionalLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic);
 vec3 CalcSpotLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic);
 vec3 CalcAreaLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic);
-vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic);
+vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic, float ao);
 
 float DistributionGGX(float N_dot_H, float roughness);
 float GeometrySchlickGGX(float N_dot_V, float roughness);
@@ -100,7 +101,7 @@ void main()
             color += CalcAreaLight(light, position, normal, albedo, roughness, metallic);
             break;
         case LIGHT_TYPE_IMAGE:
-            color += CalcImageLight(light, position, normal, albedo, roughness, metallic);
+            color += CalcImageLight(light, position, normal, albedo, roughness, metallic, texture(ao, inUV).r);
             break;
         }
     }
@@ -196,7 +197,7 @@ vec3 CalcAreaLight(LightData light, vec3 position, vec3 normal, vec3 albedo, flo
     return vec3(0.0); // Placeholder, implement area light calculations here
 }
 
-vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic)
+vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic, float ao)
 {
     vec3 V_world = normalize(vec3(cameraUbo.invView * vec4(-position, 0.0)));
     vec3 N_world = normalize(vec3(cameraUbo.invView * vec4(normal, 0.0)));
@@ -218,7 +219,7 @@ vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, fl
     vec2 envBRDF = texture(brdfLut, vec2(N_dot_V, roughness)).rg;
     vec3 Specular = prefilteredColor * (F * envBRDF.x + envBRDF.y);
 
-    return (Diffuse + Specular) * light.color * light.intensity;
+    return (Diffuse + Specular) * light.color * light.intensity * ao;
 }
 
 float DistributionGGX(float N_dot_H, float roughness)

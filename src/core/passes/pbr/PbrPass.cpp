@@ -29,6 +29,7 @@ void PbrPass::build(FrameGraph &fg) const
         .vertShader((paths::shaderDir / "fullscreen.vert.spv").string())
         .fragShader((paths::shaderDir / "pbr.frag.spv").string())
         .pushConstantSize(sizeof(PbrPC), VK_SHADER_STAGE_FRAGMENT_BIT) // numLights as push constant
+        .dependsOn({ "hbao_blur" })
         .bind({
             {
                 .resourceName = m_cfg.cameraBufferResourceName,
@@ -90,6 +91,13 @@ void PbrPass::build(FrameGraph &fg) const
                 .binding      = 8,
                 .type         = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
+            },
+            {
+                .resourceName = "hbao_ao",
+                 .binding      = 9,
+                 .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
+                 .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             }
         })
         .writes({

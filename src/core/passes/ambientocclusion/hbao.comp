@@ -1,0 +1,218 @@
+#version 450
+
+#define PI 3.14159265f
+
+#include "../utility/geometry.glslh"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) uniform CameraUbo {
+    mat4 view;
+    mat4 proj;
+    mat4 viewProj;
+    mat4 invView;
+    mat4 invProj;
+    vec3 cameraPosition;
+    float padding;
+} cam;
+
+layout(set = 0, binding = 1) uniform sampler2D depthTex;   // deinterleaved half-res depth (R32F)
+layout(set = 0, binding = 2) uniform sampler2D normalTex;  // deinterleaved half-res normal (RG32F)
+layout(set = 0, binding = 3) uniform sampler2D directionTex;
+
+layout(set = 0, binding = 4) uniform AOParam {
+    vec4  sphereRadius; // r, r^2, 1/r, 0
+    int   numSteps;
+    int   numDirs;
+    float tanAngleBias;
+    float aoScalar;
+} aoInfo;
+
+layout(set = 0, binding = 5, r32f) uniform writeonly image2D aoOut;
+
+layout(push_constant) uniform PC {
+    int passId;
+} pc;
+
+// Reconstruct view-space position from a half-res deinterleaved depth texel.
+// iuv: integer coordinate in half-res space
+// offset: (passId & 1, passId >> 1) — which 2x2 pixel this submap captured
+// fullSize: full-res image dimensions
+vec3 fetchPos(ivec2 iuv, ivec2 offset, ivec2 fullSize)
+{
+    ivec2 halfSize = fullSize / 2;
+    iuv = clamp(iuv, ivec2(0), halfSize - 1);
+    float depth  = texelFetch(depthTex, iuv, 0).r;
+    vec2  fullUV = (vec2(iuv * 2 + offset) + 0.5) / vec2(fullSize);
+    return depthToViewPosition(depth, fullUV, cam.invProj);
+}
+
+// Same but with continuous UV for use when stepping between pixels.
+// uv is in [0,1] of half-res space (== [0,1] full-res UV, same viewport coverage).
+vec3 fetchPosFloat(vec2 uv, ivec2 offset, ivec2 fullSize)
+{
+    float depth  = texture(depthTex, uv).r;
+    // Correct for the fixed 2x2 offset baked into this submap's pixels.
+    vec2  fullUV = uv + vec2(offset) / vec2(fullSize);
+    return depthToViewPosition(depth, fullUV, cam.invProj);
+}
+
+vec3 fetchNormal(ivec2 iuv)
+{
+    return unpackViewNormal(texelFetch(normalTex, iuv, 0).rg);
+}
+
+float distSq(vec3 a, vec3 b)    { vec3 d = b - a; return dot(d, d); }
+float tangentOf(vec3 p)         { return p.z / length(p.xy); }
+float tan2Sin(float x)          { return x / sqrt(1.0 + x * x); }
+
+vec2 rotateDir(vec2 dir, vec2 cosSin)
+{
+    return vec2(dir.x * cosSin.x - dir.y * cosSin.y,
+                dir.x * cosSin.y + dir.y * cosSin.x);
+}
+
+vec3 getPointOnPlane(vec4 plane, vec3 pos)
+{
+    float t = dot(plane.xyz, pos);
+    if (t < 0.0)
+        pos *= (-plane.w) / t;
+    return pos;
+}
+
+vec3 tangentVec(vec2 delta, vec3 du, vec3 dv)
+{
+    return du * delta.x + dv * delta.y;
+}
+
+void computedudv(vec4 plane, vec3 center, ivec2 iuv, ivec2 offset, ivec2 fullSize,
+                 inout vec3 du, inout vec3 dv)
+{
+    vec3 pt[4];
+    pt[0] = fetchPos(iuv + ivec2(-1,  0), offset, fullSize);
+    pt[1] = fetchPos(iuv + ivec2( 1,  0), offset, fullSize);
+    pt[2] = fetchPos(iuv + ivec2( 0, -1), offset, fullSize);
+    pt[3] = fetchPos(iuv + ivec2( 0,  1), offset, fullSize);
+
+    pt[0] = center - getPointOnPlane(plane, pt[0]);
+    pt[1] = getPointOnPlane(plane, pt[1]) - center;
+    pt[2] = center - getPointOnPlane(plane, pt[2]);
+    pt[3] = getPointOnPlane(plane, pt[3]) - center;
+
+    du = dot(pt[0], pt[0]) < dot(pt[1], pt[1]) ? pt[0] : pt[1];
+    dv = dot(pt[2], pt[2]) < dot(pt[3], pt[3]) ? pt[2] : pt[3];
+
+    ivec2 halfSize = fullSize / 2;
+    dv *= float(halfSize.y) / float(halfSize.x);
+}
+
+float singleDirectionAO(vec2 deltaUV, vec2 inUV, vec3 center, vec3 du, vec3 dv,
+                         float steps, float randStart, float tanBias,
+                         ivec2 offset, ivec2 fullSize)
+{
+    vec2  uv       = inUV + deltaUV * (1.0 + randStart);
+    vec3  tanVec   = tangentVec(uv - inUV, du, dv);
+    float tanAngle = tangentOf(tanVec) + tanBias;
+
+    float AO = 0.0;
+    float h0 = 0.0;
+
+    for (float i = 0.0; i < steps; i += 1.0) {
+        if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))))
+            break;
+
+        vec3  curPos = fetchPosFloat(uv, offset, fullSize);
+        float dsq    = distSq(curPos, center);
+
+        if (dsq < aoInfo.sphereRadius.y) {
+            float curTan = tangentOf(curPos - center);
+            if (curTan > tanAngle) {
+                float planeTan = tangentOf(tangentVec(uv - inUV, du, dv)) + tanBias;
+                float curSin   = tan2Sin(curTan);
+                float planeSin = tan2Sin(planeTan);
+                float rsq      = dsq * aoInfo.sphereRadius.z * aoInfo.sphereRadius.z;
+                float h        = curSin - planeSin;
+                AO += (1.0 - rsq) * (h - h0);
+                h0       = h;
+                tanAngle = curTan;
+            }
+        }
+        uv += deltaUV;
+    }
+    return AO;
+}
+
+float computeAO(vec3 center, vec2 inUV, vec3 du, vec3 dv, vec2 stepSize, float steps,
+                float tanBias, ivec2 offset, ivec2 fullSize)
+{
+    float AO         = 0.0;
+    float deltaAngle = 2.0 * PI / float(aoInfo.numDirs);
+
+    for (int d = 0; d < aoInfo.numDirs; d++) {
+        vec4  jitter  = texelFetch(directionTex, ivec2(d, 0), 0);
+        float angle   = deltaAngle * float(d);
+        vec2  dir     = vec2(cos(angle), sin(angle));
+        vec2  deltaUV = rotateDir(dir, jitter.xy) * stepSize;
+        AO += singleDirectionAO(deltaUV, inUV, center, du, dv, steps, jitter.z, tanBias, offset, fullSize);
+    }
+
+    return clamp(1.0 - AO / float(aoInfo.numDirs) * aoInfo.aoScalar, 0.0, 1.0);
+}
+
+void main()
+{
+    ivec2 halfPos  = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 halfSize = imageSize(aoOut);
+    if (halfPos.x >= halfSize.x || halfPos.y >= halfSize.y)
+        return;
+
+    ivec2 offset   = ivec2(pc.passId & 1, (pc.passId >> 1) & 1);
+    ivec2 fullSize = halfSize * 2;
+
+    float depth = texelFetch(depthTex, halfPos, 0).r;
+    if (depth >= 1.0) {
+        imageStore(aoOut, halfPos, vec4(1.0));
+        return;
+    }
+
+    // Reconstruct view-space position using the full-res UV for this submap's pixel
+    vec2 fullUV  = (vec2(halfPos * 2 + offset) + 0.5) / vec2(fullSize);
+    vec3 viewPos = depthToViewPosition(depth, fullUV, cam.invProj);
+
+    // Step size in UV units — same for full/half res because UV [0,1] covers the full viewport
+    vec2 focalLen = vec2(cam.proj[0][0], cam.proj[1][1]);
+    vec2 stepSize = abs(focalLen * 0.5 * aoInfo.sphereRadius.x / viewPos.z);
+
+    // Cap step count to half-res pixel radius
+    float steps = min(float(aoInfo.numSteps),
+                  min(stepSize.x * float(halfSize.x),
+                      stepSize.y * float(halfSize.y)));
+    if (steps < 1.0) {
+        imageStore(aoOut, halfPos, vec4(1.0));
+        return;
+    }
+
+    stepSize /= (steps + 1.0);
+
+    vec3 viewNormal = fetchNormal(halfPos);
+    vec4 plane;
+    plane.xyz = viewNormal;
+    plane.w   = -dot(viewNormal, viewPos);
+
+    vec3 du, dv;
+    computedudv(plane, viewPos, halfPos, offset, fullSize, du, dv);
+
+    if (dot(du, du) < 1e-10 || dot(dv, dv) < 1e-10) {
+        imageStore(aoOut, halfPos, vec4(1.0));
+        return;
+    }
+
+    float viewDotN = abs(dot(normalize(-viewPos), viewNormal));
+    float tanBias  = aoInfo.tanAngleBias / max(viewDotN, 0.1);
+
+    // inUV is in [0,1] half-res space (== full-res UV space, same viewport coverage)
+    vec2 inUV = (vec2(halfPos) + 0.5) / vec2(halfSize);
+
+    float ao = computeAO(viewPos, inUV, du, dv, stepSize, steps, tanBias, offset, fullSize);
+    imageStore(aoOut, halfPos, vec4(ao, 0.0, 0.0, 1.0));
+}

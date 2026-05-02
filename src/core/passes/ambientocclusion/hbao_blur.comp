@@ -1,0 +1,68 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) uniform sampler2D aoTex;
+layout(set = 0, binding = 1) uniform sampler2D depthTex;
+layout(set = 0, binding = 2, r32f) uniform writeonly image2D aoOut;
+
+const int RADIUS = 2;
+const int TILE_W = 16 + 2 * RADIUS;  // 20
+const int TILE_H = 16 + 2 * RADIUS;  // 20
+
+shared float s_ao[TILE_H][TILE_W];
+shared float s_depth[TILE_H][TILE_W];
+
+void main()
+{
+    ivec2 fullSize    = textureSize(aoTex, 0);
+    ivec2 groupOrigin = ivec2(gl_WorkGroupID.xy) * 16 - RADIUS;
+    int   linearIdx   = int(gl_LocalInvocationIndex);
+
+    // Load 20x20 tile (400 elements) with 256 threads — some threads load 2
+    for (int i = linearIdx; i < TILE_W * TILE_H; i += 256) {
+        ivec2 tileCoord  = ivec2(i % TILE_W, i / TILE_W);
+        ivec2 fetchCoord = clamp(groupOrigin + tileCoord, ivec2(0), fullSize - 1);
+        s_ao[tileCoord.y][tileCoord.x]    = texelFetch(aoTex,    fetchCoord, 0).r;
+        s_depth[tileCoord.y][tileCoord.x] = texelFetch(depthTex, fetchCoord, 0).r;
+    }
+
+    barrier();
+    memoryBarrierShared();
+
+    ivec2 outPos = ivec2(gl_GlobalInvocationID.xy);
+    if (outPos.x >= fullSize.x || outPos.y >= fullSize.y)
+        return;
+
+    ivec2 localBase   = ivec2(gl_LocalInvocationID.xy) + RADIUS;
+    float centerDepth = s_depth[localBase.y][localBase.x];
+
+    if (centerDepth >= 1.0) {
+        imageStore(aoOut, outPos, vec4(1.0));
+        return;
+    }
+
+    const float sigmaSpace = 2.0;
+    const float sigmaDepth = 0.05;
+
+    float aoSum     = 0.0;
+    float weightSum = 0.0;
+
+    for (int dy = -RADIUS; dy <= RADIUS; dy++) {
+        for (int dx = -RADIUS; dx <= RADIUS; dx++) {
+            ivec2 s      = localBase + ivec2(dx, dy);
+            float sDepth = s_depth[s.y][s.x];
+            float sAO    = s_ao[s.y][s.x];
+
+            float spatialW = exp(-float(dx * dx + dy * dy) / (2.0 * sigmaSpace * sigmaSpace));
+            float depthW   = exp(-abs(sDepth - centerDepth) / (abs(centerDepth) * sigmaDepth + 1e-5));
+            float w        = spatialW * depthW;
+
+            aoSum     += sAO * w;
+            weightSum += w;
+        }
+    }
+
+    float ao = weightSum > 0.0 ? aoSum / weightSum : 1.0;
+    imageStore(aoOut, outPos, vec4(ao, 0.0, 0.0, 1.0));
+}

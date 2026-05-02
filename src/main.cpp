@@ -4,6 +4,7 @@
 #include "core/passes/geometry/GeometryPass.hpp"
 #include "core/passes/ibl/IblPass.hpp"
 #include "core/passes/pbr/PbrPass.hpp"
+#include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
 #include "core/scene/Camera.hpp"
 #include "core/scene/Light.hpp"
 #include "core/scene/Mesh.hpp"
@@ -75,7 +76,7 @@ try
     lr::LightUploader lightUploader(viewer.resources());
 
     // MESH
-    const fs::path meshPath = "C:\\Users\\seani\\Documents\\sphere.glb";
+    const fs::path meshPath = "D:\\FYP\\lion_head_4k.blend\\lion_head_4k.glb";
 
     lr::GltfLoader gltfLoader;
     lr::GltfLoaderConfig config{
@@ -198,6 +199,12 @@ try
         .materialCount = static_cast<uint32_t>(staticMesh.materials().size()),
     });
     geometryPass.build(viewer.frameGraph(), gpuMeshLayout);
+
+    lr::AmbientOcclusionPass aoPass({
+        .cameraBufferResourceName = cameraUploader.bufferName(),
+    });
+    aoPass.uploadResources(viewer.resources());
+    aoPass.build(viewer.frameGraph());
 
     lr::PbrPass pbrPass({
         .cameraBufferResourceName = cameraUploader.bufferName(),
