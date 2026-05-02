@@ -68,9 +68,18 @@ MaterialImage extractImage(const tinygltf::Image &img)
     materialImg.name = img.name;
     materialImg.width = static_cast<uint32_t>(img.width);
     materialImg.height = static_cast<uint32_t>(img.height);
-    // Assumes 4 channels, which is valid because we set loader.SetPreserveImageChannels(false)
-    // in loadGltfFile(). If this becomes an issue we can add support for other channel counts in the future.
-    materialImg.pixels = img.image;
+
+    if (img.bits == 16) {
+        // 16-bit-per-channel PNG: img.image holds uint16_t values as raw bytes.
+        // Downscale to 8-bit by taking the high byte of each channel value.
+        const size_t channelCount = static_cast<size_t>(img.width) * img.height * img.component;
+        const auto  *src16 = reinterpret_cast<const uint16_t *>(img.image.data());
+        materialImg.pixels.resize(channelCount);
+        for (size_t i = 0; i < channelCount; ++i)
+            materialImg.pixels[i] = static_cast<uint8_t>(src16[i] >> 8);
+    } else {
+        materialImg.pixels = img.image;
+    }
 
     return materialImg;
 }
