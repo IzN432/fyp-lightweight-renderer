@@ -240,13 +240,7 @@ ObjMeshLoadResult ObjLoader::load(const std::filesystem::path &path, const ObjLo
 
     // SECTION 2 - Extract vertex / face data
 
-    MeshLayout layout;
-    layout
-        .addPerVertexAttr<glm::vec3>(config.normalAttributeName)
-        .addPerVertexAttr<glm::vec4>(config.tangentAttributeName)
-        .addPerVertexAttr<glm::vec2>(config.uvAttributeName);
-
-    Mesh mesh(layout);
+    Mesh mesh;
     auto [positions, normals, tangents, uvs, faces, faceGroups] = extractMeshData(reader, path);
     
     mesh.setVertexCount(static_cast<uint32_t>(positions.size()));
@@ -262,7 +256,7 @@ ObjMeshLoadResult ObjLoader::load(const std::filesystem::path &path, const ObjLo
     // SECTION 3 - Extract material data from the tinyobj::ObjReader and convert it to our internal Material format
     auto materials = extractMaterials(reader, path.parent_path(), config);
 
-    return { std::move(mesh), std::move(layout), std::move(materials) };
+    return { std::move(mesh), std::move(materials) };
 }
 
 } // namespace lr

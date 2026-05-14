@@ -52,7 +52,7 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext &ctx, const Config &confi
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.topology = config.topology;
 
     // Viewport and scissor are dynamic — set per frame via CommandBuffer
     VkPipelineViewportStateCreateInfo viewportState{};

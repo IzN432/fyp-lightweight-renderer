@@ -40,11 +40,10 @@ class StaticMesh : public Component
 {
 private:
     Mesh m_mesh;
-    MeshLayout& m_layout;
     std::vector<Material> m_materials;
 public:
-    explicit StaticMesh(Mesh &mesh, MeshLayout &layout, std::vector<Material>& materials)
-        : m_mesh(std::move(mesh)), m_layout(layout), m_materials(std::move(materials)) {}
+    explicit StaticMesh(Mesh &mesh, std::vector<Material>& materials)
+        : m_mesh(std::move(mesh)), m_materials(std::move(materials)) {}
 
     void onGUIImpl() override
     {
@@ -74,7 +73,7 @@ public:
 
     const std::vector<Material>& materials() const { return m_materials; }
     const Mesh& mesh() const { return m_mesh; }
-    const MeshLayout& layout() const { return m_layout; }
+    const MeshLayout& layout() const { return m_mesh.layout(); }
 };
 
 }

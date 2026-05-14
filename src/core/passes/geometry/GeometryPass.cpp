@@ -12,12 +12,16 @@ GeometryPass::GeometryPass(Config cfg)
 
 void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
 {
-    fg.addPass("geometry")
+    auto pass = fg.addPass("geometry")
         .type(PassType::Geometry)
-        .vertexLayout(layout)
-        .vertexBuffer(0, m_cfg.vertexAttributeBufferResourceName)
-        .indexBuffer(m_cfg.indexBufferResourceName)
-        .indexCount(m_cfg.indexCount)
+        .vertexLayout(layout);
+    
+    for (const auto &[binding, bufferName] : m_cfg.vertexBufferResourceNames)
+    {
+        pass.vertexBuffer(binding, bufferName);
+    }
+
+    pass.indexBuffer(m_cfg.indexBufferResourceName)
         .vertShader((paths::shaderDir / "geometry.vert.spv").string())
         .fragShader((paths::shaderDir / "geometry.frag.spv").string())
         .bind({
@@ -78,8 +82,13 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
             {.name = "gbufferMaterial", .format = VK_FORMAT_R16G16B16A16_UNORM},
             {.name = "gbufferDepth",    .format = VK_FORMAT_D32_SFLOAT, .clearValue = {.depthStencil = {1.0f, 0}}},
         })
-        .execute([indexCount = m_cfg.indexCount](CommandBuffer &cmd, VkPipelineLayout) {
-            cmd.drawIndexed(indexCount);
+        .execute([&](CommandBuffer &cmd, VkPipelineLayout) {
+            for (size_t i = 0; i < m_cfg.vertexBufferUploadResult.singleMeshResults.size(); ++i)
+            {
+                const auto &singleMesh = m_cfg.vertexBufferUploadResult.singleMeshResults[i];
+                const auto &singleMeshIndex = m_cfg.indexBufferUploadResult.singleMeshResults[i];
+                cmd.drawIndexed(singleMeshIndex.indexCount, 1, singleMeshIndex.firstIndex, singleMesh.vertexOffset, 0);
+            }
         });
 }
 

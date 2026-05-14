@@ -2,6 +2,8 @@
 
 #include "core/vulkan/VkFormatUtils.hpp"
 
+#include <stdexcept>
+
 namespace lr
 {
 
@@ -9,70 +11,93 @@ namespace
 {
 
 
-struct PackedVertexAttributes
+struct VertexBuffer
 {
-    // Buffers containing the packed vertex attributes
-    std::unordered_map<uint32_t, std::vector<std::byte>> vertexAttributeBufferMap;
+    std::vector<std::byte> vertexAttributeBuffer;
 };
 
-PackedVertexAttributes packVertexAttributes(const Mesh &mesh, const GpuMeshLayout &gpuLayout)
+// Packs the vertex attributes of the provided meshes into a contiguous buffer
+VertexBuffer packVertexAttributes(const std::vector<const Mesh*> &meshes, const VertexBufferUploadConfig &config)
 {
-    PackedVertexAttributes out;
-    const auto &mappings = gpuLayout.mappings();
-    const uint32_t vertexCount = mesh.vertexCount();
+    if (meshes.empty())
+        throw std::invalid_argument("packVertexAttributes: meshes must not be empty");
 
-    out.vertexAttributeBufferMap.reserve(gpuLayout.bindingDescriptions().size());
-    const auto &bindingDescriptions = gpuLayout.bindingDescriptions();
-    const auto &attributeDescriptions = gpuLayout.attributeDescriptions();
+    VertexBuffer out;
 
-    std::unordered_map<uint32_t, uint32_t> bindingToStride;
-    for (const auto &binding : bindingDescriptions)
+    const MeshLayout &layout = meshes[0]->layout();
+
+    uint32_t stride = 0;
+    for (const auto &attribute : config.vertexAttributeNames)
     {
-        bindingToStride[binding.binding] = binding.stride;
+        const auto *attr = layout.findPerVertexAttr(attribute);
+        if (!attr)
+            throw std::invalid_argument("packVertexAttributes: attribute '" + attribute + "' not found in mesh layout");
+        stride += attr->stride;
+    }
+    if (config.includePosition)
+    {
+        stride += sizeof(glm::vec3);
     }
 
-    for (const auto &description : bindingDescriptions)
+    uint32_t vertexCount = 0;
+    for (const auto &mesh : meshes)
     {
-        auto &buffer = out.vertexAttributeBufferMap[description.binding];
-        buffer.resize(static_cast<size_t>(vertexCount) * description.stride);
+        vertexCount += mesh->vertexCount();
     }
 
-    for (size_t i = 0; i < mappings.size(); ++i)
+    out.vertexAttributeBuffer.resize(static_cast<size_t>(vertexCount) * stride);
+
+    // Assign each attribute to an offset, based on the ordering in the config
+    std::unordered_map<std::string, uint32_t> attributeOffsets;
+    std::unordered_map<std::string, uint32_t> attributeStrides;
+    uint32_t currentOffset = 0;
+
+    // If position is included, it goes to the start of the vertex data
+    if (config.includePosition)
     {
-        const auto &mapping = mappings[i];
-        const uint32_t binding = mapping.binding;
-        const auto &attributeDescription = attributeDescriptions[i];
+        currentOffset += sizeof(glm::vec3);
+    }
+    for (const auto &attribute : config.vertexAttributeNames)
+    {
+        const auto *attr = layout.findPerVertexAttr(attribute);
+        if (!attr)
+            throw std::invalid_argument("packVertexAttributes: attribute '" + attribute + "' not found in mesh layout");
+        attributeOffsets[attribute] = currentOffset;
+        attributeStrides[attribute] = attr->stride;
+        currentOffset += attr->stride;
+    }
 
-        std::span<const std::byte> data;
-        if (mapping.isPosition)
+    uint32_t vertexOffset = 0;
+    for (size_t i = 0; i < meshes.size(); ++i)
+    {
+        const auto &mesh = *meshes[i];
+
+        auto uploadData = [&](std::span<const std::byte> data, uint32_t attributeStride, uint32_t attributeOffset)
         {
-            // Positions are a special case since they are stored explicitly as glm::vec3.
-            // So, we explicitly convert it into a span of bytes here.
-            data = { reinterpret_cast<const std::byte *>(mesh.positions.data()),
-                    mesh.positions.size() * sizeof(glm::vec3) };
-        }
-        else
+            for (uint32_t v = 0; v < mesh.vertexCount(); ++v)
+            {
+                std::byte *vertexPtr = out.vertexAttributeBuffer.data() + ((vertexOffset + v) * stride);
+                std::byte *dst = vertexPtr + attributeOffset;
+                const std::byte *src = data.data() + (v * attributeStride);
+                std::memcpy(dst, src, attributeStride);
+            }
+        };
+
+        if (config.includePosition)
         {
-            data = mesh.rawPerVertexData(mapping.name);
+            auto positionData = reinterpret_cast<const std::byte*>(mesh.positions.data());
+            std::span<const std::byte> data(positionData, mesh.vertexCount() * sizeof(glm::vec3));
+            uploadData(data, sizeof(glm::vec3), 0);
         }
 
-        const size_t currentStride = bindingToStride[binding];
-        const size_t currentAttributeOffset = attributeDescription.offset;
-        const size_t attributeSize = vkFormatByteSize(mapping.format);
-        if (data.size() < static_cast<size_t>(vertexCount) * attributeSize)
+        for (const auto &attribute : config.vertexAttributeNames)
         {
-            throw std::runtime_error(
-                "MeshUploader: attribute '" + mapping.name + "' has fewer elements than vertexCount");
+            // Get the attribute data
+            std::span<const std::byte> attributeData = mesh.rawPerVertexData(attribute);
+            uploadData(attributeData, attributeStrides[attribute], attributeOffsets[attribute]);
         }
 
-        auto &buffer = out.vertexAttributeBufferMap[binding];
-
-        for (uint32_t v = 0; v < vertexCount; ++v)
-        {
-            const std::byte *src = data.data() + (v * attributeSize);
-            std::byte *dst = buffer.data() + (v * currentStride) + currentAttributeOffset;
-            std::memcpy(dst, src, attributeSize);
-        }
+        vertexOffset += mesh.vertexCount();
     }
 
     return out;
@@ -85,61 +110,105 @@ MeshUploader::MeshUploader(ResourceRegistry &registry)
 {
 }
 
-MeshUploadResult MeshUploader::upload(const Mesh &mesh,
-                        const GpuMeshLayout &gpuLayout,
-                        const std::string &namePrefix)
+VertexBufferUploadResult MeshUploader::uploadVertexBuffer(const std::vector<const Mesh*> &meshes,
+                                                          const VertexBufferUploadConfig &config)
 {
-    MeshUploadResult result;
-    
-    // SECTION 1 - Add per-vertex attributes to GPU buffers
+    // We assume that all the meshes have the same layout, so we can use the first one to get the layout information.
+    // In a more robust implementation, we would want to check that all meshes have the same layout
 
-    const auto packed = packVertexAttributes(mesh, gpuLayout);
+    VertexBufferUploadResult result;
 
-    for (const auto &[binding, bytes] : packed.vertexAttributeBufferMap)
+    const auto packed = packVertexAttributes(meshes, config);
+
+    const std::string name = config.vertexBufferName;
+    m_registry.uploadBuffer(name,
+                            packed.vertexAttributeBuffer.data(),
+                            static_cast<VkDeviceSize>(packed.vertexAttributeBuffer.size()),
+                            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+
+    uint32_t vertexOffset = 0;
+    for (const auto &mesh : meshes)
     {
-        const std::string name = namePrefix + "_vb_" + std::to_string(binding);
-        m_registry.uploadBuffer(name,
-                                bytes.data(),
-                                static_cast<VkDeviceSize>(bytes.size()),
-                                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-        result.vertexBufferNames.emplace(binding, name);
+        result.singleMeshResults.push_back({ .vertexOffset = vertexOffset });
+        vertexOffset += mesh->vertexCount();
+    }
+    
+    return result;
+} 
+
+IndexBufferUploadResult MeshUploader::uploadIndexBuffer(const std::vector<const Mesh*> &meshes, const IndexBufferUploadConfig &config)
+{
+    IndexBufferUploadResult result;
+
+    uint32_t totalFaceCount = 0;
+    for (const auto &mesh : meshes)
+    {
+        totalFaceCount += mesh->faceCount();
     }
 
-    // SECTION 2 - Add indices to GPU buffer
-
     std::vector<std::byte> indexBuffer;
+    indexBuffer.resize(static_cast<size_t>(totalFaceCount) * sizeof(glm::uvec3));
 
-    indexBuffer.resize(static_cast<size_t>(mesh.faces.size()) * sizeof(uint32_t) * 3);
-    std::memcpy(indexBuffer.data(), mesh.faces.data(), indexBuffer.size());
+    uint32_t faceOffset = 0;
+    for (const auto &mesh : meshes)
+    {
+        result.singleMeshResults.push_back({
+            .firstIndex = faceOffset * 3, // 3 indices per face
+            .indexCount = mesh->faceCount() * 3
+        });
+        std::memcpy(indexBuffer.data() + faceOffset * sizeof(glm::uvec3),
+                    mesh->faces.data(),
+                    mesh->faceCount() * sizeof(glm::uvec3));
+        faceOffset += mesh->faceCount();
+    }
 
-    const std::string indexName = namePrefix + "_ib";
-    m_registry.uploadBuffer(indexName,
+    const std::string name = config.indexBufferName;
+    m_registry.uploadBuffer(name,
                             indexBuffer.data(),
                             static_cast<VkDeviceSize>(indexBuffer.size()),
                             VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-    result.indexBufferName = indexName;
-    result.indexCount = mesh.faceCount() * 3;
+    return result;
+}
 
-    // SECTION 3 - Add vertex groups to GPU buffer
-    // TODO: Add vertex groups including weights
-
-    // SECTION 4 - Add face group indices to GPU buffer (optional)
-    if (!mesh.faceGroups.empty())
+void MeshUploader::uploadFaceGroupBuffer(const std::vector<const Mesh*> &meshes, const FaceGroupBufferUploadConfig &config)
+{
+    bool anyFaceGroups = false;
+    uint32_t totalFaceCount = 0;
+    for (const auto &mesh : meshes)
     {
-        std::vector<std::byte> faceGroupBuffer;
-    
-        faceGroupBuffer.resize(static_cast<size_t>(mesh.faceGroups.size()) * sizeof(uint32_t));
-        std::memcpy(faceGroupBuffer.data(), mesh.faceGroups.data(), faceGroupBuffer.size());
-    
-        const std::string faceGroupName = namePrefix + "_fg";
-        m_registry.uploadBuffer(faceGroupName,
-                                faceGroupBuffer.data(),
-                                static_cast<VkDeviceSize>(faceGroupBuffer.size()),
-                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-        result.faceGroupBufferName = faceGroupName;
+        totalFaceCount += mesh->faceCount();
+        anyFaceGroups |= !mesh->faceGroups.empty();
     }
 
-    return result;
-} 
+    if (!anyFaceGroups)
+    {
+        throw std::invalid_argument("uploadFaceGroupBuffer: meshes must have face groups");
+    }
+
+    std::vector<std::byte> faceGroupBuffer;
+    faceGroupBuffer.resize(static_cast<size_t>(totalFaceCount) * sizeof(uint32_t));
+
+    uint32_t faceOffset = 0;
+    for (const auto &mesh : meshes)
+    {
+        if (mesh->faceGroups.empty())
+        {
+            std::memset(faceGroupBuffer.data() + faceOffset * sizeof(uint32_t), 0, mesh->faceCount() * sizeof(uint32_t));
+        }
+        else
+        {
+            std::memcpy(faceGroupBuffer.data() + faceOffset * sizeof(uint32_t),
+                        mesh->faceGroups.data(),
+                        mesh->faceGroups.size() * sizeof(uint32_t));
+        }
+        faceOffset += mesh->faceCount();
+    }
+
+    const std::string name = config.faceGroupBufferName;
+    m_registry.uploadBuffer(name,
+                            faceGroupBuffer.data(),
+                            static_cast<VkDeviceSize>(faceGroupBuffer.size()),
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+}
 
 } // namespace lr

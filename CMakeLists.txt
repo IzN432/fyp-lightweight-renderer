@@ -68,6 +68,8 @@ add_library(lr_core STATIC
     src/core/passes/ambientocclusion/AmbientOcclusionPass.cpp
     src/core/passes/final/FinalPass.cpp
     src/core/passes/geometry/GeometryPass.cpp
+    src/core/passes/overlaygeometry/OverlayGeometryPass.cpp
+    src/core/passes/overlaypoints/OverlayPointsPass.cpp
     src/core/passes/ibl/IblPass.cpp
     src/core/passes/pbr/PbrPass.cpp
     src/core/passes/imgui/ImguiPass.cpp
@@ -119,6 +121,10 @@ add_shaders(lr_core
     src/core/passes/ambientocclusion/hbao.comp
     src/core/passes/ambientocclusion/interleave.comp
     src/core/passes/ambientocclusion/hbao_blur.comp
+    src/core/passes/overlaygeometry/overlay_geometry.vert
+    src/core/passes/overlaygeometry/overlay_geometry.frag
+    src/core/passes/overlaypoints/overlay_points.vert
+    src/core/passes/overlaypoints/overlay_points.frag
 )
 
 # Test executable

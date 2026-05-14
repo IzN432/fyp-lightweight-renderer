@@ -15,13 +15,12 @@ public:
     struct Config
     {
         std::string cameraBufferResourceName;
-        
-        std::string vertexAttributeBufferResourceName;
+
+        std::unordered_map<uint32_t, std::string> vertexBufferResourceNames;
+        VertexBufferUploadResult vertexBufferUploadResult;
+        IndexBufferUploadResult indexBufferUploadResult;
         std::string indexBufferResourceName;
-        uint32_t    indexCount;
-
-        std::string faceGroupBufferResourceName; // supposed to be optional but currently coded in
-
+        std::string faceGroupBufferResourceName;
         std::string diffuseTextureArrayResourceName;
         std::string normalTextureArrayResourceName;
         std::string metallicRoughnessTextureArrayResourceName;

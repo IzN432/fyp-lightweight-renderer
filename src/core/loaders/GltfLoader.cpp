@@ -442,17 +442,11 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, const Glt
 
     // SECTION 2 - Extract vertex / face data from the tinygltf::Model
     
-    MeshLayout layout;
-    layout
-        .addPerVertexAttr<glm::vec3>(config.normalAttributeName)
-        .addPerVertexAttr<glm::vec4>(config.tangentAttributeName)
-        .addPerVertexAttr<glm::vec2>(config.uvAttributeName);
-    
     MeshSequence seq;
     seq.frames.reserve(model.meshes.size());
     for (size_t i = 0; i < model.meshes.size(); ++i)
     {
-        Mesh &outMesh = seq.frames.emplace_back(layout);
+        Mesh &outMesh = seq.frames.emplace_back();
         const tinygltf::Mesh &mesh = model.meshes[i];
         
         if (mesh.primitives.empty())
@@ -474,7 +468,7 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, const Glt
     // SECTION 3 - Extract material data from the tinygltf::Model and convert it to our internal Material format.
     auto outMaterials = extractMaterials(model, config);
 
-    return { std::move(seq), std::move(layout), std::move(outMaterials) };
+    return { std::move(seq), std::move(outMaterials) };
 }
 
 } // namespace lr

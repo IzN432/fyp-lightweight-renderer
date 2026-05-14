@@ -10,7 +10,6 @@ namespace lr
 struct GltfMeshLoadResult
 {
 	MeshSequence sequence;
-	MeshLayout layout;
 	std::vector<Material> materials;
 };
 

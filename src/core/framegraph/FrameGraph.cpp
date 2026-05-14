@@ -637,6 +637,7 @@ void FrameGraph::buildPipelines()
         cfg.vertexBindings           = pass.vertexBindings;
         cfg.vertexAttributes         = pass.vertexAttributes;
         cfg.passType                 = pass.type;
+        cfg.topology                 = pass.topology;
         cfg.colorAttachmentFormats   = std::move(colorFormats);
         cfg.depthAttachmentFormat    = depthFormat;
         cfg.layout                   = m_compiled[i].pipelineLayout;

@@ -67,6 +67,9 @@ struct PassDesc
     uint32_t           pushConstantSize   = 0;
     VkShaderStageFlags pushConstantStages = VK_SHADER_STAGE_COMPUTE_BIT;
 
+    // Primitive topology for Geometry passes — defaults to triangle list.
+    VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
     // Vertex input layout (Geometry passes only) — extracted from GpuMeshLayout at build time
     std::vector<VkVertexInputBindingDescription>   vertexBindings;
     std::vector<VkVertexInputAttributeDescription> vertexAttributes;
@@ -118,6 +121,8 @@ public:
         m_desc.pushConstantStages = stages;
         return *this;
     }
+    // Set the primitive topology (Geometry passes only). Defaults to triangle list.
+    PassBuilder &topology(VkPrimitiveTopology t)                  { m_desc.topology = t;          return *this; }
     // Set the vertex input layout from a GpuMeshLayout (Geometry passes only).
     // Binding and attribute descriptions are extracted immediately so the layout
     // object does not need to outlive the PassBuilder.

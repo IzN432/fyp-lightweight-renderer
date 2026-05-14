@@ -10,7 +10,6 @@ namespace lr
 struct ObjMeshLoadResult
 {
 	Mesh mesh;
-	MeshLayout layout;
 	std::vector<Material> materials;
 };
 

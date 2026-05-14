@@ -15,12 +15,42 @@ namespace lr
  * in the ResourceRegistry for use in frame graph passes. Also includes indexCount
  * for use in the draw call. For example usage, check out GeometryPass.cpp.
  */
-struct MeshUploadResult
+struct VertexBufferUploadPerMeshResult
 {
-    std::unordered_map<uint32_t, std::string> vertexBufferNames;
-    std::string indexBufferName;
-    std::string faceGroupBufferName;
+    uint32_t vertexOffset = 0;
+};
+
+struct VertexBufferUploadResult
+{
+    std::vector<VertexBufferUploadPerMeshResult> singleMeshResults; // details to separate the meshes up
+};
+
+struct VertexBufferUploadConfig
+{
+    std::string vertexBufferName;
+    std::vector<std::string> vertexAttributeNames;
+    bool includePosition = false; // whether to include the position attribute
+};
+
+struct IndexBufferUploadPerMeshResult
+{
+    uint32_t firstIndex = 0;
     uint32_t indexCount = 0;
+};
+
+struct IndexBufferUploadResult
+{
+    std::vector<IndexBufferUploadPerMeshResult> singleMeshResults; // details to separate the meshes up
+};
+
+struct IndexBufferUploadConfig
+{
+    std::string indexBufferName;
+};
+
+struct FaceGroupBufferUploadConfig
+{
+    std::string faceGroupBufferName;
 };
 
 /**
@@ -33,9 +63,14 @@ class MeshUploader
 public:
     explicit MeshUploader(ResourceRegistry &registry);
 
-    MeshUploadResult upload(const Mesh &mesh,
-                            const GpuMeshLayout &gpuLayout,
-                            const std::string &namePrefix = "mesh");
+    VertexBufferUploadResult uploadVertexBuffer(const std::vector<const Mesh*> &meshes,
+                                                const VertexBufferUploadConfig &config);
+    
+    IndexBufferUploadResult uploadIndexBuffer(const std::vector<const Mesh*> &meshes,
+                           const IndexBufferUploadConfig &config);
+
+    void uploadFaceGroupBuffer(const std::vector<const Mesh*> &meshes,
+                               const FaceGroupBufferUploadConfig &config);
 
 private:
     ResourceRegistry &m_registry;

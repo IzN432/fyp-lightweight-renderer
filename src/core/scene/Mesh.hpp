@@ -94,6 +94,7 @@ public:
         bool        isPosition = false;
     };
 
+    GpuMeshLayout() = default;
     explicit GpuMeshLayout(const MeshLayout &layout);
 
     // Map one per-vertex attribute to a Vulkan binding/location/format.
@@ -107,7 +108,7 @@ public:
     const std::vector<AttributeMapping> &mappings() const { return m_mappings; }
 
 private:
-    const MeshLayout             &m_layout;
+    MeshLayout                    m_layout;
     std::vector<AttributeMapping> m_mappings;
 };
 
@@ -124,7 +125,7 @@ struct VertexGroupEntry
 class Mesh
 {
 public:
-    explicit Mesh(const MeshLayout &layout);
+    Mesh() = default;
 
     Mesh(const Mesh &)            = delete;
     Mesh &operator=(const Mesh &) = delete;
@@ -321,7 +322,7 @@ private:
                  const std::string &name,
                  uint32_t index);
 
-    const MeshLayout &m_layout;
+    MeshLayout m_layout;
 
     std::unordered_map<std::string, AttributeStore> m_perVertex;
     std::unordered_map<std::string, AttributeStore> m_perFace;
@@ -451,7 +452,10 @@ T &Mesh::implGetAt(std::unordered_map<std::string, AttributeStore> &stores,
 
 template<typename T>
 void Mesh::setPerVertexArray(const std::string &n, std::span<const T> d)
-{ implSetArray(m_perVertex, m_layout.perVertexAttrs(), n, d, m_vertexCount, m_vertexCountExplicit); }
+{
+    if (!m_layout.findPerVertexAttr(n)) m_layout.addPerVertexAttr<T>(n);
+    implSetArray(m_perVertex, m_layout.perVertexAttrs(), n, d, m_vertexCount, m_vertexCountExplicit);
+}
 
 template<typename T>
 void Mesh::setPerVertexAt(const std::string &n, uint32_t i, const T &v)
@@ -474,7 +478,10 @@ const T &Mesh::perVertexAt(const std::string &n, uint32_t i) const
 
 template<typename T>
 void Mesh::setPerFaceArray(const std::string &n, std::span<const T> d)
-{ implSetArray(m_perFace, m_layout.perFaceAttrs(), n, d, m_faceCount, m_faceCountExplicit); }
+{
+    if (!m_layout.findPerFaceAttr(n)) m_layout.addPerFaceAttr<T>(n);
+    implSetArray(m_perFace, m_layout.perFaceAttrs(), n, d, m_faceCount, m_faceCountExplicit);
+}
 
 template<typename T>
 void Mesh::setPerFaceAt(const std::string &n, uint32_t i, const T &v)
@@ -497,7 +504,10 @@ const T &Mesh::perFaceAt(const std::string &n, uint32_t i) const
 
 template<typename T>
 void Mesh::setFaceGroupAttributeArray(const std::string &n, std::span<const T> d)
-{ implSetArray(m_faceGroup, m_layout.faceGroupAttrs(), n, d, m_faceGroupCount, m_faceGroupCountExplicit); }
+{
+    if (!m_layout.findFaceGroupAttr(n)) m_layout.addFaceGroupAttr<T>(n);
+    implSetArray(m_faceGroup, m_layout.faceGroupAttrs(), n, d, m_faceGroupCount, m_faceGroupCountExplicit);
+}
 
 template<typename T>
 void Mesh::setFaceGroupAttributeAt(const std::string &n, uint32_t i, const T &v)
@@ -520,7 +530,10 @@ const T &Mesh::getFaceGroupAttributeAt(const std::string &n, uint32_t i) const
 
 template<typename T>
 void Mesh::setVertexGroupAttributeArray(const std::string &n, std::span<const T> d)
-{ implSetArray(m_vertexGroup, m_layout.vertexGroupAttrs(), n, d, m_vertexGroupCount, m_vertexGroupCountExplicit); }
+{
+    if (!m_layout.findVertexGroupAttr(n)) m_layout.addVertexGroupAttr<T>(n);
+    implSetArray(m_vertexGroup, m_layout.vertexGroupAttrs(), n, d, m_vertexGroupCount, m_vertexGroupCountExplicit);
+}
 
 template<typename T>
 void Mesh::setVertexGroupAttributeAt(const std::string &n, uint32_t i, const T &v)

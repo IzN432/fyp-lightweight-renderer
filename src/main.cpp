@@ -1,10 +1,13 @@
 #include "core/app/Viewer.hpp"
 #include "core/loaders/GltfLoader.hpp"
+#include "core/overlay/OverlayMesh.hpp"
 #include "core/passes/final/FinalPass.hpp"
 #include "core/passes/geometry/GeometryPass.hpp"
 #include "core/passes/ibl/IblPass.hpp"
 #include "core/passes/pbr/PbrPass.hpp"
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
+#include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
+#include "core/passes/overlaypoints/OverlayPointsPass.hpp"
 #include "core/scene/Camera.hpp"
 #include "core/scene/Light.hpp"
 #include "core/scene/Mesh.hpp"
@@ -92,14 +95,15 @@ try
         .baseMetallicName = "baseMetallic",
         .baseEmissiveName = "baseEmissive",
     };
-    auto [sequence, layout, materials] = gltfLoader.load(meshPath, config);
+    auto [sequence, materials] = gltfLoader.load(meshPath, config);
 
     if (sequence.empty())
         throw std::runtime_error("GltfLoader returned empty sequence for '" + meshPath.string() + "'");
 
     lr::SceneObject* meshObject = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
     meshObject->addComponent<lr::Transform>();
-    auto &staticMesh = meshObject->addComponent<lr::StaticMesh>(sequence.frames.front(), layout, materials);
+    
+    auto &staticMesh = meshObject->addComponent<lr::StaticMesh>(sequence.frames.front(), materials);
     meshObject->name = "Mesh Object";
 
     // -------------------------------------------------------------------------
@@ -136,17 +140,24 @@ try
 
     lightUploader.upload(sceneLights);
     
-    lr::GpuMeshLayout gpuMeshLayout(layout);
-    gpuMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
-    gpuMeshLayout.map(config.normalAttributeName, 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
-    gpuMeshLayout.map(config.tangentAttributeName, 0, 2, VK_FORMAT_R32G32B32A32_SFLOAT);
-    gpuMeshLayout.map(config.uvAttributeName, 0, 3, VK_FORMAT_R32G32_SFLOAT);
-
+    // Upload the main scene geometry
     lr::MeshUploader meshUploader(viewer.resources());
-    const lr::MeshUploadResult mesh = meshUploader.upload(
-        staticMesh.mesh(),
-        gpuMeshLayout,
-        "mesh");
+    const std::string mainMeshVertexBufferName = "meshVertexBuffer";
+    const std::string mainMeshIndexBufferName = "meshIndexBuffer";
+    const std::string mainMeshFaceGroupBufferName = "meshFaceGroupBuffer";
+    const lr::VertexBufferUploadResult mesh = meshUploader.uploadVertexBuffer(
+        { &staticMesh.mesh() },
+        { .vertexBufferName = mainMeshVertexBufferName,
+          .vertexAttributeNames = { config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName },
+          .includePosition = true });
+    const lr::IndexBufferUploadResult indexBuffer = meshUploader.uploadIndexBuffer(
+        { &staticMesh.mesh() },
+        { .indexBufferName = mainMeshIndexBufferName });
+    meshUploader.uploadFaceGroupBuffer(
+        { &staticMesh.mesh() },
+        { .faceGroupBufferName = mainMeshFaceGroupBufferName });
+
+    const lr::OverlayMesh &cube = lr::OverlayMesh::cube();
 
     // This matches the expected layout in geometry.frag
     lr::GpuMaterialLayout gpuMaterialLayout;
@@ -183,21 +194,26 @@ try
 
     lr::GeometryPass geometryPass({
         .cameraBufferResourceName = cameraUploader.bufferName(),
-
-        .vertexAttributeBufferResourceName = mesh.vertexBufferNames.at(0),
-        .indexBufferResourceName = mesh.indexBufferName,
-        .indexCount = mesh.indexCount,
-
-        .faceGroupBufferResourceName = mesh.faceGroupBufferName,
-
+        .vertexBufferResourceNames = { {0, mainMeshVertexBufferName} },
+        .vertexBufferUploadResult = mesh,
+        .indexBufferUploadResult = indexBuffer,
+        .indexBufferResourceName = mainMeshIndexBufferName,
+        .faceGroupBufferResourceName = mainMeshFaceGroupBufferName,
         .diffuseTextureArrayResourceName = material.textureNameMap.at(config.diffuseTextureName),
         .normalTextureArrayResourceName = material.textureNameMap.at(config.normalTextureName),
         .metallicRoughnessTextureArrayResourceName = material.textureNameMap.at(config.metallicRoughnessTextureName),
         .emissiveTextureArrayResourceName = material.textureNameMap.at(config.emissiveTextureName),
         .materialBufferResourceName = material.materialInfoBufferName,
-        
+
         .materialCount = static_cast<uint32_t>(staticMesh.materials().size()),
     });
+    lr::GpuMeshLayout gpuMeshLayout(staticMesh.mesh().layout());
+
+    gpuMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT); // (location = 0)
+    gpuMeshLayout.map(config.normalAttributeName, 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
+    gpuMeshLayout.map(config.tangentAttributeName, 0, 2, VK_FORMAT_R32G32B32A32_SFLOAT);
+    gpuMeshLayout.map(config.uvAttributeName, 0, 3, VK_FORMAT_R32G32_SFLOAT);
+
     geometryPass.build(viewer.frameGraph(), gpuMeshLayout);
 
     lr::AmbientOcclusionPass aoPass({
@@ -214,6 +230,26 @@ try
     });
     pbrPass.build(viewer.frameGraph());
     
+    lr::OverlayGeometryPass overlayGeometryPass({
+        .cameraBufferResourceName = cameraUploader.bufferName(),
+    });
+    overlayGeometryPass.uploadResources(viewer.resources(), { &cube.mesh() });
+    overlayGeometryPass.build(viewer.frameGraph());
+
+    lr::GpuMeshLayout pointsMeshLayout(staticMesh.mesh().layout());
+    pointsMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
+    pointsMeshLayout.map(config.normalAttributeName,   0, 1, VK_FORMAT_R32G32B32_SFLOAT);
+    pointsMeshLayout.map(config.tangentAttributeName,  0, 2, VK_FORMAT_R32G32B32A32_SFLOAT);
+    pointsMeshLayout.map(config.uvAttributeName,       0, 3, VK_FORMAT_R32G32_SFLOAT);
+
+    lr::OverlayPointsPass overlayPointsPass({
+        .cameraBufferResourceName    = cameraUploader.bufferName(),
+        .positionBufferResourceName  = mainMeshVertexBufferName,
+        .positionBufferUploadResult  = mesh,
+        .vertexCounts                = { staticMesh.mesh().vertexCount() },
+    });
+    overlayPointsPass.build(viewer.frameGraph(), pointsMeshLayout);
+
     lr::FinalPass finalPass({
         .cameraBufferResourceName = cameraUploader.bufferName(),
         .swapchainFormat = swapchainFormat,
