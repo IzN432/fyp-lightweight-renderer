@@ -10,9 +10,8 @@ namespace lr
 struct OverlayPointsPC
 {
     glm::mat4 model           = glm::mat4(1.0f);
-    glm::vec3 color           = glm::vec3(1.0f, 1.0f, 0.0f);
     float     pointSize       = 2.0f;
-    float     occludedOpacity = 1.0f;
+    float     occludedOpacity = 0.3f;
 };
 
 OverlayPointsPass::OverlayPointsPass(Config cfg)
@@ -28,6 +27,7 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                     .vertexLayout(layout);
 
     pass.vertexBuffer(0, m_cfg.positionBufferResourceName);
+    pass.vertexBuffer(1, m_cfg.colorBufferResourceName);
 
     pass.vertShader((paths::shaderDir / "overlay_points.vert.spv").string())
         .fragShader((paths::shaderDir / "overlay_points.frag.spv").string())
@@ -51,7 +51,7 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
             {.name = "overlayPoints", .format = VK_FORMAT_R16G16B16A16_SFLOAT},
         })
         .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
-            const OverlayPointsPC pc{.pointSize = m_cfg.pointSize, .occludedOpacity = m_cfg.occludedOpacity};
+            const OverlayPointsPC pc{};
             for (size_t i = 0; i < m_cfg.positionBufferUploadResult.singleMeshResults.size(); ++i)
             {
                 const auto &vert = m_cfg.positionBufferUploadResult.singleMeshResults[i];

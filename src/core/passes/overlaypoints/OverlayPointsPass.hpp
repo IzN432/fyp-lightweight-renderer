@@ -16,10 +16,9 @@ public:
     {
         std::string              cameraBufferResourceName;
         std::string              positionBufferResourceName;
+        std::string              colorBufferResourceName;
         VertexBufferUploadResult positionBufferUploadResult;
         std::vector<uint32_t>    vertexCounts;
-        float                    pointSize       = 2.0f;
-        float                    occludedOpacity = 0.5f;
     };
 
     explicit OverlayPointsPass(Config cfg);

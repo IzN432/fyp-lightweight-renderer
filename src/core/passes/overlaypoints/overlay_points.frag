@@ -7,8 +7,7 @@ layout(location = 0) out vec4 outColor;
 layout(set = 0, binding = 1) uniform sampler2D gbufferDepth;
 
 layout(push_constant) uniform PC {
-    layout(offset = 64) vec3 color;
-    layout(offset = 80) float occludedOpacity;
+    layout(offset = 68) float occludedOpacity;
 } pc;
 
 void main()

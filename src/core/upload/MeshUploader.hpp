@@ -53,6 +53,13 @@ struct FaceGroupBufferUploadConfig
     std::string faceGroupBufferName;
 };
 
+struct VertexGroupBufferUploadConfig
+{
+    std::string entriesBufferName; // VertexGroupEntry[] — flat (groupIndex, weight) pairs
+    std::string offsetsBufferName; // uint32_t[] per vertex — start index into entries
+    std::string countsBufferName;  // uint32_t[] per vertex — number of entries for that vertex
+};
+
 /**
  * Uploads a Mesh to GPU buffers according to a provided GpuMeshLayout, along with the materials used by the mesh.
  * The data is stored in the ResourceRegistry provided at initialization. The returned MeshUploadResult contains
@@ -71,6 +78,9 @@ public:
 
     void uploadFaceGroupBuffer(const std::vector<const Mesh*> &meshes,
                                const FaceGroupBufferUploadConfig &config);
+
+    void uploadVertexGroupBuffers(const std::vector<const Mesh*> &meshes,
+                                  const VertexGroupBufferUploadConfig &config);
 
 private:
     ResourceRegistry &m_registry;

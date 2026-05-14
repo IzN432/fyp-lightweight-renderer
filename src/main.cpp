@@ -103,6 +103,11 @@ try
     lr::SceneObject* meshObject = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
     meshObject->addComponent<lr::Transform>();
     
+    {
+        lr::Mesh &m = sequence.frames.front();
+        std::vector<glm::vec3> colors(m.vertexCount(), glm::vec3(1.0f, 0.0f, 1.0f));
+        m.setPerVertexArray("color", std::span<const glm::vec3>(colors));
+    }
     auto &staticMesh = meshObject->addComponent<lr::StaticMesh>(sequence.frames.front(), materials);
     meshObject->name = "Mesh Object";
 
@@ -142,14 +147,24 @@ try
     
     // Upload the main scene geometry
     lr::MeshUploader meshUploader(viewer.resources());
-    const std::string mainMeshVertexBufferName = "meshVertexBuffer";
-    const std::string mainMeshIndexBufferName = "meshIndexBuffer";
+    const std::string mainMeshPositionBufferName  = "meshPositionBuffer";
+    const std::string mainMeshVertexBufferName    = "meshVertexBuffer";
+    const std::string mainMeshColorBufferName     = "meshColorBuffer";
+    const std::string mainMeshIndexBufferName     = "meshIndexBuffer";
     const std::string mainMeshFaceGroupBufferName = "meshFaceGroupBuffer";
-    const lr::VertexBufferUploadResult mesh = meshUploader.uploadVertexBuffer(
+
+    const lr::VertexBufferUploadResult meshPositions = meshUploader.uploadVertexBuffer(
         { &staticMesh.mesh() },
-        { .vertexBufferName = mainMeshVertexBufferName,
-          .vertexAttributeNames = { config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName },
-          .includePosition = true });
+        { .vertexBufferName = mainMeshPositionBufferName,
+          .includePosition  = true });
+    meshUploader.uploadVertexBuffer(
+        { &staticMesh.mesh() },
+        { .vertexBufferName       = mainMeshVertexBufferName,
+          .vertexAttributeNames   = { config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName } });
+    meshUploader.uploadVertexBuffer(
+        { &staticMesh.mesh() },
+        { .vertexBufferName     = mainMeshColorBufferName,
+          .vertexAttributeNames = { "color" } });
     const lr::IndexBufferUploadResult indexBuffer = meshUploader.uploadIndexBuffer(
         { &staticMesh.mesh() },
         { .indexBufferName = mainMeshIndexBufferName });
@@ -193,10 +208,10 @@ try
         viewer.frameGraph().resources().getImage("swapchain")->format;
 
     lr::GeometryPass geometryPass({
-        .cameraBufferResourceName = cameraUploader.bufferName(),
-        .vertexBufferResourceNames = { {0, mainMeshVertexBufferName} },
-        .vertexBufferUploadResult = mesh,
-        .indexBufferUploadResult = indexBuffer,
+        .cameraBufferResourceName  = cameraUploader.bufferName(),
+        .vertexBufferResourceNames = { {0, mainMeshPositionBufferName}, {1, mainMeshVertexBufferName} },
+        .vertexBufferUploadResult  = meshPositions,
+        .indexBufferUploadResult   = indexBuffer,
         .indexBufferResourceName = mainMeshIndexBufferName,
         .faceGroupBufferResourceName = mainMeshFaceGroupBufferName,
         .diffuseTextureArrayResourceName = material.textureNameMap.at(config.diffuseTextureName),
@@ -209,10 +224,10 @@ try
     });
     lr::GpuMeshLayout gpuMeshLayout(staticMesh.mesh().layout());
 
-    gpuMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT); // (location = 0)
-    gpuMeshLayout.map(config.normalAttributeName, 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
-    gpuMeshLayout.map(config.tangentAttributeName, 0, 2, VK_FORMAT_R32G32B32A32_SFLOAT);
-    gpuMeshLayout.map(config.uvAttributeName, 0, 3, VK_FORMAT_R32G32_SFLOAT);
+    gpuMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
+    gpuMeshLayout.map(config.normalAttributeName,  1, 1, VK_FORMAT_R32G32B32_SFLOAT);
+    gpuMeshLayout.map(config.tangentAttributeName, 1, 2, VK_FORMAT_R32G32B32A32_SFLOAT);
+    gpuMeshLayout.map(config.uvAttributeName,      1, 3, VK_FORMAT_R32G32_SFLOAT);
 
     geometryPass.build(viewer.frameGraph(), gpuMeshLayout);
 
@@ -238,15 +253,14 @@ try
 
     lr::GpuMeshLayout pointsMeshLayout(staticMesh.mesh().layout());
     pointsMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
-    pointsMeshLayout.map(config.normalAttributeName,   0, 1, VK_FORMAT_R32G32B32_SFLOAT);
-    pointsMeshLayout.map(config.tangentAttributeName,  0, 2, VK_FORMAT_R32G32B32A32_SFLOAT);
-    pointsMeshLayout.map(config.uvAttributeName,       0, 3, VK_FORMAT_R32G32_SFLOAT);
+    pointsMeshLayout.map("color", 1, 1, VK_FORMAT_R32G32B32_SFLOAT);
 
     lr::OverlayPointsPass overlayPointsPass({
-        .cameraBufferResourceName    = cameraUploader.bufferName(),
-        .positionBufferResourceName  = mainMeshVertexBufferName,
-        .positionBufferUploadResult  = mesh,
-        .vertexCounts                = { staticMesh.mesh().vertexCount() },
+        .cameraBufferResourceName   = cameraUploader.bufferName(),
+        .positionBufferResourceName = mainMeshPositionBufferName,
+        .colorBufferResourceName    = mainMeshColorBufferName,
+        .positionBufferUploadResult = meshPositions,
+        .vertexCounts               = { staticMesh.mesh().vertexCount() },
     });
     overlayPointsPass.build(viewer.frameGraph(), pointsMeshLayout);
 

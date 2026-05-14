@@ -211,4 +211,72 @@ void MeshUploader::uploadFaceGroupBuffer(const std::vector<const Mesh*> &meshes,
                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 }
 
+void MeshUploader::uploadVertexGroupBuffers(const std::vector<const Mesh*> &meshes,
+                                            const VertexGroupBufferUploadConfig &config)
+{
+    bool anyVertexGroups = false;
+    uint32_t totalVertexCount = 0;
+    uint32_t totalEntryCount  = 0;
+    for (const auto &mesh : meshes)
+    {
+        totalVertexCount += mesh->vertexCount();
+        if (mesh->layout().vertexGroupsEnabled())
+        {
+            anyVertexGroups = true;
+            totalEntryCount += static_cast<uint32_t>(mesh->rawGroupEntries().size());
+        }
+    }
+
+    if (!anyVertexGroups)
+        throw std::invalid_argument("uploadVertexGroupBuffers: meshes must have vertex groups enabled");
+
+    // Guarantee a non-zero entries buffer (Vulkan disallows zero-size storage buffers)
+    std::vector<VertexGroupEntry> entries(std::max(totalEntryCount, 1u));
+    std::vector<uint32_t>         offsets(totalVertexCount, 0u);
+    std::vector<uint32_t>         counts(totalVertexCount,  0u);
+
+    uint32_t vertexCursor = 0;
+    uint32_t entryCursor  = 0;
+    for (const auto &mesh : meshes)
+    {
+        const uint32_t vCount = mesh->vertexCount();
+        if (mesh->layout().vertexGroupsEnabled())
+        {
+            auto meshEntries = mesh->rawGroupEntries();
+            auto meshOffsets = mesh->rawGroupOffsets();
+            auto meshCounts  = mesh->rawGroupCounts();
+
+            std::memcpy(entries.data() + entryCursor,
+                        meshEntries.data(),
+                        meshEntries.size() * sizeof(VertexGroupEntry));
+
+            for (uint32_t v = 0; v < vCount; ++v)
+            {
+                offsets[vertexCursor + v] = meshOffsets[v] + entryCursor;
+                counts [vertexCursor + v] = meshCounts[v];
+            }
+
+            entryCursor += static_cast<uint32_t>(meshEntries.size());
+        }
+        // meshes without vertex groups: offsets/counts stay zero-initialised
+
+        vertexCursor += vCount;
+    }
+
+    m_registry.uploadBuffer(config.entriesBufferName,
+                            entries.data(),
+                            static_cast<VkDeviceSize>(entries.size() * sizeof(VertexGroupEntry)),
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+
+    m_registry.uploadBuffer(config.offsetsBufferName,
+                            offsets.data(),
+                            static_cast<VkDeviceSize>(offsets.size() * sizeof(uint32_t)),
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+
+    m_registry.uploadBuffer(config.countsBufferName,
+                            counts.data(),
+                            static_cast<VkDeviceSize>(counts.size() * sizeof(uint32_t)),
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+}
+
 } // namespace lr
