@@ -99,6 +99,7 @@ void ResourceRegistry::registerExternalImage(const std::string &name,
     entry.image.format  = format;   // mirror so getImage()->format is valid
     entry.aspect        = aspect;
     entry.persistent    = true;
+    entry.external      = true;
     entry.mipLevels  = 1;
     entry.arrayLayers = 1;
     // entry.image left zero-initialised (VK_NULL_HANDLE handles)
@@ -288,6 +289,12 @@ void ResourceRegistry::rebuild(VkExtent2D newExtent)
 
     for (auto &[name, entry] : m_images)
     {
+        if (entry.external)
+        {
+            entry.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            continue;
+        }
+
         if (entry.persistent)
             continue;
 

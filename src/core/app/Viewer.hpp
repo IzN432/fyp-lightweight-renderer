@@ -67,6 +67,11 @@ public:
     // -----------------------------------------------------------------------
     void run();
 
+    // True once at least one frame has been fully executed since the last
+    // swapchain rebuild. Use to guard GPU readbacks that assume images are
+    // in their post-render layout.
+    bool hasRenderedAtLeastOneFrame() const { return m_frameExecuted; }
+
 private:
     void recreateSwapchain();
 
@@ -85,7 +90,8 @@ private:
 
     std::function<void()>              m_guiCallback;
     std::function<void(float, VkExtent2D)> m_updateCallback;
-    double m_lastFrameTime = 0.0;
+    double m_lastFrameTime  = 0.0;
+    bool   m_frameExecuted  = false;
 };
 
 }  // namespace lr

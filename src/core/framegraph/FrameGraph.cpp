@@ -119,6 +119,7 @@ void FrameGraph::compile()
     spdlog::info("FrameGraph: compiling {} passes...", m_passes.size());
 
     destroyCompiledPasses();
+    m_descriptorAllocator.reset();
     m_compiled.clear();
     m_compiled.resize(m_passes.size());
 

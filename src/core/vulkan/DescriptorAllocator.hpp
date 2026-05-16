@@ -27,6 +27,10 @@ public:
                                            uint32_t pushConstantSize = 0,
                                            VkShaderStageFlags pushStages = 0);
 
+    // Free all allocated descriptor sets and destroy all cached layouts/pipeline
+    // layouts. Call before recompiling passes so the pool doesn't exhaust.
+    void reset();
+
     // Allocate a descriptor set from the internal pool.
     VkDescriptorSet allocate(VkDescriptorSetLayout layout);
 

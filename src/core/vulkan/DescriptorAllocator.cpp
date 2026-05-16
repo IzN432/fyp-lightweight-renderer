@@ -39,6 +39,17 @@ DescriptorAllocator::~DescriptorAllocator()
     vkDestroyDescriptorPool(m_device, m_pool, nullptr);
 }
 
+void DescriptorAllocator::reset()
+{
+    for (auto layout : m_layouts)
+        vkDestroyDescriptorSetLayout(m_device, layout, nullptr);
+    for (auto layout : m_pipelineLayouts)
+        vkDestroyPipelineLayout(m_device, layout, nullptr);
+    m_layouts.clear();
+    m_pipelineLayouts.clear();
+    vkResetDescriptorPool(m_device, m_pool, 0);
+}
+
 VkDescriptorSetLayout DescriptorAllocator::createLayout(
     std::span<const VkDescriptorSetLayoutBinding> bindings)
 {

@@ -406,7 +406,7 @@ try
             : static_cast<float>(extent.width) / static_cast<float>(extent.height);
 
         // ---- Gizmo hover detection (GPU readback of previous frame's picking image) ----
-        if (!selectedVertices.empty() && !ImGui::GetIO().WantCaptureMouse)
+        if (viewer.hasRenderedAtLeastOneFrame() && !selectedVertices.empty() && !ImGui::GetIO().WantCaptureMouse)
         {
             double mx, my;
             viewer.input().getMousePos(mx, my);

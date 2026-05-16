@@ -58,6 +58,7 @@ void Viewer::recreateSwapchain()
 {
     m_swapchain->recreate();
     m_fg->resize(m_swapchain->getExtent());
+    m_frameExecuted = false;
 }
 
 void Viewer::run()
@@ -118,6 +119,7 @@ void Viewer::run()
                                m_swapchain->getImage(imageIndex),
                                m_swapchain->getImageView(imageIndex));
         m_fg->execute(cmd);
+        m_frameExecuted = true;
 
         Renderer::transitionForPresent(cmd, m_swapchain->getImage(imageIndex));
 

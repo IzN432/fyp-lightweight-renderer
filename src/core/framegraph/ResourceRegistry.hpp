@@ -146,6 +146,7 @@ private:
         VkImageAspectFlags aspect;
         VkExtent2D extent;
         bool persistent = false;
+        bool external   = false;
         // Extended image properties — used by allocateImageEntry and rebuild
         uint32_t mipLevels = 1;
         uint32_t arrayLayers = 1;
