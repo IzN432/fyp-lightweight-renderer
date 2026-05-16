@@ -72,7 +72,11 @@ public:
 
     VertexBufferUploadResult uploadVertexBuffer(const std::vector<const Mesh*> &meshes,
                                                 const VertexBufferUploadConfig &config);
-    
+
+    // Re-pack and push new vertex data into a buffer previously uploaded with dynamic=true.
+    void updateVertexBuffer(const std::vector<const Mesh*> &meshes,
+                            const VertexBufferUploadConfig &config);
+
     IndexBufferUploadResult uploadIndexBuffer(const std::vector<const Mesh*> &meshes,
                            const IndexBufferUploadConfig &config);
 

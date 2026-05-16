@@ -136,6 +136,15 @@ VertexBufferUploadResult MeshUploader::uploadVertexBuffer(const std::vector<cons
     return result;
 } 
 
+void MeshUploader::updateVertexBuffer(const std::vector<const Mesh*> &meshes,
+                                       const VertexBufferUploadConfig &config)
+{
+    const auto packed = packVertexAttributes(meshes, config);
+    m_registry.reuploadBuffer(config.vertexBufferName,
+                              packed.vertexAttributeBuffer.data(),
+                              static_cast<VkDeviceSize>(packed.vertexAttributeBuffer.size()));
+}
+
 IndexBufferUploadResult MeshUploader::uploadIndexBuffer(const std::vector<const Mesh*> &meshes, const IndexBufferUploadConfig &config)
 {
     IndexBufferUploadResult result;

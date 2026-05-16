@@ -4,6 +4,7 @@ layout(location = 0) in vec3 inWorldPos;
 layout(location = 1) in vec3 inNormal;
 
 layout(location = 0) out vec4 outColor;
+layout(location = 1) out uint outPickIndex;
 
 layout(set = 0, binding = 0) uniform CameraUbo
 {
@@ -21,6 +22,7 @@ layout(set = 0, binding = 1) uniform sampler2D gbufferDepth;
 layout(push_constant) uniform PC {
     layout(offset = 64) vec3 overlayColor;
     layout(offset = 76) float occludedOpacity;
+    layout(offset = 80) uint instanceIndex;
 } pc;
 
 void main()
@@ -32,4 +34,5 @@ void main()
 
     bool isOccluded = depth > sceneDepth + 1e-4;
     outColor = vec4(pc.overlayColor, isOccluded ? pc.occludedOpacity : 1.0);
+    outPickIndex = pc.instanceIndex;
 }

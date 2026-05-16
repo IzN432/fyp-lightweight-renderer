@@ -72,6 +72,7 @@ public:
     }
 
     const std::vector<Material>& materials() const { return m_materials; }
+    Mesh&       mesh()       { return m_mesh; }
     const Mesh& mesh() const { return m_mesh; }
     const MeshLayout& layout() const { return m_mesh.layout(); }
 };

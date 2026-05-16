@@ -51,6 +51,7 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
             {.name = "overlayPoints", .format = VK_FORMAT_R16G16B16A16_SFLOAT},
         })
         .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
+            if (!m_enabled) return;
             const OverlayPointsPC pc{};
             for (size_t i = 0; i < m_cfg.positionBufferUploadResult.singleMeshResults.size(); ++i)
             {

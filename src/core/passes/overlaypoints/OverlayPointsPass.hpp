@@ -25,8 +25,11 @@ public:
 
     void build(FrameGraph &fg, const GpuMeshLayout &layout) const;
 
+    void setEnabled(bool e) { m_enabled = e; }
+
 private:
-    Config m_cfg;
+    Config       m_cfg;
+    mutable bool m_enabled = true;
 };
 
 }  // namespace lr

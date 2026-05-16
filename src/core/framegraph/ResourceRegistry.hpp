@@ -122,6 +122,10 @@ public:
     // data must point to at least size bytes. Call once per frame before fg.execute().
     void updateBuffer(const std::string &name, const void *data, VkDeviceSize size);
 
+    // Queue a staging upload to an existing static buffer (created via uploadBuffer()).
+    // The copy is folded into the next flushUploads() call (i.e. the next frame's execute).
+    void reuploadBuffer(const std::string &name, const void *data, VkDeviceSize size);
+
     AllocatedBuffer *getBuffer(const std::string &name);
     const AllocatedBuffer *getBuffer(const std::string &name) const;
     bool hasBuffer(const std::string &name) const;
