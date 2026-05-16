@@ -59,6 +59,7 @@ add_library(lr_core STATIC
 
     src/core/framegraph/ResourceRegistry.cpp
     src/core/framegraph/FrameGraph.cpp
+    src/core/framegraph/ImageReadback.cpp
 
     src/core/pipeline/GraphicsPipeline.cpp
     src/core/pipeline/ComputePipeline.cpp
@@ -70,6 +71,7 @@ add_library(lr_core STATIC
     src/core/passes/geometry/GeometryPass.cpp
     src/core/passes/overlaygeometry/OverlayGeometryPass.cpp
     src/core/passes/overlaypoints/OverlayPointsPass.cpp
+
     src/core/passes/ibl/IblPass.cpp
     src/core/passes/pbr/PbrPass.cpp
     src/core/passes/imgui/ImguiPass.cpp
@@ -125,6 +127,7 @@ add_shaders(lr_core
     src/core/passes/overlaygeometry/overlay_geometry.frag
     src/core/passes/overlaypoints/overlay_points.vert
     src/core/passes/overlaypoints/overlay_points.frag
+
 )
 
 # Test executable

@@ -43,6 +43,18 @@ public:
         return mesh;
     }
 
+    static const OverlayMesh& sphere()
+    {
+        static OverlayMesh mesh = OverlayMesh::create(primitives::makeSphere());
+        return mesh;
+    }
+
+    static const OverlayMesh& arrow()
+    {
+        static OverlayMesh mesh = OverlayMesh::create(primitives::makeArrow());
+        return mesh;
+    }
+
     const Mesh& mesh() const { return m_mesh; }
 private:
     OverlayMesh(Mesh&& mesh): m_mesh(std::move(mesh)) {}

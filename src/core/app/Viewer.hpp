@@ -43,9 +43,11 @@ public:
     // System accessors — use these during app setup before run()
     // -----------------------------------------------------------------------
 
-    FrameGraph       &frameGraph() { return *m_fg; }
-    ResourceRegistry &resources()  { return m_fg->resources(); }
-    InputHandler     &input()      { return m_input; }
+    FrameGraph          &frameGraph() { return *m_fg; }
+    ResourceRegistry    &resources()  { return m_fg->resources(); }
+    InputHandler        &input()      { return m_input; }
+    const VulkanContext &context()    const { return *m_ctx; }
+    Allocator           &allocator()  { return *m_allocator; }
 
     // -----------------------------------------------------------------------
     // Callbacks — set before run()

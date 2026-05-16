@@ -1,17 +1,19 @@
 #include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
 
+#include "core/overlay/OverlayMesh.hpp"
 #include "core/Paths.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace lr
 {
 
 struct OverlayGeometryPC
 {
-    glm::mat4 model = glm::scale(glm::mat4(1.0f), glm::vec3(0.02f));
-    glm::vec3 color = glm::vec3(1.0f, 0.0f, 1.0f);
-    float occludedOpacity = 0.0f;
+    glm::mat4 model           = glm::mat4(1.0f);
+    glm::vec3 color           = glm::vec3(1.0f, 0.0f, 1.0f);
+    float     occludedOpacity = 0.0f;
 };
 
 OverlayGeometryPass::OverlayGeometryPass(Config cfg)
@@ -19,8 +21,14 @@ OverlayGeometryPass::OverlayGeometryPass(Config cfg)
 {
 }
 
-void OverlayGeometryPass::uploadResources(ResourceRegistry &registry, const std::vector<const Mesh*> &meshes)
+void OverlayGeometryPass::uploadResources(ResourceRegistry &registry)
 {
+    std::vector<const Mesh*> meshes = {
+        &OverlayMesh::cube().mesh(),
+        &OverlayMesh::sphere().mesh(),
+        &OverlayMesh::arrow().mesh(),
+    };
+
     MeshUploader meshUploader(registry);
     m_vertexUpload = meshUploader.uploadVertexBuffer(meshes, {
         .vertexBufferName     = m_cfg.vertexBufferName,
@@ -37,13 +45,13 @@ void OverlayGeometryPass::uploadResources(ResourceRegistry &registry, const std:
     m_gpuMeshLayout.map("color",  0, 2, VK_FORMAT_R32G32B32_SFLOAT);
 }
 
-void OverlayGeometryPass::build(FrameGraph &fg) const
+void OverlayGeometryPass::setInstances(std::vector<OverlayInstance> instances)
 {
-    const OverlayGeometryPC overlayGeometryPC{
-        .color = glm::vec3(1.0f, 0.0f, 0.0f),
-        .occludedOpacity = 0.1f
-    };
+    m_instances = std::move(instances);
+}
 
+void OverlayGeometryPass::build(FrameGraph &fg)
+{
     auto pass = fg.addPass("overlay_geometry")
                     .type(PassType::Geometry)
                     .vertexLayout(m_gpuMeshLayout);
@@ -72,12 +80,23 @@ void OverlayGeometryPass::build(FrameGraph &fg) const
             {.name = "overlay",      .format = VK_FORMAT_R16G16B16A16_SFLOAT},
             {.name = "overlayDepth", .format = VK_FORMAT_D32_SFLOAT, .clearValue = {.depthStencil = {1.0f, 0}}},
         })
-        .execute([&, overlayGeometryPC](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
-            for (size_t i = 0; i < m_vertexUpload.singleMeshResults.size(); ++i)
+        .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
+            for (const auto &inst : m_instances)
             {
-                const auto &vert  = m_vertexUpload.singleMeshResults[i];
-                const auto &index = m_indexUpload.singleMeshResults[i];
-                cmd.pushConstants(pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, overlayGeometryPC);
+                const size_t idx   = static_cast<size_t>(inst.primitive);
+                const auto &vert   = m_vertexUpload.singleMeshResults[idx];
+                const auto &index  = m_indexUpload.singleMeshResults[idx];
+
+                const glm::mat4 T     = glm::translate(glm::mat4(1.0f), inst.position);
+                const glm::quat q     = glm::quat(glm::radians(inst.eulerDegrees));
+                const glm::mat4 model = T * glm::mat4_cast(q) * glm::scale(glm::mat4(1.0f), inst.scale);
+
+                OverlayGeometryPC pc{
+                    .model           = model,
+                    .color           = inst.color,
+                    .occludedOpacity = inst.occludedOpacity,
+                };
+                cmd.pushConstants(pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
                 cmd.drawIndexed(index.indexCount, 1, index.firstIndex, vert.vertexOffset, 0);
             }
         });
