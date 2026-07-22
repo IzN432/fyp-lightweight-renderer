@@ -298,6 +298,8 @@ try
     float     lastArrowRayT      = 0.0f;
     bool      arrowDragFirstFrame = true;
     glm::vec3 dragAxisOrigin{};
+    glm::vec3 dragPlaneLastWorldPos{};
+    float     dragPlaneNdcZ = 0.0f;
 
     // Pending pick state set by the mouse callback, consumed in onUpdate.
     bool     pickPending    = false;
@@ -554,66 +556,97 @@ try
         // ---- Arrow-drag translation ----
         if (draggingArrow != ~0u && !ImGui::GetIO().WantCaptureMouse)
         {
-            static constexpr glm::vec3 kAxisDirs[3] = {
-                {1.0f, 0.0f, 0.0f},  // 0 = X
-                {0.0f, 1.0f, 0.0f},  // 1 = Y
-                {0.0f, 0.0f, 1.0f},  // 2 = Z
-            };
-            const glm::vec3 axis = kAxisDirs[draggingArrow];
-
             const glm::mat4 vp = camera->getComponent<lr::Camera>().viewProjectionMatrix(aspect);
             const float sw = static_cast<float>(extent.width);
             const float sh = static_cast<float>(extent.height);
 
-            // Unproject mouse position to a world-space camera ray.
             double mx, my;
             viewer.input().getMousePos(mx, my);
             const float ndcX = (static_cast<float>(mx) / sw) * 2.0f - 1.0f;
             const float ndcY = (static_cast<float>(my) / sh) * 2.0f - 1.0f;
 
             const glm::mat4 invVP = glm::inverse(vp);
-            const glm::vec4 pNear = invVP * glm::vec4(ndcX, ndcY, 0.0f, 1.0f);
-            const glm::vec4 pFar  = invVP * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
-            const glm::vec3 rO    = glm::vec3(pNear) / pNear.w;
-            const glm::vec3 rD    = glm::normalize(glm::vec3(pFar) / pFar.w - rO);
 
-            // Closest point on (origin + t*axis) to the camera ray.
-            auto closestT = [&](const glm::vec3& origin) -> float {
-                const glm::vec3 w     = origin - rO;
-                const float     b     = glm::dot(rD, axis);
-                const float     denom = 1.0f - b * b;
-                return (denom > 1e-6f)
-                    ? (b * glm::dot(rD, w) - glm::dot(axis, w)) / denom
-                    : -glm::dot(axis, w);
-            };
-
-            if (arrowDragFirstFrame)
+            if (draggingArrow < 3)
             {
-                // Pin the grab point: closest point on axis to the initial click ray.
-                // dragAxisOrigin is fixed for the whole drag so that the grabbed
-                // point on the arrow stays under the cursor as you drag.
-                const float tGrab = closestT(gizmoCentroid);
-                dragAxisOrigin    = gizmoCentroid + tGrab * axis;
-                lastArrowRayT     = 0.0f;
-                arrowDragFirstFrame = false;
+                // ---- Axis drag (X/Y/Z arrow) ----
+                static constexpr glm::vec3 kAxisDirs[3] = {
+                    {1.0f, 0.0f, 0.0f},  // 0 = X
+                    {0.0f, 1.0f, 0.0f},  // 1 = Y
+                    {0.0f, 0.0f, 1.0f},  // 2 = Z
+                };
+                const glm::vec3 axis = kAxisDirs[draggingArrow];
+
+                // Unproject mouse to a world-space camera ray.
+                const glm::vec4 pNear = invVP * glm::vec4(ndcX, ndcY, 0.0f, 1.0f);
+                const glm::vec4 pFar  = invVP * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
+                const glm::vec3 rO    = glm::vec3(pNear) / pNear.w;
+                const glm::vec3 rD    = glm::normalize(glm::vec3(pFar) / pFar.w - rO);
+
+                // Closest point on (origin + t*axis) to the camera ray.
+                auto closestT = [&](const glm::vec3& origin) -> float {
+                    const glm::vec3 w     = origin - rO;
+                    const float     b     = glm::dot(rD, axis);
+                    const float     denom = 1.0f - b * b;
+                    return (denom > 1e-6f)
+                        ? (b * glm::dot(rD, w) - glm::dot(axis, w)) / denom
+                        : -glm::dot(axis, w);
+                };
+
+                if (arrowDragFirstFrame)
+                {
+                    const float tGrab = closestT(gizmoCentroid);
+                    dragAxisOrigin    = gizmoCentroid + tGrab * axis;
+                    lastArrowRayT     = 0.0f;
+                    arrowDragFirstFrame = false;
+                }
+                else
+                {
+                    const float     tCurrent   = closestT(dragAxisOrigin);
+                    const glm::vec3 worldDelta = axis * (tCurrent - lastArrowRayT);
+
+                    for (uint32_t idx : selectedVertices)
+                        staticMesh.mesh().positions[idx] += worldDelta;
+                    gizmoCentroid += worldDelta;
+
+                    meshUploader.updateVertexBuffer(
+                        { &staticMesh.mesh() },
+                        { .vertexBufferName = mainMeshPositionBufferName,
+                          .includePosition  = true });
+
+                    lastArrowRayT = tCurrent;
+                }
             }
             else
             {
-                // t is measured from dragAxisOrigin (fixed), so deltas are stable
-                // even as gizmoCentroid moves each frame.
-                const float     tCurrent   = closestT(dragAxisOrigin);
-                const glm::vec3 worldDelta = axis * (tCurrent - lastArrowRayT);
+                // ---- Screen-plane drag (center cube) ----
+                // Unproject the mouse at a fixed NDC depth (set on first frame to the
+                // depth of gizmoCentroid), giving a world-space point in the view plane.
+                if (arrowDragFirstFrame)
+                {
+                    const glm::vec4 cc = vp * glm::vec4(gizmoCentroid, 1.0f);
+                    dragPlaneNdcZ       = cc.z / cc.w;
+                    const glm::vec4 wh  = invVP * glm::vec4(ndcX, ndcY, dragPlaneNdcZ, 1.0f);
+                    dragPlaneLastWorldPos = glm::vec3(wh) / wh.w;
+                    arrowDragFirstFrame   = false;
+                }
+                else
+                {
+                    const glm::vec4 wh        = invVP * glm::vec4(ndcX, ndcY, dragPlaneNdcZ, 1.0f);
+                    const glm::vec3 worldPos   = glm::vec3(wh) / wh.w;
+                    const glm::vec3 worldDelta = worldPos - dragPlaneLastWorldPos;
 
-                for (uint32_t idx : selectedVertices)
-                    staticMesh.mesh().positions[idx] += worldDelta;
-                gizmoCentroid += worldDelta;
+                    for (uint32_t idx : selectedVertices)
+                        staticMesh.mesh().positions[idx] += worldDelta;
+                    gizmoCentroid += worldDelta;
 
-                meshUploader.updateVertexBuffer(
-                    { &staticMesh.mesh() },
-                    { .vertexBufferName = mainMeshPositionBufferName,
-                      .includePosition  = true });
+                    meshUploader.updateVertexBuffer(
+                        { &staticMesh.mesh() },
+                        { .vertexBufferName = mainMeshPositionBufferName,
+                          .includePosition  = true });
 
-                lastArrowRayT = tCurrent;
+                    dragPlaneLastWorldPos = worldPos;
+                }
             }
         }
 
@@ -650,6 +683,14 @@ try
                     .eulerDegrees    = {90.0f, 0.0f, 0.0f},
                     .scale           = {rad, len, rad},
                     .color           = {0.0f, 0.0f, 1.0f},
+                    .occludedOpacity = occ,
+                },
+                {   // center cube (white): screen-plane drag — instance index 3
+                    .primitive       = lr::OverlayPrimitive::Cube,
+                    .position        = gizmoCentroid,
+                    .eulerDegrees    = {0.0f, 0.0f, 0.0f},
+                    .scale           = {rad * 0.45f, rad * 0.45f, rad * 0.45f},
+                    .color           = {0.7f, 0.7f, 0.7f},
                     .occludedOpacity = occ,
                 },
             });
