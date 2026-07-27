@@ -26,7 +26,7 @@ void CameraUploader::upload(const SceneObject &camera, float aspectRatio)
     data.viewProj = data.proj * data.view;
     data.invView = glm::inverse(data.view);
     data.invProj = glm::inverse(data.proj);
-    data.position = glm::vec4(transform.position, 0.0f);
+    data.position = glm::vec4(transform.position(), 0.0f);
     m_registry.updateBuffer(m_bufferName, &data, sizeof(data));
 }
 

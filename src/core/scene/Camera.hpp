@@ -37,7 +37,7 @@ struct Camera : public Component
     [[nodiscard]] glm::mat4 viewMatrix() const
     {
         const lr::Transform& transform = getOwningObject().getComponent<Transform>();
-        const glm::vec3 eye = transform.position;
+        const glm::vec3 &eye = transform.position();
         return glm::lookAt(eye, eye + transform.forward(), transform.up());
     }
 

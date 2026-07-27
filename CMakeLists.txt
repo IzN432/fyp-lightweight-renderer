@@ -90,7 +90,20 @@ add_library(lr_core STATIC
     src/core/app/GuiManager.cpp
     src/core/app/InputHandler.cpp
     src/core/app/Viewer.cpp
+
+    src/core/editor/VertexManager.cpp
     
+    src/core/editor/selection/BoxSelectionTool.cpp
+    src/core/editor/selection/SelectionManager.cpp
+
+    src/core/editor/gizmo/GizmoManager.cpp
+    src/core/editor/gizmo/translate/TranslateArrowGizmo.cpp
+    src/core/editor/gizmo/translate/TranslateBoxGizmo.cpp
+
+    src/core/editor/camera/SphericalCameraController.cpp
+
+    src/core/math/LinearAlgebraHelpers.cpp
+
     src/core/utility/ImageLoader.cpp
 )
 target_include_directories(lr_core PUBLIC src)

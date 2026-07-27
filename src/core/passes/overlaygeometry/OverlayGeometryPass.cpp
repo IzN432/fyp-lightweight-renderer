@@ -101,7 +101,7 @@ void OverlayGeometryPass::build(FrameGraph &fg)
                 const glm::quat q     = glm::quat(glm::radians(inst.eulerDegrees));
                 const glm::mat4 model = T * glm::mat4_cast(q) * glm::scale(glm::mat4(1.0f), inst.scale);
 
-                const glm::vec3 drawColor = (i == m_hoveredInstance)
+                const glm::vec3 drawColor = (inst.pickingId == m_hoveredInstance)
                     ? glm::mix(inst.color, glm::vec3(1.0f), 0.4f)
                     : inst.color;
 
@@ -109,7 +109,7 @@ void OverlayGeometryPass::build(FrameGraph &fg)
                     .model           = model,
                     .color           = drawColor,
                     .occludedOpacity = inst.occludedOpacity,
-                    .instanceIndex   = i + 1,  // 1-based; 0 = background in picking image
+                    .instanceIndex   = inst.pickingId,  // 1-based; 0 = background in picking image
                 };
                 cmd.pushConstants(pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
                 cmd.drawIndexed(index.indexCount, 1, index.firstIndex, vert.vertexOffset, 0);

@@ -10,11 +10,11 @@ namespace lr
 
 Viewer::Viewer(const Config &config)
 {
-    m_glfw     = std::make_unique<GlfwContext>();
-    m_window   = std::make_unique<Window>(Window::Config{
-        .width    = config.width,
-        .height   = config.height,
-        .title    = config.title,
+    m_glfw   = std::make_unique<GlfwContext>();
+    m_window = std::make_unique<Window>(Window::Config{
+        .width  = config.width,
+        .height = config.height,
+        .title  = config.title,
     });
 
     auto extensions = GlfwContext::getRequiredInstanceExtensions();
@@ -24,8 +24,7 @@ Viewer::Viewer(const Config &config)
         .enableValidation        = config.enableValidation,
         .enableDebugNames        = config.enableValidation,
         .extraInstanceExtensions = extensions,
-        .extraDeviceExtensions   = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-                                    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME},
+        .extraDeviceExtensions   = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME},
     });
 
     spdlog::info("Device: {}", m_ctx->getDeviceProperties().properties.deviceName);
@@ -64,21 +63,17 @@ void Viewer::recreateSwapchain()
 void Viewer::run()
 {
     // Snapshot pass names before adding imgui — addPass() inserts into m_passes
-    // immediately, so calling passNames() inside the chain would include "__imgui"
-    // itself and create a self-cycle.
-    auto priorPasses = m_fg->passNames();
+    // immediately, so calling passNames() inside the chain would include
+    // "__imgui" itself and create a self-cycle.
+    auto     priorPasses       = m_fg->passNames();
     uint32_t currentImageIndex = 0;
 
     m_fg->addPass("__imgui")
         .type(PassType::Custom)
         .dependsOn(priorPasses)
-        .writes({{.name    = "swapchain",
-                  .format  = m_swapchain->getFormat(),
-                  .loadOp  = VK_ATTACHMENT_LOAD_OP_LOAD}})
+        .writes({{.name = "swapchain", .format = m_swapchain->getFormat(), .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD}})
         .execute([this, &currentImageIndex](CommandBuffer &cmd, VkPipelineLayout) {
-            m_imguiPass->render(cmd,
-                                m_swapchain->getImageView(currentImageIndex),
-                                m_swapchain->getExtent());
+            m_imguiPass->render(cmd, m_swapchain->getImageView(currentImageIndex), m_swapchain->getExtent());
         });
 
     m_fg->compile();
@@ -95,8 +90,10 @@ void Viewer::run()
         }
 
         m_imguiPass->beginFrame();
-        if (m_guiCallback)
-            m_guiCallback();
+        for (auto &cb : m_guiCallbacks)
+        {
+            cb();
+        }
 
         auto [cmd, imageIndex] = m_renderer->beginFrame(*m_swapchain);
         if (imageIndex == UINT32_MAX)
@@ -107,27 +104,27 @@ void Viewer::run()
 
         currentImageIndex = imageIndex;
 
-        if (m_updateCallback)
+        const double now = glfwGetTime();
+        const float  dt  = static_cast<float>(now - m_lastFrameTime);
+        m_lastFrameTime  = now;
+        for (auto &cb : m_updateCallbacks)
         {
-            const double now = glfwGetTime();
-            const float  dt  = static_cast<float>(now - m_lastFrameTime);
-            m_lastFrameTime  = now;
-            m_updateCallback(dt, m_swapchain->getExtent());
+            cb(dt, m_swapchain->getExtent());
         }
 
-        m_fg->setExternalImage("swapchain",
-                               m_swapchain->getImage(imageIndex),
-                               m_swapchain->getImageView(imageIndex));
+        m_fg->setExternalImage("swapchain", m_swapchain->getImage(imageIndex), m_swapchain->getImageView(imageIndex));
         m_fg->execute(cmd);
         m_frameExecuted = true;
 
         Renderer::transitionForPresent(cmd, m_swapchain->getImage(imageIndex));
 
         if (!m_renderer->endFrame(*m_swapchain, imageIndex))
+        {
             recreateSwapchain();
+        }
     }
 
     m_ctx->waitIdle();
 }
 
-}  // namespace lr
+} // namespace lr

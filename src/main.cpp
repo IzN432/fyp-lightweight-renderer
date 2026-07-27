@@ -19,6 +19,14 @@
 #include "core/upload/LightUploader.hpp"
 #include "core/upload/MaterialUploader.hpp"
 #include "core/upload/MeshUploader.hpp"
+#include "core/editor/camera/SphericalCameraController.hpp"
+#include "core/editor/gizmo/GizmoManager.hpp"
+#include "core/editor/gizmo/translate/TranslateArrowGizmo.hpp"
+#include "core/editor/gizmo/translate/TranslateBoxGizmo.hpp"
+#include "core/editor/selection/BoxSelectionTool.hpp"
+#include "core/editor/selection/SelectionManager.hpp"
+#include "core/editor/VertexManager.hpp"
+
 #include <imgui.h>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec4.hpp>
@@ -62,12 +70,6 @@ try
     camera->addComponent<lr::Camera>();
     camera->addComponent<lr::Transform>();
     camera->name = "Main Camera";
-
-    // CAMERA — spherical orbit state (Blender-style)
-    glm::vec3 orbitTarget(0.0f);
-    float orbitRadius    = 5.0f;
-    float orbitAzimuth   = 0.0f;   // radians; 0 = camera on +Z axis
-    float orbitElevation = 0.0f;   // radians; 0 = horizontal
 
     // LIGHT
     lr::DirectionalLight light;
@@ -279,94 +281,65 @@ try
     finalPass.build(viewer.frameGraph());
 
     // -------------------------------------------------------------------------
-    // Point picking state
+    // Editor state — vertex picking, selection and gizmo managers
     // -------------------------------------------------------------------------
 
-    bool      displayPoints   = true;
-    std::vector<uint32_t> selectedVertices;
-    bool      selectionDirty = false;
-    glm::vec3 gizmoCentroid(0.0f);
-    bool      hasGizmo       = false;
+    bool displayPoints = true;
 
     // Gizmo hover — reads the picking image from the previous frame
     lr::ImageReadback gizmoReadback(viewer.context(), viewer.allocator());
-    uint32_t hoveredGizmo = ~0u;
 
-    // Arrow-drag state: set on LMB press over an arrow, cleared on release.
-    // 0/1/2 = X/Y/Z axis being dragged; ~0u = not dragging.
-    uint32_t  draggingArrow      = ~0u;
-    float     lastArrowRayT      = 0.0f;
-    bool      arrowDragFirstFrame = true;
-    glm::vec3 dragAxisOrigin{};
-    glm::vec3 dragPlaneLastWorldPos{};
-    float     dragPlaneNdcZ = 0.0f;
-
-    // Pending pick state set by the mouse callback, consumed in onUpdate.
-    bool     pickPending    = false;
-    bool     boxPickPending = false;
-    uint32_t pickX          = 0;
-    uint32_t pickY          = 0;
-    uint32_t boxPickX0      = 0;
-    uint32_t boxPickY0      = 0;
-    uint32_t boxPickX1      = 0;
-    uint32_t boxPickY1      = 0;
-    bool     pickShift      = false;
-    double   mouseDownX     = 0.0;
-    double   mouseDownY     = 0.0;
-
-    static constexpr double kPickDragThreshold = 4.0;
-
-    viewer.input().onMouseButton([&](int button, int action) {
-        if (button != GLFW_MOUSE_BUTTON_LEFT)
-            return;
-
-        double mx, my;
-        viewer.input().getMousePos(mx, my);
-
-        if (action == GLFW_PRESS)
-        {
-            mouseDownX = mx;
-            mouseDownY = my;
-
-            // Initiate arrow-drag if the cursor is over a gizmo arrow.
-            if (hoveredGizmo != ~0u)
-            {
-                draggingArrow       = hoveredGizmo;
-                arrowDragFirstFrame = true;
-            }
-        }
-        else if (action == GLFW_RELEASE)
-        {
-            // End arrow-drag without triggering point picking.
-            if (draggingArrow != ~0u)
-            {
-                draggingArrow = ~0u;
-                return;
-            }
-
-            double ddx = mx - mouseDownX;
-            double ddy = my - mouseDownY;
-            pickShift = viewer.input().isKeyPressed(GLFW_KEY_LEFT_SHIFT) ||
-                        viewer.input().isKeyPressed(GLFW_KEY_RIGHT_SHIFT);
-
-            if (std::abs(ddx) < kPickDragThreshold && std::abs(ddy) < kPickDragThreshold)
-            {
-                pickPending = true;
-                pickX       = static_cast<uint32_t>(mouseDownX);
-                pickY       = static_cast<uint32_t>(mouseDownY);
-            }
-            else
-            {
-                boxPickPending = true;
-                boxPickX0 = static_cast<uint32_t>(std::min(mouseDownX, mx));
-                boxPickY0 = static_cast<uint32_t>(std::min(mouseDownY, my));
-                boxPickX1 = static_cast<uint32_t>(std::max(mouseDownX, mx));
-                boxPickY1 = static_cast<uint32_t>(std::max(mouseDownY, my));
-            }
-        }
+    lr::VertexManager vertexManager(staticMesh.mesh().positions);
+    vertexManager.registerUpdateCallback([&]() {
+        meshUploader.updateVertexBuffer(
+            { &staticMesh.mesh() },
+            { .vertexBufferName = mainMeshPositionBufferName,
+              .includePosition  = true });
     });
 
-    viewer.input().onKeyPress([&](int key, int action) {
+    lr::SelectionManager selectionManager(staticMesh.mesh().positions, viewer.input());
+    selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera));
+    selectionManager.registerSelectionChangedCallback([&]() {
+        std::fill(pointColors.begin(), pointColors.end(), glm::vec3(1.0f, 0.0f, 1.0f));
+        for (uint32_t idx : selectionManager.getSelectedIndices())
+            pointColors[idx] = glm::vec3(1.0f, 0.8f, 0.0f);  // orange = selected
+        viewer.resources().updateBuffer(
+            mainMeshColorBufferName,
+            pointColors.data(),
+            pointColors.size() * sizeof(glm::vec3));
+    });
+
+    lr::GizmoManager gizmoManager(overlayGeometryPass, viewer.input());
+    const std::vector<int> translateGizmoIds = {
+        gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
+            lr::TranslateArrowGizmoAxis::X, *camera, viewer.input(), vertexManager, selectionManager)),
+        gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
+            lr::TranslateArrowGizmoAxis::Y, *camera, viewer.input(), vertexManager, selectionManager)),
+        gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
+            lr::TranslateArrowGizmoAxis::Z, *camera, viewer.input(), vertexManager, selectionManager)),
+        gizmoManager.addGizmo(std::make_unique<lr::TranslateBoxGizmo>(
+            *camera, viewer.input(), vertexManager, selectionManager)),
+    };
+    for (int id : translateGizmoIds)
+        gizmoManager.hideGizmo(id);
+
+    // Single combined LMB handler: gizmos get first refusal on a click (so
+    // dragging an arrow doesn't simultaneously start a box-select), and
+    // selection only sees the event if no gizmo consumed it.
+    viewer.input().onMouseButton([&](int button, int action, bool shift, bool ctrl, bool alt) {
+        if (button != GLFW_MOUSE_BUTTON_LEFT || ImGui::GetIO().WantCaptureMouse)
+            return;
+
+        const bool wasInteracting = gizmoManager.isInteracting();
+        gizmoManager.mouseButtonCallback(button, action, shift, ctrl, alt);
+
+        if (wasInteracting || gizmoManager.isInteracting() || !displayPoints)
+            return;
+
+        selectionManager.mouseButtonCallback(button, action, shift, ctrl, alt);
+    });
+
+    viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
         if (key != GLFW_KEY_TAB || action != GLFW_PRESS)
             return;
         if (ImGui::GetIO().WantCaptureKeyboard)
@@ -376,12 +349,7 @@ try
         overlayPointsPass.setEnabled(displayPoints);
 
         if (!displayPoints)
-        {
-            selectedVertices.clear();
-            selectionDirty  = true;
-            hasGizmo        = false;
-            overlayGeometryPass.setInstances({});
-        }
+            selectionManager.clearSelection();
     });
 
     // -------------------------------------------------------------------------
@@ -402,345 +370,59 @@ try
         ImGui::End();
     });
 
+    lr::SphericalCameraController cameraController(*camera, viewer.input());
+    viewer.onUpdate([&cameraController](float dt, VkExtent2D extent) {
+        cameraController.update(dt);
+    });
+
+    viewer.onUpdate([&](float dt, VkExtent2D extent) {
+        gizmoManager.updateCallback(dt, extent, viewer.hasRenderedAtLeastOneFrame(), gizmoReadback, viewer.resources());
+    });
+
+    viewer.onUpdate([&](float dt, VkExtent2D extent) {
+        selectionManager.updateCallback(dt, extent);
+    });
+
+    // Keeps the translate gizmos positioned at the selection centroid, shown
+    // only while something is selected, and pushes the result to the overlay pass.
     viewer.onUpdate([&](float dt, VkExtent2D extent) {
         aspect = (extent.height == 0)
             ? 1.0f
             : static_cast<float>(extent.width) / static_cast<float>(extent.height);
 
-        // ---- Gizmo hover detection (GPU readback of previous frame's picking image) ----
-        if (viewer.hasRenderedAtLeastOneFrame() && !selectedVertices.empty() && !ImGui::GetIO().WantCaptureMouse)
+        const auto &selected = selectionManager.getSelectedIndices();
+
+        if (selected.empty())
         {
-            double mx, my;
-            viewer.input().getMousePos(mx, my);
-            const uint32_t px = static_cast<uint32_t>(mx);
-            const uint32_t py = static_cast<uint32_t>(my);
-            if (px < extent.width && py < extent.height)
-            {
-                const uint32_t raw = gizmoReadback.readPixel(
-                    viewer.frameGraph().resources(),
-                    overlayGeometryPass.pickingImageName(),
-                    px, py);
-                hoveredGizmo = (raw != lr::ImageReadback::kNoData && raw != 0) ? raw - 1 : ~0u;
-            }
-            else
-            {
-                hoveredGizmo = ~0u;
-            }
+            for (int id : translateGizmoIds)
+                gizmoManager.hideGizmo(id);
         }
         else
         {
-            hoveredGizmo = ~0u;
-        }
-        overlayGeometryPass.setHoveredInstance(draggingArrow != ~0u ? draggingArrow : hoveredGizmo);
+            glm::vec3 centroid(0.0f);
+            for (uint32_t idx : selected)
+                centroid += vertexManager.getPositions()[idx];
+            centroid /= static_cast<float>(selected.size());
 
-        // ---- CPU-side vertex picking ----
-        // Project all vertices to screen space and either find the nearest one
-        // (single click) or collect all that fall inside the drag rect (box).
-        // Both paths run fully on CPU — no GPU readback stall.
-        if (pickPending || boxPickPending)
-        {
-          if (ImGui::GetIO().WantCaptureMouse || !displayPoints)
-          {
-            pickPending    = false;
-            boxPickPending = false;
-          }
-          else
-          {
-            const glm::mat4 vp = camera->getComponent<lr::Camera>().viewProjectionMatrix(aspect);
-            const float     sw = static_cast<float>(extent.width);
-            const float     sh = static_cast<float>(extent.height);
-
-            if (pickPending)
-            {
-                pickPending = false;
-
-                static constexpr float kPickRadius = 12.0f;
-
-                const float cx = static_cast<float>(pickX);
-                const float cy = static_cast<float>(pickY);
-
-                uint32_t bestIdx  = ~0u;
-                float    bestDist = kPickRadius * kPickRadius;
-
-                for (uint32_t i = 0; i < staticMesh.mesh().positions.size(); ++i)
-                {
-                    const glm::vec4 clip = vp * glm::vec4(staticMesh.mesh().positions[i], 1.0f);
-                    if (clip.w <= 0.0f) continue;
-                    const glm::vec3 ndc = glm::vec3(clip) / clip.w;
-                    if (ndc.z < 0.0f || ndc.z > 1.0f) continue;
-
-                    const float sx = (ndc.x * 0.5f + 0.5f) * sw;
-                    const float sy = (ndc.y * 0.5f + 0.5f) * sh;
-                    const float d2 = (sx - cx) * (sx - cx) + (sy - cy) * (sy - cy);
-                    if (d2 < bestDist) { bestDist = d2; bestIdx = i; }
-                }
-
-                if (!pickShift)
-                    selectedVertices.clear();
-
-                if (bestIdx != ~0u)
-                {
-                    auto it = std::find(selectedVertices.begin(), selectedVertices.end(), bestIdx);
-                    if (it != selectedVertices.end())
-                        selectedVertices.erase(it);  // shift-click deselects
-                    else
-                        selectedVertices.push_back(bestIdx);
-                }
-
-                selectionDirty = true;
-            }
-
-            if (boxPickPending)
-            {
-                boxPickPending = false;
-
-                const float bx0 = static_cast<float>(boxPickX0);
-                const float by0 = static_cast<float>(boxPickY0);
-                const float bx1 = static_cast<float>(boxPickX1);
-                const float by1 = static_cast<float>(boxPickY1);
-
-                if (!pickShift)
-                    selectedVertices.clear();
-
-                for (uint32_t i = 0; i < staticMesh.mesh().positions.size(); ++i)
-                {
-                    const glm::vec4 clip = vp * glm::vec4(staticMesh.mesh().positions[i], 1.0f);
-                    if (clip.w <= 0.0f) continue;
-                    const glm::vec3 ndc = glm::vec3(clip) / clip.w;
-                    if (ndc.z < 0.0f || ndc.z > 1.0f) continue;
-
-                    const float sx = (ndc.x * 0.5f + 0.5f) * sw;
-                    const float sy = (ndc.y * 0.5f + 0.5f) * sh;
-
-                    if (sx >= bx0 && sx <= bx1 && sy >= by0 && sy <= by1)
-                    {
-                        if (std::find(selectedVertices.begin(), selectedVertices.end(), i) ==
-                            selectedVertices.end())
-                            selectedVertices.push_back(i);
-                    }
-                }
-
-                selectionDirty = true;
-            }
-          } // else (!WantCaptureMouse)
-        }
-
-        // Update color buffer whenever the selection changes
-        if (selectionDirty)
-        {
-            selectionDirty = false;
-
-            std::fill(pointColors.begin(), pointColors.end(), glm::vec3(1.0f, 0.0f, 1.0f));
-            for (uint32_t idx : selectedVertices)
-                pointColors[idx] = glm::vec3(1.0f, 0.8f, 0.0f);  // orange = selected
-            viewer.resources().updateBuffer(
-                mainMeshColorBufferName,
-                pointColors.data(),
-                pointColors.size() * sizeof(glm::vec3));
-
-            if (!selectedVertices.empty())
-            {
-                hasGizmo      = true;
-                gizmoCentroid = glm::vec3(0.0f);
-                for (uint32_t idx : selectedVertices)
-                    gizmoCentroid += staticMesh.mesh().positions[idx];
-                gizmoCentroid /= static_cast<float>(selectedVertices.size());
-            }
-            else
-            {
-                hasGizmo = false;
-                overlayGeometryPass.setInstances({});
-            }
-        }
-
-        // ---- Arrow-drag translation ----
-        if (draggingArrow != ~0u && !ImGui::GetIO().WantCaptureMouse)
-        {
-            const glm::mat4 vp = camera->getComponent<lr::Camera>().viewProjectionMatrix(aspect);
-            const float sw = static_cast<float>(extent.width);
-            const float sh = static_cast<float>(extent.height);
-
-            double mx, my;
-            viewer.input().getMousePos(mx, my);
-            const float ndcX = (static_cast<float>(mx) / sw) * 2.0f - 1.0f;
-            const float ndcY = (static_cast<float>(my) / sh) * 2.0f - 1.0f;
-
-            const glm::mat4 invVP = glm::inverse(vp);
-
-            if (draggingArrow < 3)
-            {
-                // ---- Axis drag (X/Y/Z arrow) ----
-                static constexpr glm::vec3 kAxisDirs[3] = {
-                    {1.0f, 0.0f, 0.0f},  // 0 = X
-                    {0.0f, 1.0f, 0.0f},  // 1 = Y
-                    {0.0f, 0.0f, 1.0f},  // 2 = Z
-                };
-                const glm::vec3 axis = kAxisDirs[draggingArrow];
-
-                // Unproject mouse to a world-space camera ray.
-                const glm::vec4 pNear = invVP * glm::vec4(ndcX, ndcY, 0.0f, 1.0f);
-                const glm::vec4 pFar  = invVP * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
-                const glm::vec3 rO    = glm::vec3(pNear) / pNear.w;
-                const glm::vec3 rD    = glm::normalize(glm::vec3(pFar) / pFar.w - rO);
-
-                // Closest point on (origin + t*axis) to the camera ray.
-                auto closestT = [&](const glm::vec3& origin) -> float {
-                    const glm::vec3 w     = origin - rO;
-                    const float     b     = glm::dot(rD, axis);
-                    const float     denom = 1.0f - b * b;
-                    return (denom > 1e-6f)
-                        ? (b * glm::dot(rD, w) - glm::dot(axis, w)) / denom
-                        : -glm::dot(axis, w);
-                };
-
-                if (arrowDragFirstFrame)
-                {
-                    const float tGrab = closestT(gizmoCentroid);
-                    dragAxisOrigin    = gizmoCentroid + tGrab * axis;
-                    lastArrowRayT     = 0.0f;
-                    arrowDragFirstFrame = false;
-                }
-                else
-                {
-                    const float     tCurrent   = closestT(dragAxisOrigin);
-                    const glm::vec3 worldDelta = axis * (tCurrent - lastArrowRayT);
-
-                    for (uint32_t idx : selectedVertices)
-                        staticMesh.mesh().positions[idx] += worldDelta;
-                    gizmoCentroid += worldDelta;
-
-                    meshUploader.updateVertexBuffer(
-                        { &staticMesh.mesh() },
-                        { .vertexBufferName = mainMeshPositionBufferName,
-                          .includePosition  = true });
-
-                    lastArrowRayT = tCurrent;
-                }
-            }
-            else
-            {
-                // ---- Screen-plane drag (center cube) ----
-                // Unproject the mouse at a fixed NDC depth (set on first frame to the
-                // depth of gizmoCentroid), giving a world-space point in the view plane.
-                if (arrowDragFirstFrame)
-                {
-                    const glm::vec4 cc = vp * glm::vec4(gizmoCentroid, 1.0f);
-                    dragPlaneNdcZ       = cc.z / cc.w;
-                    const glm::vec4 wh  = invVP * glm::vec4(ndcX, ndcY, dragPlaneNdcZ, 1.0f);
-                    dragPlaneLastWorldPos = glm::vec3(wh) / wh.w;
-                    arrowDragFirstFrame   = false;
-                }
-                else
-                {
-                    const glm::vec4 wh        = invVP * glm::vec4(ndcX, ndcY, dragPlaneNdcZ, 1.0f);
-                    const glm::vec3 worldPos   = glm::vec3(wh) / wh.w;
-                    const glm::vec3 worldDelta = worldPos - dragPlaneLastWorldPos;
-
-                    for (uint32_t idx : selectedVertices)
-                        staticMesh.mesh().positions[idx] += worldDelta;
-                    gizmoCentroid += worldDelta;
-
-                    meshUploader.updateVertexBuffer(
-                        { &staticMesh.mesh() },
-                        { .vertexBufferName = mainMeshPositionBufferName,
-                          .includePosition  = true });
-
-                    dragPlaneLastWorldPos = worldPos;
-                }
-            }
-        }
-
-        // Recompute gizmo scale every frame so it stays screen-space constant (~1/9 screen height)
-        if (hasGizmo)
-        {
-            const glm::vec3 camPos = camera->getComponent<lr::Transform>().position;
-            const float     d      = glm::length(camPos - gizmoCentroid);
+            // Keep the gizmo a constant size on screen (~1/9 screen height) regardless of camera distance.
+            const glm::vec3 camPos = camera->getComponent<lr::Transform>().position();
+            const float     d      = glm::length(camPos - centroid);
             const float     fov    = glm::radians(camera->getComponent<lr::Camera>().fovYDegrees);
             const float     len    = 2.0f * d * std::tan(fov * 0.5f) / 5.0f;
             const float     rad    = len * 0.45f;
-            constexpr float occ    = 1.0f;
 
-            overlayGeometryPass.setInstances({
-                {   // +X  (red):   euler Z=-90 rotates +Y to +X
-                    .primitive       = lr::OverlayPrimitive::Arrow,
-                    .position        = gizmoCentroid,
-                    .eulerDegrees    = {0.0f, 0.0f, -90.0f},
-                    .scale           = {rad, len, rad},
-                    .color           = {1.0f, 0.0f, 0.0f},
-                    .occludedOpacity = occ,
-                },
-                {   // +Y  (green): no rotation needed
-                    .primitive       = lr::OverlayPrimitive::Arrow,
-                    .position        = gizmoCentroid,
-                    .eulerDegrees    = {0.0f, 0.0f, 0.0f},
-                    .scale           = {rad, len, rad},
-                    .color           = {0.0f, 1.0f, 0.0f},
-                    .occludedOpacity = occ,
-                },
-                {   // +Z  (blue):  euler X=+90 rotates +Y to +Z
-                    .primitive       = lr::OverlayPrimitive::Arrow,
-                    .position        = gizmoCentroid,
-                    .eulerDegrees    = {90.0f, 0.0f, 0.0f},
-                    .scale           = {rad, len, rad},
-                    .color           = {0.0f, 0.0f, 1.0f},
-                    .occludedOpacity = occ,
-                },
-                {   // center cube (white): screen-plane drag — instance index 3
-                    .primitive       = lr::OverlayPrimitive::Cube,
-                    .position        = gizmoCentroid,
-                    .eulerDegrees    = {0.0f, 0.0f, 0.0f},
-                    .scale           = {rad * 0.45f, rad * 0.45f, rad * 0.45f},
-                    .color           = {0.7f, 0.7f, 0.7f},
-                    .occludedOpacity = occ,
-                },
-            });
+            for (size_t i = 0; i < translateGizmoIds.size(); ++i)
+            {
+                gizmoManager.unhideGizmo(translateGizmoIds[i]);
+                lr::Gizmo &gizmo = gizmoManager.getGizmo(translateGizmoIds[i]);
+                gizmo.setPosition(centroid);
+                // First 3 gizmos are the X/Y/Z arrows, the 4th is the screen-plane box.
+                gizmo.setScale(i < 3 ? glm::vec3(rad, len, rad)
+                                     : glm::vec3(rad * 0.45f, rad * 0.45f, rad * 0.45f));
+            }
         }
 
-        double dx, dy;
-        viewer.input().getMouseDelta(dx, dy);
-        double scroll = viewer.input().getScrollDelta();
-        bool mmb   = viewer.input().isMouseButtonPressed(GLFW_MOUSE_BUTTON_MIDDLE);
-        bool shift = viewer.input().isKeyPressed(GLFW_KEY_LEFT_SHIFT) ||
-                     viewer.input().isKeyPressed(GLFW_KEY_RIGHT_SHIFT);
-
-        bool reset = viewer.input().isKeyPressed(GLFW_KEY_R);
-        if (reset) {
-            orbitTarget = glm::vec3(0.0f);
-            orbitRadius = 5.0f;
-            orbitAzimuth = 0.0f;
-            orbitElevation = 0.0f;
-        }
-        
-        if (!ImGui::GetIO().WantCaptureMouse) {
-            if (mmb && shift) {
-                // Pan: translate target in camera right/up plane
-                auto &t = camera->getComponent<lr::Transform>();
-                float panSpeed = orbitRadius * 0.002f;
-                orbitTarget -= t.right() * (float)dx * panSpeed;
-                orbitTarget += t.up()    * (float)dy * panSpeed;
-            } else if (mmb) {
-                orbitAzimuth   -= (float)dx * 0.01f;
-                orbitElevation -= (float)dy * 0.01f;
-                orbitElevation  = glm::clamp(orbitElevation,
-                                    glm::radians(-89.0f), glm::radians(89.0f));
-            }
-
-            if (scroll != 0.0) {
-                orbitRadius *= std::pow(1.0f / 1.1f, (float)scroll);
-                orbitRadius  = glm::clamp(orbitRadius, 0.01f, 1000.0f);
-            }
-        } // !WantCaptureMouse
-
-        glm::vec3 pos(
-            orbitTarget.x + orbitRadius * std::cos(orbitElevation) * std::sin(orbitAzimuth),
-            orbitTarget.y + orbitRadius * std::sin(orbitElevation),
-            orbitTarget.z + orbitRadius * std::cos(orbitElevation) * std::cos(orbitAzimuth));
-
-        camera->getComponent<lr::Transform>().position = pos;
-        const glm::mat4 view = glm::lookAt(pos, orbitTarget, glm::vec3(0.0f, 1.0f, 0.0f));
-        camera->getComponent<lr::Transform>().setRotation(glm::conjugate(glm::quat_cast(view)));
-
-        updateCameraUpload();
+        overlayGeometryPass.setInstances(gizmoManager.getVisibleGizmoInstances());
     });
 
     viewer.run();

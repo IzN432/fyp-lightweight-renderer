@@ -41,13 +41,13 @@ void LightUploader::upload(std::vector<SceneObject*> &lights)
             if constexpr (std::is_same_v<T, PointLight>)
             {
                 Transform &transform = lightObject->getComponent<Transform>();
-                gpuData.position = transform.position;
+                gpuData.position = transform.position();
                 gpuData.type = 0;
             }
             else if constexpr (std::is_same_v<T, SpotLight>)
             {
                 Transform &transform = lightObject->getComponent<Transform>();
-                gpuData.position = transform.position;
+                gpuData.position = transform.position();
                 gpuData.rotation = transform.rotation();
                 gpuData.type = 1;
                 gpuData.innerConeAngle = glm::radians(l.innerConeAngleDegrees);
@@ -56,7 +56,7 @@ void LightUploader::upload(std::vector<SceneObject*> &lights)
             else if constexpr (std::is_same_v<T, AreaLight>)
             {
                 Transform &transform = lightObject->getComponent<Transform>();
-                gpuData.position = transform.position;
+                gpuData.position = transform.position();
                 gpuData.rotation = transform.rotation();
                 gpuData.type = 2;
                 gpuData.areaSize = l.size;

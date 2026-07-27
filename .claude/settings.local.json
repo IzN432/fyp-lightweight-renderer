@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmake --build build --config Debug)",
+      "Bash(Get-ChildItem -Path \"D:\\\\FYP\\\\FYP-lightweight-renderer\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Read(//d/FYP/basic-renderer-main/src/render/renderModules/shaders/**)",
+      "Bash(xargs grep *)"
+    ]
+  }
+}

@@ -3,6 +3,7 @@
 #include <functional>
 #include <unordered_set>
 #include <vector>
+#include <GLFW/glfw3.h>
 
 namespace lr
 {
@@ -14,13 +15,11 @@ public:
     ~InputHandler();
 
     // Register a callback for key press events
-    void onKeyPress(std::function<void(int key, int action)> callback);
+    void onKeyPress(std::function<void(int key, int action, bool shift, bool ctrl, bool alt)> callback);
 
-    // Register a callback for mouse move events
-    void onMouseMove(std::function<void(double x, double y)> callback);
-
-    // Register a callback for mouse button events
-    void onMouseButton(std::function<void(int button, int action)> callback);
+    // Register a callback for mouse button events. Query getMousePos()/getMouseDelta()
+    // in an update callback if position is needed — mouse move no longer fires events.
+    void onMouseButton(std::function<void(int button, int action, bool shift, bool ctrl, bool alt)> callback);
 
     // Call this each frame to poll input state
     void update();
@@ -29,6 +28,16 @@ public:
     bool isKeyPressed(int key) const;
     bool isMouseButtonPressed(int button) const;
 
+    bool isShiftPressed() const {
+        return isKeyPressed(GLFW_KEY_LEFT_SHIFT) || isKeyPressed(GLFW_KEY_RIGHT_SHIFT);
+    }
+    bool isCtrlPressed() const {
+        return isKeyPressed(GLFW_KEY_LEFT_CONTROL) || isKeyPressed(GLFW_KEY_RIGHT_CONTROL);
+    }
+    bool isAltPressed() const {
+        return isKeyPressed(GLFW_KEY_LEFT_ALT) || isKeyPressed(GLFW_KEY_RIGHT_ALT);
+    }
+    
     // Per-frame polling — valid after update() is called each frame
     void   getMouseDelta(double &dx, double &dy) const;
     double getScrollDelta() const;
@@ -43,9 +52,8 @@ public:
     void notifyScroll(double delta);
 
 private:
-    std::vector<std::function<void(int, int)>>    m_keyPressCallbacks;
-    std::vector<std::function<void(double, double)>> m_mouseMoveCallbacks;
-    std::vector<std::function<void(int, int)>>    m_mouseButtonCallbacks;
+    std::vector<std::function<void(int, int, bool, bool, bool)>>    m_keyPressCallbacks;
+    std::vector<std::function<void(int, int, bool, bool, bool)>>    m_mouseButtonCallbacks;
 
     std::unordered_set<int> m_pressedKeys;
     std::unordered_set<int> m_pressedButtons;

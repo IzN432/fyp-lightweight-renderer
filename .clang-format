@@ -1,0 +1,45 @@
+---
+BasedOnStyle: LLVM
+Language: Cpp
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 120
+
+# Allman for functions/control-statements/namespaces/etc, but keep lambda
+# bodies attached to their signature (Allman would otherwise hang the brace
+# on its own line indented to the signature column, which is ugly).
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: true
+  AfterClass: true
+  AfterStruct: true
+  AfterUnion: true
+  AfterEnum: true
+  AfterNamespace: true
+  AfterExternBlock: true
+  BeforeLambdaBody: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+
+# Don't collapse multi-statement-looking lambda callbacks onto one line;
+# only genuinely empty bodies stay inline.
+AllowShortLambdasOnASingleLine: Empty
+
+# Always wrap single-statement if/for/while bodies in braces.
+InsertBraces: true
+
+PointerAlignment: Right
+ReferenceAlignment: Right
+
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: Consecutive
+AlignTrailingComments: true
+
+NamespaceIndentation: None
+AccessModifierOffset: -4
+IndentCaseLabels: true
+
+SortIncludes: false

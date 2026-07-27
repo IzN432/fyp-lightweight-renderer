@@ -7,17 +7,12 @@ InputHandler::InputHandler() = default;
 
 InputHandler::~InputHandler() = default;
 
-void InputHandler::onKeyPress(std::function<void(int, int)> callback)
+void InputHandler::onKeyPress(std::function<void(int, int, bool, bool, bool)> callback)
 {
     m_keyPressCallbacks.push_back(callback);
 }
 
-void InputHandler::onMouseMove(std::function<void(double, double)> callback)
-{
-    m_mouseMoveCallbacks.push_back(callback);
-}
-
-void InputHandler::onMouseButton(std::function<void(int, int)> callback)
+void InputHandler::onMouseButton(std::function<void(int, int, bool, bool, bool)> callback)
 {
     m_mouseButtonCallbacks.push_back(callback);
 }
@@ -67,17 +62,17 @@ void InputHandler::notifyKey(int key, int action)
     else
         m_pressedKeys.erase(key);
 
+    bool shift = isShiftPressed();
+    bool ctrl  = isCtrlPressed();
+    bool alt   = isAltPressed();
     for (auto &cb : m_keyPressCallbacks)
-        cb(key, action);
+        cb(key, action, shift, ctrl, alt);
 }
 
 void InputHandler::notifyMouseMove(double x, double y)
 {
     m_currentMouseX = x;
     m_currentMouseY = y;
-
-    for (auto &cb : m_mouseMoveCallbacks)
-        cb(x, y);
 }
 
 void InputHandler::notifyMouseButton(int button, int action)
@@ -87,8 +82,11 @@ void InputHandler::notifyMouseButton(int button, int action)
     else
         m_pressedButtons.erase(button);
 
+    bool shift = isShiftPressed();
+    bool ctrl  = isCtrlPressed();
+    bool alt   = isAltPressed();
     for (auto &cb : m_mouseButtonCallbacks)
-        cb(button, action);
+        cb(button, action, shift, ctrl, alt);
 }
 
 void InputHandler::notifyScroll(double delta)

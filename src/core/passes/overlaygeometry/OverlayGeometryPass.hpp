@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/framegraph/FrameGraph.hpp"
+#include "core/passes/overlaygeometry/OverlayInstance.hpp"
 #include "core/scene/Mesh.hpp"
 #include "core/upload/MeshUploader.hpp"
 
@@ -11,23 +12,6 @@
 
 namespace lr
 {
-
-enum class OverlayPrimitive : uint32_t
-{
-    Cube   = 0,
-    Sphere = 1,
-    Arrow  = 2,
-};
-
-struct OverlayInstance
-{
-    OverlayPrimitive primitive       = OverlayPrimitive::Cube;
-    glm::vec3        position        = {0.0f, 0.0f, 0.0f};
-    glm::vec3        eulerDegrees    = {0.0f, 0.0f, 0.0f}; // GLM YXZ intrinsic order
-    glm::vec3        scale           = {1.0f, 1.0f, 1.0f};
-    glm::vec3        color           = {1.0f, 0.0f, 1.0f};
-    float            occludedOpacity = 0.0f;
-};
 
 class OverlayGeometryPass
 {
@@ -47,9 +31,9 @@ public:
 
     void setInstances(std::vector<OverlayInstance> instances);
 
-    // Set the 0-based index of the instance currently under the cursor.
-    // Use ~0u for "none". The hovered instance is drawn with a lightened color.
-    void setHoveredInstance(uint32_t idx) { m_hoveredInstance = idx; }
+    // Set the pickingId (OverlayInstance::pickingId) of the instance currently under the
+    // cursor. Use ~0u for "none". The hovered instance is drawn with a lightened color.
+    void setHoveredInstance(uint32_t pickingId) { m_hoveredInstance = pickingId; }
 
     const std::string &pickingImageName() const { return m_cfg.pickingImageName; }
 
