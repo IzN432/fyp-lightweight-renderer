@@ -55,9 +55,16 @@ void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
     m_selectTool->registerSelectionCallback([this]() {
         if (!m_selectTool)
             return;
-        m_selectTool->selectVertices(m_selectedVertices, m_vertices);
+        m_selectTool->selectVertices(m_highlightedVertices, m_selectedVertices, m_vertices);
         if (m_selectionChangedCallback)
             m_selectionChangedCallback();
+    });
+    m_selectTool->registerHighlightCallback([this]() {
+        if (!m_selectTool)
+            return;
+        m_selectTool->highlightVertices(m_highlightedVertices,m_selectedVertices, m_vertices);
+        if (m_highlightChangedCallback)
+            m_highlightChangedCallback();
     });
 }
 

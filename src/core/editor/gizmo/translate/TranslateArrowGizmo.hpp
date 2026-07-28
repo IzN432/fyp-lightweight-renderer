@@ -6,6 +6,7 @@
 #include "core/app/InputHandler.hpp"
 #include "core/editor/VertexManager.hpp"
 #include "core/editor/selection/SelectionManager.hpp"
+#include "core/editor/command/CommandManager.hpp"
 
 #include <glm/vec3.hpp>
 
@@ -23,7 +24,7 @@ class TranslateArrowGizmo : public Gizmo
 {
 public:
     explicit TranslateArrowGizmo(TranslateArrowGizmoAxis axis, const SceneObject &camera, const InputHandler &input,
-                                 VertexManager &vertexManager, SelectionManager &selectionManager);
+                                 VertexManager &vertexManager, SelectionManager &selectionManager, CommandManager &commandManager);
     ~TranslateArrowGizmo() = default;
 
     // Mouse interaction callbacks: override these in derived classes to implement gizmo behavior
@@ -37,9 +38,11 @@ private:
     const InputHandler &m_input;
     VertexManager      &m_vertexManager;
     SelectionManager   &m_selectionManager;
+    CommandManager     &m_commandManager;
     glm::vec3           m_axis;
-    
-    glm::vec3           m_draggingOrigin;
+
+    glm::vec3 m_currentDraggingOrigin;
+    glm::vec3 m_draggingOrigin;
 };
 
 } // namespace lr

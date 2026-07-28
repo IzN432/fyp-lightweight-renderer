@@ -92,7 +92,10 @@ add_library(lr_core STATIC
     src/core/app/Viewer.cpp
 
     src/core/editor/VertexManager.cpp
-    
+
+    src/core/editor/command/TranslatePointsCommand.cpp
+    src/core/editor/command/CommandManager.cpp
+
     src/core/editor/selection/BoxSelectionTool.cpp
     src/core/editor/selection/SelectionManager.cpp
 

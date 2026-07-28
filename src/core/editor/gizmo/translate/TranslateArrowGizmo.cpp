@@ -4,9 +4,11 @@
 
 #include "core/scene/Camera.hpp"
 #include "core/math/LinearAlgebraHelpers.hpp"
+#include "core/editor/command/TranslatePointsCommand.hpp"
 
 #include <array>
 #include <imgui.h>
+#include <memory>
 
 namespace lr
 {
@@ -59,10 +61,10 @@ constexpr std::array<glm::vec3, 3> kAxisVectors = {{
 
 TranslateArrowGizmo::TranslateArrowGizmo(TranslateArrowGizmoAxis axis, const SceneObject &camera,
                                          const InputHandler &input, VertexManager &vertexManager,
-                                         SelectionManager &selectionManager)
+                                         SelectionManager &selectionManager, CommandManager &commandManager)
     : Gizmo(kAxisInstances[static_cast<size_t>(axis)]), m_camera(camera), m_input(input),
       m_axis(kAxisVectors[static_cast<size_t>(axis)]), m_vertexManager(vertexManager),
-      m_selectionManager(selectionManager)
+      m_selectionManager(selectionManager), m_commandManager(commandManager)
 {}
 
 void TranslateArrowGizmo::onMouseDown(double ndcX, double ndcY, double aspect)
@@ -77,14 +79,15 @@ void TranslateArrowGizmo::onMouseDown(double ndcX, double ndcY, double aspect)
     const glm::vec3 cameraRayOrigin    = glm::vec3(pNear) / pNear.w;
     const glm::vec3 cameraRayDirection = glm::normalize(glm::vec3(pFar) / pFar.w - cameraRayOrigin);
 
-    m_draggingOrigin = math::closestPointOnLineToLine(m_instance.position, m_axis, cameraRayOrigin, cameraRayDirection);
+    m_currentDraggingOrigin =
+        math::closestPointOnLineToLine(m_instance.position, m_axis, cameraRayOrigin, cameraRayDirection);
+    m_draggingOrigin = m_currentDraggingOrigin;
 }
 
 void TranslateArrowGizmo::onMouseUp(double ndcX, double ndcY, double aspect)
 {
-    // This does nothing for now, but could be used to finalize the translation operation or reset state if needed.
-    // In the future once I start working with the Command pattern this could be used to finalize the translation
-    // operation and push a command to the undo stack.
+    m_commandManager.appendCommandWithoutExecuting(std::make_unique<TranslatePointsCommand>(
+        m_vertexManager, m_selectionManager.getSelectedIndices(), m_currentDraggingOrigin - m_draggingOrigin));
 }
 
 void TranslateArrowGizmo::dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect)
@@ -97,11 +100,11 @@ void TranslateArrowGizmo::dragCallback(double ndcX, double ndcY, double dNdcX, d
     const glm::vec3 cameraRayDirection = glm::normalize(glm::vec3(pFar) / pFar.w - cameraRayOrigin);
 
     glm::vec3 closestPointOnAxis =
-        math::closestPointOnLineToLine(m_draggingOrigin, m_axis, cameraRayOrigin, cameraRayDirection);
-    glm::vec3 translation = closestPointOnAxis - m_draggingOrigin;
+        math::closestPointOnLineToLine(m_currentDraggingOrigin, m_axis, cameraRayOrigin, cameraRayDirection);
+    glm::vec3 translation = closestPointOnAxis - m_currentDraggingOrigin;
 
     m_vertexManager.translateSelectedVertices(m_selectionManager.getSelectedIndices(), translation);
-    m_draggingOrigin = closestPointOnAxis; // Update the dragging origin for the next frame
+    m_currentDraggingOrigin = closestPointOnAxis; // Update the dragging origin for the next frame
 }
 
 } // namespace lr

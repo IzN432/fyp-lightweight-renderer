@@ -38,15 +38,35 @@ void BoxSelectionTool::dragCallback(double ndcX, double ndcY, double dNdcX, doub
     {
         m_boxEnd = glm::vec2(ndcX, ndcY);
         m_viewProjectionMatrix = m_camera.getComponent<Camera>().viewProjectionMatrix(aspect);
-        m_selectionCallback();
+        m_highlightCallback();
     }
 }
 
-void BoxSelectionTool::selectVertices(std::vector<uint32_t> &selectedVertices, const std::vector<glm::vec3> &vertices)
+void BoxSelectionTool::selectVertices(std::vector<uint32_t> &highlightedVertices, std::vector<uint32_t> &selectedVertices, const std::vector<glm::vec3> &vertices)
 {
-    if (!m_input.isShiftPressed())
+    selectedVertices.clear();
+
+    for (uint32_t i : highlightedVertices)
     {
-        selectedVertices.clear();
+        if (i < vertices.size())
+        {
+            selectedVertices.push_back(i);
+        }
+    }
+}
+
+void BoxSelectionTool::highlightVertices(std::vector<uint32_t> &highlightedVertices, std::vector<uint32_t> &selectedVertices, const std::vector<glm::vec3> &vertices)
+{
+    highlightedVertices.clear();
+    if (m_input.isShiftPressed())
+    {
+        for (uint32_t i : selectedVertices)
+        {
+            if (i < vertices.size())
+            {
+                highlightedVertices.push_back(i);
+            }
+        }
     }
 
     for (uint32_t i = 0; i < vertices.size(); ++i)
@@ -61,9 +81,9 @@ void BoxSelectionTool::selectVertices(std::vector<uint32_t> &selectedVertices, c
 
         if (ndc.x >= lowerLeft.x && ndc.x <= upperRight.x && ndc.y >= lowerLeft.y && ndc.y <= upperRight.y)
         {
-            if (!m_input.isShiftPressed() || std::find(selectedVertices.begin(), selectedVertices.end(), i) ==
-                selectedVertices.end())
-                selectedVertices.push_back(i);
+            if (!m_input.isShiftPressed() || std::find(highlightedVertices.begin(), highlightedVertices.end(), i) ==
+                highlightedVertices.end())
+                highlightedVertices.push_back(i);
         }
     }
 }

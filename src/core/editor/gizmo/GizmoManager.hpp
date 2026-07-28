@@ -48,6 +48,7 @@ private:
     OverlayGeometryPass &overlayGeometryPass;
     uint32_t m_hoveredGizmo = ~0u;
     uint32_t m_draggingGizmo = ~0u;
+    uint32_t m_releasedGizmo = ~0u;
     InputHandler &m_input;
     bool m_mouseClickedThisFrame = false;
     bool m_mouseReleasedThisFrame = false;

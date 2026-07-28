@@ -51,6 +51,16 @@ void GizmoManager::updateCallback(float dt, VkExtent2D extent, bool hasRenderedA
     overlayGeometryPass.setHoveredInstance(m_draggingGizmo != ~0u ? m_draggingGizmo : m_hoveredGizmo);
 
     // ---- Handle mouse button events for the current dragged gizmo ----
+    // Released gizmo is tracked separately from m_draggingGizmo, since
+    // mouseButtonCallback() already clears m_draggingGizmo synchronously on
+    // release (before this update runs on the next frame).
+    if (m_mouseReleasedThisFrame)
+    {
+        m_gizmos[m_releasedGizmo]->onMouseUp(ndcX, ndcY, aspect);
+        m_mouseReleasedThisFrame = false;
+        m_releasedGizmo = ~0u;
+    }
+
     if (m_draggingGizmo != ~0u)
     {
         if (m_mouseClickedThisFrame)
@@ -58,16 +68,8 @@ void GizmoManager::updateCallback(float dt, VkExtent2D extent, bool hasRenderedA
             m_gizmos[m_draggingGizmo]->onMouseDown(ndcX, ndcY, aspect);
             m_mouseClickedThisFrame = false;
         }
-        if (m_mouseReleasedThisFrame)
-        {
-            m_gizmos[m_draggingGizmo]->onMouseUp(ndcX, ndcY, aspect);
-            m_mouseReleasedThisFrame = false;
-        }
-    }
 
-    // ---- Drag callback for the gizmo currently being dragged (if any) ----
-    if (m_draggingGizmo != ~0u)
-    {
+        // ---- Drag callback for the gizmo currently being dragged ----
         m_gizmos[m_draggingGizmo]->dragCallback(ndcX, ndcY, dNdcX, dNdcY, aspect);
     }
 }
@@ -86,6 +88,7 @@ void GizmoManager::mouseButtonCallback(int button, int action, bool shift, bool 
         if (m_draggingGizmo != ~0u)
         {
             m_mouseReleasedThisFrame = true;
+            m_releasedGizmo = m_draggingGizmo;
         }
         m_draggingGizmo = ~0u;
     }

@@ -28,19 +28,25 @@ public:
     void updateCallback(float dt, VkExtent2D extent);
 
     const std::vector<uint32_t> &getSelectedIndices() const { return m_selectedVertices; }
+    std::vector<uint32_t> &getSelectedIndices() { return m_selectedVertices; }
 
+    const std::vector<uint32_t> &getHighlightedIndices() const { return m_highlightedVertices; }
+    std::vector<uint32_t> &getHighlightedIndices() { return m_highlightedVertices; }
+    
     void clearSelection();
 
-    // Invoked whenever the selected vertex set changes (click, box select, or clearSelection()).
     void registerSelectionChangedCallback(std::function<void()> callback) { m_selectionChangedCallback = std::move(callback); }
+    void registerHighlightChangedCallback(std::function<void()> callback) { m_highlightChangedCallback = std::move(callback); }
 private:
     std::unique_ptr<SelectionTool> m_selectTool;
+    std::vector<uint32_t> m_highlightedVertices;
     std::vector<uint32_t> m_selectedVertices;
     const std::vector<glm::vec3> &m_vertices;
     InputHandler &m_input;
     bool m_mouseClickedThisFrame = false;
     bool m_mouseReleasedThisFrame = false;
     std::function<void()> m_selectionChangedCallback;
+    std::function<void()> m_highlightChangedCallback;
 };
 
 

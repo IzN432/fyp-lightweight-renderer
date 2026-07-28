@@ -297,11 +297,13 @@ try
               .includePosition  = true });
     });
 
+    lr::CommandManager commandManager;
+
     lr::SelectionManager selectionManager(staticMesh.mesh().positions, viewer.input());
-    selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera));
-    selectionManager.registerSelectionChangedCallback([&]() {
+    selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera, selectionManager));
+    selectionManager.registerHighlightChangedCallback([&]() {
         std::fill(pointColors.begin(), pointColors.end(), glm::vec3(1.0f, 0.0f, 1.0f));
-        for (uint32_t idx : selectionManager.getSelectedIndices())
+        for (uint32_t idx : selectionManager.getHighlightedIndices())
             pointColors[idx] = glm::vec3(1.0f, 0.8f, 0.0f);  // orange = selected
         viewer.resources().updateBuffer(
             mainMeshColorBufferName,
@@ -312,13 +314,13 @@ try
     lr::GizmoManager gizmoManager(overlayGeometryPass, viewer.input());
     const std::vector<int> translateGizmoIds = {
         gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
-            lr::TranslateArrowGizmoAxis::X, *camera, viewer.input(), vertexManager, selectionManager)),
+            lr::TranslateArrowGizmoAxis::X, *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
         gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
-            lr::TranslateArrowGizmoAxis::Y, *camera, viewer.input(), vertexManager, selectionManager)),
+            lr::TranslateArrowGizmoAxis::Y, *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
         gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
-            lr::TranslateArrowGizmoAxis::Z, *camera, viewer.input(), vertexManager, selectionManager)),
+            lr::TranslateArrowGizmoAxis::Z, *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
         gizmoManager.addGizmo(std::make_unique<lr::TranslateBoxGizmo>(
-            *camera, viewer.input(), vertexManager, selectionManager)),
+            *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
     };
     for (int id : translateGizmoIds)
         gizmoManager.hideGizmo(id);
@@ -352,6 +354,14 @@ try
             selectionManager.clearSelection();
     });
 
+    viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
+        if (key != GLFW_KEY_Z || action != GLFW_PRESS || !ctrl)
+            return;
+        if (ImGui::GetIO().WantCaptureKeyboard)
+            return;
+
+        commandManager.undo();
+    });
     // -------------------------------------------------------------------------
     // Per-frame callbacks
     // -------------------------------------------------------------------------
