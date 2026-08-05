@@ -11,7 +11,7 @@ MaterialUploader::MaterialUploader(ResourceRegistry &registry)
 {
 }
 
-MaterialUploadResult MaterialUploader::upload(const std::vector<Material> &materials,
+MaterialUploadResult MaterialUploader::upload(const std::vector<const Material*> &materials,
                                             const GpuMaterialLayout &gpuLayout,
                                             const std::string &namePrefix)
 {
@@ -35,7 +35,7 @@ MaterialUploadResult MaterialUploader::upload(const std::vector<Material> &mater
 
     for (size_t i = 0; i < materials.size(); ++i)
     {
-        const auto &material = materials[i];
+        const auto &material = *materials[i];
 
         for (const auto &scalar : scalars)
         {
@@ -79,7 +79,7 @@ MaterialUploadResult MaterialUploader::upload(const std::vector<Material> &mater
         const std::string resourceName = namePrefix + "_tex_" + materialTextureName;
         for (size_t i = 0; i < materials.size(); ++i)
         {
-            const auto &material = materials[i];
+            const auto &material = *materials[i];
             const MaterialImage *img = nullptr;
             if (material.textures.contains(materialTextureName))
                 img = &material.textures.at(materialTextureName);
@@ -103,7 +103,7 @@ MaterialUploadResult MaterialUploader::upload(const std::vector<Material> &mater
     return result;
 }
 
-void MaterialUploader::update(const std::vector<Material> &materials,
+void MaterialUploader::update(const std::vector<const Material*> &materials,
                               const GpuMaterialLayout &gpuLayout,
                               const MaterialUploadResult &result)
 {
@@ -114,7 +114,7 @@ void MaterialUploader::update(const std::vector<Material> &materials,
 
     for (size_t i = 0; i < materials.size(); ++i)
     {
-        const auto &material = materials[i];
+        const auto &material = *materials[i];
 
         for (const auto &scalar : scalars)
         {

@@ -21,11 +21,11 @@ class MaterialUploader
 public:
     explicit MaterialUploader(ResourceRegistry &registry);
 
-    MaterialUploadResult upload(const std::vector<Material> &materials,
+    MaterialUploadResult upload(const std::vector<const Material*> &materials,
                                 const GpuMaterialLayout &gpuLayout,
                                 const std::string &namePrefix = "material");
 
-    void update(const std::vector<Material> &materials,
+    void update(const std::vector<const Material*> &materials,
                 const GpuMaterialLayout &gpuLayout,
                 const MaterialUploadResult &result);
 

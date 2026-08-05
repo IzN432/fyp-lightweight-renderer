@@ -77,6 +77,7 @@ add_library(lr_core STATIC
     src/core/passes/imgui/ImguiPass.cpp
 
     src/core/scene/Mesh.cpp
+    src/core/scene/AreaLightVisual.cpp
 
     src/core/loaders/ObjLoader.cpp
     src/core/loaders/GltfLoader.cpp

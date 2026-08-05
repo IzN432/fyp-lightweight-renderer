@@ -1,10 +1,16 @@
 #include "PbrPass.hpp"
 
 #include "core/Paths.hpp"
+#include "core/passes/pbr/LtcMatrix.hpp"
 #include "core/upload/CameraUploader.hpp"
 
 namespace lr
 {
+
+namespace
+{
+constexpr uint32_t kLtcSize = 64;
+}
 
 struct PbrPC
 {
@@ -15,6 +21,15 @@ struct PbrPC
 PbrPass::PbrPass(Config cfg)
     : m_cfg(std::move(cfg))
 {
+}
+
+void PbrPass::uploadResources(ResourceRegistry &resources) const
+{
+    // LTC lookup tables for area light shading (Heitz et al.) — LTC1 holds the
+    // inverse transform M^-1, LTC2 holds GGX norm/fresnel/horizon-clip terms,
+    // both indexed by (roughness, cosTheta) over a 64x64 grid.
+    resources.uploadImage("ltc1", LTC1, kLtcSize, kLtcSize, VK_FORMAT_R32G32B32A32_SFLOAT);
+    resources.uploadImage("ltc2", LTC2, kLtcSize, kLtcSize, VK_FORMAT_R32G32B32A32_SFLOAT);
 }
 
 void PbrPass::build(FrameGraph &fg) const
@@ -59,42 +74,63 @@ void PbrPass::build(FrameGraph &fg) const
                 .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             },
             {
-                .resourceName = "gbufferDepth",
+                .resourceName = "ltc1",
                 .binding      = 4,
                 .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .imageLayout  = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             },
             {
-                .resourceName = "gbufferAlbedo",
+                .resourceName = "ltc2",
                 .binding      = 5,
                 .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
                 .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             },
             {
-                .resourceName = "gbufferNormal",
+                .resourceName = "gbufferDepth",
                 .binding      = 6,
                 .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .imageLayout  = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
             },
             {
-                .resourceName = "gbufferMaterial",
+                .resourceName = "gbufferAlbedo",
                 .binding      = 7,
                 .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
                 .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             },
             {
-                .resourceName = m_cfg.lightBufferResourceName,
+                .resourceName = "gbufferNormal",
                 .binding      = 8,
+                .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            },
+            {
+                .resourceName = "gbufferMaterial",
+                .binding      = 9,
+                .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            },
+            {
+                .resourceName = "gbufferEmissive",
+                .binding      = 10,
+                .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            },
+            {
+                .resourceName = m_cfg.lightBufferResourceName,
+                .binding      = 11,
                 .type         = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
             },
             {
                 .resourceName = "hbao_ao",
-                 .binding      = 9,
+                 .binding      = 12,
                  .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                  .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
                  .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,

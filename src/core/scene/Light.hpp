@@ -53,7 +53,7 @@ struct LightGUICallbacks
     bool operator()(PointLight &light) const
     {
         bool changed = false;
-        changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 100.0f);
         changed |= ImGui::ColorEdit3("Light Color", &light.color.x);
         return changed;
     }
@@ -61,7 +61,7 @@ struct LightGUICallbacks
     bool operator()(DirectionalLight &light) const
     {
         bool changed = false;
-        changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 100.0f);
         changed |= ImGui::ColorEdit3("Light Color", &light.color.x);
         return changed;
     }
@@ -69,7 +69,7 @@ struct LightGUICallbacks
     bool operator()(SpotLight &light) const
     {
         bool changed = false;
-        changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 100.0f);
         changed |= ImGui::ColorEdit3("Light Color", &light.color.x);
         changed |= ImGui::SliderFloat("Inner Cone Angle", &light.innerConeAngleDegrees, 0.0f, 90.0f);
         changed |= ImGui::SliderFloat("Outer Cone Angle", &light.outerConeAngleDegrees, 0.0f, 90.0f);
@@ -79,7 +79,7 @@ struct LightGUICallbacks
     bool operator()(AreaLight &light) const
     {
         bool changed = false;
-        changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 100.0f);
         changed |= ImGui::ColorEdit3("Light Color", &light.color.x);
         changed |= ImGui::DragFloat2("Size", &light.size.x, 0.1f);
         return changed;
@@ -88,7 +88,7 @@ struct LightGUICallbacks
     bool operator()(ImageLight &light) const
     {
         bool changed = false;
-        changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 100.0f);
         changed |= ImGui::ColorEdit3("Light Color", &light.color.x);
         return changed;
     }

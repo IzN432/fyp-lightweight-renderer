@@ -10,6 +10,7 @@
 #include "core/passes/overlaypoints/OverlayPointsPass.hpp"
 #include "core/framegraph/ImageReadback.hpp"
 
+#include "core/scene/AreaLightVisual.hpp"
 #include "core/scene/Camera.hpp"
 #include "core/scene/Light.hpp"
 #include "core/scene/Mesh.hpp"
@@ -72,14 +73,32 @@ try
     camera->name = "Main Camera";
 
     // LIGHT
-    lr::DirectionalLight light;
-    light.color = glm::vec3(1.0f, 1.0f, 1.0f);
-    light.intensity = 1.0f;
-    
-    lr::SceneObject* editorLight = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
-    editorLight->addComponent<lr::Transform>();
-    editorLight->addComponent<lr::Light>(light);
-    editorLight->name = "Directional Light";
+    {
+        lr::DirectionalLight light;
+        light.color = glm::vec3(1.0f, 1.0f, 1.0f);
+        light.intensity = 1.0f;
+        
+        lr::SceneObject* lightObject = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
+        lightObject->addComponent<lr::Transform>();
+        lightObject->addComponent<lr::Light>(light);
+        lightObject->name = "Directional Light";
+    }
+
+    // AREA LIGHT — rendered both as an LTC light (see pbr.frag CalcAreaLight) and, further down,
+    // as a real emissive quad mesh so it's visible when looked at directly (see AreaLightVisual.hpp).
+    {
+        lr::AreaLight areaLight;
+        areaLight.color = glm::vec3(1.0f, 0.6f, 0.3f);
+        areaLight.intensity = 4.0f;
+        areaLight.size = glm::vec2(1.5f, 1.0f);
+
+        lr::SceneObject* areaLightObject = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
+        areaLightObject->addComponent<lr::Transform>(
+            glm::vec3(0.0f, 2.0f, 2.0f),
+            glm::quat(glm::radians(glm::vec3(-45.0f, 180.0f, 0.0f))));
+        areaLightObject->addComponent<lr::Light>(areaLight);
+        areaLightObject->name = "Area Light";
+    }
 
     lr::LightUploader lightUploader(viewer.resources());
 
@@ -105,9 +124,55 @@ try
     if (sequence.empty())
         throw std::runtime_error("GltfLoader returned empty sequence for '" + meshPath.string() + "'");
 
+    // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets its own StaticMesh
+    // component (a quad), separate from the main mesh's StaticMesh. The quad still draws through the
+    // same GeometryPass as the main mesh (see AreaLightVisual.hpp for why the visual needs to be real
+    // geometry rather than an overlay), which means its material index has to be baked in as a global
+    // index into the combined material buffer built below — see lightVisualMaterialBase.
+    //
+    // Pre-allocating a slot for every light (rather than only ones currently typed AreaLight) is what
+    // makes this robust to a light's type being changed at runtime via the Scene Hierarchy's type
+    // combo (see Light::onGUIImpl): the shared geometry/material buffers never need to grow or shrink
+    // when that happens — updateLightVisuals below just rewrites what's in an already-existing slot.
+    std::vector<lr::SceneObject*> lightVisualObjects;
+    for (const auto &object : sceneObjects)
+        if (object->hasComponent<lr::Light>())
+            lightVisualObjects.push_back(object.get());
+
+    const lr::AreaLightVisualConfig areaLightVisualConfig{
+        .normalAttributeName  = config.normalAttributeName,
+        .tangentAttributeName = config.tangentAttributeName,
+        .uvAttributeName      = config.uvAttributeName,
+        .baseDiffuseName      = config.baseDiffuseName,
+        .baseEmissiveName     = config.baseEmissiveName,
+        .baseRoughnessName    = config.baseRoughnessName,
+        .baseMetallicName     = config.baseMetallicName,
+    };
+
+    // A light whose current type isn't AreaLight draws as a degenerate, zero-emissive quad rather
+    // than std::get-ing a variant that isn't AreaLight.
+    static const lr::AreaLight hiddenAreaLightVisual{ {glm::vec3(0.0f), 0.0f}, glm::vec2(0.0f) };
+
+    // Base index, in the combined material buffer, where the light visuals' materials start — the
+    // glTF materials (indices [0, lightVisualMaterialBase)) come first, then one material per light.
+    const uint32_t lightVisualMaterialBase = static_cast<uint32_t>(materials.size());
+    for (size_t i = 0; i < lightVisualObjects.size(); ++i)
+    {
+        const auto *areaLight = std::get_if<lr::AreaLight>(&lightVisualObjects[i]->getComponent<lr::Light>().light);
+        const auto &lightData = areaLight ? *areaLight : hiddenAreaLightVisual;
+        const auto &transform = lightVisualObjects[i]->getComponent<lr::Transform>();
+
+        lr::Mesh quadMesh;
+        lr::buildAreaLightQuadMesh(quadMesh, transform, lightData,
+                                    lightVisualMaterialBase + static_cast<uint32_t>(i), areaLightVisualConfig);
+        std::vector<lr::Material> quadMaterials;
+        quadMaterials.push_back(lr::buildAreaLightMaterial(lightData, areaLightVisualConfig));
+
+        lightVisualObjects[i]->addComponent<lr::StaticMesh>(quadMesh, quadMaterials, /*hideFromGui=*/true);
+    }
+
     lr::SceneObject* meshObject = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
     meshObject->addComponent<lr::Transform>();
-    
     {
         lr::Mesh &m = sequence.frames.front();
         std::vector<glm::vec3> colors(m.vertexCount(), glm::vec3(1.0f, 0.0f, 1.0f));
@@ -150,7 +215,9 @@ try
 
     lightUploader.upload(sceneLights);
     
-    // Upload the main scene geometry
+    // Upload the main scene geometry — the area light quad meshes are drawn through the same
+    // GeometryPass, so they share these buffers with the main mesh (see GeometryPass.cpp, which
+    // loops over one drawIndexed per mesh out of a single shared vertex/index buffer set).
     lr::MeshUploader meshUploader(viewer.resources());
     const std::string mainMeshPositionBufferName  = "meshPositionBuffer";
     const std::string mainMeshVertexBufferName    = "meshVertexBuffer";
@@ -158,14 +225,21 @@ try
     const std::string mainMeshIndexBufferName     = "meshIndexBuffer";
     const std::string mainMeshFaceGroupBufferName = "meshFaceGroupBuffer";
 
-    const lr::VertexBufferUploadResult meshPositions = meshUploader.uploadVertexBuffer(
-        { &staticMesh.mesh() },
-        { .vertexBufferName = mainMeshPositionBufferName,
-          .includePosition  = true });
-    meshUploader.uploadVertexBuffer(
-        { &staticMesh.mesh() },
-        { .vertexBufferName       = mainMeshVertexBufferName,
-          .vertexAttributeNames   = { config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName } });
+    std::vector<const lr::Mesh*> geometryMeshes = { &staticMesh.mesh() };
+    for (auto *lightVisualObject : lightVisualObjects)
+        geometryMeshes.push_back(&lightVisualObject->getComponent<lr::StaticMesh>().mesh());
+
+    const lr::VertexBufferUploadConfig meshPositionUploadConfig{
+        .vertexBufferName = mainMeshPositionBufferName,
+        .includePosition  = true
+    };
+    const lr::VertexBufferUploadConfig meshAttributeUploadConfig{
+        .vertexBufferName     = mainMeshVertexBufferName,
+        .vertexAttributeNames = { config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName }
+    };
+
+    const lr::VertexBufferUploadResult meshPositions = meshUploader.uploadVertexBuffer(geometryMeshes, meshPositionUploadConfig);
+    meshUploader.uploadVertexBuffer(geometryMeshes, meshAttributeUploadConfig);
     // Color buffer is dynamic so selection highlights can be updated each frame.
     std::vector<glm::vec3> pointColors(staticMesh.mesh().vertexCount(), glm::vec3(1.0f, 0.0f, 1.0f));
     viewer.resources().registerDynamicBuffer(
@@ -177,10 +251,10 @@ try
         pointColors.data(),
         pointColors.size() * sizeof(glm::vec3));
     const lr::IndexBufferUploadResult indexBuffer = meshUploader.uploadIndexBuffer(
-        { &staticMesh.mesh() },
+        geometryMeshes,
         { .indexBufferName = mainMeshIndexBufferName });
     meshUploader.uploadFaceGroupBuffer(
-        { &staticMesh.mesh() },
+        geometryMeshes,
         { .faceGroupBufferName = mainMeshFaceGroupBufferName });
 
     // This matches the expected layout in geometry.frag
@@ -196,18 +270,60 @@ try
         .addTexture(config.metallicRoughnessTextureName,  VK_FORMAT_R8G8B8A8_UNORM)
         .addTexture(config.emissiveTextureName,           VK_FORMAT_R8G8B8A8_SRGB);
 
+    // The GPU material buffer is one flat array, but ownership of the materials themselves is now
+    // split across StaticMesh components (the main mesh's, plus one per light) — this gathers them
+    // back into the layout the buffer expects: glTF materials first, then one per light, matching
+    // lightVisualMaterialBase above.
+    auto buildCombinedMaterials = [&]() {
+        std::vector<const lr::Material*> combined;
+        for (const auto &m : staticMesh.materials())
+            combined.push_back(&m);
+        for (auto *lightVisualObject : lightVisualObjects)
+            for (const auto &m : lightVisualObject->getComponent<lr::StaticMesh>().materials())
+                combined.push_back(&m);
+        return combined;
+    };
+
     lr::MaterialUploader materialUploader(viewer.resources());
     const lr::MaterialUploadResult material = materialUploader.upload(
-        staticMesh.materials(),
+        buildCombinedMaterials(),
         gpuMaterialLayout,
         "material");
-    
-    staticMesh.addChangeListener([&staticMesh, &materialUploader, &gpuMaterialLayout, &material]() {
-        materialUploader.update(
-            staticMesh.materials(),
-            gpuMaterialLayout,
-            material);
-    });
+
+    std::function<void()> updateMaterialUpload = [&]() {
+        materialUploader.update(buildCombinedMaterials(), gpuMaterialLayout, material);
+    };
+    staticMesh.addChangeListener(updateMaterialUpload);
+    for (auto *lightVisualObject : lightVisualObjects)
+        lightVisualObject->getComponent<lr::StaticMesh>().addChangeListener(updateMaterialUpload);
+
+    // Keep each light's visual quad (position/orientation/size) and emissive material in sync
+    // whenever that light's Transform or Light component is edited in the Scene Hierarchy — including
+    // being switched to a different light type at runtime (see Light::onGUIImpl's type combo), at
+    // which point the quad collapses to (or springs from) the hidden zero-sized state.
+    std::function<void()> updateLightVisuals = [&]() {
+        for (size_t i = 0; i < lightVisualObjects.size(); ++i)
+        {
+            const auto *areaLight = std::get_if<lr::AreaLight>(&lightVisualObjects[i]->getComponent<lr::Light>().light);
+            const auto &lightData = areaLight ? *areaLight : hiddenAreaLightVisual;
+            const auto &transform = lightVisualObjects[i]->getComponent<lr::Transform>();
+            auto &lightStaticMesh = lightVisualObjects[i]->getComponent<lr::StaticMesh>();
+
+            lr::buildAreaLightQuadMesh(lightStaticMesh.mesh(), transform, lightData,
+                                        lightVisualMaterialBase + static_cast<uint32_t>(i), areaLightVisualConfig);
+            lightStaticMesh.materials()[0] = lr::buildAreaLightMaterial(lightData, areaLightVisualConfig);
+        }
+
+        meshUploader.updateVertexBuffer(geometryMeshes, meshPositionUploadConfig);
+        meshUploader.updateVertexBuffer(geometryMeshes, meshAttributeUploadConfig);
+        updateMaterialUpload();
+    };
+
+    for (auto *lightVisualObject : lightVisualObjects)
+    {
+        lightVisualObject->getComponent<lr::Light>().addChangeListener(updateLightVisuals);
+        lightVisualObject->getComponent<lr::Transform>().addChangeListener(updateLightVisuals);
+    }
 
     // -------------------------------------------------------------------------
     // Frame graph passes
@@ -229,7 +345,7 @@ try
         .emissiveTextureArrayResourceName = material.textureNameMap.at(config.emissiveTextureName),
         .materialBufferResourceName = material.materialInfoBufferName,
 
-        .materialCount = static_cast<uint32_t>(staticMesh.materials().size()),
+        .materialCount = lightVisualMaterialBase + static_cast<uint32_t>(lightVisualObjects.size()),
     });
     lr::GpuMeshLayout gpuMeshLayout(staticMesh.mesh().layout());
 
@@ -252,6 +368,7 @@ try
         .numLights = lightUploader.numLights(),
         .pfMips = 8,
     });
+    pbrPass.uploadResources(viewer.resources());
     pbrPass.build(viewer.frameGraph());
     
     lr::OverlayGeometryPass overlayGeometryPass({
@@ -265,11 +382,17 @@ try
     pointsMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
     pointsMeshLayout.map("color", 1, 1, VK_FORMAT_R32G32B32_SFLOAT);
 
+    // Vertex-selection points only apply to the main mesh, not the area light quads — meshPositions
+    // now covers both (see geometryMeshes above), so scope this pass to just its first entry.
+    const lr::VertexBufferUploadResult mainMeshPositionResult{
+        .singleMeshResults = { meshPositions.singleMeshResults.front() }
+    };
+
     lr::OverlayPointsPass overlayPointsPass({
         .cameraBufferResourceName   = cameraUploader.bufferName(),
         .positionBufferResourceName = mainMeshPositionBufferName,
         .colorBufferResourceName    = mainMeshColorBufferName,
-        .positionBufferUploadResult = meshPositions,
+        .positionBufferUploadResult = mainMeshPositionResult,
         .vertexCounts               = { staticMesh.mesh().vertexCount() },
     });
     overlayPointsPass.build(viewer.frameGraph(), pointsMeshLayout);
@@ -291,10 +414,10 @@ try
 
     lr::VertexManager vertexManager(staticMesh.mesh().positions);
     vertexManager.registerUpdateCallback([&]() {
-        meshUploader.updateVertexBuffer(
-            { &staticMesh.mesh() },
-            { .vertexBufferName = mainMeshPositionBufferName,
-              .includePosition  = true });
+        // Must repack the full combined mesh list (main mesh + area light quads), not just the
+        // static mesh — mainMeshPositionBufferName is sized for all of them (see geometryMeshes
+        // above), and reuploadBuffer's staging buffer needs to match that size.
+        meshUploader.updateVertexBuffer(geometryMeshes, meshPositionUploadConfig);
     });
 
     lr::CommandManager commandManager;

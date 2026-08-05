@@ -42,19 +42,29 @@ layout(set = 0, binding = 6) readonly buffer Materials
     MaterialData data[];
 } materials;
 
+// gl_PrimitiveID restarts at 0 for every draw call, but the FaceGroupIndices buffer packs
+// all meshes drawn in this pass back to back. primitiveIdOffset is the running face count of
+// all meshes drawn before this one, so the two stay aligned when the pass draws more than one mesh.
+layout(push_constant) uniform PC
+{
+    uint primitiveIdOffset;
+} pc;
+
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec2 outNormal;
 layout(location = 2) out vec4 outMaterial;
+layout(location = 3) out vec4 outEmissive;
 
 void main()
 {
-	uint faceGroupIndex = faceGroupIndices.values[gl_PrimitiveID];
+	uint faceGroupIndex = faceGroupIndices.values[pc.primitiveIdOffset + gl_PrimitiveID];
 	MaterialData mat = materials.data[faceGroupIndex];
 
 	vec3 albedo = texture(diffuseTex[nonuniformEXT(faceGroupIndex)], inUv).rgb * mat.baseColorFactor.rgb;
 	float roughness = texture(metallicRoughnessTex[nonuniformEXT(faceGroupIndex)], inUv).g * mat.roughnessFactor;
 	float metallic = texture(metallicRoughnessTex[nonuniformEXT(faceGroupIndex)],  inUv).b * mat.metallicFactor;
-	
+	vec3 emissive = texture(emissiveTex[nonuniformEXT(faceGroupIndex)], inUv).rgb * mat.emissiveFactor.rgb;
+
 	// ========== SECTION 1 - Normal Mapping ==========
 
 	vec3 N = normalize(inNormal); // Geometric world-space normal
@@ -72,5 +82,6 @@ void main()
 	
 	outAlbedo = vec4(albedo, 1.0);
 	outMaterial = vec4(clamp(roughness, 0.0, 1.0), clamp(metallic, 0.0, 1.0), 0.0, 0.0);
+	outEmissive = vec4(emissive, 1.0);
 }
 

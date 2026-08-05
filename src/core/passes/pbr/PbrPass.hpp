@@ -20,6 +20,10 @@ public:
 
     explicit PbrPass(Config cfg);
 
+    // Upload the LTC lookup tables used for area light shading (ltc1, ltc2).
+    // Call once before build().
+    void uploadResources(ResourceRegistry &resources) const;
+
     void build(FrameGraph &fg) const;
 
 private:

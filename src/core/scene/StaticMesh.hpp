@@ -41,12 +41,19 @@ class StaticMesh : public Component
 private:
     Mesh m_mesh;
     std::vector<Material> m_materials;
+    // Set for meshes that are an implementation detail of another component (e.g. a light's visual
+    // quad, whose mesh/material are derived from that light and overwritten on every update) rather
+    // than user-editable scene content — keeps them out of the Scene Hierarchy.
+    bool m_hideFromGui;
 public:
-    explicit StaticMesh(Mesh &mesh, std::vector<Material>& materials)
-        : m_mesh(std::move(mesh)), m_materials(std::move(materials)) {}
+    explicit StaticMesh(Mesh &mesh, std::vector<Material>& materials, bool hideFromGui = false)
+        : m_mesh(std::move(mesh)), m_materials(std::move(materials)), m_hideFromGui(hideFromGui) {}
 
     void onGUIImpl() override
     {
+        if (m_hideFromGui)
+            return;
+
         ImGui::Text("Mesh: %u vertices, %u faces", m_mesh.vertexCount(), m_mesh.faceCount());
         
         bool changed = false;
@@ -71,6 +78,7 @@ public:
         }
     }
 
+    std::vector<Material>& materials() { return m_materials; }
     const std::vector<Material>& materials() const { return m_materials; }
     Mesh&       mesh()       { return m_mesh; }
     const Mesh& mesh() const { return m_mesh; }
