@@ -119,6 +119,7 @@ target_link_libraries(lr_core PUBLIC
     tinyobjloader::tinyobjloader
     GPUOpen::VulkanMemoryAllocator
     imgui
+    imguiFileDialog
     mikktspace::mikktspace
 )
 target_include_directories(lr_core PUBLIC ${TINYGLTF_INCLUDE_DIRS})

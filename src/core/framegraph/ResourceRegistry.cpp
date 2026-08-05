@@ -283,6 +283,29 @@ bool ResourceRegistry::hasImageArray(const std::string &arrayName) const
     return m_imageArrays.count(arrayName) > 0;
 }
 
+void ResourceRegistry::destroyImageArray(const std::string &arrayName)
+{
+    auto arrIt = m_imageArrays.find(arrayName);
+    if (arrIt == m_imageArrays.end())
+        return;
+
+    for (const auto &slotName : arrIt->second)
+    {
+        if (slotName.empty())
+            continue;
+
+        auto imgIt = m_images.find(slotName);
+        if (imgIt == m_images.end())
+            continue;
+
+        m_allocator.destroy(imgIt->second.image);
+        m_images.erase(imgIt);
+    }
+
+    m_imageArrays.erase(arrIt);
+    spdlog::debug("ResourceRegistry: destroyed image array '{}'", arrayName);
+}
+
 void ResourceRegistry::rebuild(VkExtent2D newExtent)
 {
     m_defaultExtent = newExtent;
@@ -404,6 +427,17 @@ const AllocatedBuffer *ResourceRegistry::getBuffer(const std::string &name) cons
 bool ResourceRegistry::hasBuffer(const std::string &name) const
 {
     return m_buffers.count(name) > 0;
+}
+
+void ResourceRegistry::destroyBuffer(const std::string &name)
+{
+    auto it = m_buffers.find(name);
+    if (it == m_buffers.end())
+        return;
+
+    m_allocator.destroy(it->second.buffer);
+    m_buffers.erase(it);
+    spdlog::debug("ResourceRegistry: destroyed buffer '{}'", name);
 }
 
 void ResourceRegistry::updateBuffer(const std::string &name,

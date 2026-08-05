@@ -130,6 +130,16 @@ public:
     const AllocatedBuffer *getBuffer(const std::string &name) const;
     bool hasBuffer(const std::string &name) const;
 
+    // Destroys a previously registered buffer, freeing its GPU memory, so the name can be
+    // reused (e.g. registered again at a different size). Caller must ensure the GPU is not
+    // using the buffer first (see VulkanContext::waitIdle()). No-op if not found.
+    void destroyBuffer(const std::string &name);
+
+    // Destroys every image slot belonging to a named image array (created via uploadArrayImage),
+    // so the array name can be reused with a different slot count. Caller must ensure the GPU
+    // is not using the images first. No-op if not found.
+    void destroyImageArray(const std::string &arrayName);
+
     // -----------------------------------------------------------------------
     // Upload queue — called automatically by FrameGraph::execute()
     // -----------------------------------------------------------------------

@@ -14,7 +14,7 @@ public:
     {
         std::string             cameraBufferResourceName;
         std::string             lightBufferResourceName;
-        uint32_t                numLights;
+        const uint32_t         *numLights; // read each frame (see PbrPass::build) so lights added at runtime are picked up without rebuilding this pass
         uint32_t                pfMips;
     };
 

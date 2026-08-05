@@ -25,8 +25,11 @@ struct ObjLoaderConfig
 	std::string ambientTextureName = "ambientTexture";
 	std::string specularTextureName = "specularTexture";
 	std::string normalTextureName = "normalTexture";
-	std::string metallicTextureName = "metallicTexture";
-	std::string roughnessTextureName = "roughnessTexture";
+	// OBJ/MTL's PBR extension stores roughness and metallic as two separate grayscale images
+	// (roughness_texname/metallic_texname), unlike glTF's single combined texture — they're
+	// packed into one image (G=roughness, B=metallic, matching GltfLoaderConfig's convention)
+	// under this one key so OBJ- and glTF-sourced materials can share one GpuMaterialLayout.
+	std::string metallicRoughnessTextureName = "metallicRoughnessTexture";
 	std::string emissiveTextureName = "emissiveTexture";
 
 	std::string baseDiffuseName = "baseDiffuse";

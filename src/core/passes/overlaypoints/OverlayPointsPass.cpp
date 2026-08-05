@@ -52,7 +52,9 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         })
         .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
             if (!m_enabled) return;
-            const OverlayPointsPC pc{};
+            const OverlayPointsPC pc{
+                .model = m_cfg.meshTransform ? m_cfg.meshTransform->localMatrix() : glm::mat4(1.0f)
+            };
             for (size_t i = 0; i < m_cfg.positionBufferUploadResult.singleMeshResults.size(); ++i)
             {
                 const auto &vert = m_cfg.positionBufferUploadResult.singleMeshResults[i];

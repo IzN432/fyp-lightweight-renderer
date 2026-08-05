@@ -1,5 +1,6 @@
 #include "core/app/Viewer.hpp"
 #include "core/loaders/GltfLoader.hpp"
+#include "core/loaders/ObjLoader.hpp"
 #include "core/overlay/OverlayMesh.hpp"
 #include "core/passes/final/FinalPass.hpp"
 #include "core/passes/geometry/GeometryPass.hpp"
@@ -29,11 +30,13 @@
 #include "core/editor/VertexManager.hpp"
 
 #include <imgui.h>
+#include <ImGuiFileDialog.h>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec4.hpp>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
@@ -124,6 +127,25 @@ try
     if (sequence.empty())
         throw std::runtime_error("GltfLoader returned empty sequence for '" + meshPath.string() + "'");
 
+    // OBJ files (see addMeshFromFile below) use their own loader, but the output key names are
+    // set to match `config` above so both loaders' materials share the one GpuMaterialLayout
+    // built later (gpuMaterialLayout). ambient/specular/shininess have no corresponding scalar/
+    // texture in that layout and are simply unused.
+    lr::ObjLoader objLoader;
+    lr::ObjLoaderConfig objConfig{
+        .normalAttributeName = config.normalAttributeName,
+        .tangentAttributeName = config.tangentAttributeName,
+        .uvAttributeName = config.uvAttributeName,
+        .diffuseTextureName = config.diffuseTextureName,
+        .normalTextureName = config.normalTextureName,
+        .metallicRoughnessTextureName = config.metallicRoughnessTextureName,
+        .emissiveTextureName = config.emissiveTextureName,
+        .baseDiffuseName = config.baseDiffuseName,
+        .baseRoughnessName = config.baseRoughnessName,
+        .baseMetallicName = config.baseMetallicName,
+        .baseEmissiveName = config.baseEmissiveName,
+    };
+
     // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets its own StaticMesh
     // component (a quad), separate from the main mesh's StaticMesh. The quad still draws through the
     // same GeometryPass as the main mesh (see AreaLightVisual.hpp for why the visual needs to be real
@@ -204,14 +226,13 @@ try
         lightUploader.upload(sceneLights);
     };
 
+    // Change-listener wiring for these lights (updateLightList, plus updateMaterialUpload and
+    // updateLightVisuals below) happens later, via wireLightObject, once all three listener
+    // targets exist — see the wireLightObject definition after updateLightVisuals.
     std::vector<lr::SceneObject*> sceneLights;
-    for (const auto &sceneObject : sceneObjects) {
-        if (sceneObject->hasComponent<lr::Light>()) {
+    for (const auto &sceneObject : sceneObjects)
+        if (sceneObject->hasComponent<lr::Light>())
             sceneLights.push_back(sceneObject.get());
-            sceneObject->getComponent<lr::Light>().addChangeListener(updateLightList);
-            sceneObject->getComponent<lr::Transform>().addChangeListener(updateLightList);
-        }
-    }
 
     lightUploader.upload(sceneLights);
     
@@ -225,9 +246,47 @@ try
     const std::string mainMeshIndexBufferName     = "meshIndexBuffer";
     const std::string mainMeshFaceGroupBufferName = "meshFaceGroupBuffer";
 
-    std::vector<const lr::Mesh*> geometryMeshes = { &staticMesh.mesh() };
-    for (auto *lightVisualObject : lightVisualObjects)
-        geometryMeshes.push_back(&lightVisualObject->getComponent<lr::StaticMesh>().mesh());
+    // Objects loaded into the scene at runtime (see addMeshFromFile below) — kept separate from
+    // lightVisualObjects since they're plain renderable meshes, not light-driven. localFaceGroups
+    // is a pristine, pre-offset copy of the loaded mesh's face groups: buildCombinedMaterials()
+    // below places lightVisualObjects' materials before extraModelObjects', so growing
+    // lightVisualObjects at runtime (adding a light) shifts the absolute material offset every
+    // extraModelObject was baked against — rebakeExtraModelFaceGroups() (defined after
+    // rebuildSceneGeometry) uses this local copy to recompute that offset from scratch.
+    struct ExtraModelEntry
+    {
+        lr::SceneObject *object;
+        std::vector<uint32_t> localFaceGroups;
+    };
+    std::vector<ExtraModelEntry> extraModelObjects;
+
+    // Gathers every mesh that shares the buffers below (main mesh + light visuals + anything
+    // loaded at runtime), in the fixed order the combined material indices assume. Called once to
+    // build the initial geometryMeshes list, and again from rebuildSceneGeometry() whenever that
+    // set changes.
+    auto currentGeometryMeshes = [&]() {
+        std::vector<const lr::Mesh*> meshes = { &staticMesh.mesh() };
+        for (auto *lightVisualObject : lightVisualObjects)
+            meshes.push_back(&lightVisualObject->getComponent<lr::StaticMesh>().mesh());
+        for (auto &extraModelEntry : extraModelObjects)
+            meshes.push_back(&extraModelEntry.object->getComponent<lr::StaticMesh>().mesh());
+        return meshes;
+    };
+
+    // Parallel to currentGeometryMeshes() (same order, one entry per mesh) — the model matrix
+    // GeometryPass applies per draw. Light visuals bake their Transform into vertex positions
+    // directly (see AreaLightVisual.hpp), so they'd be double-transformed by also applying their
+    // Transform here — pass nullptr for those to mean "draw with an identity model matrix".
+    auto currentMeshTransforms = [&]() {
+        std::vector<const lr::Transform*> transforms = { &meshObject->getComponent<lr::Transform>() };
+        for (size_t i = 0; i < lightVisualObjects.size(); ++i)
+            transforms.push_back(nullptr);
+        for (auto &extraModelEntry : extraModelObjects)
+            transforms.push_back(&extraModelEntry.object->getComponent<lr::Transform>());
+        return transforms;
+    };
+
+    std::vector<const lr::Mesh*> geometryMeshes = currentGeometryMeshes();
 
     const lr::VertexBufferUploadConfig meshPositionUploadConfig{
         .vertexBufferName = mainMeshPositionBufferName,
@@ -238,7 +297,7 @@ try
         .vertexAttributeNames = { config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName }
     };
 
-    const lr::VertexBufferUploadResult meshPositions = meshUploader.uploadVertexBuffer(geometryMeshes, meshPositionUploadConfig);
+    lr::VertexBufferUploadResult meshPositions = meshUploader.uploadVertexBuffer(geometryMeshes, meshPositionUploadConfig);
     meshUploader.uploadVertexBuffer(geometryMeshes, meshAttributeUploadConfig);
     // Color buffer is dynamic so selection highlights can be updated each frame.
     std::vector<glm::vec3> pointColors(staticMesh.mesh().vertexCount(), glm::vec3(1.0f, 0.0f, 1.0f));
@@ -250,7 +309,7 @@ try
         mainMeshColorBufferName,
         pointColors.data(),
         pointColors.size() * sizeof(glm::vec3));
-    const lr::IndexBufferUploadResult indexBuffer = meshUploader.uploadIndexBuffer(
+    lr::IndexBufferUploadResult indexBuffer = meshUploader.uploadIndexBuffer(
         geometryMeshes,
         { .indexBufferName = mainMeshIndexBufferName });
     meshUploader.uploadFaceGroupBuffer(
@@ -271,9 +330,10 @@ try
         .addTexture(config.emissiveTextureName,           VK_FORMAT_R8G8B8A8_SRGB);
 
     // The GPU material buffer is one flat array, but ownership of the materials themselves is now
-    // split across StaticMesh components (the main mesh's, plus one per light) — this gathers them
-    // back into the layout the buffer expects: glTF materials first, then one per light, matching
-    // lightVisualMaterialBase above.
+    // split across StaticMesh components (the main mesh's, plus one per light, plus one per
+    // runtime-loaded model) — this gathers them back into the layout the buffer expects: glTF
+    // materials first, then one per light (matching lightVisualMaterialBase above), then one per
+    // runtime-loaded model appended at the end (see the "Load Another Model" button below).
     auto buildCombinedMaterials = [&]() {
         std::vector<const lr::Material*> combined;
         for (const auto &m : staticMesh.materials())
@@ -281,11 +341,14 @@ try
         for (auto *lightVisualObject : lightVisualObjects)
             for (const auto &m : lightVisualObject->getComponent<lr::StaticMesh>().materials())
                 combined.push_back(&m);
+        for (auto &extraModelEntry : extraModelObjects)
+            for (const auto &m : extraModelEntry.object->getComponent<lr::StaticMesh>().materials())
+                combined.push_back(&m);
         return combined;
     };
 
     lr::MaterialUploader materialUploader(viewer.resources());
-    const lr::MaterialUploadResult material = materialUploader.upload(
+    lr::MaterialUploadResult material = materialUploader.upload(
         buildCombinedMaterials(),
         gpuMaterialLayout,
         "material");
@@ -294,8 +357,6 @@ try
         materialUploader.update(buildCombinedMaterials(), gpuMaterialLayout, material);
     };
     staticMesh.addChangeListener(updateMaterialUpload);
-    for (auto *lightVisualObject : lightVisualObjects)
-        lightVisualObject->getComponent<lr::StaticMesh>().addChangeListener(updateMaterialUpload);
 
     // Keep each light's visual quad (position/orientation/size) and emissive material in sync
     // whenever that light's Transform or Light component is edited in the Scene Hierarchy — including
@@ -319,11 +380,19 @@ try
         updateMaterialUpload();
     };
 
+    // Wires a light object's GPU-side plumbing: light-buffer re-upload, visual-quad rebuild, and
+    // material re-upload for that quad. Used both for the two startup lights below and for any
+    // light added later via addPointLightObject.
+    auto wireLightObject = [&](lr::SceneObject *lightObject) {
+        lightObject->getComponent<lr::Light>().addChangeListener(updateLightList);
+        lightObject->getComponent<lr::Transform>().addChangeListener(updateLightList);
+        lightObject->getComponent<lr::Light>().addChangeListener(updateLightVisuals);
+        lightObject->getComponent<lr::Transform>().addChangeListener(updateLightVisuals);
+        lightObject->getComponent<lr::StaticMesh>().addChangeListener(updateMaterialUpload);
+    };
+
     for (auto *lightVisualObject : lightVisualObjects)
-    {
-        lightVisualObject->getComponent<lr::Light>().addChangeListener(updateLightVisuals);
-        lightVisualObject->getComponent<lr::Transform>().addChangeListener(updateLightVisuals);
-    }
+        wireLightObject(lightVisualObject);
 
     // -------------------------------------------------------------------------
     // Frame graph passes
@@ -337,6 +406,7 @@ try
         .vertexBufferResourceNames = { {0, mainMeshPositionBufferName}, {1, mainMeshVertexBufferName} },
         .vertexBufferUploadResult  = meshPositions,
         .indexBufferUploadResult   = indexBuffer,
+        .meshTransforms = currentMeshTransforms(),
         .indexBufferResourceName = mainMeshIndexBufferName,
         .faceGroupBufferResourceName = mainMeshFaceGroupBufferName,
         .diffuseTextureArrayResourceName = material.textureNameMap.at(config.diffuseTextureName),
@@ -356,6 +426,168 @@ try
 
     geometryPass.build(viewer.frameGraph(), gpuMeshLayout);
 
+    // Rebuilds the shared vertex/index/facegroup/material buffers and texture arrays from scratch
+    // to reflect the current set of renderable objects (main mesh + light visuals +
+    // extraModelObjects), then re-declares the geometry pass and recompiles the frame graph so its
+    // descriptor sets — materialCount is baked into their size — pick up the new content. Used
+    // whenever a new object is added to the scene at runtime (see addPointLightObject and
+    // addMeshFromFile below). The GPU must be idle before any of this, same as
+    // Viewer::recreateSwapchain() (the only other place that tears down GPU resources the render
+    // loop might still be using).
+    std::function<void()> rebuildSceneGeometry = [&]() {
+        geometryMeshes = currentGeometryMeshes();
+        const auto combinedMaterials = buildCombinedMaterials();
+
+        viewer.context().waitIdle();
+
+        viewer.resources().destroyBuffer(mainMeshPositionBufferName);
+        viewer.resources().destroyBuffer(mainMeshVertexBufferName);
+        viewer.resources().destroyBuffer(mainMeshIndexBufferName);
+        viewer.resources().destroyBuffer(mainMeshFaceGroupBufferName);
+        viewer.resources().destroyBuffer(material.materialInfoBufferName);
+        for (const auto &[textureName, resourceName] : material.textureNameMap)
+            viewer.resources().destroyImageArray(resourceName);
+
+        meshPositions = meshUploader.uploadVertexBuffer(geometryMeshes, meshPositionUploadConfig);
+        meshUploader.uploadVertexBuffer(geometryMeshes, meshAttributeUploadConfig);
+        indexBuffer = meshUploader.uploadIndexBuffer(
+            geometryMeshes,
+            { .indexBufferName = mainMeshIndexBufferName });
+        meshUploader.uploadFaceGroupBuffer(
+            geometryMeshes,
+            { .faceGroupBufferName = mainMeshFaceGroupBufferName });
+
+        material = materialUploader.upload(combinedMaterials, gpuMaterialLayout, "material");
+
+        // FrameGraph::buildBarriers() only emits a transition barrier when the registry's tracked
+        // layout for a resource differs from what the next pass needs. The registry has no way to
+        // know the swapchain image was handed back to PRESENT_SRC_KHR by Renderer::transitionForPresent()
+        // after the last frame (that transition happens outside the registry entirely) — recompiling
+        // without resetting this would make buildBarriers() think "swapchain" is already in
+        // COLOR_ATTACHMENT_OPTIMAL and skip the barrier that puts it there for real. FrameGraph::resize()
+        // avoids this the same way, via ResourceRegistry::rebuild() resetting every external image.
+        viewer.resources().setImageLayout("swapchain", VK_IMAGE_LAYOUT_UNDEFINED);
+
+        geometryPass.rebuild(viewer.frameGraph(), gpuMeshLayout, {
+            .cameraBufferResourceName = cameraUploader.bufferName(),
+            .vertexBufferResourceNames = { {0, mainMeshPositionBufferName}, {1, mainMeshVertexBufferName} },
+            .vertexBufferUploadResult = meshPositions,
+            .indexBufferUploadResult = indexBuffer,
+            .meshTransforms = currentMeshTransforms(),
+            .indexBufferResourceName = mainMeshIndexBufferName,
+            .faceGroupBufferResourceName = mainMeshFaceGroupBufferName,
+            .diffuseTextureArrayResourceName = material.textureNameMap.at(config.diffuseTextureName),
+            .normalTextureArrayResourceName = material.textureNameMap.at(config.normalTextureName),
+            .metallicRoughnessTextureArrayResourceName = material.textureNameMap.at(config.metallicRoughnessTextureName),
+            .emissiveTextureArrayResourceName = material.textureNameMap.at(config.emissiveTextureName),
+            .materialBufferResourceName = material.materialInfoBufferName,
+            .materialCount = static_cast<uint32_t>(combinedMaterials.size()),
+        });
+
+        viewer.frameGraph().compile();
+    };
+
+    // Recomputes every extraModelObject's absolute material offset from its pristine
+    // localFaceGroups and re-bakes it into the live Mesh. Only needed when lightVisualObjects
+    // grows — that block sits before extraModelObjects in buildCombinedMaterials(), so a new
+    // light's material shifts every already-loaded mesh's offset out from under it. Call this
+    // before rebuildSceneGeometry() whenever a light is added.
+    auto rebakeExtraModelFaceGroups = [&]() {
+        uint32_t base = lightVisualMaterialBase + static_cast<uint32_t>(lightVisualObjects.size());
+        for (auto &entry : extraModelObjects)
+        {
+            lr::Mesh &mesh = entry.object->getComponent<lr::StaticMesh>().mesh();
+            for (size_t f = 0; f < mesh.faceGroups.size(); ++f)
+                mesh.faceGroups[f] = entry.localFaceGroups[f] + base;
+            base += static_cast<uint32_t>(entry.object->getComponent<lr::StaticMesh>().materials().size());
+        }
+    };
+
+    // Adds a Point light to the scene at runtime. Every light — not just Area lights — carries a
+    // hidden quad visual (see the startup light-visual loop above) so it can be switched to Area
+    // type later via the Light component's type combo without needing to regrow GPU buffers; a
+    // freshly added Point light needs that same slot pre-allocated.
+    auto addPointLightObject = [&]() {
+        lr::PointLight point;
+        point.color = glm::vec3(1.0f);
+        point.intensity = 5.0f;
+
+        lr::SceneObject *lightObject = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
+        lightObject->addComponent<lr::Transform>(
+            glm::vec3(1.5f * static_cast<float>(lightVisualObjects.size()), 2.0f, 0.0f));
+        lightObject->addComponent<lr::Light>(lr::LightVariant{point});
+        lightObject->name = "Point Light " + std::to_string(lightVisualObjects.size() + 1);
+
+        const uint32_t materialIndex = lightVisualMaterialBase + static_cast<uint32_t>(lightVisualObjects.size());
+        lr::Mesh quadMesh;
+        lr::buildAreaLightQuadMesh(quadMesh, lightObject->getComponent<lr::Transform>(),
+                                    hiddenAreaLightVisual, materialIndex, areaLightVisualConfig);
+        std::vector<lr::Material> quadMaterials;
+        quadMaterials.push_back(lr::buildAreaLightMaterial(hiddenAreaLightVisual, areaLightVisualConfig));
+        lightObject->addComponent<lr::StaticMesh>(quadMesh, quadMaterials, /*hideFromGui=*/true);
+
+        lightVisualObjects.push_back(lightObject);
+        wireLightObject(lightObject);
+
+        rebakeExtraModelFaceGroups();
+        updateLightList();
+        rebuildSceneGeometry();
+    };
+
+    // Loads a mesh from disk (picked via the file dialog below) and adds it to the scene at
+    // runtime — same pattern as the original "Load Another Model" proof of concept, generalized
+    // to a caller-supplied path (dispatched to GltfLoader or ObjLoader by extension, both
+    // producing materials keyed to match gpuMaterialLayout — see objConfig above) and keeping a
+    // pristine copy of the face groups so rebakeExtraModelFaceGroups can correct this object's
+    // material offset later if a light gets added after it.
+    auto addMeshFromFile = [&](const std::filesystem::path &path) {
+        std::string ext = path.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+
+        lr::Mesh newMesh;
+        std::vector<lr::Material> newMaterials;
+
+        if (ext == ".obj")
+        {
+            try
+            {
+                lr::ObjMeshLoadResult result = objLoader.load(path, objConfig);
+                newMesh = std::move(result.mesh);
+                newMaterials = std::move(result.materials);
+            }
+            catch (const std::exception &e)
+            {
+                spdlog::error("Add Mesh: ObjLoader failed for '{}': {}", path.string(), e.what());
+                return;
+            }
+        }
+        else
+        {
+            auto [newSequence, gltfMaterials] = gltfLoader.load(path, config);
+            if (newSequence.empty())
+            {
+                spdlog::error("Add Mesh: GltfLoader returned empty sequence for '{}'", path.string());
+                return;
+            }
+            newMesh = std::move(newSequence.frames.front());
+            newMaterials = std::move(gltfMaterials);
+        }
+
+        std::vector<uint32_t> localFaceGroups = newMesh.faceGroups;
+        const uint32_t materialBase = static_cast<uint32_t>(buildCombinedMaterials().size());
+        for (auto &group : newMesh.faceGroups)
+            group += materialBase;
+
+        lr::SceneObject *newObject = sceneObjects.emplace_back(std::make_unique<lr::SceneObject>()).get();
+        newObject->addComponent<lr::Transform>(
+            glm::vec3(2.5f * static_cast<float>(extraModelObjects.size() + 1), 0.0f, 0.0f));
+        newObject->addComponent<lr::StaticMesh>(newMesh, newMaterials);
+        newObject->name = path.stem().string();
+
+        extraModelObjects.push_back({ newObject, std::move(localFaceGroups) });
+        rebuildSceneGeometry();
+    };
+
     lr::AmbientOcclusionPass aoPass({
         .cameraBufferResourceName = cameraUploader.bufferName(),
     });
@@ -365,7 +597,7 @@ try
     lr::PbrPass pbrPass({
         .cameraBufferResourceName = cameraUploader.bufferName(),
         .lightBufferResourceName = lightUploader.bufferName(),
-        .numLights = lightUploader.numLights(),
+        .numLights = &lightUploader.numLights(),
         .pfMips = 8,
     });
     pbrPass.uploadResources(viewer.resources());
@@ -394,6 +626,7 @@ try
         .colorBufferResourceName    = mainMeshColorBufferName,
         .positionBufferUploadResult = mainMeshPositionResult,
         .vertexCounts               = { staticMesh.mesh().vertexCount() },
+        .meshTransform              = &meshObject->getComponent<lr::Transform>(),
     });
     overlayPointsPass.build(viewer.frameGraph(), pointsMeshLayout);
 
@@ -422,7 +655,7 @@ try
 
     lr::CommandManager commandManager;
 
-    lr::SelectionManager selectionManager(staticMesh.mesh().positions, viewer.input());
+    lr::SelectionManager selectionManager(staticMesh.mesh().positions, meshObject->getComponent<lr::Transform>(), viewer.input());
     selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera, selectionManager));
     selectionManager.registerHighlightChangedCallback([&]() {
         std::fill(pointColors.begin(), pointColors.end(), glm::vec3(1.0f, 0.0f, 1.0f));
@@ -491,7 +724,7 @@ try
 
     viewer.onGui([&sceneObjects, &lightUploader]() {
         ImGui::Begin("Scene Hierarchy");
-        
+
         int id = 0;
         for (auto &object : sceneObjects)
         {
@@ -499,7 +732,29 @@ try
             object->onGUI();
             ImGui::PopID();
         }
-        
+
+        ImGui::End();
+    });
+
+    // Lets the user grow the scene at runtime from a small predetermined list: a Point light
+    // (addPointLightObject) or a mesh picked from disk via ImGuiFileDialog (addMeshFromFile).
+    viewer.onGui([&]() {
+        ImGui::Begin("Add Object");
+
+        if (ImGui::Button("Add Point Light"))
+            addPointLightObject();
+
+        if (ImGui::Button("Add Mesh..."))
+            ImGuiFileDialog::Instance()->OpenDialog(
+                "AddMeshDialog", "Choose Mesh", ".gltf,.glb,.obj{.gltf,.glb,.obj}", IGFD::FileDialogConfig{});
+
+        if (ImGuiFileDialog::Instance()->Display("AddMeshDialog"))
+        {
+            if (ImGuiFileDialog::Instance()->IsOk())
+                addMeshFromFile(ImGuiFileDialog::Instance()->GetFilePathName());
+            ImGuiFileDialog::Instance()->Close();
+        }
+
         ImGui::End();
     });
 
@@ -532,10 +787,16 @@ try
         }
         else
         {
-            glm::vec3 centroid(0.0f);
+            // Average in local space, then transform once — valid since centroid-of-transformed-points
+            // equals transform-of-centroid for any affine map. The gizmo itself is positioned in world
+            // space (it's not part of the mesh, so GeometryPass's model matrix never applies to it),
+            // so it needs to track where the selected vertices actually render, not their local positions.
+            glm::vec3 localCentroid(0.0f);
             for (uint32_t idx : selected)
-                centroid += vertexManager.getPositions()[idx];
-            centroid /= static_cast<float>(selected.size());
+                localCentroid += vertexManager.getPositions()[idx];
+            localCentroid /= static_cast<float>(selected.size());
+            const glm::vec3 centroid = glm::vec3(
+                meshObject->getComponent<lr::Transform>().localMatrix() * glm::vec4(localCentroid, 1.0f));
 
             // Keep the gizmo a constant size on screen (~1/9 screen height) regardless of camera distance.
             const glm::vec3 camPos = camera->getComponent<lr::Transform>().position();

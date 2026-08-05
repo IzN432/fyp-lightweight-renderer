@@ -1,9 +1,25 @@
 #include "SelectionManager.hpp"
 
 #include <GLFW/glfw3.h>
+#include <glm/vec4.hpp>
 
 namespace lr
 {
+
+namespace
+{
+// BoxSelectionTool (and any future SelectionTool) hit-tests against camera-space projection, so
+// the vertices it sees need to be in the same world space GeometryPass actually renders them in.
+std::vector<glm::vec3> toWorldSpace(const std::vector<glm::vec3> &local, const Transform &transform)
+{
+    const glm::mat4 model = transform.localMatrix();
+    std::vector<glm::vec3> world;
+    world.reserve(local.size());
+    for (const auto &v : local)
+        world.push_back(glm::vec3(model * glm::vec4(v, 1.0f)));
+    return world;
+}
+} // namespace
 
 void SelectionManager::mouseButtonCallback(int button, int action, bool shift, bool ctrl, bool alt)
 {
@@ -55,14 +71,14 @@ void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
     m_selectTool->registerSelectionCallback([this]() {
         if (!m_selectTool)
             return;
-        m_selectTool->selectVertices(m_highlightedVertices, m_selectedVertices, m_vertices);
+        m_selectTool->selectVertices(m_highlightedVertices, m_selectedVertices, toWorldSpace(m_vertices, m_meshTransform));
         if (m_selectionChangedCallback)
             m_selectionChangedCallback();
     });
     m_selectTool->registerHighlightCallback([this]() {
         if (!m_selectTool)
             return;
-        m_selectTool->highlightVertices(m_highlightedVertices,m_selectedVertices, m_vertices);
+        m_selectTool->highlightVertices(m_highlightedVertices, m_selectedVertices, toWorldSpace(m_vertices, m_meshTransform));
         if (m_highlightChangedCallback)
             m_highlightChangedCallback();
     });

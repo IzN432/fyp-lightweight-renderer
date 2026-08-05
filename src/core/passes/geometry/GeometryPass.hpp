@@ -2,6 +2,7 @@
 
 #include "core/framegraph/FrameGraph.hpp"
 #include "core/scene/Mesh.hpp"
+#include "core/scene/Transform.hpp"
 #include "core/upload/MeshUploader.hpp"
 
 #include <vulkan/vulkan.h>
@@ -19,6 +20,13 @@ public:
         std::unordered_map<uint32_t, std::string> vertexBufferResourceNames;
         VertexBufferUploadResult vertexBufferUploadResult;
         IndexBufferUploadResult indexBufferUploadResult;
+
+        // One entry per mesh, parallel to vertexBufferUploadResult/indexBufferUploadResult's
+        // singleMeshResults — read fresh every frame so dragging a Transform moves the mesh
+        // immediately with no buffer/pass rebuild. A null entry means the mesh's vertex positions
+        // are already baked into world space (e.g. AreaLightVisual's quads) and should be drawn
+        // with an identity model matrix rather than double-transformed.
+        std::vector<const Transform*> meshTransforms;
         std::string indexBufferResourceName;
         std::string faceGroupBufferResourceName;
         std::string diffuseTextureArrayResourceName;
@@ -34,7 +42,16 @@ public:
 
     void build(FrameGraph &fg, const GpuMeshLayout &layout) const;
 
+    // Re-declares this pass with a new config — e.g. after the mesh/material set grew and the
+    // shared buffers were destroyed and re-uploaded at a new size. Caller must have already
+    // waited for the GPU to be idle and rebuilt the underlying buffers/textures under their
+    // existing names; this only replaces the pass declaration. Caller must still call
+    // FrameGraph::compile() afterward.
+    void rebuild(FrameGraph &fg, const GpuMeshLayout &layout, Config newCfg);
+
 private:
+    static constexpr const char *kPassName = "geometry";
+
     Config m_cfg;
 };
 

@@ -31,6 +31,11 @@ public:
     // The returned reference is valid until compile() is called.
     PassBuilder addPass(const std::string &name);
 
+    // Removes a previously declared pass by name so it can be re-declared with a new config
+    // (see GeometryPass::rebuild()). No-op if not found. Does not itself recompile — call
+    // compile() after re-adding.
+    void removePass(const std::string &name);
+
     // Access the resource registry — register buffers and persistent images here
     // before calling compile().
     ResourceRegistry &resources() { return m_registry; }

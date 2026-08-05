@@ -21,12 +21,24 @@ layout(location = 1) out vec3 outNormal;
 layout(location = 2) out vec4 outTangent;
 layout(location = 3) out vec2 outUv;
 
+// Mirrors the push_constant block in geometry.frag — model is this draw's mesh-to-world matrix
+// (identity for meshes whose vertices are already baked into world space, e.g. area light quads).
+// primitiveIdOffset is unused here but must stay in the layout so both stages agree on offsets.
+layout(push_constant) uniform PC
+{
+    mat4 model;
+    uint primitiveIdOffset;
+} pc;
+
 void main()
 {
-    vec4 worldPos = vec4(inPosition, 1.0);
+    vec4 worldPos = pc.model * vec4(inPosition, 1.0);
     outWorldPos = worldPos.xyz;
-    outNormal = normalize(inNormal);
-    outTangent = inTangent;
+
+    mat3 normalMatrix = transpose(inverse(mat3(pc.model)));
+    outNormal = normalize(normalMatrix * inNormal);
+    outTangent = vec4(normalize(mat3(pc.model) * inTangent.xyz), inTangent.w);
+
     outUv = inUv;
     gl_Position = cameraUbo.viewProj * worldPos;
 }

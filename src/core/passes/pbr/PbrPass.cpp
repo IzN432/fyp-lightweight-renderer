@@ -34,11 +34,6 @@ void PbrPass::uploadResources(ResourceRegistry &resources) const
 
 void PbrPass::build(FrameGraph &fg) const
 {
-    const PbrPC pbrPC{
-        .pfMips = m_cfg.pfMips,
-        .numLights = m_cfg.numLights
-    };
-
     fg.addPass("pbr")
         .type(PassType::Fullscreen)
         .vertShader((paths::shaderDir / "fullscreen.vert.spv").string())
@@ -139,7 +134,11 @@ void PbrPass::build(FrameGraph &fg) const
         .writes({
             {.name = "pbr",   .format = VK_FORMAT_R16G16B16A16_SFLOAT},
         })
-        .execute([pbrPC](CommandBuffer &cmd, VkPipelineLayout layout) {
+        .execute([this](CommandBuffer &cmd, VkPipelineLayout layout) {
+            const PbrPC pbrPC{
+                .pfMips = m_cfg.pfMips,
+                .numLights = *m_cfg.numLights
+            };
             cmd.pushConstants(layout, VK_SHADER_STAGE_FRAGMENT_BIT, pbrPC);
             cmd.draw(3);
         });

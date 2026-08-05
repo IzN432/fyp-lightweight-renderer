@@ -35,6 +35,46 @@ MaterialImage loadMaterialImage(const std::filesystem::path &objDirectoryPath,
     return out;
 }
 
+// Combines separately-loaded roughness/metallic grayscale images (stb_image replicates a
+// single-channel source across R/G/B, so the scalar value lives in R of each) into one image
+// matching glTF's metallicRoughnessTexture convention (G=roughness, B=metallic) — see
+// ObjLoaderConfig::metallicRoughnessTextureName. A missing side samples as 255 (glTF's "no
+// texture" fallback), leaving that channel driven purely by the baseRoughness/baseMetallic
+// scalar factor. Returns the same single-pixel fallback GltfLoader uses when neither is present.
+MaterialImage packMetallicRoughnessImage(const MaterialImage &roughnessImg, const MaterialImage &metallicImg)
+{
+    if (roughnessImg.empty() && metallicImg.empty())
+        return MaterialImage::singlePixel(glm::vec4(0.0f, 1.0f, 1.0f, 1.0f));
+
+    const uint32_t width  = std::max(roughnessImg.width,  metallicImg.width);
+    const uint32_t height = std::max(roughnessImg.height, metallicImg.height);
+
+    auto sampleChannel = [&](const MaterialImage &img, uint32_t x, uint32_t y) -> uint8_t {
+        if (img.empty())
+            return 255;
+        const uint32_t sx = (img.width  == width)  ? x : (x * img.width)  / width;
+        const uint32_t sy = (img.height == height) ? y : (y * img.height) / height;
+        return img.pixels[(static_cast<size_t>(sy) * img.width + sx) * 4 + 0];
+    };
+
+    MaterialImage out;
+    out.width  = width;
+    out.height = height;
+    out.pixels.resize(static_cast<size_t>(width) * height * 4);
+    for (uint32_t y = 0; y < height; ++y)
+    {
+        for (uint32_t x = 0; x < width; ++x)
+        {
+            const size_t i = (static_cast<size_t>(y) * width + x) * 4;
+            out.pixels[i + 0] = 0;
+            out.pixels[i + 1] = sampleChannel(roughnessImg, x, y);
+            out.pixels[i + 2] = sampleChannel(metallicImg, x, y);
+            out.pixels[i + 3] = 255;
+        }
+    }
+    return out;
+}
+
 std::vector<Material> extractMaterials(const tinyobj::ObjReader &reader, const std::filesystem::path &objDirectoryPath, const ObjLoaderConfig &config)
 {
     std::vector<Material> out;
@@ -55,8 +95,7 @@ std::vector<Material> extractMaterials(const tinyobj::ObjReader &reader, const s
     defaultMat.textures[config.ambientTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
     defaultMat.textures[config.specularTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
     defaultMat.textures[config.normalTextureName] = MaterialImage::singlePixel(glm::vec4(0.5f, 0.5f, 1.0f, 1.0f));
-    defaultMat.textures[config.metallicTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
-    defaultMat.textures[config.roughnessTextureName] = MaterialImage::singlePixel(glm::vec4(1.0f));
+    defaultMat.textures[config.metallicRoughnessTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f, 1.0f, 1.0f, 1.0f));
     defaultMat.textures[config.emissiveTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
 
     for (const auto &m : materials)
@@ -74,22 +113,19 @@ std::vector<Material> extractMaterials(const tinyobj::ObjReader &reader, const s
         mat.textures[config.ambientTextureName] = loadMaterialImage(objDirectoryPath, m.ambient_texname);
         mat.textures[config.specularTextureName] = loadMaterialImage(objDirectoryPath, m.specular_texname);
         mat.textures[config.normalTextureName] = loadMaterialImage(objDirectoryPath, m.normal_texname);
-        mat.textures[config.metallicTextureName] = loadMaterialImage(objDirectoryPath, m.metallic_texname);
-        mat.textures[config.roughnessTextureName] = loadMaterialImage(objDirectoryPath, m.roughness_texname); 
+        mat.textures[config.metallicRoughnessTextureName] = packMetallicRoughnessImage(
+            loadMaterialImage(objDirectoryPath, m.roughness_texname),
+            loadMaterialImage(objDirectoryPath, m.metallic_texname));
         mat.textures[config.emissiveTextureName] = loadMaterialImage(objDirectoryPath, m.emissive_texname);
 
         if (mat.textures[config.diffuseTextureName].pixels.empty())
             mat.textures[config.diffuseTextureName] = defaultMat.textures[config.diffuseTextureName];
         if (mat.textures[config.ambientTextureName].pixels.empty())
             mat.textures[config.ambientTextureName] = defaultMat.textures[config.ambientTextureName];
-        if (mat.textures[config.specularTextureName].pixels.empty())    
+        if (mat.textures[config.specularTextureName].pixels.empty())
             mat.textures[config.specularTextureName] = defaultMat.textures[config.specularTextureName];
         if (mat.textures[config.normalTextureName].pixels.empty())
             mat.textures[config.normalTextureName] = defaultMat.textures[config.normalTextureName];
-        if (mat.textures[config.metallicTextureName].pixels.empty())
-            mat.textures[config.metallicTextureName] = defaultMat.textures[config.metallicTextureName];
-        if (mat.textures[config.roughnessTextureName].pixels.empty())
-            mat.textures[config.roughnessTextureName] = defaultMat.textures[config.roughnessTextureName];
         if (mat.textures[config.emissiveTextureName].pixels.empty())
             mat.textures[config.emissiveTextureName] = defaultMat.textures[config.emissiveTextureName];
     }

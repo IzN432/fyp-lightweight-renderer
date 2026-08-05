@@ -13,9 +13,9 @@ public:
     struct Config
     {
         std::string cameraBufferResourceName;
-        float sphereRadius = 0.5f;
-        int   numSteps     = 16;
-        int   numDirs      = 8;
+        float sphereRadius = 0.1f;
+        int   numSteps     = 32;
+        int   numDirs      = 32;
         float tanAngleBias = 0.364f;  // tan(20 degrees)
         float aoScalar     = 2.0f;
     };

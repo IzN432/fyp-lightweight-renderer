@@ -5,6 +5,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <queue>
 #include <stdexcept>
 #include <unordered_map>
@@ -102,6 +103,14 @@ PassBuilder FrameGraph::addPass(const std::string &name)
 
     m_passes.push_back(PassDesc{.name = name});
     return PassBuilder(m_passes.back());
+}
+
+void FrameGraph::removePass(const std::string &name)
+{
+    m_passes.erase(
+        std::remove_if(m_passes.begin(), m_passes.end(),
+                        [&](const PassDesc &p) { return p.name == name; }),
+        m_passes.end());
 }
 
 // Compiles the pass graph: topological sort, resource allocation, pipeline and descriptor set creation, barrier generation.
