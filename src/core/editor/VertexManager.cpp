@@ -36,4 +36,13 @@ void VertexManager::translateSelectedVertices(const std::vector<uint32_t> &indic
     m_updateCallback();
 }
 
+void VertexManager::setPositions(std::vector<glm::vec3> newPositions)
+{
+    if (newPositions.size() != m_positions.size())
+        return;
+
+    m_positions = std::move(newPositions);
+    m_updateCallback();
+}
+
 } // namespace lr

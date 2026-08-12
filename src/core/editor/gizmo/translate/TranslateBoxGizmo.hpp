@@ -8,12 +8,21 @@
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/command/CommandManager.hpp"
 
+#include <cstdint>
+#include <functional>
+#include <vector>
+
 namespace lr
 {
 
 class TranslateBoxGizmo : public Gizmo
 {
 public:
+    // See TranslateArrowGizmo::CommitCallback / BeginDragCallback / DragUpdateCallback — same contract.
+    using CommitCallback = std::function<void(const std::vector<uint32_t> &, const glm::vec3 &)>;
+    using BeginDragCallback = std::function<void()>;
+    using DragUpdateCallback = std::function<void()>;
+
     explicit TranslateBoxGizmo(const SceneObject &camera, const InputHandler &input, VertexManager &vertexManager,
                                SelectionManager &selectionManager, CommandManager &commandManager);
     ~TranslateBoxGizmo() = default;
@@ -22,12 +31,19 @@ public:
     void onMouseUp(double ndcX, double ndcY, double aspect) override;
     void dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect) override;
 
+    void setCommitCallback(CommitCallback cb) { m_commitCallback = std::move(cb); }
+    void setBeginDragCallback(BeginDragCallback cb) { m_beginDragCallback = std::move(cb); }
+    void setDragUpdateCallback(DragUpdateCallback cb) { m_dragUpdateCallback = std::move(cb); }
+
 private:
     const SceneObject  &m_camera;
     const InputHandler &m_input;
     VertexManager      &m_vertexManager;
     SelectionManager   &m_selectionManager;
     CommandManager     &m_commandManager;
+    CommitCallback       m_commitCallback;
+    BeginDragCallback     m_beginDragCallback = [] {};
+    DragUpdateCallback    m_dragUpdateCallback = [] {};
 
     glm::vec4 m_draggingPlane;
     glm::vec3 m_draggingOrigin;

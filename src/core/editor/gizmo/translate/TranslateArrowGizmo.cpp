@@ -65,10 +65,17 @@ TranslateArrowGizmo::TranslateArrowGizmo(TranslateArrowGizmoAxis axis, const Sce
     : Gizmo(kAxisInstances[static_cast<size_t>(axis)]), m_camera(camera), m_input(input),
       m_axis(kAxisVectors[static_cast<size_t>(axis)]), m_vertexManager(vertexManager),
       m_selectionManager(selectionManager), m_commandManager(commandManager)
-{}
+{
+    m_commitCallback = [this](const std::vector<uint32_t> &indices, const glm::vec3 &translation) {
+        m_commandManager.appendCommandWithoutExecuting(
+            std::make_unique<TranslatePointsCommand>(m_vertexManager, indices, translation));
+    };
+}
 
 void TranslateArrowGizmo::onMouseDown(double ndcX, double ndcY, double aspect)
 {
+    m_beginDragCallback();
+
     // In here, we want to set the m_draggingOrigin to the closest point on the
     // axis line (the line originating at the gizmo centroid, going in the direction of the axis)
     // to the mouse ray in world space. This is what will be used as reference for translation
@@ -86,8 +93,7 @@ void TranslateArrowGizmo::onMouseDown(double ndcX, double ndcY, double aspect)
 
 void TranslateArrowGizmo::onMouseUp(double ndcX, double ndcY, double aspect)
 {
-    m_commandManager.appendCommandWithoutExecuting(std::make_unique<TranslatePointsCommand>(
-        m_vertexManager, m_selectionManager.getSelectedIndices(), m_currentDraggingOrigin - m_draggingOrigin));
+    m_commitCallback(m_selectionManager.getSelectedIndices(), m_currentDraggingOrigin - m_draggingOrigin);
 }
 
 void TranslateArrowGizmo::dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect)
@@ -105,6 +111,7 @@ void TranslateArrowGizmo::dragCallback(double ndcX, double ndcY, double dNdcX, d
 
     m_vertexManager.translateSelectedVertices(m_selectionManager.getSelectedIndices(), translation);
     m_currentDraggingOrigin = closestPointOnAxis; // Update the dragging origin for the next frame
+    m_dragUpdateCallback();
 }
 
 } // namespace lr

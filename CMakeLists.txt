@@ -38,6 +38,8 @@ find_package(tinyobjloader CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(mikktspace CONFIG REQUIRED)
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h" REQUIRED)
+find_package(Eigen3 CONFIG REQUIRED)
+find_package(libigl CONFIG REQUIRED)
 
 # MSVC flags
 add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/EHsc>)
@@ -95,7 +97,11 @@ add_library(lr_core STATIC
     src/core/editor/VertexManager.cpp
 
     src/core/editor/command/TranslatePointsCommand.cpp
+    src/core/editor/command/ArapDeformCommand.cpp
     src/core/editor/command/CommandManager.cpp
+
+    src/core/editor/deform/ArapDeformer.cpp
+    src/core/editor/deform/ArapController.cpp
 
     src/core/editor/selection/BoxSelectionTool.cpp
     src/core/editor/selection/SelectionManager.cpp
@@ -121,6 +127,8 @@ target_link_libraries(lr_core PUBLIC
     imgui
     imguiFileDialog
     mikktspace::mikktspace
+    Eigen3::Eigen
+    igl::igl_core
 )
 target_include_directories(lr_core PUBLIC ${TINYGLTF_INCLUDE_DIRS})
 target_compile_definitions(lr_core PUBLIC

@@ -28,6 +28,8 @@
 #include "core/editor/selection/BoxSelectionTool.hpp"
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/VertexManager.hpp"
+#include "core/editor/command/TranslatePointsCommand.hpp"
+#include "core/editor/deform/ArapController.hpp"
 
 #include <imgui.h>
 #include <ImGuiFileDialog.h>
@@ -106,7 +108,7 @@ try
     lr::LightUploader lightUploader(viewer.resources());
 
     // MESH
-    const fs::path meshPath = "D:\\FYP\\lion_head_4k.blend\\lion_head_4k.glb";
+    const fs::path meshPath = "D:\\FYP\\Models\\cube.glb"; // "D:\\FYP\\lion_head_4k.blend\\lion_head_4k.glb";
 
     lr::GltfLoader gltfLoader;
     lr::GltfLoaderConfig config{
@@ -659,24 +661,90 @@ try
     selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera, selectionManager));
     selectionManager.registerHighlightChangedCallback([&]() {
         std::fill(pointColors.begin(), pointColors.end(), glm::vec3(1.0f, 0.0f, 1.0f));
+        for (uint32_t idx : selectionManager.getAnchorIndices())
+            pointColors[idx] = glm::vec3(0.2f, 0.5f, 1.0f);  // blue = ARAP anchor
+        for (uint32_t idx : selectionManager.getSelectedIndices())
+            pointColors[idx] = glm::vec3(1.0f, 0.8f, 0.0f);  // orange = selected / ARAP handle
+
+        // Live drag-box preview — painted in whichever set is currently being picked, since
+        // highlightedVertices is shared between handle- and anchor-selection (see SelectionManager).
+        const glm::vec3 previewColor = (selectionManager.getSelectionMode() == lr::SelectionMode::Anchor)
+            ? glm::vec3(0.2f, 0.5f, 1.0f)
+            : glm::vec3(1.0f, 0.8f, 0.0f);
         for (uint32_t idx : selectionManager.getHighlightedIndices())
-            pointColors[idx] = glm::vec3(1.0f, 0.8f, 0.0f);  // orange = selected
+            pointColors[idx] = previewColor;
+
         viewer.resources().updateBuffer(
             mainMeshColorBufferName,
             pointColors.data(),
             pointColors.size() * sizeof(glm::vec3));
     });
 
+    // ARAP editing — anchors/handles come from selectionManager (handles reuse its existing
+    // "selected" set, which is also what the translate gizmos below already drag). The solve
+    // itself runs off the main thread; see ArapController's header for the concurrency contract.
+    lr::ArapController arapController(vertexManager, selectionManager, commandManager, staticMesh.mesh().faces);
+    bool arapConfirmFailed = false;  // set by the "Confirm Constraints" button below, for GUI feedback
+
+    // Redirects a translate gizmo's release into an ARAP solve instead of a rigid
+    // TranslatePointsCommand whenever ARAP mode is on and constraints have been confirmed.
+    auto gizmoCommitCallback = [&](const std::vector<uint32_t> &indices, const glm::vec3 &translation) {
+        if (arapController.isEnabled() && arapController.hasConstraints())
+        {
+            spdlog::info("gizmoCommitCallback: routing release to ARAP solve");
+            arapController.commitDrag();
+            return;
+        }
+        spdlog::info("gizmoCommitCallback: rigid translate (ARAP enabled={}, hasConstraints={})",
+                     arapController.isEnabled(), arapController.hasConstraints());
+        commandManager.appendCommandWithoutExecuting(
+            std::make_unique<lr::TranslatePointsCommand>(vertexManager, indices, translation));
+    };
+
+    // Snapshots pre-drag positions so the eventual undo (see gizmoCommitCallback above) covers the
+    // live rigid handle drag AND the ARAP solve it triggers on release, as a single action.
+    auto gizmoBeginDragCallback = [&]() {
+        if (arapController.isEnabled() && arapController.hasConstraints())
+            arapController.beginDrag();
+    };
+
+    // Runs every frame during a drag, after the handle has already moved rigidly — when "Live
+    // Drag" is on, this makes the rest of the mesh follow the handle in real time instead of only
+    // snapping into shape on release. See ArapController::liveDragUpdate() for why this is
+    // synchronous rather than routed through the same async path as the release-triggered solve.
+    auto gizmoDragUpdateCallback = [&]() {
+        if (arapController.isEnabled() && arapController.isLiveDragEnabled() && arapController.hasConstraints())
+            arapController.liveDragUpdate();
+    };
+
     lr::GizmoManager gizmoManager(overlayGeometryPass, viewer.input());
+
+    auto xArrowGizmo = std::make_unique<lr::TranslateArrowGizmo>(
+        lr::TranslateArrowGizmoAxis::X, *camera, viewer.input(), vertexManager, selectionManager, commandManager);
+    auto yArrowGizmo = std::make_unique<lr::TranslateArrowGizmo>(
+        lr::TranslateArrowGizmoAxis::Y, *camera, viewer.input(), vertexManager, selectionManager, commandManager);
+    auto zArrowGizmo = std::make_unique<lr::TranslateArrowGizmo>(
+        lr::TranslateArrowGizmoAxis::Z, *camera, viewer.input(), vertexManager, selectionManager, commandManager);
+    auto boxGizmo = std::make_unique<lr::TranslateBoxGizmo>(
+        *camera, viewer.input(), vertexManager, selectionManager, commandManager);
+    xArrowGizmo->setCommitCallback(gizmoCommitCallback);
+    yArrowGizmo->setCommitCallback(gizmoCommitCallback);
+    zArrowGizmo->setCommitCallback(gizmoCommitCallback);
+    boxGizmo->setCommitCallback(gizmoCommitCallback);
+    xArrowGizmo->setBeginDragCallback(gizmoBeginDragCallback);
+    yArrowGizmo->setBeginDragCallback(gizmoBeginDragCallback);
+    zArrowGizmo->setBeginDragCallback(gizmoBeginDragCallback);
+    boxGizmo->setBeginDragCallback(gizmoBeginDragCallback);
+    xArrowGizmo->setDragUpdateCallback(gizmoDragUpdateCallback);
+    yArrowGizmo->setDragUpdateCallback(gizmoDragUpdateCallback);
+    zArrowGizmo->setDragUpdateCallback(gizmoDragUpdateCallback);
+    boxGizmo->setDragUpdateCallback(gizmoDragUpdateCallback);
+
     const std::vector<int> translateGizmoIds = {
-        gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
-            lr::TranslateArrowGizmoAxis::X, *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
-        gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
-            lr::TranslateArrowGizmoAxis::Y, *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
-        gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
-            lr::TranslateArrowGizmoAxis::Z, *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
-        gizmoManager.addGizmo(std::make_unique<lr::TranslateBoxGizmo>(
-            *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
+        gizmoManager.addGizmo(std::move(xArrowGizmo)),
+        gizmoManager.addGizmo(std::move(yArrowGizmo)),
+        gizmoManager.addGizmo(std::move(zArrowGizmo)),
+        gizmoManager.addGizmo(std::move(boxGizmo)),
     };
     for (int id : translateGizmoIds)
         gizmoManager.hideGizmo(id);
@@ -686,6 +754,12 @@ try
     // selection only sees the event if no gizmo consumed it.
     viewer.input().onMouseButton([&](int button, int action, bool shift, bool ctrl, bool alt) {
         if (button != GLFW_MOUSE_BUTTON_LEFT || ImGui::GetIO().WantCaptureMouse)
+            return;
+
+        // A background ARAP solve is writing into VertexManager/Mesh via arapController.update()
+        // once it resolves — no new drag or selection may start until that happens, or the write
+        // could race the ongoing solve's eventual apply.
+        if (arapController.isBusy())
             return;
 
         const bool wasInteracting = gizmoManager.isInteracting();
@@ -715,6 +789,8 @@ try
             return;
         if (ImGui::GetIO().WantCaptureKeyboard)
             return;
+        if (arapController.isBusy())
+            return;
 
         commandManager.undo();
     });
@@ -738,8 +814,12 @@ try
 
     // Lets the user grow the scene at runtime from a small predetermined list: a Point light
     // (addPointLightObject) or a mesh picked from disk via ImGuiFileDialog (addMeshFromFile).
+    // Disabled while an ARAP solve is in flight — rebuildSceneGeometry() destroys and reallocates
+    // the shared vertex buffers arapController.update() is about to write positions into.
     viewer.onGui([&]() {
         ImGui::Begin("Add Object");
+
+        ImGui::BeginDisabled(arapController.isBusy());
 
         if (ImGui::Button("Add Point Light"))
             addPointLightObject();
@@ -748,11 +828,83 @@ try
             ImGuiFileDialog::Instance()->OpenDialog(
                 "AddMeshDialog", "Choose Mesh", ".gltf,.glb,.obj{.gltf,.glb,.obj}", IGFD::FileDialogConfig{});
 
+        ImGui::EndDisabled();
+
         if (ImGuiFileDialog::Instance()->Display("AddMeshDialog"))
         {
-            if (ImGuiFileDialog::Instance()->IsOk())
+            if (ImGuiFileDialog::Instance()->IsOk() && !arapController.isBusy())
                 addMeshFromFile(ImGuiFileDialog::Instance()->GetFilePathName());
             ImGuiFileDialog::Instance()->Close();
+        }
+
+        ImGui::End();
+    });
+
+    // ARAP editing panel: toggle the mode, switch the selection tool between picking anchors
+    // (fixed) and handles (dragged — reuses the normal "selected vertices" set and gizmos),
+    // confirm the constraint set to (re)factorize, then drag a translate gizmo as usual. The
+    // actual solve is kicked off on release by gizmoCommitCallback above and applied by
+    // arapController.update() in the onUpdate chain below.
+    viewer.onGui([&]() {
+        ImGui::Begin("ARAP");
+
+        bool enabled = arapController.isEnabled();
+        if (ImGui::Checkbox("Enable ARAP Mode", &enabled))
+            arapController.setEnabled(enabled);
+
+        if (enabled)
+        {
+            const bool anchorMode = selectionManager.getSelectionMode() == lr::SelectionMode::Anchor;
+            if (ImGui::RadioButton("Select Handles", !anchorMode))
+                selectionManager.setSelectionMode(lr::SelectionMode::Handle);
+            ImGui::SameLine();
+            if (ImGui::RadioButton("Select Anchors", anchorMode))
+                selectionManager.setSelectionMode(lr::SelectionMode::Anchor);
+
+            ImGui::Text("Handles: %zu   Anchors: %zu",
+                        selectionManager.getSelectedIndices().size(),
+                        selectionManager.getAnchorIndices().size());
+
+            bool liveDrag = arapController.isLiveDragEnabled();
+            if (ImGui::Checkbox("Live Drag (solve every frame)", &liveDrag))
+                arapController.setLiveDragEnabled(liveDrag);
+
+            const size_t meshVertexCount = staticMesh.mesh().vertexCount();
+            if (meshVertexCount > lr::ArapController::kLiveDragVertexWarningThreshold)
+                ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+                                    "%zu vertices - live drag may stutter on a mesh this size",
+                                    meshVertexCount);
+
+            if (ImGui::Button("Clear Anchors"))
+                selectionManager.clearAnchors();
+
+            ImGui::BeginDisabled(arapController.isBusy());
+            ImGui::SameLine();
+            if (ImGui::Button("Confirm Constraints"))
+                arapConfirmFailed = !arapController.confirmConstraints();
+            ImGui::EndDisabled();
+
+            // Every reachable state gets its own line — a blank panel here was the original bug
+            // report ("nothing shows"): there was no branch for "not confirmed yet" or "confirm
+            // failed", so a failed/never-clicked Confirm looked identical to a healthy idle state.
+            if (arapController.isBusy())
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "Solving...");
+            }
+            else if (arapController.hasConstraints())
+            {
+                ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Ready - drag a handle gizmo");
+            }
+            else if (arapConfirmFailed)
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
+                                    "Precomputation failed - select at least one handle or anchor "
+                                    "(see console log for details)");
+            }
+            else
+            {
+                ImGui::TextDisabled("Select handles/anchors above, then click Confirm Constraints");
+            }
         }
 
         ImGui::End();
@@ -769,6 +921,12 @@ try
 
     viewer.onUpdate([&](float dt, VkExtent2D extent) {
         selectionManager.updateCallback(dt, extent);
+    });
+
+    // Poll the in-flight ARAP solve (if any) and apply its result once ready. Must run every
+    // frame regardless of ARAP mode being toggled off mid-solve, so a pending solve can still land.
+    viewer.onUpdate([&](float dt, VkExtent2D extent) {
+        arapController.update();
     });
 
     // Keeps the translate gizmos positioned at the selection centroid, shown

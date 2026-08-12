@@ -12,6 +12,15 @@
 namespace lr
 {
 
+// Which vertex set a SelectionTool currently writes into. Handle is the existing "selected
+// vertices" set used everywhere (gizmo dragging, highlighting) — Anchor is a second, independent
+// set used only by ARAP to mark vertices that must stay fixed during the solve.
+enum class SelectionMode
+{
+    Handle,
+    Anchor,
+};
+
 class SelectionManager
 {
 public:
@@ -35,7 +44,17 @@ public:
 
     const std::vector<uint32_t> &getHighlightedIndices() const { return m_highlightedVertices; }
     std::vector<uint32_t> &getHighlightedIndices() { return m_highlightedVertices; }
-    
+
+    // Anchors — a second selection set, independent of getSelectedIndices() ("handles"), used
+    // only by ARAP to mark vertices that must stay fixed during the solve. Populated by the same
+    // SelectionTool, just routed to this set instead while setSelectionMode(Anchor) is active.
+    const std::vector<uint32_t> &getAnchorIndices() const { return m_anchorVertices; }
+    std::vector<uint32_t> &getAnchorIndices() { return m_anchorVertices; }
+    void clearAnchors();
+
+    void setSelectionMode(SelectionMode mode) { m_mode = mode; }
+    SelectionMode getSelectionMode() const { return m_mode; }
+
     void clearSelection();
 
     void registerSelectionChangedCallback(std::function<void()> callback) { m_selectionChangedCallback = std::move(callback); }
@@ -44,6 +63,8 @@ private:
     std::unique_ptr<SelectionTool> m_selectTool;
     std::vector<uint32_t> m_highlightedVertices;
     std::vector<uint32_t> m_selectedVertices;
+    std::vector<uint32_t> m_anchorVertices;
+    SelectionMode m_mode = SelectionMode::Handle;
     const std::vector<glm::vec3> &m_vertices;
     const Transform &m_meshTransform;
     InputHandler &m_input;

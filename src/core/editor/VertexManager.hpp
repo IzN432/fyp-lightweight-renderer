@@ -23,6 +23,11 @@ public:
 
     void translateSelectedVertices(const std::vector<uint32_t> &indices, const glm::vec3 &translation);
 
+    // Wholesale replace every vertex position (e.g. the result of an ARAP solve, which moves the
+    // whole mesh, not just the dragged handles). newPositions must be the same size as the
+    // existing position array.
+    void setPositions(std::vector<glm::vec3> newPositions);
+
     void registerUpdateCallback(std::function<void()> callback) { m_updateCallback = std::move(callback); }
 
 private:

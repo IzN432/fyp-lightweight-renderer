@@ -71,14 +71,16 @@ void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
     m_selectTool->registerSelectionCallback([this]() {
         if (!m_selectTool)
             return;
-        m_selectTool->selectVertices(m_highlightedVertices, m_selectedVertices, toWorldSpace(m_vertices, m_meshTransform));
+        auto &target = (m_mode == SelectionMode::Anchor) ? m_anchorVertices : m_selectedVertices;
+        m_selectTool->selectVertices(m_highlightedVertices, target, toWorldSpace(m_vertices, m_meshTransform));
         if (m_selectionChangedCallback)
             m_selectionChangedCallback();
     });
     m_selectTool->registerHighlightCallback([this]() {
         if (!m_selectTool)
             return;
-        m_selectTool->highlightVertices(m_highlightedVertices, m_selectedVertices, toWorldSpace(m_vertices, m_meshTransform));
+        auto &target = (m_mode == SelectionMode::Anchor) ? m_anchorVertices : m_selectedVertices;
+        m_selectTool->highlightVertices(m_highlightedVertices, target, toWorldSpace(m_vertices, m_meshTransform));
         if (m_highlightChangedCallback)
             m_highlightChangedCallback();
     });
@@ -90,6 +92,16 @@ void SelectionManager::clearSelection()
         return;
 
     m_selectedVertices.clear();
+    if (m_selectionChangedCallback)
+        m_selectionChangedCallback();
+}
+
+void SelectionManager::clearAnchors()
+{
+    if (m_anchorVertices.empty())
+        return;
+
+    m_anchorVertices.clear();
     if (m_selectionChangedCallback)
         m_selectionChangedCallback();
 }

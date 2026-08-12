@@ -8,6 +8,8 @@
         "tinygltf",
         "tinyobjloader",
         "vulkan-memory-allocator",
-        "mikktspace"
+        "mikktspace",
+        "eigen3",
+        "libigl"
     ]
 }

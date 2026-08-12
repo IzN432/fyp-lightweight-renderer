@@ -27,10 +27,17 @@ TranslateBoxGizmo::TranslateBoxGizmo(const SceneObject &camera, const InputHandl
                                      SelectionManager &selectionManager, CommandManager &commandManager)
     : Gizmo(boxInstance), m_camera(camera), m_input(input), m_vertexManager(vertexManager),
       m_selectionManager(selectionManager), m_commandManager(commandManager)
-{}
+{
+    m_commitCallback = [this](const std::vector<uint32_t> &indices, const glm::vec3 &translation) {
+        m_commandManager.appendCommandWithoutExecuting(
+            std::make_unique<TranslatePointsCommand>(m_vertexManager, indices, translation));
+    };
+}
 
 void TranslateBoxGizmo::onMouseDown(double ndcX, double ndcY, double aspect)
 {
+    m_beginDragCallback();
+
     // Define the m_draggingPlane as the plane perpendicular to the camera's forward direction and passing through the
     // centroid of the selected vertices
     m_draggingPlane = math::planeFromNormalAndPoint(m_camera.getComponent<Transform>().forward(), m_instance.position);
@@ -49,8 +56,7 @@ void TranslateBoxGizmo::onMouseDown(double ndcX, double ndcY, double aspect)
 
 void TranslateBoxGizmo::onMouseUp(double ndcX, double ndcY, double aspect)
 {
-    m_commandManager.appendCommandWithoutExecuting(std::make_unique<TranslatePointsCommand>(
-        m_vertexManager, m_selectionManager.getSelectedIndices(), m_currentDraggingOrigin - m_draggingOrigin));
+    m_commitCallback(m_selectionManager.getSelectedIndices(), m_currentDraggingOrigin - m_draggingOrigin);
 }
 
 void TranslateBoxGizmo::dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect)
@@ -66,6 +72,7 @@ void TranslateBoxGizmo::dragCallback(double ndcX, double ndcY, double dNdcX, dou
     glm::vec3 translation  = intersection - m_currentDraggingOrigin;
     m_vertexManager.translateSelectedVertices(m_selectionManager.getSelectedIndices(), translation);
     m_currentDraggingOrigin = intersection;
+    m_dragUpdateCallback();
 }
 
 } // namespace lr
