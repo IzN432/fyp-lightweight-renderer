@@ -258,10 +258,28 @@ static const std::string NORMAL_ATTR_NAME   = "NORMAL";
 static const std::string UV_ATTR_NAME       = "TEXCOORD_0";
 static const std::string TANGENT_ATTR_NAME  = "TANGENT";
 
+struct Vector3Hash
+{
+    std::size_t operator()(const glm::vec3 &v) const
+    {
+        std::size_t seed = 0;
+        auto combine = [&](float val) {
+            std::size_t h = std::hash<float>{}(val);
+            seed ^= h + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        };
+
+        combine(v.x);
+        combine(v.y);
+        combine(v.z);
+        return seed;
+    }
+};
+
 MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &model)
 {
     MeshData meshData;
     auto &positions = meshData.positions;
+    auto &positionIndices = meshData.positionIndices;
     auto &normals = meshData.normals;
     auto &tangents = meshData.tangents;
     auto &uvs = meshData.uvs;
@@ -292,17 +310,20 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
         }
     }
 
-    positions.reserve(totalVertexCount);
+    positionIndices.reserve(totalVertexCount);
     normals.reserve(totalVertexCount);
     tangents.reserve(totalVertexCount);
     uvs.reserve(totalVertexCount);
     faces.reserve(totalFaceCount);
     faceGroups.reserve(totalFaceCount);
 
+    // Generate the position indices
+    std::unordered_map<glm::vec3, uint32_t, Vector3Hash> positionToIndex;
+
     // For each primitive, which is a submesh, not a triangle
     for (const tinygltf::Primitive &primitive : mesh.primitives)
     {
-        size_t baseVertex = positions.size();
+        size_t baseVertex = positionIndices.size();
         // We only support triangles for now, so we skip other primitive types
         if (primitive.mode != TINYGLTF_MODE_TRIANGLES)
         {
@@ -332,7 +353,18 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
 
         for (size_t j = 0; j < vertexCount; ++j)
         {
-            positions.push_back(readVec<glm::vec3>(posView, j));
+            if (positionToIndex.find(readVec<glm::vec3>(posView, j)) == positionToIndex.end())
+            {
+                // The position is not already in the map, meaning this is the first occurence, so we add the position to the positions vector
+                positionToIndex[readVec<glm::vec3>(posView, j)] = static_cast<uint32_t>(positions.size());
+                positions.push_back(readVec<glm::vec3>(posView, j));
+                positionIndices.push_back(positionToIndex[readVec<glm::vec3>(posView, j)]);
+            } 
+            else
+            {
+                // The position is already in the map, meaning this is a duplicate vertex, so we don't add it to the positions vector
+                positionIndices.push_back(positionToIndex[readVec<glm::vec3>(posView, j)]);
+            }
         }
 
         // ATTRIBUTE 2 - Normal
@@ -423,7 +455,7 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
 
     if (!hasTangents)
     {
-        tangents.resize(positions.size(), glm::vec4(0.0f));
+        tangents.resize(positionIndices.size(), glm::vec4(0.0f));
         generateTangents(meshData);
     }
 
@@ -452,11 +484,12 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, const Glt
         if (mesh.primitives.empty())
             throw std::runtime_error("GltfLoader: mesh has no primitives");
 
-        auto [positions, normals, tangents, uvs, faces, faceGroups] = extractMeshData(mesh, model);
+        auto [positions, positionIndices, normals, tangents, uvs, faces, faceGroups] = extractMeshData(mesh, model);
         
         outMesh.setFaceCount(faces.size());
-        outMesh.setVertexCount(positions.size());
+        outMesh.setVertexCount(positionIndices.size());
         outMesh.positions = std::move(positions);
+        outMesh.positionIndices = std::move(positionIndices);
         outMesh.faces = std::move(faces);
         outMesh.faceGroups = std::move(faceGroups);
 

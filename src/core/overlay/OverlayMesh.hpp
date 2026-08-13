@@ -31,6 +31,11 @@ public:
         mesh.setVertexCount(static_cast<uint32_t>(data.positions.size()));
         mesh.setFaceCount(static_cast<uint32_t>(data.faces.size()));
         mesh.positions = std::move(data.positions);
+        mesh.positionIndices.resize(mesh.vertexCount());
+        for (uint32_t i = 0; i < mesh.vertexCount(); ++i)
+        {
+            mesh.positionIndices[i] = i;
+        }
         mesh.faces = std::move(data.faces);
         mesh.setPerVertexArray<glm::vec3>("normal", data.normals);
         mesh.setPerVertexArray<glm::vec3>("color", data.colors);

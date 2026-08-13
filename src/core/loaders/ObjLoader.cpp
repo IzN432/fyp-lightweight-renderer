@@ -151,10 +151,28 @@ struct VertexKeyHash
     }
 };
 
+struct Vector3Hash
+{
+    std::size_t operator()(const glm::vec3 &v) const
+    {
+        std::size_t seed = 0;
+        auto combine = [&](float val) {
+            std::size_t h = std::hash<float>{}(val);
+            seed ^= h + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        };
+
+        combine(v.x);
+        combine(v.y);
+        combine(v.z);
+        return seed;
+    }
+};
+
 MeshData extractMeshData(const tinyobj::ObjReader &reader, const std::filesystem::path &path)
 {
     MeshData meshData;
     auto &positions = meshData.positions;
+    auto &positionIndices = meshData.positionIndices;
     auto &normals = meshData.normals;
     auto &tangents = meshData.tangents;
     auto &uvs = meshData.uvs;
@@ -176,17 +194,31 @@ MeshData extractMeshData(const tinyobj::ObjReader &reader, const std::filesystem
     faces.reserve(indicesCount / 3);
     faceGroups.reserve(indicesCount / 3);
 
+    std::unordered_map<glm::vec3, uint32_t, Vector3Hash> positionToIndex;
+
     auto getOrAddVertex = [&](const tinyobj::index_t &idx) -> uint32_t {
         VertexKey key{ idx.vertex_index, idx.texcoord_index, idx.normal_index };
-        auto [it, inserted] = vertexMap.try_emplace(key, static_cast<uint32_t>(positions.size()));
+        auto [it, inserted] = vertexMap.try_emplace(key, static_cast<uint32_t>(positionIndices.size()));
         if (!inserted)
             return it->second;
 
-        positions.emplace_back(
+        glm::vec3 position(
             attributes.vertices[3 * idx.vertex_index + 0],
             attributes.vertices[3 * idx.vertex_index + 1],
             attributes.vertices[3 * idx.vertex_index + 2]
         );
+
+        if (positionToIndex.find(position) == positionToIndex.end())
+        {
+            positionToIndex[position] = static_cast<uint32_t>(positions.size());
+            positions.push_back(position);
+            positionIndices.push_back(positionToIndex[position]);
+        }
+        else
+        {
+            // The position is already in the map, meaning this is a duplicate vertex, so we don't add it to the positions vector
+            positionIndices.push_back(positionToIndex[position]);
+        }
         normals.emplace_back(
             idx.normal_index >= 0
                 ? glm::vec3(
@@ -222,7 +254,7 @@ MeshData extractMeshData(const tinyobj::ObjReader &reader, const std::filesystem
         }
     }
 
-    tangents.resize(positions.size(), glm::vec4(0.0f));
+    tangents.resize(positionIndices.size(), glm::vec4(0.0f));
     generateTangents(meshData);
 
     return meshData;
@@ -241,11 +273,12 @@ ObjMeshLoadResult ObjLoader::load(const std::filesystem::path &path, const ObjLo
     // SECTION 2 - Extract vertex / face data
 
     Mesh mesh;
-    auto [positions, normals, tangents, uvs, faces, faceGroups] = extractMeshData(reader, path);
+    auto [positions, positionIndices, normals, tangents, uvs, faces, faceGroups] = extractMeshData(reader, path);
     
-    mesh.setVertexCount(static_cast<uint32_t>(positions.size()));
+    mesh.setVertexCount(static_cast<uint32_t>(positionIndices.size()));
     mesh.setFaceCount(static_cast<uint32_t>(faces.size()));
     mesh.positions = std::move(positions);
+    mesh.positionIndices = std::move(positionIndices);
     mesh.faces = std::move(faces);
     mesh.faceGroups = std::move(faceGroups);
     

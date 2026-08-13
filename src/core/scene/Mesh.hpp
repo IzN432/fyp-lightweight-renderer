@@ -140,6 +140,7 @@ public:
     // update the internal vertex count; call setVertexCount() or use
     // setPerVertexArray() / setPerVertexAt() which keep counts in sync.
     std::vector<glm::vec3>  positions;
+    std::vector<uint32_t>  positionIndices; // index into positions for each vertex
     std::vector<glm::uvec3> faces;       // triangle index triplets (uint32)
 
     // Per-face group membership — valid only when faceGroups are enabled.

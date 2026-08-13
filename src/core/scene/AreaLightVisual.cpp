@@ -18,6 +18,7 @@ void buildAreaLightQuadMesh(Mesh &mesh, const Transform &transform, const AreaLi
         center + right + up,
         center - right + up,
     };
+    mesh.positionIndices = { 0, 1, 2, 3 };
     mesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, std::vector<glm::vec3>(4, forward));
     // Tangent = local right axis; w = +1 (no bitangent mirroring) matches geometry.frag's TBN build.
     mesh.setPerVertexArray<glm::vec4>(config.tangentAttributeName,

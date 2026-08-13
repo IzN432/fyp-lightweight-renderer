@@ -25,7 +25,7 @@ int msGetNumVerticesOfFace(const SMikkTSpaceContext *context, const int faceNum)
 void msGetPosition(const SMikkTSpaceContext *context, float outPos[], const int faceNum, const int vertNum)
 {
     auto *data = static_cast<const MeshData *>(context->m_pUserData);
-    const glm::vec3 &pos = data->positions[data->faces[faceNum][vertNum]];
+    const glm::vec3 &pos = data->positions[data->positionIndices[data->faces[faceNum][vertNum]]];
     outPos[0] = pos.x;
     outPos[1] = pos.y;
     outPos[2] = pos.z;

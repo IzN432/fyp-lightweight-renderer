@@ -85,7 +85,13 @@ VertexBuffer packVertexAttributes(const std::vector<const Mesh*> &meshes, const 
 
         if (config.includePosition)
         {
-            auto positionData = reinterpret_cast<const std::byte*>(mesh.positions.data());
+            std::vector<glm::vec3> positions(mesh.vertexCount());
+            for (uint32_t v = 0; v < mesh.vertexCount(); ++v)
+            {
+                positions[v] = mesh.positions[mesh.positionIndices[v]];
+            }
+
+            auto positionData = reinterpret_cast<const std::byte*>(positions.data());
             std::span<const std::byte> data(positionData, mesh.vertexCount() * sizeof(glm::vec3));
             uploadData(data, sizeof(glm::vec3), 0);
         }
