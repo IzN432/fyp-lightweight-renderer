@@ -229,6 +229,14 @@ try
     for (auto *lightVisualObject : lightVisualObjects)
         geometryMeshes.push_back(&lightVisualObject->getComponent<lr::StaticMesh>().mesh());
 
+    // Parallel to geometryMeshes (same order, one entry per mesh) — the model matrix GeometryPass
+    // applies per draw. Light visuals bake their Transform into vertex positions directly (see
+    // AreaLightVisual.hpp), so they'd be double-transformed by also applying their Transform here
+    // — nullptr means "draw with an identity model matrix".
+    std::vector<const lr::Transform*> meshTransforms = { &meshObject->getComponent<lr::Transform>() };
+    for (size_t i = 0; i < lightVisualObjects.size(); ++i)
+        meshTransforms.push_back(nullptr);
+
     const lr::VertexBufferUploadConfig meshPositionUploadConfig{
         .vertexBufferName = mainMeshPositionBufferName,
         .includePosition  = true
@@ -337,6 +345,7 @@ try
         .vertexBufferResourceNames = { {0, mainMeshPositionBufferName}, {1, mainMeshVertexBufferName} },
         .vertexBufferUploadResult  = meshPositions,
         .indexBufferUploadResult   = indexBuffer,
+        .meshTransforms = meshTransforms,
         .indexBufferResourceName = mainMeshIndexBufferName,
         .faceGroupBufferResourceName = mainMeshFaceGroupBufferName,
         .diffuseTextureArrayResourceName = material.textureNameMap.at(config.diffuseTextureName),
@@ -394,6 +403,7 @@ try
         .colorBufferResourceName    = mainMeshColorBufferName,
         .positionBufferUploadResult = mainMeshPositionResult,
         .vertexCounts               = { staticMesh.mesh().vertexCount() },
+        .meshTransform              = &meshObject->getComponent<lr::Transform>(),
     });
     overlayPointsPass.build(viewer.frameGraph(), pointsMeshLayout);
 
@@ -422,7 +432,7 @@ try
 
     lr::CommandManager commandManager;
 
-    lr::SelectionManager selectionManager(staticMesh.mesh().positions, viewer.input());
+    lr::SelectionManager selectionManager(staticMesh.mesh().positions, meshObject->getComponent<lr::Transform>(), viewer.input());
     selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera, selectionManager));
     selectionManager.registerHighlightChangedCallback([&]() {
         std::fill(pointColors.begin(), pointColors.end(), glm::vec3(1.0f, 0.0f, 1.0f));
@@ -491,7 +501,7 @@ try
 
     viewer.onGui([&sceneObjects, &lightUploader]() {
         ImGui::Begin("Scene Hierarchy");
-        
+
         int id = 0;
         for (auto &object : sceneObjects)
         {
@@ -499,7 +509,7 @@ try
             object->onGUI();
             ImGui::PopID();
         }
-        
+
         ImGui::End();
     });
 
@@ -532,10 +542,16 @@ try
         }
         else
         {
-            glm::vec3 centroid(0.0f);
+            // Average in local space, then transform once — valid since centroid-of-transformed-points
+            // equals transform-of-centroid for any affine map. The gizmo itself is positioned in world
+            // space (it's not part of the mesh, so GeometryPass's model matrix never applies to it),
+            // so it needs to track where the selected vertices actually render, not their local positions.
+            glm::vec3 localCentroid(0.0f);
             for (uint32_t idx : selected)
-                centroid += vertexManager.getPositions()[idx];
-            centroid /= static_cast<float>(selected.size());
+                localCentroid += vertexManager.getPositions()[idx];
+            localCentroid /= static_cast<float>(selected.size());
+            const glm::vec3 centroid = glm::vec3(
+                meshObject->getComponent<lr::Transform>().localMatrix() * glm::vec4(localCentroid, 1.0f));
 
             // Keep the gizmo a constant size on screen (~1/9 screen height) regardless of camera distance.
             const glm::vec3 camPos = camera->getComponent<lr::Transform>().position();

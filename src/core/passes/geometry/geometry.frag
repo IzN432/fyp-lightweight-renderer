@@ -45,8 +45,11 @@ layout(set = 0, binding = 6) readonly buffer Materials
 // gl_PrimitiveID restarts at 0 for every draw call, but the FaceGroupIndices buffer packs
 // all meshes drawn in this pass back to back. primitiveIdOffset is the running face count of
 // all meshes drawn before this one, so the two stay aligned when the pass draws more than one mesh.
+// model (this draw's mesh-to-world matrix) is unused here but must stay in the layout so both
+// stages agree on offsets — see geometry.vert.
 layout(push_constant) uniform PC
 {
+    mat4 model;
     uint primitiveIdOffset;
 } pc;
 

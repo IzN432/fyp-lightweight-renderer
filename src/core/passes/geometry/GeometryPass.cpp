@@ -7,10 +7,13 @@ namespace lr
 
 namespace
 {
-// Mirrors the push_constant block in geometry.frag — see the comment there for why this offset
-// is needed once the pass draws more than one mesh.
+// Mirrors the push_constant block in geometry.vert/geometry.frag. model is consumed by the vertex
+// shader; primitiveIdOffset is consumed by the fragment shader (see its comment for why it's
+// needed once the pass draws more than one mesh) — both shaders declare the full struct so their
+// offsets agree, even though each only reads its own field(s).
 struct GeometryPC
 {
+    glm::mat4 model;
     uint32_t primitiveIdOffset;
 };
 }
@@ -34,7 +37,7 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
     pass.indexBuffer(m_cfg.indexBufferResourceName)
         .vertShader((paths::shaderDir / "geometry.vert.spv").string())
         .fragShader((paths::shaderDir / "geometry.frag.spv").string())
-        .pushConstantSize(sizeof(GeometryPC), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .pushConstantSize(sizeof(GeometryPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .bind({
             {
                 .resourceName = m_cfg.cameraBufferResourceName,
@@ -100,8 +103,11 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                 const auto &singleMesh = m_cfg.vertexBufferUploadResult.singleMeshResults[i];
                 const auto &singleMeshIndex = m_cfg.indexBufferUploadResult.singleMeshResults[i];
 
-                const GeometryPC pc{ .primitiveIdOffset = singleMeshIndex.firstIndex / 3 };
-                cmd.pushConstants(layout, VK_SHADER_STAGE_FRAGMENT_BIT, pc);
+                const Transform *transform = m_cfg.meshTransforms[i];
+                const glm::mat4 model = transform ? transform->localMatrix() : glm::mat4(1.0f);
+
+                const GeometryPC pc{ .model = model, .primitiveIdOffset = singleMeshIndex.firstIndex / 3 };
+                cmd.pushConstants(layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
                 cmd.drawIndexed(singleMeshIndex.indexCount, 1, singleMeshIndex.firstIndex, singleMesh.vertexOffset, 0);
             }
         });

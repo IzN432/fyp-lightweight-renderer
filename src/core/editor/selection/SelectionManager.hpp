@@ -3,6 +3,7 @@
 #include "SelectionTool.hpp"
 
 #include "core/app/InputHandler.hpp"
+#include "core/scene/Transform.hpp"
 
 #include <functional>
 #include <memory>
@@ -14,8 +15,10 @@ namespace lr
 class SelectionManager
 {
 public:
-    SelectionManager(const std::vector<glm::vec3> &vertices, InputHandler &input)
-        : m_vertices(vertices), m_input(input) {}
+    // meshTransform is the Transform GeometryPass applies to `vertices` at render time — hit-testing
+    // needs to work in the same world space the mesh is actually drawn in, not raw local space.
+    SelectionManager(const std::vector<glm::vec3> &vertices, const Transform &meshTransform, InputHandler &input)
+        : m_vertices(vertices), m_meshTransform(meshTransform), m_input(input) {}
     ~SelectionManager() = default;
 
     void setSelectTool(std::unique_ptr<SelectionTool> tool);
@@ -42,6 +45,7 @@ private:
     std::vector<uint32_t> m_highlightedVertices;
     std::vector<uint32_t> m_selectedVertices;
     const std::vector<glm::vec3> &m_vertices;
+    const Transform &m_meshTransform;
     InputHandler &m_input;
     bool m_mouseClickedThisFrame = false;
     bool m_mouseReleasedThisFrame = false;
