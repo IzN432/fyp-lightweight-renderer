@@ -99,7 +99,7 @@ struct Camera : public Component
 
         if (changed)
         {
-            notifyChanged();
+            markDirty();
         }
     }
 };

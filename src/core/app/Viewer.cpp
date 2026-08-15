@@ -111,6 +111,10 @@ void Viewer::run()
         {
             cb(dt, m_swapchain->getExtent());
         }
+        for (auto &cb : m_lateUpdateCallbacks)
+        {
+            cb(dt, m_swapchain->getExtent());
+        }
 
         m_fg->setExternalImage("swapchain", m_swapchain->getImage(imageIndex), m_swapchain->getImageView(imageIndex));
         m_fg->execute(cmd);

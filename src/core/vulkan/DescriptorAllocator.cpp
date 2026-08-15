@@ -10,7 +10,10 @@ namespace lr
 DescriptorAllocator::DescriptorAllocator(VkDevice device) : m_device(device)
 {
     VkDescriptorPoolSize sizes[] = {
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 64},
+        // GeometryPass binds 4 material texture arrays (diffuse/normal/metallicRoughness/emissive),
+        // each sized to MaterialStore's fixed capacity (see kMaterialCapacity in main.cpp) — plus
+        // headroom for the handful of single-image bindings elsewhere (LTC LUTs, IBL maps, etc.).
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 * 256 + 128},
         {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          32},
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         32},
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         32},

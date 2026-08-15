@@ -63,6 +63,14 @@ public:
     m_updateCallbacks.push_back(std::move(cb));
   }
 
+  // Called once per frame after every onUpdate callback has run, and before the frame graph
+  // records/executes GPU work. Use this for end-of-frame bookkeeping that needs to see the
+  // results of this frame's updates — e.g. flushing dirty scene state into a single GPU upload
+  // rather than reacting to each mutation as it happens.
+  void onLateUpdate(std::function<void(float dt, VkExtent2D extent)> cb) {
+    m_lateUpdateCallbacks.push_back(std::move(cb));
+  }
+
   // -----------------------------------------------------------------------
   // Run — compiles the frame graph and enters the event/render loop.
   // Returns when the window is closed.
@@ -92,6 +100,7 @@ private:
 
   std::vector<std::function<void()>> m_guiCallbacks;
   std::vector<std::function<void(float, VkExtent2D)>> m_updateCallbacks;
+  std::vector<std::function<void(float, VkExtent2D)>> m_lateUpdateCallbacks;
   double m_lastFrameTime = 0.0;
   bool m_frameExecuted = false;
 };

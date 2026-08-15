@@ -110,29 +110,28 @@ MaterialImage extractImage(const tinygltf::NormalTextureInfo &texInfo, const tin
     return extractImage(img);
 }
 
-std::vector<Material> extractMaterials(const tinygltf::Model &model, const GltfLoaderConfig &config)
+// Registers each material into `materialStore` as it's built and returns the resulting handles,
+// parallel to the glTF material indices (index 0 = MaterialStore's shared default material, index
+// i+1 = model.materials[i]) — extractMeshData bakes these straight into each face's faceGroups entry.
+std::vector<MaterialHandle> extractMaterials(const tinygltf::Model &model, const GltfLoaderConfig &config,
+                                              MaterialStore &materialStore)
 {
-    std::vector<Material> materials;
-    materials.reserve(model.materials.size() + 1);
+    std::vector<MaterialHandle> handles;
+    handles.reserve(model.materials.size() + 1);
+    handles.push_back(materialStore.defaultMaterialHandle());
 
-    // Add a default material at index 0 for primitives that don't have a material
-    Material &defaultMaterial = materials.emplace_back();
-    defaultMaterial.name = "Default Material";
-    defaultMaterial.parameters[config.baseDiffuseName] = MaterialParam::ColorRGBA{glm::vec4(1.0f)};
-    defaultMaterial.parameters[config.baseRoughnessName] = MaterialParam::RangedFloat{1.0f, 0.0f, 1.0f};
-    defaultMaterial.parameters[config.baseMetallicName] = MaterialParam::NormalizedFloat{0.0f};
-    defaultMaterial.parameters[config.baseEmissiveName] = MaterialParam::ColorRGB{glm::vec3(0.0f)};
-
-    defaultMaterial.textures[config.diffuseTextureName] = MaterialImage::singlePixel(glm::vec4(1.0f));
+    // Fallback texture values used to patch any real material missing a required texture — just a
+    // handful of 1x1 pixels, cheap to keep local rather than routing through the store.
+    const MaterialImage fallbackDiffuse = MaterialImage::singlePixel(glm::vec4(1.0f));
     // Default normal texture points straight up. 0.5f is the "zero" value for normal maps, and the Z channel is usually stored in the B channel, so we set it to 1.0f.
-    defaultMaterial.textures[config.normalTextureName] = MaterialImage::singlePixel(glm::vec4(0.5f, 0.5f, 1.0f, 1.0f));
+    const MaterialImage fallbackNormal = MaterialImage::singlePixel(glm::vec4(0.5f, 0.5f, 1.0f, 1.0f));
     // Metallic is stored in the B channel and roughness is stored in the G channel, so we set metallic to 0.0f and roughness to 1.0f.
-    defaultMaterial.textures[config.metallicRoughnessTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f, 1.0f, 1.0f, 1.0f));
-    defaultMaterial.textures[config.emissiveTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    const MaterialImage fallbackMetallicRoughness = MaterialImage::singlePixel(glm::vec4(0.0f, 1.0f, 1.0f, 1.0f));
+    const MaterialImage fallbackEmissive = MaterialImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
 
     for (const auto &m : model.materials)
     {
-        Material &material = materials.emplace_back();
+        Material material;
         material.name = m.name;
 
         // The values in the Model are stored as doubles and vectors of doubles,
@@ -152,15 +151,17 @@ std::vector<Material> extractMaterials(const tinygltf::Model &model, const GltfL
 
         // Replace with the default if it is missing any of the required textures
         if (material.textures[config.diffuseTextureName].pixels.empty())
-            material.textures[config.diffuseTextureName] = defaultMaterial.textures[config.diffuseTextureName];
+            material.textures[config.diffuseTextureName] = fallbackDiffuse;
         if (material.textures[config.normalTextureName].pixels.empty())
-            material.textures[config.normalTextureName] = defaultMaterial.textures[config.normalTextureName];
+            material.textures[config.normalTextureName] = fallbackNormal;
         if (material.textures[config.metallicRoughnessTextureName].pixels.empty())
-            material.textures[config.metallicRoughnessTextureName] = defaultMaterial.textures[config.metallicRoughnessTextureName];
+            material.textures[config.metallicRoughnessTextureName] = fallbackMetallicRoughness;
         if (material.textures[config.emissiveTextureName].pixels.empty())
-            material.textures[config.emissiveTextureName] = defaultMaterial.textures[config.emissiveTextureName];
+            material.textures[config.emissiveTextureName] = fallbackEmissive;
+
+        handles.push_back(materialStore.acquire(std::move(material)));
     }
-    return materials;
+    return handles;
 }
 
 /**
@@ -275,7 +276,8 @@ struct Vector3Hash
     }
 };
 
-MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &model)
+MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &model,
+                          const std::vector<MaterialHandle> &materialHandles)
 {
     MeshData meshData;
     auto &positions = meshData.positions;
@@ -444,9 +446,9 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
 
                 
                 faceGroups.push_back(
-                    primitive.material >= 0 
-                    ? static_cast<uint32_t>(primitive.material) + 1
-                    : 0);
+                    primitive.material >= 0
+                    ? materialHandles.at(static_cast<size_t>(primitive.material) + 1)
+                    : materialHandles.at(0));
             }
         }
     }
@@ -464,7 +466,8 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
 
 } // namespace
 
-GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, const GltfLoaderConfig &config) const
+GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialStore &materialStore,
+                                     const GltfLoaderConfig &config) const
 {
     // SECTION 1 - Load the glTF file using tinygltf to obtain a tinygltf::Model instance.
 
@@ -472,20 +475,24 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, const Glt
 
     tinygltf::Model model = loadGltfFile(path);
 
-    // SECTION 2 - Extract vertex / face data from the tinygltf::Model
-    
+    // SECTION 2 - Extract material data and register it into the store first — mesh extraction
+    // below needs the resulting handles to bake directly into each face's faceGroups entry.
+    std::vector<MaterialHandle> materialHandles = extractMaterials(model, config, materialStore);
+
+    // SECTION 3 - Extract vertex / face data from the tinygltf::Model
+
     MeshSequence seq;
     seq.frames.reserve(model.meshes.size());
     for (size_t i = 0; i < model.meshes.size(); ++i)
     {
         Mesh &outMesh = seq.frames.emplace_back();
         const tinygltf::Mesh &mesh = model.meshes[i];
-        
+
         if (mesh.primitives.empty())
             throw std::runtime_error("GltfLoader: mesh has no primitives");
 
-        auto [positions, positionIndices, normals, tangents, uvs, faces, faceGroups] = extractMeshData(mesh, model);
-        
+        auto [positions, positionIndices, normals, tangents, uvs, faces, faceGroups] = extractMeshData(mesh, model, materialHandles);
+
         outMesh.setFaceCount(faces.size());
         outMesh.setVertexCount(positionIndices.size());
         outMesh.positions = std::move(positions);
@@ -498,10 +505,7 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, const Glt
         outMesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
     }
 
-    // SECTION 3 - Extract material data from the tinygltf::Model and convert it to our internal Material format.
-    auto outMaterials = extractMaterials(model, config);
-
-    return { std::move(seq), std::move(outMaterials) };
+    return { std::move(seq), std::move(materialHandles) };
 }
 
 } // namespace lr

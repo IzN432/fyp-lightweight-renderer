@@ -4,6 +4,7 @@
 #include "core/scene/Mesh.hpp"
 #include "core/scene/Transform.hpp"
 #include "core/loaders/Material.hpp"
+#include "core/loaders/MaterialStore.hpp"
 
 namespace lr
 {
@@ -26,9 +27,9 @@ struct AreaLightVisualConfig
 // (Re)builds `mesh` as a single flat quad standing in for an area light: centered on the light's
 // Transform, spanning its local right/up axes scaled by `light.size` — the same basis CalcAreaLight
 // in pbr.frag uses for the LTC quad — and facing the light's forward direction. All faces are tagged
-// with `materialIndex`, an index into the combined Materials buffer the quad is uploaded alongside.
+// with `materialHandle`, a MaterialStore handle resolved straight into the Materials SSBO.
 void buildAreaLightQuadMesh(Mesh &mesh, const Transform &transform, const AreaLight &light,
-                             uint32_t materialIndex, const AreaLightVisualConfig &config);
+                             MaterialHandle materialHandle, const AreaLightVisualConfig &config);
 
 // Builds the material that makes the quad read as "the light" rather than a lit surface: black
 // diffuse (it reflects nothing of its own) with emissive = light.color * light.intensity, so its

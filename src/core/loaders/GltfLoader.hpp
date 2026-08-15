@@ -4,13 +4,16 @@
 
 #include "MeshSequence.hpp"
 #include "Material.hpp"
+#include "MaterialStore.hpp"
 namespace lr
 {
 
 struct GltfMeshLoadResult
 {
 	MeshSequence sequence;
-	std::vector<Material> materials;
+	// Parallel to the glTF material indices (index 0 = the synthetic default material) — already
+	// resolved to their MaterialStore slots, matching what got baked into each Mesh's faceGroups.
+	std::vector<MaterialHandle> materialHandles;
 };
 
 struct GltfLoaderConfig
@@ -54,7 +57,10 @@ struct GltfLoaderConfig
 class GltfLoader
 {
 public:
-	GltfMeshLoadResult load(const std::filesystem::path &path, const GltfLoaderConfig &config = {}) const;
+	// Materials are registered into `materialStore` as they're parsed, so the returned Mesh's
+	// faceGroups already hold global MaterialHandles — no remapping needed at the call site.
+	GltfMeshLoadResult load(const std::filesystem::path &path, MaterialStore &materialStore,
+	                         const GltfLoaderConfig &config = {}) const;
 };
 
 }  // namespace lr

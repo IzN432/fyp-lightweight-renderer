@@ -4,7 +4,7 @@ namespace lr
 {
 
 void buildAreaLightQuadMesh(Mesh &mesh, const Transform &transform, const AreaLight &light,
-                             uint32_t materialIndex, const AreaLightVisualConfig &config)
+                             MaterialHandle materialHandle, const AreaLightVisualConfig &config)
 {
     const glm::vec3 right   = transform.right() * (light.size.x * 0.5f);
     const glm::vec3 up      = transform.up() * (light.size.y * 0.5f);
@@ -30,7 +30,7 @@ void buildAreaLightQuadMesh(Mesh &mesh, const Transform &transform, const AreaLi
     // Wound so the quad is visible (front-facing) from the `forward` side, matching the pass's
     // CCW-front backface culling.
     mesh.faces = { {0, 1, 2}, {0, 2, 3} };
-    mesh.faceGroups = { materialIndex, materialIndex };
+    mesh.faceGroups = { materialHandle, materialHandle };
 }
 
 Material buildAreaLightMaterial(const AreaLight &light, const AreaLightVisualConfig &config)

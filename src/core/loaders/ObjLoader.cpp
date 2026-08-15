@@ -35,33 +35,31 @@ MaterialImage loadMaterialImage(const std::filesystem::path &objDirectoryPath,
     return out;
 }
 
-std::vector<Material> extractMaterials(const tinyobj::ObjReader &reader, const std::filesystem::path &objDirectoryPath, const ObjLoaderConfig &config)
+// Registers each material into `materialStore` as it's built and returns the resulting handles,
+// parallel to the OBJ's material indices (index 0 = MaterialStore's shared default material,
+// index i+1 = materials[i]) — extractMeshData bakes these straight into each face's faceGroups entry.
+std::vector<MaterialHandle> extractMaterials(const tinyobj::ObjReader &reader, const std::filesystem::path &objDirectoryPath,
+                                              const ObjLoaderConfig &config, MaterialStore &materialStore)
 {
-    std::vector<Material> out;
+    std::vector<MaterialHandle> handles;
 
     const auto &materials = reader.GetMaterials();
-    out.reserve(materials.size() + 1);
+    handles.reserve(materials.size() + 1);
+    handles.push_back(materialStore.defaultMaterialHandle());
 
-    auto &defaultMat = out.emplace_back();
-    defaultMat.name = "Default Material";
-    defaultMat.parameters[config.baseDiffuseName] = MaterialParam::ColorRGBA{glm::vec4(1.0f)};
-    defaultMat.parameters[config.baseAmbientName] = MaterialParam::ColorRGBA{glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)};
-    defaultMat.parameters[config.baseSpecularName] = MaterialParam::ColorRGBA{glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)};
-    defaultMat.parameters[config.shininessName] = MaterialParam::RangedFloat{1.0f, 0.0f, 128.0f};
-    defaultMat.parameters[config.baseRoughnessName] = MaterialParam::NormalizedFloat{1.0f};
-    defaultMat.parameters[config.baseMetallicName] = MaterialParam::NormalizedFloat{0.0f};
-    defaultMat.parameters[config.baseEmissiveName] = MaterialParam::ColorRGB{glm::vec3(0.0f)};
-    defaultMat.textures[config.diffuseTextureName] = MaterialImage::singlePixel(glm::vec4(1.0f));
-    defaultMat.textures[config.ambientTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
-    defaultMat.textures[config.specularTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
-    defaultMat.textures[config.normalTextureName] = MaterialImage::singlePixel(glm::vec4(0.5f, 0.5f, 1.0f, 1.0f));
-    defaultMat.textures[config.metallicTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
-    defaultMat.textures[config.roughnessTextureName] = MaterialImage::singlePixel(glm::vec4(1.0f));
-    defaultMat.textures[config.emissiveTextureName] = MaterialImage::singlePixel(glm::vec4(0.0f));
+    // Fallback texture values used to patch any real material missing a required texture — just a
+    // handful of 1x1 pixels, cheap to keep local rather than routing through the store.
+    const MaterialImage fallbackDiffuse   = MaterialImage::singlePixel(glm::vec4(1.0f));
+    const MaterialImage fallbackAmbient   = MaterialImage::singlePixel(glm::vec4(0.0f));
+    const MaterialImage fallbackSpecular  = MaterialImage::singlePixel(glm::vec4(0.0f));
+    const MaterialImage fallbackNormal    = MaterialImage::singlePixel(glm::vec4(0.5f, 0.5f, 1.0f, 1.0f));
+    const MaterialImage fallbackMetallic  = MaterialImage::singlePixel(glm::vec4(0.0f));
+    const MaterialImage fallbackRoughness = MaterialImage::singlePixel(glm::vec4(1.0f));
+    const MaterialImage fallbackEmissive  = MaterialImage::singlePixel(glm::vec4(0.0f));
 
     for (const auto &m : materials)
     {
-        auto &mat = out.emplace_back();
+        Material mat;
         mat.name = m.name;
         mat.parameters[config.baseDiffuseName] = MaterialParam::ColorRGBA{glm::vec4(m.diffuse[0], m.diffuse[1], m.diffuse[2], 1.0f)};
         mat.parameters[config.baseAmbientName] = MaterialParam::ColorRGBA{glm::vec4(m.ambient[0], m.ambient[1], m.ambient[2], 1.0f)};
@@ -75,26 +73,28 @@ std::vector<Material> extractMaterials(const tinyobj::ObjReader &reader, const s
         mat.textures[config.specularTextureName] = loadMaterialImage(objDirectoryPath, m.specular_texname);
         mat.textures[config.normalTextureName] = loadMaterialImage(objDirectoryPath, m.normal_texname);
         mat.textures[config.metallicTextureName] = loadMaterialImage(objDirectoryPath, m.metallic_texname);
-        mat.textures[config.roughnessTextureName] = loadMaterialImage(objDirectoryPath, m.roughness_texname); 
+        mat.textures[config.roughnessTextureName] = loadMaterialImage(objDirectoryPath, m.roughness_texname);
         mat.textures[config.emissiveTextureName] = loadMaterialImage(objDirectoryPath, m.emissive_texname);
 
         if (mat.textures[config.diffuseTextureName].pixels.empty())
-            mat.textures[config.diffuseTextureName] = defaultMat.textures[config.diffuseTextureName];
+            mat.textures[config.diffuseTextureName] = fallbackDiffuse;
         if (mat.textures[config.ambientTextureName].pixels.empty())
-            mat.textures[config.ambientTextureName] = defaultMat.textures[config.ambientTextureName];
-        if (mat.textures[config.specularTextureName].pixels.empty())    
-            mat.textures[config.specularTextureName] = defaultMat.textures[config.specularTextureName];
+            mat.textures[config.ambientTextureName] = fallbackAmbient;
+        if (mat.textures[config.specularTextureName].pixels.empty())
+            mat.textures[config.specularTextureName] = fallbackSpecular;
         if (mat.textures[config.normalTextureName].pixels.empty())
-            mat.textures[config.normalTextureName] = defaultMat.textures[config.normalTextureName];
+            mat.textures[config.normalTextureName] = fallbackNormal;
         if (mat.textures[config.metallicTextureName].pixels.empty())
-            mat.textures[config.metallicTextureName] = defaultMat.textures[config.metallicTextureName];
+            mat.textures[config.metallicTextureName] = fallbackMetallic;
         if (mat.textures[config.roughnessTextureName].pixels.empty())
-            mat.textures[config.roughnessTextureName] = defaultMat.textures[config.roughnessTextureName];
+            mat.textures[config.roughnessTextureName] = fallbackRoughness;
         if (mat.textures[config.emissiveTextureName].pixels.empty())
-            mat.textures[config.emissiveTextureName] = defaultMat.textures[config.emissiveTextureName];
+            mat.textures[config.emissiveTextureName] = fallbackEmissive;
+
+        handles.push_back(materialStore.acquire(std::move(mat)));
     }
 
-    return out;
+    return handles;
 }
 
 tinyobj::ObjReader loadObjFile(const std::filesystem::path &path)
@@ -168,7 +168,8 @@ struct Vector3Hash
     }
 };
 
-MeshData extractMeshData(const tinyobj::ObjReader &reader, const std::filesystem::path &path)
+MeshData extractMeshData(const tinyobj::ObjReader &reader, const std::filesystem::path &path,
+                          const std::vector<MaterialHandle> &materialHandles)
 {
     MeshData meshData;
     auto &positions = meshData.positions;
@@ -242,8 +243,12 @@ MeshData extractMeshData(const tinyobj::ObjReader &reader, const std::filesystem
     {
         for (size_t faceIdx = 0; faceIdx < shape.mesh.num_face_vertices.size(); ++faceIdx)
         {
+            // material_ids[faceIdx] is -1 when a face has no material even in a non-empty vector;
+            // +1 in int space maps that (like an empty vector) to the default material at handle 0.
             faceGroups.emplace_back(
-                shape.mesh.material_ids.empty() ? 0 : (shape.mesh.material_ids[faceIdx] + 1)
+                shape.mesh.material_ids.empty()
+                    ? materialHandles.at(0)
+                    : materialHandles.at(static_cast<size_t>(shape.mesh.material_ids[faceIdx] + 1))
             );
             const size_t base = faceIdx * 3;
             faces.push_back({
@@ -262,34 +267,36 @@ MeshData extractMeshData(const tinyobj::ObjReader &reader, const std::filesystem
 
 } // namespace
 
-ObjMeshLoadResult ObjLoader::load(const std::filesystem::path &path, const ObjLoaderConfig &config) const
+ObjMeshLoadResult ObjLoader::load(const std::filesystem::path &path, MaterialStore &materialStore,
+                                   const ObjLoaderConfig &config) const
 {
     // SECTION 1 - Load the OBJ file
-    
+
     if (path.empty()) throw std::invalid_argument("ObjLoader: empty path");
-    
+
     tinyobj::ObjReader reader = loadObjFile(path);
 
-    // SECTION 2 - Extract vertex / face data
+    // SECTION 2 - Extract material data and register it into the store first — mesh extraction
+    // below needs the resulting handles to bake directly into each face's faceGroups entry.
+    std::vector<MaterialHandle> materialHandles = extractMaterials(reader, path.parent_path(), config, materialStore);
+
+    // SECTION 3 - Extract vertex / face data
 
     Mesh mesh;
-    auto [positions, positionIndices, normals, tangents, uvs, faces, faceGroups] = extractMeshData(reader, path);
-    
+    auto [positions, positionIndices, normals, tangents, uvs, faces, faceGroups] = extractMeshData(reader, path, materialHandles);
+
     mesh.setVertexCount(static_cast<uint32_t>(positionIndices.size()));
     mesh.setFaceCount(static_cast<uint32_t>(faces.size()));
     mesh.positions = std::move(positions);
     mesh.positionIndices = std::move(positionIndices);
     mesh.faces = std::move(faces);
     mesh.faceGroups = std::move(faceGroups);
-    
+
     mesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, normals);
     mesh.setPerVertexArray<glm::vec4>(config.tangentAttributeName, tangents);
     mesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
 
-    // SECTION 3 - Extract material data from the tinyobj::ObjReader and convert it to our internal Material format
-    auto materials = extractMaterials(reader, path.parent_path(), config);
-
-    return { std::move(mesh), std::move(materials) };
+    return { std::move(mesh), std::move(materialHandles) };
 }
 
 } // namespace lr

@@ -78,10 +78,12 @@ add_library(lr_core STATIC
 
     src/core/scene/Mesh.cpp
     src/core/scene/AreaLightVisual.cpp
+    src/core/scene/SceneManager.cpp
 
     src/core/loaders/ObjLoader.cpp
     src/core/loaders/GltfLoader.cpp
     src/core/loaders/LoaderUtils.cpp
+    src/core/loaders/MaterialStore.cpp
 
     src/core/upload/CameraUploader.cpp
     src/core/upload/LightUploader.cpp

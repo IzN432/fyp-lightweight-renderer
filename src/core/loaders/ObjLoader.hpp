@@ -2,6 +2,7 @@
 
 #include "core/scene/Mesh.hpp"
 #include "core/loaders/Material.hpp"
+#include "core/loaders/MaterialStore.hpp"
 
 #include <filesystem>
 
@@ -10,7 +11,9 @@ namespace lr
 struct ObjMeshLoadResult
 {
 	Mesh mesh;
-	std::vector<Material> materials;
+	// Parallel to the OBJ's material indices (index 0 = the synthetic default material) — already
+	// resolved to their MaterialStore slots, matching what got baked into the Mesh's faceGroups.
+	std::vector<MaterialHandle> materialHandles;
 };
 
 struct ObjLoaderConfig
@@ -41,7 +44,10 @@ struct ObjLoaderConfig
 class ObjLoader
 {
 public:
-	ObjMeshLoadResult load(const std::filesystem::path &path, const ObjLoaderConfig &config = {}) const;
+	// Materials are registered into `materialStore` as they're parsed, so the returned Mesh's
+	// faceGroups already hold global MaterialHandles — no remapping needed at the call site.
+	ObjMeshLoadResult load(const std::filesystem::path &path, MaterialStore &materialStore,
+	                        const ObjLoaderConfig &config = {}) const;
 };
 
 }  // namespace lr

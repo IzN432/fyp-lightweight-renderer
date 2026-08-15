@@ -36,26 +36,26 @@ public:
     {
         m_rotation = q;
         m_eulerDegrees = glm::degrees(glm::eulerAngles(q));
-        notifyChanged();
+        markDirty();
     }
 
     void setEulerDegrees(const glm::vec3& degrees)
     {
         m_eulerDegrees = degrees;
         m_rotation = glm::quat(glm::radians(degrees));
-        notifyChanged();
+        markDirty();
     }
 
     void setPosition(const glm::vec3& pos)
     {
         m_position = pos;
-        notifyChanged();
+        markDirty();
     }
 
     void setScale(const glm::vec3& s)
     {
         m_scale = s;
-        notifyChanged();
+        markDirty();
     }
 
     void onGUIImpl() override
@@ -70,7 +70,7 @@ public:
         changed |= ImGui::DragFloat3("Scale", &m_scale.x, 0.1f);
         if (changed)
         {
-            notifyChanged();
+            markDirty();
         }
     }
 

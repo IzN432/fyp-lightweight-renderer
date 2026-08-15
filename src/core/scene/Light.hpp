@@ -128,7 +128,7 @@ struct Light : public Component
 
         if (changed)
         {
-            notifyChanged();
+            markDirty();
         }
     }
     
