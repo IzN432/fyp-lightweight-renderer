@@ -145,9 +145,13 @@ try
     lr::SceneObject* meshObject = &scene.createSceneObject();
     meshObject->addComponent<lr::Transform>();
     {
+        // Seeds the main mesh's selection-highlight colors — one per unique/deduped position, the
+        // same space VertexManager/SelectionManager and the points-picking overlay operate in.
+        // SceneManager::uploadMeshes() reads this back to build the initial GPU color buffer, so it
+        // must be set before sceneManager.initialize() runs.
         lr::Mesh &m = sequence.frames.front();
-        std::vector<glm::vec3> colors(m.vertexCount(), glm::vec3(1.0f, 0.0f, 1.0f));
-        m.setPerVertexArray("color", std::span<const glm::vec3>(colors));
+        std::vector<glm::vec3> colors(m.positions.size(), glm::vec3(1.0f, 0.0f, 1.0f));
+        m.setPerUniqueVertexArray("color", std::span<const glm::vec3>(colors));
     }
     auto &staticMesh = meshObject->addComponent<lr::StaticMesh>(sequence.frames.front(), materialHandles,
                                                                  sceneManager.materialStore());
@@ -175,7 +179,8 @@ try
     // change listeners that keep the camera UBO and main mesh's materials SSBO in sync afterward —
     // see SceneManager::initialize().
     sceneManager.initialize(areaLightVisualConfig, gpuMaterialLayout,
-                            { config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName });
+                            { config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName },
+                            viewer.input());
 
     // -------------------------------------------------------------------------
     // Frame graph passes
@@ -233,21 +238,14 @@ try
 
     lr::GpuMeshLayout pointsMeshLayout(staticMesh.mesh().layout());
     pointsMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
-    pointsMeshLayout.map("color", 1, 1, VK_FORMAT_R32G32B32_SFLOAT);
-
-    // Vertex-selection points only apply to the main mesh, not the area light quads — meshPositions
-    // now covers both, so scope this pass to just its first entry.
-    const lr::VertexBufferUploadResult mainMeshPositionResult{
-        .singleMeshResults = { sceneManager.meshPositions().singleMeshResults.front() }
-    };
+    pointsMeshLayout.mapUniqueVertex("color", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
 
     lr::OverlayPointsPass overlayPointsPass({
-        .cameraBufferResourceName   = sceneManager.cameraBufferName(),
-        .positionBufferResourceName = sceneManager.mainMeshPositionBufferName(),
-        .colorBufferResourceName    = sceneManager.mainMeshColorBufferName(),
-        .positionBufferUploadResult = mainMeshPositionResult,
-        .vertexCounts               = { staticMesh.mesh().vertexCount() },
-        .meshTransform              = &meshObject->getComponent<lr::Transform>(),
+        .cameraBufferResourceName = sceneManager.cameraBufferName(),
+        .pointsBufferResourceName = sceneManager.mainMeshPointsBufferName(),
+        .pointsBufferUploadResult = sceneManager.mainMeshPoints(),
+        .vertexCounts             = { static_cast<uint32_t>(staticMesh.mesh().positions.size()) },
+        .meshTransform            = &meshObject->getComponent<lr::Transform>(),
     });
     overlayPointsPass.build(viewer.frameGraph(), pointsMeshLayout);
 
@@ -261,7 +259,7 @@ try
     // Editor state — vertex picking, selection and gizmo managers
     // -------------------------------------------------------------------------
 
-    bool displayPoints = true;
+    overlayPointsPass.setEnabled(sceneManager.selectionState() == lr::SelectionState::Edit);
 
     // Gizmo hover — reads the picking image from the previous frame
     lr::ImageReadback gizmoReadback(viewer.context(), viewer.allocator());
@@ -273,19 +271,11 @@ try
 
     lr::CommandManager commandManager;
 
-    lr::SelectionManager selectionManager(staticMesh.mesh().positions, meshObject->getComponent<lr::Transform>(), viewer.input());
+    // SceneManager owns the SelectionManager (constructed off the main mesh in initialize(), see
+    // SceneManager::selectionManager()) since it needs to wire selection-highlight changes straight
+    // to the GPU color buffer; this is just a local alias to keep the call sites below unchanged.
+    lr::SelectionManager &selectionManager = sceneManager.selectionManager();
     selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera, selectionManager));
-
-    std::vector<glm::vec3> pointColors(staticMesh.mesh().vertexCount(), glm::vec3(1.0f, 0.0f, 1.0f));
-    selectionManager.registerHighlightChangedCallback([&]() {
-        std::fill(pointColors.begin(), pointColors.end(), glm::vec3(1.0f, 0.0f, 1.0f));
-        for (uint32_t idx : selectionManager.getHighlightedIndices())
-            pointColors[idx] = glm::vec3(1.0f, 0.8f, 0.0f);  // orange = selected
-        viewer.resources().updateBuffer(
-            sceneManager.mainMeshColorBufferName(),
-            pointColors.data(),
-            pointColors.size() * sizeof(glm::vec3));
-    });
 
     lr::GizmoManager gizmoManager(overlayGeometryPass, viewer.input());
     const std::vector<int> translateGizmoIds = {
@@ -311,7 +301,7 @@ try
         const bool wasInteracting = gizmoManager.isInteracting();
         gizmoManager.mouseButtonCallback(button, action, shift, ctrl, alt);
 
-        if (wasInteracting || gizmoManager.isInteracting() || !displayPoints)
+        if (wasInteracting || gizmoManager.isInteracting() || sceneManager.selectionState() != lr::SelectionState::Edit)
             return;
 
         selectionManager.mouseButtonCallback(button, action, shift, ctrl, alt);
@@ -323,11 +313,9 @@ try
         if (ImGui::GetIO().WantCaptureKeyboard)
             return;
 
-        displayPoints = !displayPoints;
-        overlayPointsPass.setEnabled(displayPoints);
-
-        if (!displayPoints)
-            selectionManager.clearSelection();
+        const bool nowEditing = sceneManager.selectionState() != lr::SelectionState::Edit;
+        sceneManager.setSelectionState(nowEditing ? lr::SelectionState::Edit : lr::SelectionState::View);
+        overlayPointsPass.setEnabled(nowEditing);
     });
 
     viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
@@ -365,9 +353,8 @@ try
         gizmoManager.updateCallback(dt, extent, viewer.hasRenderedAtLeastOneFrame(), gizmoReadback, viewer.resources());
     });
 
-    viewer.onUpdate([&](float dt, VkExtent2D extent) {
-        selectionManager.updateCallback(dt, extent);
-    });
+    // selectionManager's per-frame mouse/drag handling is driven by SceneManager::registerCallbacks()
+    // below, since SceneManager now owns the SelectionManager instance.
 
     // Keeps the translate gizmos positioned at the selection centroid, shown
     // only while something is selected, and pushes the result to the overlay pass.

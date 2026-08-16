@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -8,6 +9,7 @@
 #include "Scene.hpp"
 #include "AreaLightVisual.hpp"
 
+#include "core/editor/selection/SelectionManager.hpp"
 #include "core/framegraph/ResourceRegistry.hpp"
 #include "core/loaders/Material.hpp"
 #include "core/loaders/MaterialStore.hpp"
@@ -24,6 +26,15 @@ namespace lr
 {
 
 class Viewer;
+
+// The editor's current interaction mode over the main mesh — View just renders normally, Edit
+// shows the vertex-picking overlay and lets the SelectionManager's SelectionTool receive clicks.
+// Only two states for now; may grow (e.g. per-tool edit modes) later.
+enum class SelectionState
+{
+    View,
+    Edit,
+};
 
 class SceneManager
 {
@@ -50,16 +61,35 @@ public:
     void setAspect(float aspect) { m_aspect = aspect; }
 
     // Performs all one-time scene setup that would otherwise have to be manually sequenced by the
-    // caller: builds light visuals and uploads the initial lights/mesh/material/camera buffers.
-    // Requires setScene(), setMainMeshObject() and setDefaultCamera() to have been called first.
+    // caller: builds light visuals, uploads the initial lights/mesh/material/camera buffers, and
+    // constructs the SelectionManager that operates on the main mesh (see selectionManager()) —
+    // input is needed for that. Requires setScene(), setMainMeshObject() and setDefaultCamera() to
+    // have been called first.
     void initialize(const AreaLightVisualConfig &areaLightVisualConfig,
                      const GpuMaterialLayout &materialLayout,
-                     const std::vector<std::string> &vertexAttributeNames);
+                     const std::vector<std::string> &vertexAttributeNames,
+                     InputHandler &input);
 
     // Registers the per-frame callbacks SceneManager needs — an onUpdate that tracks the
-    // swapchain aspect ratio (see setAspect) and an onLateUpdate that calls flushDirty() — so the
-    // caller doesn't need to know what SceneManager wires up each frame.
+    // swapchain aspect ratio (see setAspect), an onUpdate that drives the SelectionManager's mouse/
+    // drag handling, and an onLateUpdate that calls flushDirty() — so the caller doesn't need to
+    // know what SceneManager wires up each frame.
     void registerCallbacks(Viewer &viewer);
+
+    // Selection over the main mesh's deduped-position space — constructed by initialize(), so only
+    // valid to call after it. Highlight changes are wired internally to push the highlighted-vertex
+    // colors to the GPU (see updateMainMeshPointsBuffer()); the caller still owns wiring up a SelectionTool
+    // (setSelectTool), the mouse click handoff with gizmos, and reading getSelectedIndices()/
+    // getHighlightedIndices() for its own UI (translate gizmo placement, etc.).
+    SelectionManager &selectionManager() { return *m_selectionManager; }
+
+    SelectionState selectionState() const { return m_selectionState; }
+
+    // Switches the editor's interaction mode. Leaving Edit clears the current selection (mirrors
+    // the old Tab-toggle behavior). The caller is still responsible for toggling the points-overlay
+    // pass's own visibility to match (see OverlayPointsPass::setEnabled) — SceneManager doesn't own
+    // any render passes.
+    void setSelectionState(SelectionState state);
 
     // Polls the camera, light visual, and main mesh components for the dirty flag their setters/
     // onGUIImpl set via Component::markDirty(), re-uploads whatever's dirty (at most once per
@@ -80,7 +110,8 @@ public:
 
     void uploadLights();
 
-    // Repacks just the position buffer — for edits that only move vertices (vertex-drag editing).
+    // Repacks the GBuffer position buffer plus the deduped position+color buffer (see
+    // updateMainMeshPointsBuffer()) — for edits that only move vertices (vertex-drag editing).
     void updateMainMeshPositions();
 
     // Re-uploads the materials SSBO from the MaterialStore's current contents — called by
@@ -101,12 +132,16 @@ public:
     const std::string &cameraBufferName() const { return m_cameraUploader.bufferName(); }
 
     const std::string &mainMeshPositionBufferName()  const { return m_mainMeshPositionBufferName; }
+    // Interleaved unique/deduped position + color buffer — see m_mainMeshPointsBufferName. Distinct
+    // from mainMeshPositionBufferName(), which is duped per UV-seam corner for GeometryPass.
+    const std::string &mainMeshPointsBufferName()    const { return m_mainMeshPointsBufferName; }
     const std::string &mainMeshVertexBufferName()    const { return m_mainMeshVertexBufferName; }
-    const std::string &mainMeshColorBufferName()     const { return m_mainMeshColorBufferName; }
     const std::string &mainMeshIndexBufferName()     const { return m_mainMeshIndexBufferName; }
     const std::string &mainMeshFaceGroupBufferName() const { return m_mainMeshFaceGroupBufferName; }
 
     const VertexBufferUploadResult &meshPositions() const { return m_meshPositions; }
+    // Main mesh's unique/deduped position+color buffer — see mainMeshPointsBufferName().
+    const VertexBufferUploadResult &mainMeshPoints() const { return m_mainMeshPoints; }
     const IndexBufferUploadResult  &indexBuffer()   const { return m_indexBuffer; }
     const std::vector<const Transform*> &meshTransforms() const { return m_meshTransforms; }
 
@@ -118,8 +153,22 @@ public:
 private:
     void gatherGeometry(const std::vector<std::string> &vertexAttributeNames);
 
+    // Rebuilds the main mesh's "color" per-unique-vertex attribute from the SelectionManager's
+    // current highlighted indices and pushes it to the GPU. Wired as m_selectionManager's
+    // highlight-changed callback in initialize().
+    void updateMainMeshHighlightColors();
+
+    // Repacks and re-uploads the deduped position+color buffer (m_mainMeshPointsBufferName) from
+    // the main mesh's current positions/"color" attribute. Shared by updateMainMeshPositions() (a
+    // vertex moved) and updateMainMeshHighlightColors() (a color changed) since both fields live in
+    // the same interleaved buffer.
+    void updateMainMeshPointsBuffer();
+
     Scene* m_scene = nullptr;
     ResourceRegistry &m_registry;
+
+    std::unique_ptr<SelectionManager> m_selectionManager;
+    SelectionState m_selectionState = SelectionState::View;
 
     MeshUploader m_meshUploader;
     MaterialUploader m_materialUploader;
@@ -144,12 +193,22 @@ private:
     GpuMaterialLayout m_materialLayout;
 
     const std::string m_mainMeshPositionBufferName  = "meshPositionBuffer";
+    const std::string m_mainMeshPointsBufferName    = "meshPointsBuffer";
     const std::string m_mainMeshVertexBufferName    = "meshVertexBuffer";
-    const std::string m_mainMeshColorBufferName      = "meshColorBuffer";
     const std::string m_mainMeshIndexBufferName     = "meshIndexBuffer";
     const std::string m_mainMeshFaceGroupBufferName = "meshFaceGroupBuffer";
 
+    // Config for the deduped position+color buffer above — same shape as m_meshPositionUploadConfig/
+    // m_meshAttributeUploadConfig, cached so updateMainMeshPositions()/updateMainMeshHighlightColors()
+    // both repack it identically.
+    VertexBufferUploadConfig m_mainMeshPointsUploadConfig = {
+        .vertexBufferName     = m_mainMeshPointsBufferName,
+        .vertexAttributeNames = { "color" },
+        .includePosition      = true
+    };
+
     VertexBufferUploadResult m_meshPositions;
+    VertexBufferUploadResult m_mainMeshPoints;
     IndexBufferUploadResult  m_indexBuffer;
     MaterialUploadResult     m_materialUploadResult;
 };

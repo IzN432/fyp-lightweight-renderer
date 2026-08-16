@@ -16,9 +16,9 @@ public:
     struct Config
     {
         std::string              cameraBufferResourceName;
-        std::string              positionBufferResourceName;
-        std::string              colorBufferResourceName;
-        VertexBufferUploadResult positionBufferUploadResult;
+        // Interleaved deduped position + color buffer (see SceneManager::mainMeshPointsBufferName).
+        std::string              pointsBufferResourceName;
+        VertexBufferUploadResult pointsBufferUploadResult;
         std::vector<uint32_t>    vertexCounts;
 
         // The mesh's Transform, read fresh every frame so the points stay aligned with the mesh

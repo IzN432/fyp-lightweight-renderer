@@ -32,7 +32,8 @@ SceneManager::SceneManager(ResourceRegistry &registry, uint32_t materialCapacity
 
 void SceneManager::initialize(const AreaLightVisualConfig &areaLightVisualConfig,
                                const GpuMaterialLayout &materialLayout,
-                               const std::vector<std::string> &vertexAttributeNames)
+                               const std::vector<std::string> &vertexAttributeNames,
+                               InputHandler &input)
 {
     if (!m_scene)
         throw std::runtime_error("SceneManager::initialize: scene must be set first (see setScene)");
@@ -45,6 +46,17 @@ void SceneManager::initialize(const AreaLightVisualConfig &areaLightVisualConfig
     uploadLights();
 
     uploadMeshes(materialLayout, vertexAttributeNames);
+
+    // Constructed here rather than as a SceneManager member-initializer since it operates on the
+    // main mesh's Mesh/Transform, which only exist once uploadMeshes() above has run. The
+    // highlight-changed callback keeps the GPU color buffer in sync with selection state — the
+    // caller (main.cpp) still owns wiring up a SelectionTool and its own UI on top of it.
+    auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
+    m_selectionManager = std::make_unique<SelectionManager>(
+        mainMesh.positions, m_mainMeshObject->getComponent<Transform>(), input);
+    m_selectionManager->registerHighlightChangedCallback([this]() {
+        updateMainMeshHighlightColors();
+    });
 
     // The camera buffer is registered by CameraUploader's constructor, but this is what actually
     // populates it, so do it once now rather than waiting for flushDirty()'s first pass. Ongoing
@@ -59,6 +71,10 @@ void SceneManager::registerCallbacks(Viewer &viewer)
         setAspect((extent.height == 0)
             ? 1.0f
             : static_cast<float>(extent.width) / static_cast<float>(extent.height));
+    });
+
+    viewer.onUpdate([this](float dt, VkExtent2D extent) {
+        m_selectionManager->updateCallback(dt, extent);
     });
 
     viewer.onLateUpdate([this](float dt, VkExtent2D extent) {
@@ -127,15 +143,13 @@ void SceneManager::uploadMeshes(const GpuMaterialLayout &materialLayout,
     m_meshPositions = m_meshUploader.uploadVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
     m_meshUploader.uploadVertexBuffer(m_geometryMeshes, m_meshAttributeUploadConfig);
 
-    // Color buffer is dynamic so selection highlights can be updated each frame.
+    // Deduped position + color, interleaved — unlike the buffer above (duped per UV-seam corner,
+    // for GeometryPass), this is mesh.positions verbatim, matching the index space VertexManager/
+    // SelectionManager and the points-picking overlay already operate in. Color comes from the main
+    // mesh's own "color" per-unique-vertex attribute (caller must seed it before initialize() — see
+    // main.cpp), which is what SelectionManager's highlight indices are already in terms of.
     const auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
-    std::vector<glm::vec3> pointColors(mainMesh.vertexCount(), glm::vec3(1.0f, 0.0f, 1.0f));
-    m_registry.registerDynamicBuffer(m_mainMeshColorBufferName,
-                                     pointColors.size() * sizeof(glm::vec3),
-                                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    m_registry.updateBuffer(m_mainMeshColorBufferName,
-                            pointColors.data(),
-                            pointColors.size() * sizeof(glm::vec3));
+    m_mainMeshPoints = m_meshUploader.uploadUniqueVertexBuffer({ &mainMesh }, m_mainMeshPointsUploadConfig);
 
     m_indexBuffer = m_meshUploader.uploadIndexBuffer(m_geometryMeshes, { .indexBufferName = m_mainMeshIndexBufferName });
     m_meshUploader.uploadFaceGroupBuffer(m_geometryMeshes, { .faceGroupBufferName = m_mainMeshFaceGroupBufferName });
@@ -155,6 +169,29 @@ void SceneManager::uploadLights()
 void SceneManager::updateMainMeshPositions()
 {
     m_meshUploader.updateVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
+    updateMainMeshPointsBuffer();
+}
+
+void SceneManager::updateMainMeshPointsBuffer()
+{
+    const auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
+    m_meshUploader.updateUniqueVertexBuffer({ &mainMesh }, m_mainMeshPointsUploadConfig);
+}
+
+void SceneManager::updateMainMeshHighlightColors()
+{
+    // SelectionManager owns the coloring itself (persistent buffer, tool-customizable highlight
+    // color) — this just pushes its result to the Mesh + GPU.
+    auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
+    mainMesh.setPerUniqueVertexArray("color", std::span<const glm::vec3>(m_selectionManager->getColors()));
+    updateMainMeshPointsBuffer();
+}
+
+void SceneManager::setSelectionState(SelectionState state)
+{
+    m_selectionState = state;
+    if (state == SelectionState::View)
+        m_selectionManager->clearSelection();
 }
 
 void SceneManager::updateMaterials()

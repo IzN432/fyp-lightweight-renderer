@@ -3,6 +3,8 @@
 #include <GLFW/glfw3.h>
 #include <glm/vec4.hpp>
 
+#include <algorithm>
+
 namespace lr
 {
 
@@ -79,19 +81,41 @@ void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
         if (!m_selectTool)
             return;
         m_selectTool->highlightVertices(m_highlightedVertices, m_selectedVertices, toWorldSpace(m_vertices, m_meshTransform));
+        rebuildColors();
         if (m_highlightChangedCallback)
             m_highlightChangedCallback();
     });
 }
 
+void SelectionManager::rebuildColors()
+{
+    std::fill(m_colors.begin(), m_colors.end(), kDefaultColor);
+    const glm::vec3 highlightColor = m_selectTool ? m_selectTool->highlightColor() : kDefaultColor;
+    for (uint32_t idx : m_highlightedVertices)
+        if (idx < m_colors.size())
+            m_colors[idx] = highlightColor;
+}
+
 void SelectionManager::clearSelection()
 {
-    if (m_selectedVertices.empty())
+    // Both lists, since the highlighted-vertex colors (driven by m_highlightChangedCallback) would
+    // otherwise stay stale after a clear — selectVertices()/highlightVertices() keep them in sync
+    // during normal box-select use, but clearSelection() bypasses that.
+    const bool hadSelection = !m_selectedVertices.empty();
+    const bool hadHighlight = !m_highlightedVertices.empty();
+    if (!hadSelection && !hadHighlight)
         return;
 
     m_selectedVertices.clear();
-    if (m_selectionChangedCallback)
+    m_highlightedVertices.clear();
+
+    if (hadHighlight)
+        rebuildColors();
+
+    if (hadSelection && m_selectionChangedCallback)
         m_selectionChangedCallback();
+    if (hadHighlight && m_highlightChangedCallback)
+        m_highlightChangedCallback();
 }
 
 } // namespace lr

@@ -26,8 +26,7 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                     .topology(VK_PRIMITIVE_TOPOLOGY_POINT_LIST)
                     .vertexLayout(layout);
 
-    pass.vertexBuffer(0, m_cfg.positionBufferResourceName);
-    pass.vertexBuffer(1, m_cfg.colorBufferResourceName);
+    pass.vertexBuffer(0, m_cfg.pointsBufferResourceName);
 
     pass.vertShader((paths::shaderDir / "overlay_points.vert.spv").string())
         .fragShader((paths::shaderDir / "overlay_points.frag.spv").string())
@@ -55,9 +54,9 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
             const OverlayPointsPC pc{
                 .model = m_cfg.meshTransform ? m_cfg.meshTransform->localMatrix() : glm::mat4(1.0f)
             };
-            for (size_t i = 0; i < m_cfg.positionBufferUploadResult.singleMeshResults.size(); ++i)
+            for (size_t i = 0; i < m_cfg.pointsBufferUploadResult.singleMeshResults.size(); ++i)
             {
-                const auto &vert = m_cfg.positionBufferUploadResult.singleMeshResults[i];
+                const auto &vert = m_cfg.pointsBufferUploadResult.singleMeshResults[i];
                 cmd.pushConstants(pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
                 cmd.draw(m_cfg.vertexCounts[i], 1, vert.vertexOffset, 0);
             }

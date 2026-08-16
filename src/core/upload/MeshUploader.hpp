@@ -77,6 +77,18 @@ public:
     void updateVertexBuffer(const std::vector<const Mesh*> &meshes,
                             const VertexBufferUploadConfig &config);
 
+    // Packs each mesh's unique/deduped positions (mesh.positions verbatim, not expanded through
+    // positionIndices) together with named per-unique-vertex attributes (see
+    // MeshLayout::addPerUniqueVertexAttr) into one interleaved buffer — the deduped-position-space
+    // analogue of uploadVertexBuffer(). For consumers that index in deduped-position space rather
+    // than per-UV-seam-corner space: VertexManager, SelectionManager, points-picking overlays.
+    VertexBufferUploadResult uploadUniqueVertexBuffer(const std::vector<const Mesh*> &meshes,
+                                                       const VertexBufferUploadConfig &config);
+
+    // Re-pack and push new data into a buffer previously uploaded with uploadUniqueVertexBuffer().
+    void updateUniqueVertexBuffer(const std::vector<const Mesh*> &meshes,
+                                  const VertexBufferUploadConfig &config);
+
     IndexBufferUploadResult uploadIndexBuffer(const std::vector<const Mesh*> &meshes,
                            const IndexBufferUploadConfig &config);
 

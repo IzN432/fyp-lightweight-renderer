@@ -36,6 +36,12 @@ public:
     template<typename T>
     MeshLayout &addPerVertexAttr(const std::string &name);
 
+    // Per-unique-vertex attributes — domain size is positions.size(), the deduped position
+    // space, rather than vertexCount()'s duped-per-UV-seam-corner space (see addPerVertexAttr).
+    // For data that only makes sense per distinct position: selection-highlight color, picking, ...
+    template<typename T>
+    MeshLayout &addPerUniqueVertexAttr(const std::string &name);
+
     // Per-face attributes
     template<typename T>
     MeshLayout &addPerFaceAttr(const std::string &name);
@@ -52,23 +58,26 @@ public:
     MeshLayout &addVertexGroupAttr(const std::string &name);
 
     // Read-only accessors used by Mesh and GpuMeshLayout
-    const std::vector<AttributeDesc> &perVertexAttrs()   const { return m_perVertex;   }
-    const std::vector<AttributeDesc> &perFaceAttrs()     const { return m_perFace;     }
-    const std::vector<AttributeDesc> &faceGroupAttrs()   const { return m_faceGroup;   }
-    const std::vector<AttributeDesc> &vertexGroupAttrs() const { return m_vertexGroup; }
+    const std::vector<AttributeDesc> &perVertexAttrs()       const { return m_perVertex;       }
+    const std::vector<AttributeDesc> &perUniqueVertexAttrs() const { return m_perUniqueVertex; }
+    const std::vector<AttributeDesc> &perFaceAttrs()         const { return m_perFace;         }
+    const std::vector<AttributeDesc> &faceGroupAttrs()       const { return m_faceGroup;       }
+    const std::vector<AttributeDesc> &vertexGroupAttrs()     const { return m_vertexGroup;     }
 
     bool vertexGroupsEnabled() const { return m_vertexGroupsEnabled; }
 
-    const AttributeDesc *findPerVertexAttr(const std::string &name)   const;
-    const AttributeDesc *findPerFaceAttr(const std::string &name)     const;
-    const AttributeDesc *findFaceGroupAttr(const std::string &name)   const;
-    const AttributeDesc *findVertexGroupAttr(const std::string &name) const;
+    const AttributeDesc *findPerVertexAttr(const std::string &name)       const;
+    const AttributeDesc *findPerUniqueVertexAttr(const std::string &name) const;
+    const AttributeDesc *findPerFaceAttr(const std::string &name)         const;
+    const AttributeDesc *findFaceGroupAttr(const std::string &name)       const;
+    const AttributeDesc *findVertexGroupAttr(const std::string &name)     const;
 
 private:
     template<typename T>
     static void pushAttr(std::vector<AttributeDesc> &vec, const std::string &name);
 
     std::vector<AttributeDesc> m_perVertex;
+    std::vector<AttributeDesc> m_perUniqueVertex;
     std::vector<AttributeDesc> m_perFace;
     std::vector<AttributeDesc> m_faceGroup;
     std::vector<AttributeDesc> m_vertexGroup;
@@ -85,7 +94,7 @@ class GpuMeshLayout
 public:
     struct AttributeMapping
     {
-        // must match a name registered in MeshLayout, empty when isPosition == true
+        // must match a name registered in MeshLayout's corresponding domain, empty when isPosition == true
         std::string name;
         // buffer index, same binding -> interleave
         uint32_t    binding;
@@ -100,16 +109,21 @@ public:
     // Map one per-vertex attribute to a Vulkan binding/location/format.
     GpuMeshLayout &map(std::string name, uint32_t binding, uint32_t location, VkFormat format);
 
+    // Map one per-unique-vertex attribute (see MeshLayout::addPerUniqueVertexAttr).
+    GpuMeshLayout &mapUniqueVertex(std::string name, uint32_t binding, uint32_t location, VkFormat format);
+
     GpuMeshLayout &mapPosition(uint32_t binding, uint32_t location, VkFormat format);
     
     std::vector<VkVertexInputBindingDescription>   bindingDescriptions()   const;
     std::vector<VkVertexInputAttributeDescription> attributeDescriptions() const;
 
-    const std::vector<AttributeMapping> &mappings() const { return m_mappings; }
+    const std::vector<AttributeMapping> &mappings()             const { return m_mappings;             }
+    const std::vector<AttributeMapping> &uniqueVertexMappings() const { return m_uniqueVertexMappings; }
 
 private:
     MeshLayout                    m_layout;
-    std::vector<AttributeMapping> m_mappings;
+    std::vector<AttributeMapping> m_mappings;             // position + per-vertex attributes
+    std::vector<AttributeMapping> m_uniqueVertexMappings;  // per-unique-vertex attributes
 };
 
 // =============================================================================
@@ -185,6 +199,27 @@ public:
     const T &perVertexAt(const std::string &name, uint32_t index) const;
 
     // -------------------------------------------------------------------------
+    // Per-unique-vertex attributes — domain size is positions.size(), not vertexCount()
+    // (see MeshLayout::addPerUniqueVertexAttr)
+    // -------------------------------------------------------------------------
+
+    // Bulk set — data.size() must equal positions.size() exactly.
+    template<typename T>
+    void setPerUniqueVertexArray(const std::string &name, std::span<const T> data);
+
+    template<typename T>
+    void setPerUniqueVertexAt(const std::string &name, uint32_t index, const T &value);
+
+    template<typename T>
+    std::span<const T> getPerUniqueVertexArray(const std::string &name) const;
+
+    template<typename T>
+    T &perUniqueVertexAt(const std::string &name, uint32_t index);
+
+    template<typename T>
+    const T &perUniqueVertexAt(const std::string &name, uint32_t index) const;
+
+    // -------------------------------------------------------------------------
     // Per-face attributes
     // -------------------------------------------------------------------------
 
@@ -255,8 +290,9 @@ public:
     // Raw byte access — for GPU upload
     // -------------------------------------------------------------------------
 
-    std::span<const std::byte> rawPerVertexData(const std::string &name)   const;
-    std::span<const std::byte> rawPerFaceData(const std::string &name)     const;
+    std::span<const std::byte> rawPerVertexData(const std::string &name)       const;
+    std::span<const std::byte> rawPerUniqueVertexData(const std::string &name) const;
+    std::span<const std::byte> rawPerFaceData(const std::string &name)         const;
     std::span<const std::byte> rawFaceGroupAttributeData(const std::string &name)   const;
     std::span<const std::byte> rawVertexGroupAttributeData(const std::string &name) const;
 
@@ -326,6 +362,7 @@ private:
     MeshLayout m_layout;
 
     std::unordered_map<std::string, AttributeStore> m_perVertex;
+    std::unordered_map<std::string, AttributeStore> m_perUniqueVertex;
     std::unordered_map<std::string, AttributeStore> m_perFace;
     std::unordered_map<std::string, AttributeStore> m_faceGroup;
     std::unordered_map<std::string, AttributeStore> m_vertexGroup;
@@ -374,8 +411,9 @@ void MeshLayout::pushAttr(std::vector<AttributeDesc> &vec, const std::string &na
     vec.push_back({name, sizeof(T), std::type_index(typeid(T))});
 }
 
-template<typename T> MeshLayout &MeshLayout::addPerVertexAttr(const std::string &n)   { pushAttr<T>(m_perVertex,   n); return *this; }
-template<typename T> MeshLayout &MeshLayout::addPerFaceAttr(const std::string &n)     { pushAttr<T>(m_perFace,     n); return *this; }
+template<typename T> MeshLayout &MeshLayout::addPerVertexAttr(const std::string &n)       { pushAttr<T>(m_perVertex,       n); return *this; }
+template<typename T> MeshLayout &MeshLayout::addPerUniqueVertexAttr(const std::string &n) { pushAttr<T>(m_perUniqueVertex, n); return *this; }
+template<typename T> MeshLayout &MeshLayout::addPerFaceAttr(const std::string &n)         { pushAttr<T>(m_perFace,         n); return *this; }
 template<typename T> MeshLayout &MeshLayout::addFaceGroupAttr(const std::string &n)   { pushAttr<T>(m_faceGroup,   n); return *this; }
 template<typename T> MeshLayout &MeshLayout::addVertexGroupAttr(const std::string &n) { pushAttr<T>(m_vertexGroup, n); return *this; }
 
@@ -474,6 +512,36 @@ template<typename T>
 const T &Mesh::perVertexAt(const std::string &n, uint32_t i) const
 { return implGetAt<T>(const_cast<std::unordered_map<std::string, AttributeStore> &>(m_perVertex),
                       m_layout.perVertexAttrs(), n, i); }
+
+// --- Per-unique-vertex ---
+
+template<typename T>
+void Mesh::setPerUniqueVertexArray(const std::string &n, std::span<const T> d)
+{
+    if (!m_layout.findPerUniqueVertexAttr(n)) m_layout.addPerUniqueVertexAttr<T>(n);
+    // Domain count is always positions.size() — locked (explicitFlag=true) so implSetArray
+    // throws rather than silently accepting a mismatched array.
+    uint32_t count = static_cast<uint32_t>(positions.size());
+    bool explicitFlag = true;
+    implSetArray(m_perUniqueVertex, m_layout.perUniqueVertexAttrs(), n, d, count, explicitFlag);
+}
+
+template<typename T>
+void Mesh::setPerUniqueVertexAt(const std::string &n, uint32_t i, const T &v)
+{ implSetAt(m_perUniqueVertex, m_layout.perUniqueVertexAttrs(), n, i, v); }
+
+template<typename T>
+std::span<const T> Mesh::getPerUniqueVertexArray(const std::string &n) const
+{ return implGetArray<T>(m_perUniqueVertex, n); }
+
+template<typename T>
+T &Mesh::perUniqueVertexAt(const std::string &n, uint32_t i)
+{ return implGetAt<T>(m_perUniqueVertex, m_layout.perUniqueVertexAttrs(), n, i); }
+
+template<typename T>
+const T &Mesh::perUniqueVertexAt(const std::string &n, uint32_t i) const
+{ return implGetAt<T>(const_cast<std::unordered_map<std::string, AttributeStore> &>(m_perUniqueVertex),
+                      m_layout.perUniqueVertexAttrs(), n, i); }
 
 // --- Per-face ---
 

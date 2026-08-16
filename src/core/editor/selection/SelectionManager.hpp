@@ -18,7 +18,8 @@ public:
     // meshTransform is the Transform GeometryPass applies to `vertices` at render time — hit-testing
     // needs to work in the same world space the mesh is actually drawn in, not raw local space.
     SelectionManager(const std::vector<glm::vec3> &vertices, const Transform &meshTransform, InputHandler &input)
-        : m_vertices(vertices), m_meshTransform(meshTransform), m_input(input) {}
+        : m_colors(vertices.size(), kDefaultColor)
+        , m_vertices(vertices), m_meshTransform(meshTransform), m_input(input) {}
     ~SelectionManager() = default;
 
     void setSelectTool(std::unique_ptr<SelectionTool> tool);
@@ -35,15 +36,27 @@ public:
 
     const std::vector<uint32_t> &getHighlightedIndices() const { return m_highlightedVertices; }
     std::vector<uint32_t> &getHighlightedIndices() { return m_highlightedVertices; }
-    
+
+    // One color per vertex (indices match `vertices` passed to the constructor) — kDefaultColor
+    // where unhighlighted, the active SelectionTool's highlightColor() where highlighted. A
+    // persistent buffer reused in place by rebuildColors() rather than rebuilt from scratch each
+    // time, since highlight changes fire every frame during a drag-select.
+    const std::vector<glm::vec3> &getColors() const { return m_colors; }
+
     void clearSelection();
 
     void registerSelectionChangedCallback(std::function<void()> callback) { m_selectionChangedCallback = std::move(callback); }
     void registerHighlightChangedCallback(std::function<void()> callback) { m_highlightChangedCallback = std::move(callback); }
 private:
+    static inline const glm::vec3 kDefaultColor{1.0f, 0.0f, 1.0f};
+
+    // Repaints m_colors from the current m_highlightedVertices + the active tool's highlightColor().
+    void rebuildColors();
+
     std::unique_ptr<SelectionTool> m_selectTool;
     std::vector<uint32_t> m_highlightedVertices;
     std::vector<uint32_t> m_selectedVertices;
+    std::vector<glm::vec3> m_colors;
     const std::vector<glm::vec3> &m_vertices;
     const Transform &m_meshTransform;
     InputHandler &m_input;

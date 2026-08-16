@@ -26,10 +26,11 @@ static const MeshLayout::AttributeDesc *findInList(
     return nullptr;
 }
 
-const MeshLayout::AttributeDesc *MeshLayout::findPerVertexAttr(const std::string &name)   const { return findInList(m_perVertex,   name); }
-const MeshLayout::AttributeDesc *MeshLayout::findPerFaceAttr(const std::string &name)     const { return findInList(m_perFace,     name); }
-const MeshLayout::AttributeDesc *MeshLayout::findFaceGroupAttr(const std::string &name)   const { return findInList(m_faceGroup,   name); }
-const MeshLayout::AttributeDesc *MeshLayout::findVertexGroupAttr(const std::string &name) const { return findInList(m_vertexGroup, name); }
+const MeshLayout::AttributeDesc *MeshLayout::findPerVertexAttr(const std::string &name)       const { return findInList(m_perVertex,       name); }
+const MeshLayout::AttributeDesc *MeshLayout::findPerUniqueVertexAttr(const std::string &name) const { return findInList(m_perUniqueVertex, name); }
+const MeshLayout::AttributeDesc *MeshLayout::findPerFaceAttr(const std::string &name)         const { return findInList(m_perFace,         name); }
+const MeshLayout::AttributeDesc *MeshLayout::findFaceGroupAttr(const std::string &name)       const { return findInList(m_faceGroup,       name); }
+const MeshLayout::AttributeDesc *MeshLayout::findVertexGroupAttr(const std::string &name)     const { return findInList(m_vertexGroup,     name); }
 
 // =============================================================================
 // GpuMeshLayout
@@ -48,11 +49,27 @@ GpuMeshLayout &GpuMeshLayout::map(std::string name, uint32_t binding, uint32_t l
     return *this;
 }
 
+GpuMeshLayout &GpuMeshLayout::mapUniqueVertex(std::string name, uint32_t binding, uint32_t location, VkFormat format)
+{
+    if (!m_layout.findPerUniqueVertexAttr(name))
+    {
+        throw std::invalid_argument(
+            "GpuMeshLayout: '" + name + "' is not a registered per-unique-vertex attribute");
+    }
+    m_uniqueVertexMappings.push_back({std::move(name), binding, location, format});
+    return *this;
+}
+
 GpuMeshLayout &GpuMeshLayout::mapPosition(uint32_t binding, uint32_t location, VkFormat format)
 {
     m_mappings.push_back({"", binding, location, format, true});
     return *this;
 }
+
+namespace
+{
+uint32_t strideOf(const MeshLayout::AttributeDesc *attr) { return static_cast<uint32_t>(attr->stride); }
+} // namespace
 
 std::vector<VkVertexInputBindingDescription> GpuMeshLayout::bindingDescriptions() const
 {
@@ -61,12 +78,10 @@ std::vector<VkVertexInputBindingDescription> GpuMeshLayout::bindingDescriptions(
     // For interleaved layouts (multiple attributes per binding) this is the total stride.
     std::unordered_map<uint32_t, uint32_t> bindingStrides;
     for (const auto &m : m_mappings)
-    {
-        uint32_t stride = m.isPosition
-            ? static_cast<uint32_t>(sizeof(glm::vec3))
-            : static_cast<uint32_t>(m_layout.findPerVertexAttr(m.name)->stride);
-        bindingStrides[m.binding] += stride;
-    }
+        bindingStrides[m.binding] += m.isPosition ? static_cast<uint32_t>(sizeof(glm::vec3))
+                                                   : strideOf(m_layout.findPerVertexAttr(m.name));
+    for (const auto &m : m_uniqueVertexMappings)
+        bindingStrides[m.binding] += strideOf(m_layout.findPerUniqueVertexAttr(m.name));
 
     std::vector<VkVertexInputBindingDescription> result;
     result.reserve(bindingStrides.size());
@@ -77,27 +92,39 @@ std::vector<VkVertexInputBindingDescription> GpuMeshLayout::bindingDescriptions(
 
 std::vector<VkVertexInputAttributeDescription> GpuMeshLayout::attributeDescriptions() const
 {
-    // Offsets within each binding are accumulated in declaration order,
-    // which matches the order mapPosition/map were called.
+    // Offsets within each binding are accumulated in declaration order within each of
+    // m_mappings/m_uniqueVertexMappings — safe since a single binding is always fed from one
+    // vertex buffer and never mixes position/per-vertex attributes with per-unique-vertex ones.
     std::unordered_map<uint32_t, uint32_t> bindingOffsets;
 
     std::vector<VkVertexInputAttributeDescription> result;
-    result.reserve(m_mappings.size());
-    for (const auto &m : m_mappings)
+    result.reserve(m_mappings.size() + m_uniqueVertexMappings.size());
+
+    auto append = [&](const std::vector<AttributeMapping> &mappings, auto strideFn)
     {
-        uint32_t stride = m.isPosition
-            ? static_cast<uint32_t>(sizeof(glm::vec3))
-            : static_cast<uint32_t>(m_layout.findPerVertexAttr(m.name)->stride);
+        for (const auto &m : mappings)
+        {
+            uint32_t stride = strideFn(m);
 
-        VkVertexInputAttributeDescription attr{};
-        attr.location = m.location;
-        attr.binding  = m.binding;
-        attr.format   = m.format;
-        attr.offset   = bindingOffsets[m.binding];
-        result.push_back(attr);
+            VkVertexInputAttributeDescription attr{};
+            attr.location = m.location;
+            attr.binding  = m.binding;
+            attr.format   = m.format;
+            attr.offset   = bindingOffsets[m.binding];
+            result.push_back(attr);
 
-        bindingOffsets[m.binding] += stride;
-    }
+            bindingOffsets[m.binding] += stride;
+        }
+    };
+
+    append(m_mappings, [&](const AttributeMapping &m) {
+        return m.isPosition ? static_cast<uint32_t>(sizeof(glm::vec3))
+                             : strideOf(m_layout.findPerVertexAttr(m.name));
+    });
+    append(m_uniqueVertexMappings, [&](const AttributeMapping &m) {
+        return strideOf(m_layout.findPerUniqueVertexAttr(m.name));
+    });
+
     return result;
 }
 
@@ -265,6 +292,11 @@ std::span<const VertexGroupEntry> Mesh::getVertexGroups(uint32_t vertexIndex) co
 std::span<const std::byte> Mesh::rawPerVertexData(const std::string &name) const
 {
     return getStore(m_perVertex, name).data;
+}
+
+std::span<const std::byte> Mesh::rawPerUniqueVertexData(const std::string &name) const
+{
+    return getStore(m_perUniqueVertex, name).data;
 }
 
 std::span<const std::byte> Mesh::rawPerFaceData(const std::string &name) const
