@@ -1,12 +1,11 @@
 #pragma once
 
 #include "core/editor/gizmo/Gizmo.hpp"
+#include "core/editor/gizmo/DragHandlerGizmo.hpp"
 
 #include "core/scene/SceneObject.hpp"
 #include "core/app/InputHandler.hpp"
-#include "core/editor/VertexManager.hpp"
-#include "core/editor/selection/SelectionManager.hpp"
-#include "core/editor/command/CommandManager.hpp"
+#include "core/editor/VertexDragHandler.hpp"
 
 #include <glm/vec3.hpp>
 
@@ -20,11 +19,11 @@ enum class TranslateArrowGizmoAxis
     Z = 2,
 };
 
-class TranslateArrowGizmo : public Gizmo
+class TranslateArrowGizmo : public Gizmo, public DragHandlerGizmo
 {
 public:
     explicit TranslateArrowGizmo(TranslateArrowGizmoAxis axis, const SceneObject &camera, const InputHandler &input,
-                                 VertexManager &vertexManager, SelectionManager &selectionManager, CommandManager &commandManager);
+                                 VertexDragHandler &handler);
     ~TranslateArrowGizmo() = default;
 
     // Mouse interaction callbacks: override these in derived classes to implement gizmo behavior
@@ -33,12 +32,15 @@ public:
     void onMouseUp(double ndcX, double ndcY, double aspect) override;
     void dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect) override;
 
+    // Reassigns what this gizmo drives — e.g. swapping from the default vertex-drag behavior onto
+    // an ARAP-solve handler once a precompute succeeds.
+    void setDragHandler(VertexDragHandler &handler) override { m_dragHandler = &handler; }
+    const VertexDragHandler &dragHandler() const override { return *m_dragHandler; }
+
 private:
     const SceneObject  &m_camera;
     const InputHandler &m_input;
-    VertexManager      &m_vertexManager;
-    SelectionManager   &m_selectionManager;
-    CommandManager     &m_commandManager;
+    VertexDragHandler *m_dragHandler;
     glm::vec3           m_axis;
 
     glm::vec3 m_currentDraggingOrigin;

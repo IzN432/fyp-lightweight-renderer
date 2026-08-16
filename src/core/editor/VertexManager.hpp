@@ -2,6 +2,7 @@
 
 #include <span>
 #include <vector>
+#include <unordered_set>
 #include <functional>
 #include <glm/vec3.hpp>
 
@@ -21,7 +22,13 @@ public:
     void removeVertex(uint32_t index);
     void addVertex(const glm::vec3 &position);
 
-    void translateSelectedVertices(const std::vector<uint32_t> &indices, const glm::vec3 &translation);
+    void translateSelectedVertices(const std::unordered_set<uint32_t> &indices, const glm::vec3 &translation);
+
+    // Bulk position overwrite — writes every (indices[i], positions[i]) pair, then fires the
+    // update callback once. Needed by anything that moves many vertices to independent absolute
+    // positions per call (e.g. an ARAP solve result), where translateSelectedVertices' shared
+    // delta doesn't apply.
+    void setPositions(const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &positions);
 
     void registerUpdateCallback(std::function<void()> callback) { m_updateCallback = std::move(callback); }
 

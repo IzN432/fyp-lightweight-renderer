@@ -19,9 +19,9 @@ public:
     void onMouseUp(double ndcX, double ndcY, double aspect) override;
     void dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect) override;
 
-    void selectVertices(std::vector<uint32_t> &highlightedVertices, std::vector<uint32_t> &selectedVertices,
+    void selectVertices(std::unordered_set<uint32_t> &highlightedVertices, std::unordered_set<uint32_t> &selectedVertices,
                         const std::vector<glm::vec3> &vertices) override;
-    void highlightVertices(std::vector<uint32_t> &highlightedVertices, std::vector<uint32_t> &selectedVertices, 
+    void highlightVertices(std::unordered_set<uint32_t> &highlightedVertices, std::unordered_set<uint32_t> &selectedVertices,
                         const std::vector<glm::vec3> &vertices) override;
 
 private:

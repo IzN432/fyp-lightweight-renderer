@@ -3,6 +3,7 @@
 #include "core/app/InputHandler.hpp"
 
 #include <vector>
+#include <unordered_set>
 #include <glm/vec3.hpp>
 #include <functional>
 
@@ -25,9 +26,9 @@ public:
     virtual void dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect) {}
 
     // Selection callback: override this in derived classes to implement selection behavior
-    virtual void selectVertices(std::vector<uint32_t> &highlightedVertices, std::vector<uint32_t> &selectedVertices,
+    virtual void selectVertices(std::unordered_set<uint32_t> &highlightedVertices, std::unordered_set<uint32_t> &selectedVertices,
                                 const std::vector<glm::vec3> &vertices) {};
-    virtual void highlightVertices(std::vector<uint32_t> &highlightedVertices, std::vector<uint32_t> &selectedVertices,
+    virtual void highlightVertices(std::unordered_set<uint32_t> &highlightedVertices, std::unordered_set<uint32_t> &selectedVertices,
                                 const std::vector<glm::vec3> &vertices) {};
 
     // Color SelectionManager paints highlighted vertices with — override to vary by tool state

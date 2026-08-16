@@ -38,6 +38,7 @@ find_package(tinyobjloader CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(mikktspace CONFIG REQUIRED)
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h" REQUIRED)
+find_package(libigl CONFIG REQUIRED)
 
 # MSVC flags
 add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/EHsc>)
@@ -95,6 +96,7 @@ add_library(lr_core STATIC
     src/core/app/Viewer.cpp
 
     src/core/editor/VertexManager.cpp
+    src/core/editor/DefaultVertexDragHandler.cpp
 
     src/core/editor/command/TranslatePointsCommand.cpp
     src/core/editor/command/CommandManager.cpp
@@ -149,6 +151,19 @@ add_shaders(lr_core
 
 )
 
+# ARAP plugin — physically separate from lr_core: lr_core never includes anything from
+# src/plugins/**, this links against lr_core (never the reverse), and libigl/Eigen are scoped to
+# this target only, keeping the core engine's dependency footprint unchanged. No dynamic loading
+# yet, but this compile-time boundary is what makes that a later, separate step.
+add_library(lr_arap_plugin STATIC
+    src/plugins/arap/ArapSolver.cpp
+    src/plugins/arap/ArapDragHandler.cpp
+    src/plugins/arap/ArapDeformCommand.cpp
+    src/plugins/arap/ArapPlugin.cpp
+)
+target_include_directories(lr_arap_plugin PUBLIC src)
+target_link_libraries(lr_arap_plugin PUBLIC lr_core igl::igl_core)
+
 # Test executable
 add_executable(renderer src/main.cpp)
-target_link_libraries(renderer PRIVATE lr_core)
+target_link_libraries(renderer PRIVATE lr_core lr_arap_plugin)

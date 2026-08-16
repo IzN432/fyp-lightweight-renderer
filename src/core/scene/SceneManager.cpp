@@ -54,7 +54,7 @@ void SceneManager::initialize(const AreaLightVisualConfig &areaLightVisualConfig
     auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
     m_selectionManager = std::make_unique<SelectionManager>(
         mainMesh.positions, m_mainMeshObject->getComponent<Transform>(), input);
-    m_selectionManager->registerHighlightChangedCallback([this]() {
+    m_selectionManager->registerColorsChangedCallback([this]() {
         updateMainMeshHighlightColors();
     });
 

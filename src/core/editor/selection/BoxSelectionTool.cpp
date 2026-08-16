@@ -42,7 +42,7 @@ void BoxSelectionTool::dragCallback(double ndcX, double ndcY, double dNdcX, doub
     }
 }
 
-void BoxSelectionTool::selectVertices(std::vector<uint32_t> &highlightedVertices, std::vector<uint32_t> &selectedVertices, const std::vector<glm::vec3> &vertices)
+void BoxSelectionTool::selectVertices(std::unordered_set<uint32_t> &highlightedVertices, std::unordered_set<uint32_t> &selectedVertices, const std::vector<glm::vec3> &vertices)
 {
     selectedVertices.clear();
 
@@ -50,41 +50,29 @@ void BoxSelectionTool::selectVertices(std::vector<uint32_t> &highlightedVertices
     {
         if (i < vertices.size())
         {
-            selectedVertices.push_back(i);
+            selectedVertices.insert(i);
         }
     }
 }
 
-void BoxSelectionTool::highlightVertices(std::vector<uint32_t> &highlightedVertices, std::vector<uint32_t> &selectedVertices, const std::vector<glm::vec3> &vertices)
+void BoxSelectionTool::highlightVertices(std::unordered_set<uint32_t> &highlightedVertices, std::unordered_set<uint32_t> &selectedVertices, const std::vector<glm::vec3> &vertices)
 {
     highlightedVertices.clear();
     if (m_input.isShiftPressed())
-    {
-        for (uint32_t i : selectedVertices)
-        {
-            if (i < vertices.size())
-            {
-                highlightedVertices.push_back(i);
-            }
-        }
-    }
+        highlightedVertices = selectedVertices;
+
+    const glm::vec2 lowerLeft(std::min(m_boxStart.x, m_boxEnd.x), std::min(m_boxStart.y, m_boxEnd.y));
+    const glm::vec2 upperRight(std::max(m_boxStart.x, m_boxEnd.x), std::max(m_boxStart.y, m_boxEnd.y));
 
     for (uint32_t i = 0; i < vertices.size(); ++i)
     {
-        glm::vec2 lowerLeft(std::min(m_boxStart.x, m_boxEnd.x), std::min(m_boxStart.y, m_boxEnd.y));
-        glm::vec2 upperRight(std::max(m_boxStart.x, m_boxEnd.x), std::max(m_boxStart.y, m_boxEnd.y));
-
         const glm::vec4 clip = m_viewProjectionMatrix * glm::vec4(vertices[i], 1.0f);
         if (clip.w <= 0.0f) continue;
         const glm::vec3 ndc = glm::vec3(clip) / clip.w;
         if (ndc.z < 0.0f || ndc.z > 1.0f) continue;
 
         if (ndc.x >= lowerLeft.x && ndc.x <= upperRight.x && ndc.y >= lowerLeft.y && ndc.y <= upperRight.y)
-        {
-            if (!m_input.isShiftPressed() || std::find(highlightedVertices.begin(), highlightedVertices.end(), i) ==
-                highlightedVertices.end())
-                highlightedVertices.push_back(i);
-        }
+            highlightedVertices.insert(i);
     }
 }
 }

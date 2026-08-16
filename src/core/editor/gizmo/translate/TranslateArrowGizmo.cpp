@@ -4,7 +4,6 @@
 
 #include "core/scene/Camera.hpp"
 #include "core/math/LinearAlgebraHelpers.hpp"
-#include "core/editor/command/TranslatePointsCommand.hpp"
 
 #include <array>
 #include <imgui.h>
@@ -60,11 +59,9 @@ constexpr std::array<glm::vec3, 3> kAxisVectors = {{
 } // namespace
 
 TranslateArrowGizmo::TranslateArrowGizmo(TranslateArrowGizmoAxis axis, const SceneObject &camera,
-                                         const InputHandler &input, VertexManager &vertexManager,
-                                         SelectionManager &selectionManager, CommandManager &commandManager)
+                                         const InputHandler &input, VertexDragHandler &handler)
     : Gizmo(kAxisInstances[static_cast<size_t>(axis)]), m_camera(camera), m_input(input),
-      m_axis(kAxisVectors[static_cast<size_t>(axis)]), m_vertexManager(vertexManager),
-      m_selectionManager(selectionManager), m_commandManager(commandManager)
+      m_dragHandler(&handler), m_axis(kAxisVectors[static_cast<size_t>(axis)])
 {}
 
 void TranslateArrowGizmo::onMouseDown(double ndcX, double ndcY, double aspect)
@@ -82,12 +79,12 @@ void TranslateArrowGizmo::onMouseDown(double ndcX, double ndcY, double aspect)
     m_currentDraggingOrigin =
         math::closestPointOnLineToLine(m_instance.position, m_axis, cameraRayOrigin, cameraRayDirection);
     m_draggingOrigin = m_currentDraggingOrigin;
+    m_dragHandler->beginDrag();
 }
 
 void TranslateArrowGizmo::onMouseUp(double ndcX, double ndcY, double aspect)
 {
-    m_commandManager.appendCommandWithoutExecuting(std::make_unique<TranslatePointsCommand>(
-        m_vertexManager, m_selectionManager.getSelectedIndices(), m_currentDraggingOrigin - m_draggingOrigin));
+    m_dragHandler->endDrag(m_currentDraggingOrigin - m_draggingOrigin);
 }
 
 void TranslateArrowGizmo::dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect)
@@ -103,7 +100,7 @@ void TranslateArrowGizmo::dragCallback(double ndcX, double ndcY, double dNdcX, d
         math::closestPointOnLineToLine(m_currentDraggingOrigin, m_axis, cameraRayOrigin, cameraRayDirection);
     glm::vec3 translation = closestPointOnAxis - m_currentDraggingOrigin;
 
-    m_vertexManager.translateSelectedVertices(m_selectionManager.getSelectedIndices(), translation);
+    m_dragHandler->translate(translation);
     m_currentDraggingOrigin = closestPointOnAxis; // Update the dragging origin for the next frame
 }
 

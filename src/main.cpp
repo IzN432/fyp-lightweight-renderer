@@ -20,13 +20,17 @@
 #include "core/scene/SceneObject.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
 #include "core/editor/gizmo/GizmoManager.hpp"
+#include "core/editor/gizmo/DragHandlerGizmo.hpp"
 #include "core/editor/gizmo/translate/TranslateArrowGizmo.hpp"
 #include "core/editor/gizmo/translate/TranslateBoxGizmo.hpp"
 #include "core/editor/selection/BoxSelectionTool.hpp"
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/VertexManager.hpp"
+#include "core/editor/DefaultVertexDragHandler.hpp"
 #include "core/scene/SceneManager.hpp"
 #include "core/scene/Scene.hpp"
+
+#include "plugins/arap/ArapPlugin.hpp"
 
 #include <imgui.h>
 #include <glm/gtc/quaternion.hpp>
@@ -37,6 +41,7 @@
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
+#include <unordered_set>
 
 int main()
 try
@@ -277,19 +282,38 @@ try
     lr::SelectionManager &selectionManager = sceneManager.selectionManager();
     selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera, selectionManager));
 
+    // What the translate gizmos drive by default (plain vertex-drag editing). ArapPlugin swaps
+    // this out for an ARAP-solve handler on the same gizmo instances once a precompute succeeds.
+    lr::DefaultVertexDragHandler defaultHandler(vertexManager, selectionManager, commandManager);
+
     lr::GizmoManager gizmoManager(overlayGeometryPass, viewer.input());
+
+    auto arrowXGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::X, *camera, viewer.input(), defaultHandler);
+    auto arrowYGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::Y, *camera, viewer.input(), defaultHandler);
+    auto arrowZGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::Z, *camera, viewer.input(), defaultHandler);
+    auto boxGizmo     = std::make_unique<lr::TranslateBoxGizmo>(*camera, viewer.input(), defaultHandler);
+
+    // Raw pointers kept for ArapPlugin (needs a generic DragHandlerGizmo list) and the gizmo-
+    // positioning loop below (reads whichever handler is currently wired) — ownership moves to
+    // gizmoManager via addGizmo() just below.
+    lr::TranslateArrowGizmo *arrowX = arrowXGizmo.get();
+    lr::TranslateArrowGizmo *arrowY = arrowYGizmo.get();
+    lr::TranslateArrowGizmo *arrowZ = arrowZGizmo.get();
+    lr::TranslateBoxGizmo   *boxGizmoPtr = boxGizmo.get();
+
     const std::vector<int> translateGizmoIds = {
-        gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
-            lr::TranslateArrowGizmoAxis::X, *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
-        gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
-            lr::TranslateArrowGizmoAxis::Y, *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
-        gizmoManager.addGizmo(std::make_unique<lr::TranslateArrowGizmo>(
-            lr::TranslateArrowGizmoAxis::Z, *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
-        gizmoManager.addGizmo(std::make_unique<lr::TranslateBoxGizmo>(
-            *camera, viewer.input(), vertexManager, selectionManager, commandManager)),
+        gizmoManager.addGizmo(std::move(arrowXGizmo)),
+        gizmoManager.addGizmo(std::move(arrowYGizmo)),
+        gizmoManager.addGizmo(std::move(arrowZGizmo)),
+        gizmoManager.addGizmo(std::move(boxGizmo)),
     };
     for (int id : translateGizmoIds)
         gizmoManager.hideGizmo(id);
+
+    const std::vector<lr::DragHandlerGizmo *> dragHandlerGizmos = {arrowX, arrowY, arrowZ, boxGizmoPtr};
+
+    lr::ArapPlugin arapPlugin(selectionManager, vertexManager, commandManager, staticMesh.mesh(),
+                              defaultHandler, dragHandlerGizmos);
 
     // Single combined LMB handler: gizmos get first refusal on a click (so
     // dragging an arrow doesn't simultaneously start a box-select), and
@@ -316,6 +340,12 @@ try
         const bool nowEditing = sceneManager.selectionState() != lr::SelectionState::Edit;
         sceneManager.setSelectionState(nowEditing ? lr::SelectionState::Edit : lr::SelectionState::View);
         overlayPointsPass.setEnabled(nowEditing);
+
+        // ARAP mode is conceptually nested inside Edit mode — leaving Edit is a hard reset for
+        // everything nested under it, so it can't outlive the mode it depends on (e.g. a gizmo
+        // left showing/interactive after Tab-ing out of Edit).
+        if (!nowEditing)
+            arapPlugin.setModeActive(false);
     });
 
     viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
@@ -325,6 +355,15 @@ try
             return;
 
         commandManager.undo();
+    });
+
+    viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
+        if (key != GLFW_KEY_A || action != GLFW_PRESS)
+            return;
+        if (ImGui::GetIO().WantCaptureKeyboard)
+            return;
+
+        arapPlugin.setModeActive(!arapPlugin.isModeActive());
     });
     // -------------------------------------------------------------------------
     // Per-frame callbacks
@@ -356,28 +395,51 @@ try
     // selectionManager's per-frame mouse/drag handling is driven by SceneManager::registerCallbacks()
     // below, since SceneManager now owns the SelectionManager instance.
 
-    // Keeps the translate gizmos positioned at the selection centroid, shown
-    // only while something is selected, and pushes the result to the overlay pass.
+    // Drives the ARAP anchor/handle popup + Solve button, and keeps the translate gizmos
+    // positioned at whichever index set the currently-wired target drives (the selection by
+    // default, or the handle set once an ARAP precompute has succeeded) — shown only while that
+    // set is non-empty, and pushes the result to the overlay pass.
     viewer.onUpdate([&](float dt, VkExtent2D extent) {
-        const auto &selected = selectionManager.getSelectedIndices();
+        const float     aspect   = (extent.height == 0) ? 1.0f : static_cast<float>(extent.width) / static_cast<float>(extent.height);
+        const glm::mat4 viewProj = camera->getComponent<lr::Camera>().viewProjectionMatrix(aspect);
 
-        if (selected.empty())
+        // Average in local space, then transform once — valid since centroid-of-transformed-points
+        // equals transform-of-centroid for any affine map. The result is a world-space point since
+        // the gizmo/popup aren't part of the mesh, so GeometryPass's model matrix never applies to
+        // them — they need to track where the vertices actually render, not their local positions.
+        auto worldCentroidOf = [&](const std::unordered_set<uint32_t> &idxs) {
+            glm::vec3 localCentroid(0.0f);
+            for (uint32_t idx : idxs)
+                localCentroid += vertexManager.getPositions()[idx];
+            localCentroid /= static_cast<float>(idxs.size());
+            return glm::vec3(meshObject->getComponent<lr::Transform>().localMatrix() * glm::vec4(localCentroid, 1.0f));
+        };
+
+        const auto &selected = selectionManager.getSelectedIndices();
+        arapPlugin.onGui(viewProj, extent, selected.empty() ? glm::vec3(0.0f) : worldCentroidOf(selected));
+
+        // All 4 gizmos always share the same handler (ArapPlugin swaps them together), so any one
+        // of them tells us which is currently active.
+        const lr::VertexDragHandler &activeHandler = arrowX->dragHandler();
+        const auto &driven = activeHandler.indices();
+        // While ARAP mode is active but no precompute has succeeded yet, the default drag gizmo
+        // would otherwise appear over the very selection the anchor/handle popup is asking about —
+        // suppress it until Solve actually swaps the handler.
+        const bool suppressedByArapMode = arapPlugin.isModeActive() && (&activeHandler == &defaultHandler);
+        // Edit mode is the top-level switch everything gizmo-related is nested under (ARAP mode
+        // included — see the Tab handler above, which forces it off on leaving Edit) — a handler's
+        // index list can still be non-empty outside Edit (roles/selection aren't cleared just by
+        // toggling modes), so this can't be inferred from driven.empty() alone.
+        const bool editingAllowed = sceneManager.selectionState() == lr::SelectionState::Edit;
+
+        if (!editingAllowed || driven.empty() || suppressedByArapMode)
         {
             for (int id : translateGizmoIds)
                 gizmoManager.hideGizmo(id);
         }
         else
         {
-            // Average in local space, then transform once — valid since centroid-of-transformed-points
-            // equals transform-of-centroid for any affine map. The gizmo itself is positioned in world
-            // space (it's not part of the mesh, so GeometryPass's model matrix never applies to it),
-            // so it needs to track where the selected vertices actually render, not their local positions.
-            glm::vec3 localCentroid(0.0f);
-            for (uint32_t idx : selected)
-                localCentroid += vertexManager.getPositions()[idx];
-            localCentroid /= static_cast<float>(selected.size());
-            const glm::vec3 centroid = glm::vec3(
-                meshObject->getComponent<lr::Transform>().localMatrix() * glm::vec4(localCentroid, 1.0f));
+            const glm::vec3 centroid = worldCentroidOf(driven);
 
             // Keep the gizmo a constant size on screen (~1/9 screen height) regardless of camera distance.
             const glm::vec3 camPos = camera->getComponent<lr::Transform>().position();

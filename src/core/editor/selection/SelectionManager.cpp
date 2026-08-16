@@ -82,14 +82,24 @@ void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
             return;
         m_selectTool->highlightVertices(m_highlightedVertices, m_selectedVertices, toWorldSpace(m_vertices, m_meshTransform));
         rebuildColors();
-        if (m_highlightChangedCallback)
-            m_highlightChangedCallback();
+        if (m_colorsChangedCallback)
+            m_colorsChangedCallback();
     });
 }
 
 void SelectionManager::rebuildColors()
 {
     std::fill(m_colors.begin(), m_colors.end(), kDefaultColor);
+
+    for (size_t i = 0; i < m_roles.size(); ++i)
+    {
+        if (m_roles[i] == kNoRole)
+            continue;
+        auto it = m_roleColors.find(m_roles[i]);
+        if (it != m_roleColors.end())
+            m_colors[i] = it->second;
+    }
+
     const glm::vec3 highlightColor = m_selectTool ? m_selectTool->highlightColor() : kDefaultColor;
     for (uint32_t idx : m_highlightedVertices)
         if (idx < m_colors.size())
@@ -98,7 +108,7 @@ void SelectionManager::rebuildColors()
 
 void SelectionManager::clearSelection()
 {
-    // Both lists, since the highlighted-vertex colors (driven by m_highlightChangedCallback) would
+    // Both lists, since the highlighted-vertex colors (driven by m_colorsChangedCallback) would
     // otherwise stay stale after a clear — selectVertices()/highlightVertices() keep them in sync
     // during normal box-select use, but clearSelection() bypasses that.
     const bool hadSelection = !m_selectedVertices.empty();
@@ -114,8 +124,61 @@ void SelectionManager::clearSelection()
 
     if (hadSelection && m_selectionChangedCallback)
         m_selectionChangedCallback();
-    if (hadHighlight && m_highlightChangedCallback)
-        m_highlightChangedCallback();
+    if (hadHighlight && m_colorsChangedCallback)
+        m_colorsChangedCallback();
+}
+
+VertexRoleId SelectionManager::registerRole(const glm::vec3 &color)
+{
+    const VertexRoleId id = m_nextRoleId++;
+    m_roleColors.emplace(id, color);
+    return id;
+}
+
+void SelectionManager::classifySelectionAs(VertexRoleId role)
+{
+    if (m_selectedVertices.empty())
+        return;
+
+    for (uint32_t idx : m_selectedVertices)
+        if (idx < m_roles.size())
+            m_roles[idx] = role;
+
+    rebuildColors();
+    if (m_colorsChangedCallback)
+        m_colorsChangedCallback();
+    if (m_roleChangedCallback)
+        m_roleChangedCallback();
+}
+
+void SelectionManager::clearAllRoles()
+{
+    const bool anyClassified = std::any_of(m_roles.begin(), m_roles.end(),
+                                            [](VertexRoleId r) { return r != kNoRole; });
+    if (!anyClassified)
+        return;
+
+    std::fill(m_roles.begin(), m_roles.end(), kNoRole);
+
+    rebuildColors();
+    if (m_colorsChangedCallback)
+        m_colorsChangedCallback();
+    if (m_roleChangedCallback)
+        m_roleChangedCallback();
+}
+
+VertexRoleId SelectionManager::getVertexRole(uint32_t index) const
+{
+    return index < m_roles.size() ? m_roles[index] : kNoRole;
+}
+
+std::vector<uint32_t> SelectionManager::getIndicesWithRole(VertexRoleId role) const
+{
+    std::vector<uint32_t> indices;
+    for (uint32_t i = 0; i < m_roles.size(); ++i)
+        if (m_roles[i] == role)
+            indices.push_back(i);
+    return indices;
 }
 
 } // namespace lr

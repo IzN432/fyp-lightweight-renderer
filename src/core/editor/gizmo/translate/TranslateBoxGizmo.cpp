@@ -3,7 +3,6 @@
 #include "core/scene/Transform.hpp"
 #include "core/scene/Camera.hpp"
 #include "core/math/LinearAlgebraHelpers.hpp"
-#include "core/editor/command/TranslatePointsCommand.hpp"
 
 namespace lr
 {
@@ -23,10 +22,8 @@ OverlayInstance boxInstance = {
 
 } // namespace
 
-TranslateBoxGizmo::TranslateBoxGizmo(const SceneObject &camera, const InputHandler &input, VertexManager &vertexManager,
-                                     SelectionManager &selectionManager, CommandManager &commandManager)
-    : Gizmo(boxInstance), m_camera(camera), m_input(input), m_vertexManager(vertexManager),
-      m_selectionManager(selectionManager), m_commandManager(commandManager)
+TranslateBoxGizmo::TranslateBoxGizmo(const SceneObject &camera, const InputHandler &input, VertexDragHandler &handler)
+    : Gizmo(boxInstance), m_camera(camera), m_input(input), m_dragHandler(&handler)
 {}
 
 void TranslateBoxGizmo::onMouseDown(double ndcX, double ndcY, double aspect)
@@ -45,12 +42,12 @@ void TranslateBoxGizmo::onMouseDown(double ndcX, double ndcY, double aspect)
     m_currentDraggingOrigin =
         math::intersectionBetweenRayAndPlane(cameraRayOrigin, cameraRayDirection, m_draggingPlane);
     m_draggingOrigin = m_currentDraggingOrigin;
+    m_dragHandler->beginDrag();
 }
 
 void TranslateBoxGizmo::onMouseUp(double ndcX, double ndcY, double aspect)
 {
-    m_commandManager.appendCommandWithoutExecuting(std::make_unique<TranslatePointsCommand>(
-        m_vertexManager, m_selectionManager.getSelectedIndices(), m_currentDraggingOrigin - m_draggingOrigin));
+    m_dragHandler->endDrag(m_currentDraggingOrigin - m_draggingOrigin);
 }
 
 void TranslateBoxGizmo::dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect)
@@ -64,7 +61,7 @@ void TranslateBoxGizmo::dragCallback(double ndcX, double ndcY, double dNdcX, dou
 
     glm::vec3 intersection = math::intersectionBetweenRayAndPlane(cameraRayOrigin, cameraRayDirection, m_draggingPlane);
     glm::vec3 translation  = intersection - m_currentDraggingOrigin;
-    m_vertexManager.translateSelectedVertices(m_selectionManager.getSelectedIndices(), translation);
+    m_dragHandler->translate(translation);
     m_currentDraggingOrigin = intersection;
 }
 

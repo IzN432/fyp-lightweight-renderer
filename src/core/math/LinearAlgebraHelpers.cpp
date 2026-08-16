@@ -45,4 +45,12 @@ glm::vec3 intersectionBetweenRayAndPlane(const glm::vec3 &rayOrigin, const glm::
 
 }
 
+glm::vec2 worldToScreenPixels(const glm::vec3 &worldPos, const glm::mat4 &viewProj, VkExtent2D extent)
+{
+    const glm::vec4 clip = viewProj * glm::vec4(worldPos, 1.0f);
+    const glm::vec3 ndc  = glm::vec3(clip) / clip.w;
+    return glm::vec2((ndc.x * 0.5f + 0.5f) * static_cast<float>(extent.width),
+                      (ndc.y * 0.5f + 0.5f) * static_cast<float>(extent.height));
+}
+
 } // namespace lr::math
