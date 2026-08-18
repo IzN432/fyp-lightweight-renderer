@@ -5,6 +5,7 @@
 #include "core/overlay/OverlayMesh.hpp"
 #include "core/passes/final/FinalPass.hpp"
 #include "core/passes/geometry/GeometryPass.hpp"
+#include "core/passes/heatmap/HeatmapPass.hpp"
 #include "core/passes/ibl/IblPass.hpp"
 #include "core/passes/pbr/PbrPass.hpp"
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
@@ -219,6 +220,21 @@ try
 
     geometryPass.build(viewer.frameGraph(), gpuMeshLayout);
 
+    lr::HeatmapPass heatmapPass({
+        .cameraBufferResourceName = sceneManager.cameraBufferName(),
+        .vertexBufferResourceName = sceneManager.mainMeshHeatmapBufferName(),
+        .indexBufferResourceName  = sceneManager.mainMeshIndexBufferName(),
+        .vertexBufferUploadResult = sceneManager.mainMeshHeatmap(),
+        .indexBufferUploadResult  = sceneManager.indexBuffer(),
+        .meshTransform            = &meshObject->getComponent<lr::Transform>(),
+    });
+
+    lr::GpuMeshLayout heatmapMeshLayout(staticMesh.mesh().layout());
+    heatmapMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
+    heatmapMeshLayout.map("color", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
+
+    heatmapPass.build(viewer.frameGraph(), heatmapMeshLayout);
+
     lr::AmbientOcclusionPass aoPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
     });
@@ -364,6 +380,15 @@ try
             return;
 
         arapPlugin.setModeActive(!arapPlugin.isModeActive());
+    });
+
+    viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
+        if (key != GLFW_KEY_H || action != GLFW_PRESS)
+            return;
+        if (ImGui::GetIO().WantCaptureKeyboard)
+            return;
+
+        heatmapPass.setEnabled(!heatmapPass.isEnabled());
     });
     // -------------------------------------------------------------------------
     // Per-frame callbacks

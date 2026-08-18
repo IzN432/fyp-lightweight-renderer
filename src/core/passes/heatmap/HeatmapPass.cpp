@@ -1,0 +1,61 @@
+#include "HeatmapPass.hpp"
+
+#include "core/Paths.hpp"
+
+namespace lr
+{
+
+namespace
+{
+struct HeatmapPC
+{
+    glm::mat4 model;
+};
+}
+
+HeatmapPass::HeatmapPass(Config cfg)
+    : m_cfg(std::move(cfg))
+{
+}
+
+void HeatmapPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
+{
+    fg.addPass("heatmap")
+        .type(PassType::Geometry)
+        .vertexLayout(layout)
+        .vertexBuffer(0, m_cfg.vertexBufferResourceName)
+        .indexBuffer(m_cfg.indexBufferResourceName)
+        .vertShader((paths::shaderDir / "heatmap.vert.spv").string())
+        .fragShader((paths::shaderDir / "heatmap.frag.spv").string())
+        .pushConstantSize(sizeof(HeatmapPC), VK_SHADER_STAGE_VERTEX_BIT)
+        .bind({
+            {
+                .resourceName = m_cfg.cameraBufferResourceName,
+                .binding      = 0,
+                .type         = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .stages       = VK_SHADER_STAGE_VERTEX_BIT,
+            },
+        })
+        .writes({
+            {.name = "heatmap",      .format = VK_FORMAT_R16G16B16A16_SFLOAT},
+            {.name = "heatmapDepth", .format = VK_FORMAT_D32_SFLOAT, .clearValue = {.depthStencil = {1.0f, 0}}},
+        })
+        .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
+            if (!m_enabled)
+                return;
+
+            // Only the main mesh (singleMeshResults[0]) is drawn — light visuals never get a
+            // "color" attribute (see SceneManager::updateMainMeshHeatmapBuffer), so they aren't
+            // part of m_cfg.vertexBufferUploadResult/indexBufferUploadResult to begin with.
+            const auto &vert  = m_cfg.vertexBufferUploadResult.singleMeshResults[0];
+            const auto &index = m_cfg.indexBufferUploadResult.singleMeshResults[0];
+
+            const HeatmapPC pc{
+                .model = m_cfg.meshTransform ? m_cfg.meshTransform->localMatrix() : glm::mat4(1.0f),
+            };
+            cmd.pushConstants(pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, pc);
+            cmd.drawIndexed(index.indexCount, 1, index.firstIndex, vert.vertexOffset, 0);
+        });
+}
+
+}  // namespace lr

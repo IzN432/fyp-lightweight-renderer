@@ -138,10 +138,19 @@ public:
     const std::string &mainMeshVertexBufferName()    const { return m_mainMeshVertexBufferName; }
     const std::string &mainMeshIndexBufferName()     const { return m_mainMeshIndexBufferName; }
     const std::string &mainMeshFaceGroupBufferName() const { return m_mainMeshFaceGroupBufferName; }
+    // Interleaved position + color buffer, duped per UV-seam corner like mainMeshVertexBufferName()
+    // (unlike mainMeshPointsBufferName(), which is deduped) — for HeatmapPass, which needs the
+    // color Gouraud-interpolated across the same triangles GeometryPass draws, so it must share
+    // GeometryPass's corner-indexed topology (see mainMeshIndexBufferName()) rather than the
+    // deduped-position space the points overlay uses.
+    const std::string &mainMeshHeatmapBufferName()   const { return m_mainMeshHeatmapBufferName; }
 
     const VertexBufferUploadResult &meshPositions() const { return m_meshPositions; }
     // Main mesh's unique/deduped position+color buffer — see mainMeshPointsBufferName().
     const VertexBufferUploadResult &mainMeshPoints() const { return m_mainMeshPoints; }
+    // Main mesh's corner-domain position+color buffer — see mainMeshHeatmapBufferName(). Only
+    // ever holds one mesh (singleMeshResults[0]), unlike meshPositions()/indexBuffer().
+    const VertexBufferUploadResult &mainMeshHeatmap() const { return m_mainMeshHeatmap; }
     const IndexBufferUploadResult  &indexBuffer()   const { return m_indexBuffer; }
     const std::vector<const Transform*> &meshTransforms() const { return m_meshTransforms; }
 
@@ -163,6 +172,17 @@ private:
     // vertex moved) and updateMainMeshHighlightColors() (a color changed) since both fields live in
     // the same interleaved buffer.
     void updateMainMeshPointsBuffer();
+
+    // Expands the main mesh's per-unique-vertex "color" attribute out to the corner domain (via
+    // positionIndices) and registers it as a per-vertex "color" attribute on the same Mesh, ready
+    // for packing into m_mainMeshHeatmapBufferName. Returns the mutable mesh reference so callers
+    // can pack/upload it (initial upload vs. re-upload need different MeshUploader calls).
+    Mesh &syncMainMeshCornerColor();
+
+    // Repacks and re-uploads m_mainMeshHeatmapBufferName after syncMainMeshCornerColor(). Shared
+    // by updateMainMeshPositions() (a vertex moved) and updateMainMeshHighlightColors() (a color
+    // changed) — same reasoning as updateMainMeshPointsBuffer(), just in the other domain.
+    void updateMainMeshHeatmapBuffer();
 
     Scene* m_scene = nullptr;
     ResourceRegistry &m_registry;
@@ -197,6 +217,7 @@ private:
     const std::string m_mainMeshVertexBufferName    = "meshVertexBuffer";
     const std::string m_mainMeshIndexBufferName     = "meshIndexBuffer";
     const std::string m_mainMeshFaceGroupBufferName = "meshFaceGroupBuffer";
+    const std::string m_mainMeshHeatmapBufferName   = "meshHeatmapBuffer";
 
     // Config for the deduped position+color buffer above — same shape as m_meshPositionUploadConfig/
     // m_meshAttributeUploadConfig, cached so updateMainMeshPositions()/updateMainMeshHighlightColors()
@@ -207,8 +228,16 @@ private:
         .includePosition      = true
     };
 
+    // Config for the corner-domain position+color buffer — see m_mainMeshHeatmapBufferName.
+    VertexBufferUploadConfig m_mainMeshHeatmapUploadConfig = {
+        .vertexBufferName     = m_mainMeshHeatmapBufferName,
+        .vertexAttributeNames = { "color" },
+        .includePosition      = true
+    };
+
     VertexBufferUploadResult m_meshPositions;
     VertexBufferUploadResult m_mainMeshPoints;
+    VertexBufferUploadResult m_mainMeshHeatmap;
     IndexBufferUploadResult  m_indexBuffer;
     MaterialUploadResult     m_materialUploadResult;
 };

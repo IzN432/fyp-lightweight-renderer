@@ -22,6 +22,8 @@ layout(set = 0, binding = 5) uniform sampler2D overlay;
 
 layout(set = 0, binding = 6) uniform sampler2D overlayPoints;
 
+layout(set = 0, binding = 7) uniform sampler2D heatmap;
+
 layout(location = 0) out vec4 outColor;
 
 void main()
@@ -44,8 +46,10 @@ void main()
     else
     {
         vec3 pbrColor = texture(pbr, inUV).rgb;
+        vec4 heatmapSample = texture(heatmap, inUV);
+        vec3 litColor = mix(pbrColor, heatmapSample.rgb, heatmapSample.a);
         vec4 overlaySample = texture(overlay, inUV);
-        vec3 color = (1.0 - overlaySample.a) * pbrColor + overlaySample.a * overlaySample.rgb;
+        vec3 color = (1.0 - overlaySample.a) * litColor + overlaySample.a * overlaySample.rgb;
         baseColor = color / (color + vec3(1.0));
     }
 

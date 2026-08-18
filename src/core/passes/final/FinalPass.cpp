@@ -65,6 +65,13 @@ void FinalPass::build(FrameGraph &fg) const
                 .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
                 .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            },
+            {
+                .resourceName = "heatmap",
+                .binding      = 7,
+                .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             }
         })
         .writes({

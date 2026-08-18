@@ -70,6 +70,7 @@ add_library(lr_core STATIC
     src/core/passes/ambientocclusion/AmbientOcclusionPass.cpp
     src/core/passes/final/FinalPass.cpp
     src/core/passes/geometry/GeometryPass.cpp
+    src/core/passes/heatmap/HeatmapPass.cpp
     src/core/passes/overlaygeometry/OverlayGeometryPass.cpp
     src/core/passes/overlaypoints/OverlayPointsPass.cpp
 
@@ -148,6 +149,8 @@ add_shaders(lr_core
     src/core/passes/overlaygeometry/overlay_geometry.frag
     src/core/passes/overlaypoints/overlay_points.vert
     src/core/passes/overlaypoints/overlay_points.frag
+    src/core/passes/heatmap/heatmap.vert
+    src/core/passes/heatmap/heatmap.frag
 
 )
 
