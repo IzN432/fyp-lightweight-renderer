@@ -170,49 +170,106 @@ void ResourceRegistry::uploadImage(const std::string &name,
                                     VkFormat format,
                                     bool generateMipmaps)
 {
-    if (m_images.count(name))
-    {
-        throw std::runtime_error("ResourceRegistry: duplicate image '" + name + "'");
-    }
+    queueImageUpload(name, data, width, height, format, generateMipmaps,
+                     ImageUploadMode::Create);
+}
 
-    // Determine bytes per pixel from format (common formats)
+void ResourceRegistry::replaceUploadedImage(const std::string &name,
+                                             const void *data,
+                                             uint32_t width,
+                                             uint32_t height,
+                                             VkFormat format,
+                                             bool generateMipmaps)
+{
+    queueImageUpload(name, data, width, height, format, generateMipmaps,
+                     ImageUploadMode::Replace);
+}
+
+void ResourceRegistry::queueImageUpload(const std::string &name,
+                                        const void *data,
+                                        uint32_t width,
+                                        uint32_t height,
+                                        VkFormat format,
+                                        bool generateMipmaps,
+                                        ImageUploadMode mode)
+{
+    auto existing = m_images.find(name);
+    if (mode == ImageUploadMode::Create && existing != m_images.end())
+        throw std::runtime_error("ResourceRegistry: duplicate image '" + name + "'");
+    if (mode == ImageUploadMode::Replace && existing == m_images.end())
+        throw std::runtime_error("ResourceRegistry: image '" + name + "' not found");
+    if (mode == ImageUploadMode::Replace &&
+        (!existing->second.persistent || existing->second.external))
+        throw std::runtime_error("ResourceRegistry: image '" + name + "' is not a replaceable uploaded image");
+
+    for (const auto &upload : m_pendingUploads)
+        if (upload.type == PendingUpload::Type::Image && upload.resourceName == name)
+            throw std::runtime_error("ResourceRegistry: image '" + name + "' already has a pending upload");
+
     VkDeviceSize bpp = 4;  // default RGBA8
     if (format == VK_FORMAT_R16G16B16A16_SFLOAT) bpp = 8;
     if (format == VK_FORMAT_R32G32B32A32_SFLOAT) bpp = 16;
     if (format == VK_FORMAT_R8_UNORM)            bpp = 1;
     if (format == VK_FORMAT_R8G8_UNORM)          bpp = 2;
 
-    uint32_t mipLevels = generateMipmaps ? computeMipLevels(width, height) : 1;
-
+    const uint32_t mipLevels = generateMipmaps ? computeMipLevels(width, height) : 1;
     VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     if (generateMipmaps)
-        usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;  // needed to blit from each mip
+        usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
-    ImageEntry entry{};
-    entry.format = format;
-    entry.usage = usage;
-    entry.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-    entry.extent = {width, height};
-    entry.persistent = true;
-    entry.mipLevels = mipLevels;
-    entry.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
-    entry.currentLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    ImageEntry prepared{};
+    prepared.format        = format;
+    prepared.usage         = usage;
+    prepared.aspect        = VK_IMAGE_ASPECT_COLOR_BIT;
+    prepared.extent        = {width, height};
+    prepared.persistent    = true;
+    prepared.mipLevels     = mipLevels;
+    prepared.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    prepared.currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    allocateImageEntry(name, entry);
-    m_images.emplace(name, std::move(entry));
+    AllocatedBuffer staging{};
+    try
+    {
+        // Prepare every fallible allocation before changing the registry.
+        allocateImageEntry(name, prepared);
+        const VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * bpp;
+        staging = m_allocator.createBuffer(
+            size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+        std::memcpy(staging.info.pMappedData, data, size);
 
-    VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * bpp;
-    AllocatedBuffer staging = m_allocator.createBuffer(
-        size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-    std::memcpy(staging.info.pMappedData, data, size);
+        PendingUpload pending{
+            .staging = staging,
+            .resourceName = name,
+            .type = PendingUpload::Type::Image,
+        };
+        m_pendingUploads.reserve(m_pendingUploads.size() + 1);
 
-    PendingUpload upload{};
-    upload.staging = staging;
-    upload.type = PendingUpload::Type::Image;
-    upload.resourceName = name;
-    m_pendingUploads.push_back(upload);
+        if (mode == ImageUploadMode::Create)
+        {
+            m_images.emplace(name, std::move(prepared));
+        }
+        else
+        {
+            AllocatedImage oldImage = std::move(existing->second.image);
+            existing->second = std::move(prepared);
+            m_allocator.destroy(oldImage);
+        }
 
-    spdlog::debug("ResourceRegistry: queued image upload '{}' ({} mips)", name, mipLevels);
+        // Capacity was reserved before committing the image, so this move cannot reallocate.
+        m_pendingUploads.push_back(std::move(pending));
+    }
+    catch (...)
+    {
+        if (staging.buffer != VK_NULL_HANDLE)
+            m_allocator.destroy(staging);
+        if (prepared.image.image != VK_NULL_HANDLE)
+            m_allocator.destroy(prepared.image);
+        throw;
+    }
+
+    spdlog::debug("ResourceRegistry: {} image '{}' ({}x{}, {} mips)",
+                  mode == ImageUploadMode::Create ? "queued" : "replaced",
+                  name, width, height, mipLevels);
 }
 
 void ResourceRegistry::uploadArrayImage(const std::string &arrayName,

@@ -25,6 +25,10 @@ public:
     // Upload the HDRI and register output cubemaps into the resource registry.
     void uploadResources(ResourceRegistry &resources) const;
 
+    // Replace only the HDR source image. Existing IBL output cubemaps are preserved.
+    // Throws if a configured HDRI cannot be decoded.
+    void replaceHdriResource(ResourceRegistry &resources) const;
+
     // Add all IBL compute passes to a short-lived preprocessing graph.
     void build(FrameGraph &fg) const;
 

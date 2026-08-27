@@ -33,6 +33,7 @@
 
 #include "plugins/arap/ArapPlugin.hpp"
 
+#include <ImGuiFileDialog.h>
 #include <imgui.h>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec4.hpp>
@@ -41,7 +42,9 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
+#include <string>
 #include <unordered_set>
 
 int main()
@@ -57,13 +60,15 @@ try
     // IBL preprocessing  (runs once before the frame loop)
     // -------------------------------------------------------------------------
 
+    const lr::IBLPass::Config iblConfig{
+        .envRes = 2048,
+        .irrRes = 32,
+        .pfRes  = 2048,
+        .pfMips = 8,
+    };
+
     {
-        lr::IBLPass iblPass({
-            .envRes    = 2048,
-            .irrRes    = 32,
-            .pfRes     = 2048,
-            .pfMips    = 8
-        });
+        lr::IBLPass iblPass(iblConfig);
         iblPass.uploadResources(viewer.resources());
         lr::FrameGraph iblGraph(viewer.context(), viewer.resources());
         iblPass.build(iblGraph);
@@ -398,18 +403,113 @@ try
     // Per-frame callbacks
     // -------------------------------------------------------------------------
 
-    viewer.onGui([&scene]() {
+    std::optional<fs::path> environmentHdriPath;
+    std::string environmentLoadError;
+    bool environmentDirty = false;
+
+    viewer.onGui([&]() {
         ImGui::Begin("Scene Hierarchy");
 
-        int id = 0;
-        for (auto &object : scene.sceneObjects())
+        if (ImGui::CollapsingHeader("Environment", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            ImGui::PushID(id++);
-            object->onGUI();
-            ImGui::PopID();
+            ImGui::Indent();
+
+            ImGui::TextUnformatted("HDRI");
+            ImGui::SameLine();
+            if (environmentHdriPath)
+                ImGui::TextWrapped("%s", environmentHdriPath->filename().string().c_str());
+            else
+                ImGui::TextDisabled("None (black environment)");
+
+            if (ImGui::Button("Load HDRI..."))
+            {
+                IGFD::FileDialogConfig dialogConfig;
+                dialogConfig.path = environmentHdriPath
+                    ? environmentHdriPath->parent_path().string()
+                    : ".";
+                dialogConfig.flags = ImGuiFileDialogFlags_Modal |
+                                     ImGuiFileDialogFlags_ReadOnlyFileNameField |
+                                     ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
+                                     ImGuiFileDialogFlags_ShowDevicesButton;
+                ImGuiFileDialog::Instance()->OpenDialog(
+                    "ChooseEnvironmentHdri", "Select HDRI", ".hdr", dialogConfig);
+            }
+            ImGui::SameLine();
+
+            ImGui::BeginDisabled(!environmentHdriPath.has_value());
+            if (ImGui::Button("Clear"))
+            {
+                environmentHdriPath.reset();
+                environmentLoadError.clear();
+                environmentDirty = true;
+            }
+            ImGui::EndDisabled();
+
+            ImGui::Spacing();
+            ImGui::TextDisabled("Supported format: Radiance HDR (.hdr)");
+            if (!environmentLoadError.empty())
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f),
+                                   "Load failed: %s", environmentLoadError.c_str());
+            }
+
+            ImGui::Unindent();
         }
 
+        if (ImGuiFileDialog::Instance()->Display(
+                "ChooseEnvironmentHdri", ImGuiWindowFlags_NoCollapse,
+                ImVec2(640.0f, 360.0f)))
+        {
+            if (ImGuiFileDialog::Instance()->IsOk())
+            {
+                fs::path selectedPath(ImGuiFileDialog::Instance()->GetFilePathName());
+                if (environmentHdriPath != selectedPath)
+                {
+                    environmentHdriPath = std::move(selectedPath);
+                    environmentLoadError.clear();
+                    environmentDirty = true;
+                }
+            }
+            ImGuiFileDialog::Instance()->Close();
+        }
+
+        scene.onGUI();
         ImGui::End();
+    });
+
+    // Application-level rendering policy: the C++ demo owns the IBL shaders, resource names,
+    // and rebuild timing. A future Python entry point can express the same composition using the
+    // frame-graph and resource-registry bindings without Scene knowing what an environment is.
+    viewer.onLateUpdate([&](float, VkExtent2D) {
+        if (!environmentDirty)
+            return;
+
+        try
+        {
+            auto reloadConfig = iblConfig;
+            reloadConfig.hdriPath = environmentHdriPath.value_or(fs::path{});
+            lr::IBLPass iblPass(std::move(reloadConfig));
+
+            // The existing cubemaps are sampled by in-flight frames and overwritten in place.
+            viewer.context().waitIdle();
+            iblPass.replaceHdriResource(viewer.resources());
+
+            lr::FrameGraph iblGraph(viewer.context(), viewer.resources());
+            iblPass.build(iblGraph);
+            iblGraph.executeAndWait({
+                {"ibl_irradiance",  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                {"ibl_prefiltered", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+            });
+
+            environmentLoadError.clear();
+        }
+        catch (const std::exception &e)
+        {
+            environmentLoadError = e.what();
+            spdlog::error("Failed to update environment: {}", e.what());
+        }
+
+        environmentDirty = false;
     });
 
     lr::SphericalCameraController cameraController(*camera, viewer.input());

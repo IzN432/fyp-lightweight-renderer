@@ -69,6 +69,15 @@ public:
                      VkFormat format,
                      bool generateMipmaps = false);
 
+    // Replace an uploaded persistent image while preserving its registry name.
+    // The caller must ensure the GPU is no longer using the old image.
+    void replaceUploadedImage(const std::string &name,
+                              const void *data,
+                              uint32_t width,
+                              uint32_t height,
+                              VkFormat format,
+                              bool generateMipmaps = false);
+
     // Upload one element of a named image array.
     // Internally this creates a persistent image slot and records that it
     // belongs to arrayName at [index].
@@ -172,7 +181,20 @@ private:
         enum class Type { Buffer, Image } type;
     };
 
+    enum class ImageUploadMode
+    {
+        Create,
+        Replace,
+    };
+
     void allocateImageEntry(const std::string &name, ImageEntry &entry);
+    void queueImageUpload(const std::string &name,
+                          const void *data,
+                          uint32_t width,
+                          uint32_t height,
+                          VkFormat format,
+                          bool generateMipmaps,
+                          ImageUploadMode mode);
     void initCommandPool();
 
     void setDebugName(VkObjectType objectType, uint64_t objectHandle, const std::string &name);

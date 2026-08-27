@@ -170,4 +170,4 @@ target_link_libraries(lr_arap_plugin PUBLIC lr_core igl::igl_core)
 
 # Test executable
 add_executable(renderer src/main.cpp)
-target_link_libraries(renderer PRIVATE lr_core lr_arap_plugin)
+target_link_libraries(renderer PRIVATE lr_core lr_arap_plugin imguiFileDialog)

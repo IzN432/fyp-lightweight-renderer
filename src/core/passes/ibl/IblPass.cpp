@@ -80,6 +80,19 @@ void IBLPass::uploadResources(ResourceRegistry &resources) const
         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 }
 
+void IBLPass::replaceHdriResource(ResourceRegistry &resources) const
+{
+    LoadedHdrImage hdri = m_cfg.hdriPath.empty()
+        ? LoadedHdrImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f))
+        : loadHdrFromFile(m_cfg.hdriPath);
+
+    if (hdri.empty())
+        throw std::runtime_error("IBLPass: failed to allocate fallback HDR pixel");
+
+    resources.replaceUploadedImage("hdri", hdri.pixels, hdri.width, hdri.height,
+                                   LoadedHdrImage::format);
+}
+
 void IBLPass::build(FrameGraph &fg) const
 {
     const uint32_t envRes    = m_cfg.envRes;
