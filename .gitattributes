@@ -1,0 +1,4 @@
+assets/samples/**/*.glb filter=lfs diff=lfs merge=lfs -text
+assets/samples/**/*.gltf filter=lfs diff=lfs merge=lfs -text
+assets/samples/**/*.bin filter=lfs diff=lfs merge=lfs -text
+assets/samples/**/*.hdr filter=lfs diff=lfs merge=lfs -text

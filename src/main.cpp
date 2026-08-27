@@ -1,4 +1,5 @@
 #include "core/app/Viewer.hpp"
+#include "core/Paths.hpp"
 #include "core/loaders/GltfLoader.hpp"
 #include "core/loaders/Material.hpp"
 #include "core/loaders/MaterialStore.hpp"
@@ -133,7 +134,7 @@ try
     }
 
     // MESH
-    const fs::path meshPath = "D:\\FYP\\lion_head_4k.blend\\lion_head_4k.glb";
+    const fs::path meshPath = lr::paths::assetDir / "samples/models/lion_head_4k.glb";
 
     lr::GltfLoader gltfLoader;
     auto [sequence, materialHandles] = gltfLoader.load(meshPath, sceneManager.materialStore(), config);
