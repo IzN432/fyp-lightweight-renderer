@@ -25,9 +25,8 @@ public:
     // Upload the HDRI and register output cubemaps into the resource registry.
     void uploadResources(ResourceRegistry &resources) const;
 
-    // Add all IBL compute passes to fg and execute them once.
-    // The pass graph is cleared afterwards; the registry keeps the results.
-    void preprocess(FrameGraph &fg) const;
+    // Add all IBL compute passes to a short-lived preprocessing graph.
+    void build(FrameGraph &fg) const;
 
 private:
     Config m_cfg;

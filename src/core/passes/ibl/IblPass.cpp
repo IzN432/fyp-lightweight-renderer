@@ -80,7 +80,7 @@ void IBLPass::uploadResources(ResourceRegistry &resources) const
         VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 }
 
-void IBLPass::preprocess(FrameGraph &fg) const
+void IBLPass::build(FrameGraph &fg) const
 {
     const uint32_t envRes    = m_cfg.envRes;
     const uint32_t irrRes    = m_cfg.irrRes;
@@ -161,10 +161,6 @@ void IBLPass::preprocess(FrameGraph &fg) const
 
 
 
-    fg.executeOnce({
-        {"ibl_irradiance",  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-        {"ibl_prefiltered", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-    });
 }
 
 }  // namespace lr

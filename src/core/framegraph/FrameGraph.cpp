@@ -75,10 +75,9 @@ ResourceState writeStateForFormat(VkFormat format)
 namespace lr
 {
 
-FrameGraph::FrameGraph(const VulkanContext &ctx, Allocator &allocator, VkExtent2D extent)
+FrameGraph::FrameGraph(const VulkanContext &ctx, ResourceRegistry &registry)
     : m_ctx(ctx)
-    , m_allocator(allocator)
-    , m_registry(ctx, allocator, extent)
+    , m_registry(registry)
     , m_descriptorAllocator(ctx.getDevice())
 {
     createDefaultSampler();
@@ -742,7 +741,7 @@ void FrameGraph::setExternalImage(const std::string &name, VkImage image, VkImag
     m_externalImages[name] = {image, view};
 }
 
-void FrameGraph::executeOnce(std::vector<FinalLayoutDesc> finalLayouts)
+void FrameGraph::executeAndWait(std::vector<FinalLayoutDesc> finalLayouts)
 {
     compile();
 
@@ -755,98 +754,108 @@ void FrameGraph::executeOnce(std::vector<FinalLayoutDesc> finalLayouts)
 
     VkCommandPool pool = VK_NULL_HANDLE;
     if (vkCreateCommandPool(device, &poolCI, nullptr, &pool) != VK_SUCCESS)
-        throw std::runtime_error("FrameGraph::executeOnce: failed to create command pool");
+        throw std::runtime_error("FrameGraph::executeAndWait: failed to create command pool");
 
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = pool;
-    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer vkCmd = VK_NULL_HANDLE;
-    vkAllocateCommandBuffers(device, &allocInfo, &vkCmd);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(vkCmd, &beginInfo);
-
-    CommandBuffer cmd(vkCmd);
-    execute(cmd);
-
-    if (!finalLayouts.empty())
-    {
-        std::vector<VkImageMemoryBarrier2> barriers;
-        barriers.reserve(finalLayouts.size());
-
-        for (const auto &fl : finalLayouts)
-        {
-            const AllocatedImage *img = m_registry.getImage(fl.resourceName);
-            if (!img)
-                continue;
-
-            VkImageLayout current = m_registry.getImageLayout(fl.resourceName);
-            if (current == fl.layout)
-                continue;
-
-            VkImageAspectFlags aspect = isDepthFormat(img->format)
-                ? VK_IMAGE_ASPECT_DEPTH_BIT
-                : VK_IMAGE_ASPECT_COLOR_BIT;
-
-            VkImageMemoryBarrier2 barrier{};
-            barrier.sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-            barrier.srcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-            barrier.srcAccessMask    = VK_ACCESS_2_SHADER_WRITE_BIT;
-            barrier.dstStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-            barrier.dstAccessMask    = VK_ACCESS_2_SHADER_READ_BIT;
-            barrier.oldLayout        = current;
-            barrier.newLayout        = fl.layout;
-            barrier.image            = img->image;
-            barrier.subresourceRange = { aspect, 0, img->mipLevels, 0, img->arrayLayers };
-            barriers.push_back(barrier);
-
-            m_registry.setImageLayout(fl.resourceName, fl.layout);
-        }
-
-        if (!barriers.empty())
-        {
-            VkDependencyInfo dep{};
-            dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-            dep.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
-            dep.pImageMemoryBarriers    = barriers.data();
-            vkCmdPipelineBarrier2(vkCmd, &dep);
-        }
-    }
-
-    vkEndCommandBuffer(vkCmd);
-
-    VkFenceCreateInfo fenceCI{};
-    fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     VkFence fence = VK_NULL_HANDLE;
-    vkCreateFence(device, &fenceCI, nullptr, &fence);
+    try
+    {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool        = pool;
+        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
 
-    VkCommandBufferSubmitInfo cmdSubmit{};
-    cmdSubmit.sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cmdSubmit.commandBuffer = vkCmd;
+        VkCommandBuffer vkCmd = VK_NULL_HANDLE;
+        if (vkAllocateCommandBuffers(device, &allocInfo, &vkCmd) != VK_SUCCESS)
+            throw std::runtime_error("FrameGraph::executeAndWait: failed to allocate command buffer");
 
-    VkSubmitInfo2 submitInfo{};
-    submitInfo.sType                  = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-    submitInfo.commandBufferInfoCount = 1;
-    submitInfo.pCommandBufferInfos    = &cmdSubmit;
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        if (vkBeginCommandBuffer(vkCmd, &beginInfo) != VK_SUCCESS)
+            throw std::runtime_error("FrameGraph::executeAndWait: failed to begin command buffer");
 
-    vkQueueSubmit2(m_ctx.getGraphicsQueue(), 1, &submitInfo, fence);
-    vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+        CommandBuffer cmd(vkCmd);
+        execute(cmd);
+
+        if (!finalLayouts.empty())
+        {
+            std::vector<VkImageMemoryBarrier2> barriers;
+            barriers.reserve(finalLayouts.size());
+
+            for (const auto &fl : finalLayouts)
+            {
+                const AllocatedImage *img = m_registry.getImage(fl.resourceName);
+                if (!img)
+                    continue;
+
+                VkImageLayout current = m_registry.getImageLayout(fl.resourceName);
+                if (current == fl.layout)
+                    continue;
+
+                VkImageAspectFlags aspect = isDepthFormat(img->format)
+                    ? VK_IMAGE_ASPECT_DEPTH_BIT
+                    : VK_IMAGE_ASPECT_COLOR_BIT;
+
+                VkImageMemoryBarrier2 barrier{};
+                barrier.sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+                barrier.srcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                barrier.srcAccessMask    = VK_ACCESS_2_SHADER_WRITE_BIT;
+                barrier.dstStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                barrier.dstAccessMask    = VK_ACCESS_2_SHADER_READ_BIT;
+                barrier.oldLayout        = current;
+                barrier.newLayout        = fl.layout;
+                barrier.image            = img->image;
+                barrier.subresourceRange = { aspect, 0, img->mipLevels, 0, img->arrayLayers };
+                barriers.push_back(barrier);
+
+                m_registry.setImageLayout(fl.resourceName, fl.layout);
+            }
+
+            if (!barriers.empty())
+            {
+                VkDependencyInfo dep{};
+                dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dep.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
+                dep.pImageMemoryBarriers    = barriers.data();
+                vkCmdPipelineBarrier2(vkCmd, &dep);
+            }
+        }
+
+        if (vkEndCommandBuffer(vkCmd) != VK_SUCCESS)
+            throw std::runtime_error("FrameGraph::executeAndWait: failed to end command buffer");
+
+        VkFenceCreateInfo fenceCI{};
+        fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        if (vkCreateFence(device, &fenceCI, nullptr, &fence) != VK_SUCCESS)
+            throw std::runtime_error("FrameGraph::executeAndWait: failed to create fence");
+
+        VkCommandBufferSubmitInfo cmdSubmit{};
+        cmdSubmit.sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+        cmdSubmit.commandBuffer = vkCmd;
+
+        VkSubmitInfo2 submitInfo{};
+        submitInfo.sType                  = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+        submitInfo.commandBufferInfoCount = 1;
+        submitInfo.pCommandBufferInfos    = &cmdSubmit;
+
+        if (vkQueueSubmit2(m_ctx.getGraphicsQueue(), 1, &submitInfo, fence) != VK_SUCCESS)
+            throw std::runtime_error("FrameGraph::executeAndWait: failed to submit command buffer");
+        if (vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS)
+            throw std::runtime_error("FrameGraph::executeAndWait: failed while waiting for completion");
+    }
+    catch (...)
+    {
+        if (fence != VK_NULL_HANDLE)
+            vkDestroyFence(device, fence, nullptr);
+        vkDestroyCommandPool(device, pool, nullptr);
+        throw;
+    }
 
     vkDestroyFence(device, fence, nullptr);
     vkDestroyCommandPool(device, pool, nullptr);  // also frees vkCmd
 
-    // Discard preprocessing passes — registry (images, buffers) stays intact
-    destroyCompiledPasses();
-    m_compiled.clear();
-    m_passes.clear();
-    m_sortedIndices.clear();
-
-    spdlog::info("FrameGraph: executeOnce complete, preprocessing passes discarded");
+    spdlog::info("FrameGraph: synchronous execution complete");
 }
 
 std::vector<std::string> FrameGraph::passNames() const

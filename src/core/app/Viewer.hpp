@@ -42,7 +42,7 @@ public:
   // -----------------------------------------------------------------------
 
   FrameGraph &frameGraph() { return *m_fg; }
-  ResourceRegistry &resources() { return m_fg->resources(); }
+  ResourceRegistry &resources() { return *m_resources; }
   InputHandler &input() { return m_input; }
   const VulkanContext &context() const { return *m_ctx; }
   Allocator &allocator() { return *m_allocator; }
@@ -93,6 +93,7 @@ private:
   std::unique_ptr<Window> m_window;
   std::unique_ptr<VulkanContext> m_ctx;
   std::unique_ptr<Allocator> m_allocator;
+  std::unique_ptr<ResourceRegistry> m_resources;
   std::unique_ptr<Swapchain> m_swapchain;
   std::unique_ptr<Renderer> m_renderer;
   std::unique_ptr<FrameGraph> m_fg;

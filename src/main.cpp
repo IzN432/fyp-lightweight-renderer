@@ -65,7 +65,12 @@ try
             .pfMips    = 8
         });
         iblPass.uploadResources(viewer.resources());
-        iblPass.preprocess(viewer.frameGraph());
+        lr::FrameGraph iblGraph(viewer.context(), viewer.resources());
+        iblPass.build(iblGraph);
+        iblGraph.executeAndWait({
+            {"ibl_irradiance",  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+            {"ibl_prefiltered", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        });
     }
 
     // -------------------------------------------------------------------------

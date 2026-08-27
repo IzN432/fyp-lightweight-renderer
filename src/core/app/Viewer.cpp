@@ -31,8 +31,9 @@ Viewer::Viewer(const Config &config)
 
     m_allocator = std::make_unique<Allocator>(*m_ctx);
     m_swapchain = std::make_unique<Swapchain>(*m_ctx, *m_window);
+    m_resources = std::make_unique<ResourceRegistry>(*m_ctx, *m_allocator, m_swapchain->getExtent());
     m_renderer  = std::make_unique<Renderer>(*m_ctx, *m_swapchain);
-    m_fg        = std::make_unique<FrameGraph>(*m_ctx, *m_allocator, m_swapchain->getExtent());
+    m_fg        = std::make_unique<FrameGraph>(*m_ctx, *m_resources);
     m_imguiPass = std::make_unique<ImguiPass>(*m_ctx, *m_window, *m_swapchain);
 
     m_window->setKeyCallback([this](int key, int action) {
@@ -48,7 +49,7 @@ Viewer::Viewer(const Config &config)
         m_input.notifyScroll(delta);
     });
 
-    m_fg->resources().registerExternalImage("swapchain", m_swapchain->getFormat());
+    m_resources->registerExternalImage("swapchain", m_swapchain->getFormat());
 }
 
 Viewer::~Viewer() = default;
