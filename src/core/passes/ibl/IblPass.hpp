@@ -12,6 +12,7 @@ class IBLPass
 public:
     struct Config
     {
+        // Empty or unreadable paths use a black 1x1 environment.
         std::filesystem::path hdriPath;
         uint32_t envRes = 2048;
         uint32_t irrRes = 32;

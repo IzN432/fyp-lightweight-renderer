@@ -92,6 +92,22 @@ struct LoadedHdrImage
 
     static constexpr VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
 
+    static LoadedHdrImage singlePixel(glm::vec4 color)
+    {
+        LoadedHdrImage image;
+        image.width  = 1;
+        image.height = 1;
+        image.pixels = static_cast<float *>(std::malloc(4 * sizeof(float)));
+        if (image.pixels)
+        {
+            image.pixels[0] = color.r;
+            image.pixels[1] = color.g;
+            image.pixels[2] = color.b;
+            image.pixels[3] = color.a;
+        }
+        return image;
+    }
+
     LoadedHdrImage() = default;
     LoadedHdrImage(const LoadedHdrImage &)            = delete;
     LoadedHdrImage &operator=(const LoadedHdrImage &) = delete;

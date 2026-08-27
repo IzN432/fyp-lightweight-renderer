@@ -5,6 +5,9 @@
 
 #include <glm/vec4.hpp>
 
+#include <spdlog/spdlog.h>
+
+#include <stdexcept>
 #include <string>
 
 namespace lr
@@ -36,7 +39,29 @@ IBLPass::IBLPass(Config cfg)
 
 void IBLPass::uploadResources(ResourceRegistry &resources) const
 {
-    LoadedHdrImage hdri = loadHdrFromFile(m_cfg.hdriPath);
+    LoadedHdrImage hdri;
+    if (m_cfg.hdriPath.empty())
+    {
+        spdlog::info("IBLPass: no HDRI configured; using a black environment");
+        hdri = LoadedHdrImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+    }
+    else
+    {
+        try
+        {
+            hdri = loadHdrFromFile(m_cfg.hdriPath);
+        }
+        catch (const std::exception &e)
+        {
+            spdlog::warn("IBLPass: failed to load HDRI '{}': {}. Using a black environment.",
+                         m_cfg.hdriPath.string(), e.what());
+            hdri = LoadedHdrImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+        }
+    }
+
+    if (hdri.empty())
+        throw std::runtime_error("IBLPass: failed to allocate fallback HDR pixel");
+
     resources.uploadImage("hdri", hdri.pixels, hdri.width, hdri.height,
                             LoadedHdrImage::format);
 

@@ -59,7 +59,6 @@ try
 
     {
         lr::IBLPass iblPass({
-            .hdriPath  = "C:\\Users\\seani\\Downloads\\cedar_bridge_sunset_2_4k.hdr",
             .envRes    = 2048,
             .irrRes    = 32,
             .pfRes     = 2048,
