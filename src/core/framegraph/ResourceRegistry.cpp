@@ -320,6 +320,39 @@ std::vector<const AllocatedImage *> ResourceRegistry::getImageArray(const std::s
     return result;
 }
 
+std::vector<VkImageLayout> ResourceRegistry::getImageArrayLayouts(const std::string &arrayName) const
+{
+    std::vector<VkImageLayout> result;
+    const auto it = m_imageArrays.find(arrayName);
+    if (it == m_imageArrays.end())
+    {
+        return result;
+    }
+
+    result.reserve(it->second.size());
+    for (const std::string &slotName : it->second)
+    {
+        result.push_back(slotName.empty() ? VK_IMAGE_LAYOUT_UNDEFINED : getImageLayout(slotName));
+    }
+    return result;
+}
+
+void ResourceRegistry::setImageArrayLayout(const std::string &arrayName, VkImageLayout layout)
+{
+    const auto it = m_imageArrays.find(arrayName);
+    if (it == m_imageArrays.end())
+    {
+        return;
+    }
+    for (const std::string &slotName : it->second)
+    {
+        if (!slotName.empty())
+        {
+            setImageLayout(slotName, layout);
+        }
+    }
+}
+
 bool ResourceRegistry::hasImageArray(const std::string &arrayName) const { return m_imageArrays.count(arrayName) > 0; }
 
 void ResourceRegistry::rebuild(VkExtent2D newExtent)

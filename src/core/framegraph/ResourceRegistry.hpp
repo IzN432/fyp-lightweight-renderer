@@ -98,6 +98,8 @@ public:
     void          setImageLayout(const std::string &name, VkImageLayout layout);
 
     std::vector<const AllocatedImage *> getImageArray(const std::string &arrayName) const;
+    std::vector<VkImageLayout> getImageArrayLayouts(const std::string &arrayName) const;
+    void setImageArrayLayout(const std::string &arrayName, VkImageLayout layout);
     bool hasImageArray(const std::string &arrayName) const;
 
     // Destroys and reallocates all transient images. Call on swapchain resize.

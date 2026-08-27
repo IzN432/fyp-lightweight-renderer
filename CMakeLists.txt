@@ -66,6 +66,7 @@ add_library(lr_core STATIC
     src/core/framegraph/FrameGraphTopology.cpp
     src/core/framegraph/model/GraphDefinition.cpp
     src/core/framegraph/compiler/GraphCompiler.cpp
+    src/core/framegraph/compiler/VulkanBarrierPlanner.cpp
     src/core/framegraph/ImageReadback.cpp
 
     src/core/pipeline/GraphicsPipeline.cpp
@@ -193,6 +194,7 @@ if(BUILD_TESTING)
         src/core/framegraph/FrameGraphTopology.cpp
         src/core/framegraph/model/GraphDefinition.cpp
         src/core/framegraph/compiler/GraphCompiler.cpp
+        src/core/framegraph/compiler/VulkanBarrierPlanner.cpp
     )
     target_include_directories(framegraph_topology_tests PRIVATE src)
     target_link_libraries(framegraph_topology_tests PRIVATE Vulkan::Vulkan glm::glm)

@@ -3,6 +3,7 @@
 #include "PassBuilder.hpp"
 #include "ResourceRegistry.hpp"
 #include "compiler/GraphCompiler.hpp"
+#include "compiler/VulkanBarrierPlanner.hpp"
 #include "core/pipeline/Pipeline.hpp"
 #include "core/vulkan/Allocator.hpp"
 #include "core/vulkan/CommandBuffer.hpp"
@@ -99,10 +100,16 @@ private:
     framegraph::GraphDefinition m_definition;
     framegraph::ExecutionPlan m_executionPlan;
 
-    struct CompiledBarrier
+    struct CompiledImageBarrier
     {
         VkImageMemoryBarrier2 barrier;
         std::string           resourceName;  // used to patch external image handles
+    };
+
+    struct CompiledBufferBarrier
+    {
+        VkBufferMemoryBarrier2 barrier;
+        std::string            resourceName;
     };
 
     // Per-pass GPU objects populated by compile()
@@ -112,7 +119,8 @@ private:
         VkPipelineLayout                  pipelineLayout   = VK_NULL_HANDLE;
         VkDescriptorSet                   descriptorSet    = VK_NULL_HANDLE;
         std::unique_ptr<Pipeline>         pipeline;
-        std::vector<CompiledBarrier>      barriers;
+        std::vector<CompiledImageBarrier>  imageBarriers;
+        std::vector<CompiledBufferBarrier> bufferBarriers;
     };
     std::vector<CompiledPass> m_compiled;
 };

@@ -1,6 +1,7 @@
 #include "core/framegraph/PassDescAdapter.hpp"
 #include "core/framegraph/FrameGraphTopology.hpp"
 #include "core/framegraph/compiler/GraphCompiler.hpp"
+#include "core/framegraph/compiler/VulkanBarrierPlanner.hpp"
 
 #include <functional>
 #include <iostream>
@@ -243,6 +244,132 @@ void executionPlanMatchesPassDescFrontend()
     }
 }
 
+void sameLayoutAttachmentHazard()
+{
+    std::vector<lr::PassDesc> passes(2);
+    passes[0].name = "final";
+    passes[0].writes.push_back({
+        .name = "swapchain",
+        .format = VK_FORMAT_B8G8R8A8_SRGB,
+    });
+    passes[1].name = "imgui";
+    passes[1].writes.push_back({
+        .name = "swapchain",
+        .format = VK_FORMAT_B8G8R8A8_SRGB,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+    });
+
+    const auto plan = lr::framegraph::planVulkanBarriers(passes, std::vector<size_t>{0, 1});
+    require(plan.beforePass[1].size() == 1,
+            "attachment WAW must synchronize even when its layout is unchanged");
+    const auto &barrier = plan.beforePass[1][0];
+    require(barrier.source.layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
+                barrier.destination.layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            "same-layout attachment barrier must preserve the attachment layout");
+    require((barrier.source.access & VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT) != 0,
+            "ImGui barrier must wait for the final pass color write");
+    require((barrier.destination.access & VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT) != 0 &&
+                (barrier.destination.access & VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT) != 0,
+            "LOAD attachment must declare both color read and write access");
+}
+
+void readOnlyImageAccessesCoalesce()
+{
+    std::vector<lr::PassDesc> passes(2);
+    passes[0].name = "first reader";
+    passes[0].bindings.push_back(read("texture"));
+    passes[1].name = "second reader";
+    passes[1].bindings.push_back(read("texture"));
+
+    const auto plan = lr::framegraph::planVulkanBarriers(
+        passes, std::vector<size_t>{0, 1},
+        {{"texture", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}});
+    require(plan.beforePass[0].empty() && plan.beforePass[1].empty(),
+            "same-layout read-only accesses should not emit barriers");
+}
+
+void storageImageSameLayoutHazard()
+{
+    auto storageWrite = [](std::string resource) {
+        return lr::BindingDesc{
+            .resourceName = std::move(resource),
+            .binding = 0,
+            .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+            .access = lr::BindingAccess::Write,
+        };
+    };
+
+    std::vector<lr::PassDesc> passes(2);
+    passes[0].name = "first write";
+    passes[0].bindings.push_back(storageWrite("storage"));
+    passes[1].name = "second write";
+    passes[1].bindings.push_back(storageWrite("storage"));
+
+    const auto plan = lr::framegraph::planVulkanBarriers(passes, std::vector<size_t>{0, 1});
+    require(plan.beforePass[1].size() == 1,
+            "storage WAW must synchronize while remaining in GENERAL");
+    const auto &barrier = plan.beforePass[1][0];
+    require(barrier.source.layout == VK_IMAGE_LAYOUT_GENERAL &&
+                barrier.destination.layout == VK_IMAGE_LAYOUT_GENERAL,
+            "storage WAW should use a same-layout GENERAL barrier");
+    require(barrier.source.access == VK_ACCESS_2_SHADER_WRITE_BIT &&
+                barrier.destination.access == VK_ACCESS_2_SHADER_WRITE_BIT,
+            "storage WAW barrier must connect shader writes");
+}
+
+void bufferRawHazard()
+{
+    std::vector<lr::PassDesc> passes(2);
+    passes[0].name = "compute writer";
+    passes[0].bindings.push_back({
+        .resourceName = "values",
+        .binding = 0,
+        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .stages = VK_SHADER_STAGE_COMPUTE_BIT,
+        .access = lr::BindingAccess::Write,
+    });
+    passes[1].name = "fragment reader";
+    passes[1].bindings.push_back({
+        .resourceName = "values",
+        .binding = 0,
+        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .stages = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .access = lr::BindingAccess::Read,
+    });
+
+    const auto plan = lr::framegraph::planVulkanBarriers(passes, std::vector<size_t>{0, 1});
+    require(plan.beforePass[1].size() == 1,
+            "storage-buffer RAW must produce a buffer barrier");
+    const auto &barrier = plan.beforePass[1][0];
+    require(barrier.kind == lr::framegraph::BarrierResourceKind::Buffer,
+            "storage-buffer hazard must retain buffer identity");
+    require(barrier.source.stages == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT &&
+                barrier.destination.stages == VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            "buffer RAW must synchronize compute writes to fragment reads");
+    require(barrier.source.access == VK_ACCESS_2_SHADER_WRITE_BIT &&
+                barrier.destination.access == VK_ACCESS_2_SHADER_READ_BIT,
+            "buffer RAW must use shader write/read access masks");
+}
+
+void vertexShaderStageMapping()
+{
+    std::vector<lr::PassDesc> passes(1);
+    passes[0].name = "vertex sampler";
+    passes[0].bindings.push_back({
+        .resourceName = "displacement",
+        .binding = 0,
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .stages = VK_SHADER_STAGE_VERTEX_BIT,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    });
+
+    const auto plan = lr::framegraph::planVulkanBarriers(passes, std::vector<size_t>{0});
+    require(plan.beforePass[0].size() == 1 &&
+                plan.beforePass[0][0].destination.stages == VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+            "sampled images used by vertex shaders must target the vertex stage");
+}
+
 } // namespace
 
 int main()
@@ -257,6 +384,11 @@ int main()
         {"deterministic debug dump", deterministicDebugDump},
         {"graph definition translation", graphDefinitionTranslation},
         {"execution plan PassDesc frontend", executionPlanMatchesPassDescFrontend},
+        {"same-layout attachment hazard", sameLayoutAttachmentHazard},
+        {"read-only image accesses coalesce", readOnlyImageAccessesCoalesce},
+        {"same-layout storage image hazard", storageImageSameLayoutHazard},
+        {"buffer RAW hazard", bufferRawHazard},
+        {"vertex shader stage mapping", vertexShaderStageMapping},
     };
 
     size_t failures = 0;

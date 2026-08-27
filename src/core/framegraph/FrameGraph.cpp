@@ -19,60 +19,6 @@ bool isDepthFormat(VkFormat format)
            format == VK_FORMAT_D32_SFLOAT_S8_UINT;
 }
 
-struct ResourceState
-{
-    VkImageLayout         layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkPipelineStageFlags2 stage  = VK_PIPELINE_STAGE_2_NONE;
-    VkAccessFlags2        access = VK_ACCESS_2_NONE;
-};
-
-VkPipelineStageFlags2 stageFromShaderStages(VkShaderStageFlags stages)
-{
-    if (stages & VK_SHADER_STAGE_COMPUTE_BIT)
-    {
-        return VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-    }
-    return VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-}
-
-ResourceState stateForBinding(const lr::BindingDesc &b)
-{
-    VkPipelineStageFlags2 stage = stageFromShaderStages(b.stages);
-
-    switch (b.type)
-    {
-        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
-        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-            return {b.imageLayout, stage, VK_ACCESS_2_SHADER_READ_BIT};
-        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE: {
-            VkAccessFlags2 access = 0;
-            if (b.access != lr::BindingAccess::Write)
-            {
-                access |= VK_ACCESS_2_SHADER_READ_BIT;
-            }
-            if (b.access != lr::BindingAccess::Read)
-            {
-                access |= VK_ACCESS_2_SHADER_WRITE_BIT;
-            }
-            return {VK_IMAGE_LAYOUT_GENERAL, stage, access};
-        }
-        default:
-            return {}; // buffer binding — no image layout transition needed
-    }
-}
-
-ResourceState writeStateForFormat(VkFormat format)
-{
-    if (isDepthFormat(format))
-    {
-        return {VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT};
-    }
-
-    return {VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT};
-}
-
 } // namespace
 
 namespace lr
@@ -167,12 +113,12 @@ void FrameGraph::execute(CommandBuffer &cmd)
             m_ctx.beginDebugLabel(cmd.get(), pass.name, color);
         }
 
-        // Barriers - patch external image handles, then submit
-        if (!compiled.barriers.empty())
+        // Patch external image handles and submit all resource barriers together.
+        if (!compiled.imageBarriers.empty() || !compiled.bufferBarriers.empty())
         {
             std::vector<VkImageMemoryBarrier2> patchedBarriers;
-            patchedBarriers.reserve(compiled.barriers.size());
-            for (const auto &cb : compiled.barriers)
+            patchedBarriers.reserve(compiled.imageBarriers.size());
+            for (const auto &cb : compiled.imageBarriers)
             {
                 VkImageMemoryBarrier2 b  = cb.barrier;
                 auto                  it = m_externalImages.find(cb.resourceName);
@@ -183,10 +129,19 @@ void FrameGraph::execute(CommandBuffer &cmd)
                 patchedBarriers.push_back(b);
             }
 
+            std::vector<VkBufferMemoryBarrier2> bufferBarriers;
+            bufferBarriers.reserve(compiled.bufferBarriers.size());
+            for (const auto &cb : compiled.bufferBarriers)
+            {
+                bufferBarriers.push_back(cb.barrier);
+            }
+
             VkDependencyInfo dep{};
             dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
             dep.imageMemoryBarrierCount = static_cast<uint32_t>(patchedBarriers.size());
             dep.pImageMemoryBarriers    = patchedBarriers.data();
+            dep.bufferMemoryBarrierCount = static_cast<uint32_t>(bufferBarriers.size());
+            dep.pBufferMemoryBarriers    = bufferBarriers.data();
             vkCmdPipelineBarrier2(cmd.get(), &dep);
         }
 
@@ -561,100 +516,133 @@ void FrameGraph::buildPipelines()
 
 void FrameGraph::buildBarriers()
 {
-    std::unordered_map<std::string, ResourceState> resourceStates;
-
-    for (size_t idx : m_sortedIndices)
+    std::unordered_map<std::string, VkImageLayout> initialImageLayouts;
+    for (const PassDesc &pass : m_passes)
     {
-        const PassDesc &pass     = m_passes[idx];
-        CompiledPass   &compiled = m_compiled[idx];
-
-        // For each image binding, emit a barrier if the resource isn't already
-        // in the required layout
-        for (const auto &b : pass.bindings)
+        for (const BindingDesc &binding : pass.bindings)
         {
-            ResourceState required = stateForBinding(b);
-            if (required.layout == VK_IMAGE_LAYOUT_UNDEFINED)
+            if (m_registry.getImage(binding.resourceName))
             {
-                continue; // buffer binding - no layout transition
+                initialImageLayouts.try_emplace(
+                    binding.resourceName, m_registry.getImageLayout(binding.resourceName));
             }
-
-            const AllocatedImage *img = m_registry.getImage(b.resourceName);
-            if (!img)
+            else if (m_registry.hasImageArray(binding.resourceName))
             {
-                continue;
+                const std::vector<VkImageLayout> layouts =
+                    m_registry.getImageArrayLayouts(binding.resourceName);
+                if (!layouts.empty())
+                {
+                    const VkImageLayout commonLayout = layouts.front();
+                    for (VkImageLayout layout : layouts)
+                    {
+                        if (layout != commonLayout)
+                        {
+                            throw std::runtime_error(
+                                "FrameGraph: image array '" + binding.resourceName +
+                                "' has mixed initial layouts");
+                        }
+                    }
+                    initialImageLayouts.try_emplace(binding.resourceName, commonLayout);
+                }
             }
-
-            auto          it      = resourceStates.find(b.resourceName);
-            ResourceState current = (it != resourceStates.end())
-                                        ? it->second
-                                        : ResourceState{m_registry.getImageLayout(b.resourceName),
-                                                        VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE};
-
-            if (current.layout == required.layout)
-            {
-                continue; // already correct, no barrier needed
-            }
-
-            VkImageMemoryBarrier2 barrier{};
-            barrier.sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-            barrier.srcStageMask  = current.stage;
-            barrier.srcAccessMask = current.access;
-            barrier.dstStageMask  = required.stage;
-            barrier.dstAccessMask = required.access;
-            barrier.oldLayout     = current.layout;
-            barrier.newLayout     = required.layout;
-            barrier.image         = img->image;
-            VkImageAspectFlags aspect =
-                isDepthFormat(img->format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-            barrier.subresourceRange = {aspect, 0, img->mipLevels, 0, img->arrayLayers};
-
-            compiled.barriers.push_back({barrier, b.resourceName});
-            resourceStates[b.resourceName] = required;
         }
-
-        // Barriers for write targets - transition into attachment layout before the pass
-        for (const auto &write : pass.writes)
+        for (const ResourceDesc &attachment : pass.writes)
         {
-            ResourceState required = writeStateForFormat(write.format);
-
-            const AllocatedImage *img = m_registry.getImage(write.name);
-            if (!img)
+            if (m_registry.getImage(attachment.name))
             {
-                continue;
+                initialImageLayouts.try_emplace(
+                    attachment.name, m_registry.getImageLayout(attachment.name));
             }
-
-            auto          it = resourceStates.find(write.name);
-            ResourceState current =
-                (it != resourceStates.end())
-                    ? it->second
-                    : ResourceState{m_registry.getImageLayout(write.name), VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE};
-
-            if (current.layout != required.layout)
-            {
-                VkImageAspectFlags aspect =
-                    isDepthFormat(img->format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-
-                VkImageMemoryBarrier2 barrier{};
-                barrier.sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-                barrier.srcStageMask     = current.stage;
-                barrier.srcAccessMask    = current.access;
-                barrier.dstStageMask     = required.stage;
-                barrier.dstAccessMask    = required.access;
-                barrier.oldLayout        = current.layout;
-                barrier.newLayout        = required.layout;
-                barrier.image            = img->image;
-                barrier.subresourceRange = {aspect, 0, img->mipLevels, 0, img->arrayLayers};
-
-                compiled.barriers.push_back({barrier, write.name});
-            }
-
-            resourceStates[write.name] = required;
         }
     }
 
-    for (const auto &[name, state] : resourceStates)
+    const framegraph::VulkanBarrierPlan plan =
+        framegraph::planVulkanBarriers(m_passes, m_sortedIndices, initialImageLayouts);
+
+    for (size_t passIndex = 0; passIndex < plan.beforePass.size(); ++passIndex)
     {
-        m_registry.setImageLayout(name, state.layout);
+        CompiledPass &compiled = m_compiled[passIndex];
+        for (const framegraph::PlannedBarrier &planned : plan.beforePass[passIndex])
+        {
+            if (planned.kind == framegraph::BarrierResourceKind::Image)
+            {
+                std::vector<const AllocatedImage *> images;
+                if (const AllocatedImage *image = m_registry.getImage(planned.resourceName))
+                {
+                    images.push_back(image);
+                }
+                else
+                {
+                    images = m_registry.getImageArray(planned.resourceName);
+                }
+                if (images.empty())
+                {
+                    throw std::runtime_error("FrameGraph: barrier references missing image '" +
+                                             planned.resourceName + "'");
+                }
+
+                for (const AllocatedImage *image : images)
+                {
+                    if (!image)
+                    {
+                        throw std::runtime_error(
+                            "FrameGraph: barrier references empty slot in image array '" +
+                            planned.resourceName + "'");
+                    }
+
+                    VkImageMemoryBarrier2 barrier{};
+                    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+                    barrier.srcStageMask = planned.source.stages;
+                    barrier.srcAccessMask = planned.source.access;
+                    barrier.dstStageMask = planned.destination.stages;
+                    barrier.dstAccessMask = planned.destination.access;
+                    barrier.oldLayout = planned.source.layout;
+                    barrier.newLayout = planned.destination.layout;
+                    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    barrier.image = image->image;
+                    const VkImageAspectFlags aspect = isDepthFormat(image->format)
+                        ? VK_IMAGE_ASPECT_DEPTH_BIT
+                        : VK_IMAGE_ASPECT_COLOR_BIT;
+                    barrier.subresourceRange = {aspect, 0, image->mipLevels, 0, image->arrayLayers};
+                    compiled.imageBarriers.push_back({barrier, planned.resourceName});
+                }
+            }
+            else
+            {
+                const AllocatedBuffer *buffer = m_registry.getBuffer(planned.resourceName);
+                if (!buffer)
+                {
+                    throw std::runtime_error("FrameGraph: barrier references missing buffer '" +
+                                             planned.resourceName + "'");
+                }
+
+                VkBufferMemoryBarrier2 barrier{};
+                barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+                barrier.srcStageMask = planned.source.stages;
+                barrier.srcAccessMask = planned.source.access;
+                barrier.dstStageMask = planned.destination.stages;
+                barrier.dstAccessMask = planned.destination.access;
+                barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.buffer = buffer->buffer;
+                barrier.offset = 0;
+                barrier.size = VK_WHOLE_SIZE;
+                compiled.bufferBarriers.push_back({barrier, planned.resourceName});
+            }
+        }
+    }
+
+    for (const auto &[name, layout] : plan.finalImageLayouts)
+    {
+        if (m_registry.hasImageArray(name))
+        {
+            m_registry.setImageArrayLayout(name, layout);
+        }
+        else
+        {
+            m_registry.setImageLayout(name, layout);
+        }
     }
 }
 
@@ -808,8 +796,9 @@ std::string FrameGraph::debugDump() const
     for (size_t passIndex = 0; passIndex < m_compiled.size(); ++passIndex)
     {
         auto &output = barriersByPass[passIndex];
-        output.reserve(m_compiled[passIndex].barriers.size());
-        for (const auto &compiledBarrier : m_compiled[passIndex].barriers)
+        output.reserve(m_compiled[passIndex].imageBarriers.size() +
+                       m_compiled[passIndex].bufferBarriers.size());
+        for (const auto &compiledBarrier : m_compiled[passIndex].imageBarriers)
         {
             const auto &barrier = compiledBarrier.barrier;
             output.push_back({
@@ -820,6 +809,17 @@ std::string FrameGraph::debugDump() const
                 .dstAccess    = barrier.dstAccessMask,
                 .oldLayout    = barrier.oldLayout,
                 .newLayout    = barrier.newLayout,
+            });
+        }
+        for (const auto &compiledBarrier : m_compiled[passIndex].bufferBarriers)
+        {
+            const auto &barrier = compiledBarrier.barrier;
+            output.push_back({
+                .resourceName = compiledBarrier.resourceName,
+                .srcStage     = barrier.srcStageMask,
+                .srcAccess    = barrier.srcAccessMask,
+                .dstStage     = barrier.dstStageMask,
+                .dstAccess    = barrier.dstAccessMask,
             });
         }
     }
