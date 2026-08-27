@@ -1,4 +1,6 @@
 #include "FrameGraph.hpp"
+#include "PassDescAdapter.hpp"
+#include "FrameGraphTopology.hpp"
 #include "core/vulkan/VkResultUtils.hpp"
 
 #include "core/pipeline/ComputePipeline.hpp"
@@ -6,10 +8,7 @@
 
 #include <spdlog/spdlog.h>
 
-#include <queue>
 #include <stdexcept>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace
 {
@@ -95,17 +94,7 @@ FrameGraph::~FrameGraph()
 // called.
 PassBuilder FrameGraph::addPass(const std::string &name)
 {
-    for (const auto &p : m_passes)
-    {
-        if (p.name == name)
-        {
-            spdlog::error("FrameGraph: duplicate pass name '{}'", name);
-            throw std::runtime_error("FrameGraph: duplicate pass name '" + name + "'");
-        }
-    }
-
-    m_passes.push_back(PassDesc{.name = name});
-    return PassBuilder(m_passes.back());
+    return PassBuilder(framegraph::appendPass(m_passes, name));
 }
 
 // Compiles the pass graph: topological sort, resource allocation, pipeline and descriptor set creation, barrier
@@ -136,6 +125,10 @@ void FrameGraph::compile()
     buildPipelines();
     buildBarriers();
 
+    if (spdlog::should_log(spdlog::level::debug))
+    {
+        spdlog::debug("{}", debugDump());
+    }
     spdlog::info("FrameGraph: compiled OK");
 }
 
@@ -327,110 +320,14 @@ void FrameGraph::resize(VkExtent2D newExtent)
 
 void FrameGraph::sortPasses()
 {
-    const size_t n = m_passes.size();
+    m_definition = framegraph::translatePassDescriptions(m_passes);
+    m_executionPlan = framegraph::buildLegacyExecutionPlan(m_definition);
 
-    // resource name → index of the pass that writes it
-    // Covers both graphics color/depth outputs and compute storage writes
-    std::unordered_map<std::string, size_t> resourceProducers;
-    for (size_t i = 0; i < n; ++i)
-    {
-        for (const auto &write : m_passes[i].writes)
-        {
-            resourceProducers[write.name] = i;
-        }
-        for (const auto &b : m_passes[i].bindings)
-        {
-            if (b.access != BindingAccess::Read)
-            {
-                resourceProducers[b.resourceName] = i;
-            }
-        }
-    }
-
-    // build a name→index lookup for explicit dependency resolution
-    std::unordered_map<std::string, size_t> passIndex;
-    for (size_t i = 0; i < n; ++i)
-    {
-        passIndex[m_passes[i].name] = i;
-    }
-
-    // build unique pass→pass out-edges via the resource map
-    // edge i→j means pass i must execute before pass j
-    std::vector<std::unordered_set<size_t>> outEdges(n);
-    for (size_t j = 0; j < n; ++j)
-    {
-        for (const auto &b : m_passes[j].bindings)
-        {
-            // only readers depend on the producer — skip write bindings
-            if (b.access != BindingAccess::Read)
-            {
-                continue;
-            }
-            auto it = resourceProducers.find(b.resourceName);
-            if (it != resourceProducers.end() && it->second != j)
-            {
-                outEdges[it->second].insert(j);
-            }
-        }
-    }
-
-    // inject explicit ordering edges declared via dependsOn()
-    for (size_t j = 0; j < n; ++j)
-    {
-        for (const auto &depName : m_passes[j].explicitDeps)
-        {
-            auto it = passIndex.find(depName);
-            if (it == passIndex.end())
-            {
-                spdlog::error("FrameGraph: pass '{}' depends on unknown pass '{}'", m_passes[j].name, depName);
-                throw std::runtime_error("FrameGraph: pass '" + m_passes[j].name + "' declares dependsOn(\"" + depName +
-                                         "\") but no such pass exists");
-            }
-            outEdges[it->second].insert(j);
-        }
-    }
-
-    // in-degree from the resolved edge sets
-    std::vector<int> inDegree(n, 0);
-    for (size_t i = 0; i < n; ++i)
-    {
-        for (size_t j : outEdges[i])
-        {
-            ++inDegree[j];
-        }
-    }
-
-    // seed queue with passes that have no dependencies
-    std::queue<size_t> queue;
-    for (size_t i = 0; i < n; ++i)
-    {
-        if (inDegree[i] == 0)
-        {
-            queue.push(i);
-        }
-    }
-
-    // Kahn's BFS
     m_sortedIndices.clear();
-    while (!queue.empty())
+    m_sortedIndices.reserve(m_executionPlan.orderedPasses.size());
+    for (framegraph::PassId pass : m_executionPlan.orderedPasses)
     {
-        size_t i = queue.front();
-        queue.pop();
-        m_sortedIndices.push_back(i);
-
-        for (size_t j : outEdges[i])
-        {
-            if (--inDegree[j] == 0)
-            {
-                queue.push(j);
-            }
-        }
-    }
-
-    if (m_sortedIndices.size() != n)
-    {
-        spdlog::error("FrameGraph: cycle detected in pass dependencies");
-        throw std::runtime_error("FrameGraph: cycle detected in pass dependencies");
+        m_sortedIndices.push_back(pass.value);
     }
 
     spdlog::debug("FrameGraph: pass order:");
@@ -442,25 +339,12 @@ void FrameGraph::sortPasses()
 
 void FrameGraph::allocateResources()
 {
-    // TODO: for each pass write, register the output image in m_registry
-    // Compute usage flags by scanning all reads/writes across passes
-    for (const auto &pass : m_passes)
+    const auto planned = framegraph::planAttachmentImages(m_passes, m_registry.getExtent());
+    for (const auto &image : planned)
     {
-        for (const auto &write : pass.writes)
+        if (!m_registry.hasImage(image.name))
         {
-            if (m_registry.hasImage(write.name))
-            {
-                continue;
-            }
-
-            bool isDepth = isDepthFormat(write.format);
-
-            VkImageUsageFlags usage = isDepth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
-                                              : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-
-            VkImageAspectFlags aspect = isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-
-            m_registry.registerImage(write.name, write.format, usage, write.extent, aspect);
+            m_registry.registerImage(image.name, image.format, image.usage, image.extent, image.aspect);
         }
     }
 }
@@ -916,6 +800,31 @@ std::vector<std::string> FrameGraph::passNames() const
         names.push_back(p.name);
     }
     return names;
+}
+
+std::string FrameGraph::debugDump() const
+{
+    std::vector<std::vector<framegraph::BarrierDebugInfo>> barriersByPass(m_passes.size());
+    for (size_t passIndex = 0; passIndex < m_compiled.size(); ++passIndex)
+    {
+        auto &output = barriersByPass[passIndex];
+        output.reserve(m_compiled[passIndex].barriers.size());
+        for (const auto &compiledBarrier : m_compiled[passIndex].barriers)
+        {
+            const auto &barrier = compiledBarrier.barrier;
+            output.push_back({
+                .resourceName = compiledBarrier.resourceName,
+                .srcStage     = barrier.srcStageMask,
+                .srcAccess    = barrier.srcAccessMask,
+                .dstStage     = barrier.dstStageMask,
+                .dstAccess    = barrier.dstAccessMask,
+                .oldLayout    = barrier.oldLayout,
+                .newLayout    = barrier.newLayout,
+            });
+        }
+    }
+
+    return framegraph::dumpTopology(m_passes, m_sortedIndices, barriersByPass);
 }
 
 void FrameGraph::createDefaultSampler()

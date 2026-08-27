@@ -6,6 +6,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 project(FypLightweightRenderer LANGUAGES CXX C)
 
+include(CTest)
+
 find_package(Vulkan REQUIRED)
 find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin REQUIRED)
 
@@ -60,6 +62,10 @@ add_library(lr_core STATIC
 
     src/core/framegraph/ResourceRegistry.cpp
     src/core/framegraph/FrameGraph.cpp
+    src/core/framegraph/PassDescAdapter.cpp
+    src/core/framegraph/FrameGraphTopology.cpp
+    src/core/framegraph/model/GraphDefinition.cpp
+    src/core/framegraph/compiler/GraphCompiler.cpp
     src/core/framegraph/ImageReadback.cpp
 
     src/core/pipeline/GraphicsPipeline.cpp
@@ -168,6 +174,27 @@ add_library(lr_arap_plugin STATIC
 target_include_directories(lr_arap_plugin PUBLIC src)
 target_link_libraries(lr_arap_plugin PUBLIC lr_core igl::igl_core)
 
-# Test executable
+# Application executable
 add_executable(renderer src/main.cpp)
 target_link_libraries(renderer PRIVATE lr_core lr_arap_plugin imguiFileDialog)
+
+if(BUILD_TESTING)
+    add_executable(framegraph_model_tests
+        tests/framegraph/GraphModelTests.cpp
+        src/core/framegraph/model/GraphDefinition.cpp
+        src/core/framegraph/compiler/GraphCompiler.cpp
+    )
+    target_include_directories(framegraph_model_tests PRIVATE src)
+    add_test(NAME framegraph.model COMMAND framegraph_model_tests)
+
+    add_executable(framegraph_topology_tests
+        tests/framegraph/FrameGraphTopologyTests.cpp
+        src/core/framegraph/PassDescAdapter.cpp
+        src/core/framegraph/FrameGraphTopology.cpp
+        src/core/framegraph/model/GraphDefinition.cpp
+        src/core/framegraph/compiler/GraphCompiler.cpp
+    )
+    target_include_directories(framegraph_topology_tests PRIVATE src)
+    target_link_libraries(framegraph_topology_tests PRIVATE Vulkan::Vulkan glm::glm)
+    add_test(NAME framegraph.topology COMMAND framegraph_topology_tests)
+endif()

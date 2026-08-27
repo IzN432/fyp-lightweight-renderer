@@ -2,6 +2,7 @@
 
 #include "PassBuilder.hpp"
 #include "ResourceRegistry.hpp"
+#include "compiler/GraphCompiler.hpp"
 #include "core/pipeline/Pipeline.hpp"
 #include "core/vulkan/Allocator.hpp"
 #include "core/vulkan/CommandBuffer.hpp"
@@ -50,6 +51,10 @@ public:
     // Used by Viewer to build the imgui pass's dependsOn list.
     std::vector<std::string> passNames() const;
 
+    // Deterministic topology snapshot for diagnostics and before/after comparisons.
+    // Vulkan object handles are intentionally omitted.
+    std::string debugDump() const;
+
     // Describes a resource layout that the GPU image should be left in after executeAndWait().
     // Used to transition preprocessing outputs (e.g. GENERAL storage writes) into
     // a layout suitable for the main pipeline (e.g. SHADER_READ_ONLY_OPTIMAL).
@@ -91,6 +96,8 @@ private:
 
     std::vector<PassDesc> m_passes;         // declared passes (insertion order)
     std::vector<size_t> m_sortedIndices;    // topological order into m_passes
+    framegraph::GraphDefinition m_definition;
+    framegraph::ExecutionPlan m_executionPlan;
 
     struct CompiledBarrier
     {
