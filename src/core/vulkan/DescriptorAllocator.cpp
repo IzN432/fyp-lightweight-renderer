@@ -1,4 +1,5 @@
 #include "DescriptorAllocator.hpp"
+#include "VkResultUtils.hpp"
 
 #include <spdlog/spdlog.h>
 
@@ -14,21 +15,18 @@ DescriptorAllocator::DescriptorAllocator(VkDevice device) : m_device(device)
         // each sized to MaterialStore's fixed capacity (see kMaterialCapacity in main.cpp) — plus
         // headroom for the handful of single-image bindings elsewhere (LTC LUTs, IBL maps, etc.).
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 * 256 + 128},
-        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          32},
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         32},
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         32},
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 32},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 32},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 32},
     };
 
     VkDescriptorPoolCreateInfo ci{};
-    ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    ci.maxSets = 64;
+    ci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    ci.maxSets       = 64;
     ci.poolSizeCount = static_cast<uint32_t>(std::size(sizes));
-    ci.pPoolSizes = sizes;
+    ci.pPoolSizes    = sizes;
 
-    if (vkCreateDescriptorPool(m_device, &ci, nullptr, &m_pool) != VK_SUCCESS)
-    {
-        throw std::runtime_error("DescriptorAllocator: failed to create pool");
-    }
+    checkVk(vkCreateDescriptorPool(m_device, &ci, nullptr, &m_pool), "DescriptorAllocator: vkCreateDescriptorPool");
 
     spdlog::debug("DescriptorAllocator: created");
 }
@@ -36,65 +34,70 @@ DescriptorAllocator::DescriptorAllocator(VkDevice device) : m_device(device)
 DescriptorAllocator::~DescriptorAllocator()
 {
     for (auto layout : m_layouts)
+    {
         vkDestroyDescriptorSetLayout(m_device, layout, nullptr);
+    }
     for (auto layout : m_pipelineLayouts)
+    {
         vkDestroyPipelineLayout(m_device, layout, nullptr);
-    vkDestroyDescriptorPool(m_device, m_pool, nullptr);
+    }
+    if (m_pool != VK_NULL_HANDLE)
+    {
+        vkDestroyDescriptorPool(m_device, m_pool, nullptr);
+    }
 }
 
 void DescriptorAllocator::reset()
 {
     for (auto layout : m_layouts)
+    {
         vkDestroyDescriptorSetLayout(m_device, layout, nullptr);
+    }
     for (auto layout : m_pipelineLayouts)
+    {
         vkDestroyPipelineLayout(m_device, layout, nullptr);
+    }
     m_layouts.clear();
     m_pipelineLayouts.clear();
-    vkResetDescriptorPool(m_device, m_pool, 0);
+    checkVk(vkResetDescriptorPool(m_device, m_pool, 0), "DescriptorAllocator: vkResetDescriptorPool");
 }
 
-VkDescriptorSetLayout DescriptorAllocator::createLayout(
-    std::span<const VkDescriptorSetLayoutBinding> bindings)
+VkDescriptorSetLayout DescriptorAllocator::createLayout(std::span<const VkDescriptorSetLayoutBinding> bindings)
 {
     VkDescriptorSetLayoutCreateInfo ci{};
-    ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    ci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     ci.bindingCount = static_cast<uint32_t>(bindings.size());
-    ci.pBindings = bindings.data();
+    ci.pBindings    = bindings.data();
 
     VkDescriptorSetLayout layout;
-    if (vkCreateDescriptorSetLayout(m_device, &ci, nullptr, &layout) != VK_SUCCESS)
-    {
-        throw std::runtime_error("DescriptorAllocator: failed to create layout");
-    }
+    checkVk(vkCreateDescriptorSetLayout(m_device, &ci, nullptr, &layout),
+            "DescriptorAllocator: vkCreateDescriptorSetLayout");
 
     m_layouts.push_back(layout);
     return layout;
 }
 
-VkPipelineLayout DescriptorAllocator::createPipelineLayout(VkDescriptorSetLayout layout,
-                                                             uint32_t pushConstantSize,
-                                                             VkShaderStageFlags pushStages)
+VkPipelineLayout DescriptorAllocator::createPipelineLayout(VkDescriptorSetLayout layout, uint32_t pushConstantSize,
+                                                           VkShaderStageFlags pushStages)
 {
     VkPushConstantRange pushRange{};
     pushRange.stageFlags = pushStages;
-    pushRange.offset = 0;
-    pushRange.size = pushConstantSize;
+    pushRange.offset     = 0;
+    pushRange.size       = pushConstantSize;
 
     VkPipelineLayoutCreateInfo ci{};
-    ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    ci.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     ci.setLayoutCount = 1;
-    ci.pSetLayouts = &layout;
+    ci.pSetLayouts    = &layout;
     if (pushConstantSize > 0)
     {
         ci.pushConstantRangeCount = 1;
-        ci.pPushConstantRanges = &pushRange;
+        ci.pPushConstantRanges    = &pushRange;
     }
 
     VkPipelineLayout pipelineLayout;
-    if (vkCreatePipelineLayout(m_device, &ci, nullptr, &pipelineLayout) != VK_SUCCESS)
-    {
-        throw std::runtime_error("DescriptorAllocator: failed to create pipeline layout");
-    }
+    checkVk(vkCreatePipelineLayout(m_device, &ci, nullptr, &pipelineLayout),
+            "DescriptorAllocator: vkCreatePipelineLayout");
 
     m_pipelineLayouts.push_back(pipelineLayout);
     return pipelineLayout;
@@ -103,42 +106,35 @@ VkPipelineLayout DescriptorAllocator::createPipelineLayout(VkDescriptorSetLayout
 VkDescriptorSet DescriptorAllocator::allocate(VkDescriptorSetLayout layout)
 {
     VkDescriptorSetAllocateInfo ai{};
-    ai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    ai.descriptorPool = m_pool;
+    ai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    ai.descriptorPool     = m_pool;
     ai.descriptorSetCount = 1;
-    ai.pSetLayouts = &layout;
+    ai.pSetLayouts        = &layout;
 
     VkDescriptorSet set;
-    if (vkAllocateDescriptorSets(m_device, &ai, &set) != VK_SUCCESS)
-    {
-        throw std::runtime_error("DescriptorAllocator: failed to allocate descriptor set");
-    }
+    checkVk(vkAllocateDescriptorSets(m_device, &ai, &set), "DescriptorAllocator: vkAllocateDescriptorSets");
 
     return set;
 }
 
-void DescriptorAllocator::writeImage(VkDescriptorSet set, uint32_t binding,
-                                      VkImageView view, VkSampler sampler,
-                                      VkImageLayout imageLayout, VkDescriptorType type)
+void DescriptorAllocator::writeImage(VkDescriptorSet set, uint32_t binding, VkImageView view, VkSampler sampler,
+                                     VkImageLayout imageLayout, VkDescriptorType type)
 {
     // Push info first — pointer must remain stable until commit()
     m_imageInfos.push_back({sampler, view, imageLayout});
 
     VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set;
-    write.dstBinding = binding;
+    write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet          = set;
+    write.dstBinding      = binding;
     write.descriptorCount = 1;
-    write.descriptorType = type;
-    write.pImageInfo = &m_imageInfos.back();
+    write.descriptorType  = type;
+    write.pImageInfo      = &m_imageInfos.back();
     m_writes.push_back(write);
 }
 
-void DescriptorAllocator::writeImageArray(VkDescriptorSet set, uint32_t binding,
-                                           std::span<const VkImageView> views,
-                                           VkSampler sampler,
-                                           VkImageLayout imageLayout,
-                                           VkDescriptorType type)
+void DescriptorAllocator::writeImageArray(VkDescriptorSet set, uint32_t binding, std::span<const VkImageView> views,
+                                          VkSampler sampler, VkImageLayout imageLayout, VkDescriptorType type)
 {
     if (views.empty())
     {
@@ -148,44 +144,45 @@ void DescriptorAllocator::writeImageArray(VkDescriptorSet set, uint32_t binding,
     std::vector<VkDescriptorImageInfo> infos;
     infos.reserve(views.size());
     for (VkImageView view : views)
+    {
         infos.push_back({sampler, view, imageLayout});
+    }
 
     m_imageInfoArrays.push_back(std::move(infos));
 
     VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set;
-    write.dstBinding = binding;
+    write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet          = set;
+    write.dstBinding      = binding;
     write.descriptorCount = static_cast<uint32_t>(m_imageInfoArrays.back().size());
-    write.descriptorType = type;
-    write.pImageInfo = m_imageInfoArrays.back().data();
+    write.descriptorType  = type;
+    write.pImageInfo      = m_imageInfoArrays.back().data();
     m_writes.push_back(write);
 }
 
-void DescriptorAllocator::writeBuffer(VkDescriptorSet set, uint32_t binding,
-                                       VkBuffer buffer, VkDeviceSize offset,
-                                       VkDeviceSize range, VkDescriptorType type)
+void DescriptorAllocator::writeBuffer(VkDescriptorSet set, uint32_t binding, VkBuffer buffer, VkDeviceSize offset,
+                                      VkDeviceSize range, VkDescriptorType type)
 {
     m_bufferInfos.push_back({buffer, offset, range});
 
     VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set;
-    write.dstBinding = binding;
+    write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet          = set;
+    write.dstBinding      = binding;
     write.descriptorCount = 1;
-    write.descriptorType = type;
-    write.pBufferInfo = &m_bufferInfos.back();
+    write.descriptorType  = type;
+    write.pBufferInfo     = &m_bufferInfos.back();
     m_writes.push_back(write);
 }
 
 void DescriptorAllocator::commit()
 {
     if (m_writes.empty())
+    {
         return;
+    }
 
-    vkUpdateDescriptorSets(m_device,
-                           static_cast<uint32_t>(m_writes.size()), m_writes.data(),
-                           0, nullptr);
+    vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(m_writes.size()), m_writes.data(), 0, nullptr);
 
     m_writes.clear();
     m_imageInfos.clear();
@@ -193,4 +190,4 @@ void DescriptorAllocator::commit()
     m_bufferInfos.clear();
 }
 
-}  // namespace lr
+} // namespace lr

@@ -1,4 +1,5 @@
 #include "VulkanContext.hpp"
+#include "VkResultUtils.hpp"
 
 #include <spdlog/spdlog.h>
 
@@ -12,16 +13,18 @@ namespace lr
 // Debug messenger callback
 // ---------------------------------------------------------------------------
 
-static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
-    VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-    VkDebugUtilsMessageTypeFlagsEXT /*type*/,
-    const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
-    void * /*pUserData*/)
+static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+                                                    VkDebugUtilsMessageTypeFlagsEXT /*type*/,
+                                                    const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
+                                                    void * /*pUserData*/)
 {
     if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+    {
         spdlog::error("[Vulkan] {}", pCallbackData->pMessage);
-    else if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+    } else if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+    {
         spdlog::warn("[Vulkan] {}", pCallbackData->pMessage);
+    }
 
     return VK_FALSE;
 }
@@ -32,16 +35,20 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 
 VulkanContext::VulkanContext(const Config &config, VkSurfaceKHR surface)
 {
-    m_config = config;
-    createInstance();
-    pickPhysicalDevice(surface);
-    createDevice();
+    try
+    {
+        m_config = config;
+        createInstance();
+        pickPhysicalDevice(surface);
+        createDevice();
+    } catch (...)
+    {
+        destroy();
+        throw;
+    }
 }
 
-VulkanContext::~VulkanContext()
-{
-    destroy();
-}
+VulkanContext::~VulkanContext() { destroy(); }
 
 void VulkanContext::destroy()
 {
@@ -56,7 +63,9 @@ void VulkanContext::destroy()
         auto fn = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
             vkGetInstanceProcAddr(m_instance, "vkDestroyDebugUtilsMessengerEXT"));
         if (fn)
+        {
             fn(m_instance, m_debugMessenger, nullptr);
+        }
         m_debugMessenger = VK_NULL_HANDLE;
     }
 
@@ -67,64 +76,71 @@ void VulkanContext::destroy()
     }
 }
 
-VkQueue VulkanContext::getGraphicsQueue(int idx) const
-{
-    return m_graphicsQueues.at(static_cast<size_t>(idx));
-}
+VkQueue VulkanContext::getGraphicsQueue(int idx) const { return m_graphicsQueues.at(static_cast<size_t>(idx)); }
 
 VkQueue VulkanContext::getTransferQueue() const
 {
     if (m_hasDedicatedTransfer)
+    {
         return m_transferQueue;
+    }
     return m_graphicsQueues[0];
 }
 
 int VulkanContext::getTransferQueueFamily() const
 {
     if (m_hasDedicatedTransfer)
+    {
         return m_transferQueueFamily;
+    }
     return m_graphicsQueueFamilies[0];
 }
 
-void VulkanContext::waitIdle() const
-{
-    vkDeviceWaitIdle(m_device);
-}
+void VulkanContext::waitIdle() const { checkVk(vkDeviceWaitIdle(m_device), "VulkanContext: vkDeviceWaitIdle"); }
 
 void VulkanContext::setDebugName(VkObjectType type, uint64_t handle, std::string_view name) const
 {
     if (!m_vkSetDebugUtilsObjectName || handle == 0)
+    {
         return;
+    }
 
     VkDebugUtilsObjectNameInfoEXT info{};
-    info.sType        = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
-    info.objectType   = type;
-    info.objectHandle = handle;
-    info.pObjectName  = name.data();
-    m_vkSetDebugUtilsObjectName(m_device, &info);
+    info.sType            = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    info.objectType       = type;
+    info.objectHandle     = handle;
+    info.pObjectName      = name.data();
+    const VkResult result = m_vkSetDebugUtilsObjectName(m_device, &info);
+    if (result != VK_SUCCESS)
+    {
+        spdlog::warn("VulkanContext: vkSetDebugUtilsObjectNameEXT failed: {} ({})", vkResultName(result),
+                     static_cast<int>(result));
+    }
 }
 
-void VulkanContext::beginDebugLabel(VkCommandBuffer cmd,
-                                    std::string_view name,
-                                    const std::array<float, 4> &color) const
+void VulkanContext::beginDebugLabel(VkCommandBuffer cmd, std::string_view name, const std::array<float, 4> &color) const
 {
     if (!m_vkCmdBeginDebugUtilsLabel || cmd == VK_NULL_HANDLE)
+    {
         return;
+    }
 
     VkDebugUtilsLabelEXT label{};
-    label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    label.sType      = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
     label.pLabelName = name.data();
-    label.color[0] = color[0];
-    label.color[1] = color[1];
-    label.color[2] = color[2];
-    label.color[3] = color[3];
+    label.color[0]   = color[0];
+    label.color[1]   = color[1];
+    label.color[2]   = color[2];
+    label.color[3]   = color[3];
     m_vkCmdBeginDebugUtilsLabel(cmd, &label);
 }
 
 void VulkanContext::endDebugLabel(VkCommandBuffer cmd) const
 {
     if (!m_vkCmdEndDebugUtilsLabel || cmd == VK_NULL_HANDLE)
+    {
         return;
+    }
 
     m_vkCmdEndDebugUtilsLabel(cmd);
 }
@@ -136,27 +152,29 @@ uint32_t VulkanContext::findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags 
         bool typeMatch = (typeBits & (1u << i)) != 0;
         bool propMatch = (m_memProperties.memoryTypes[i].propertyFlags & flags) == flags;
         if (typeMatch && propMatch)
+        {
             return i;
+        }
     }
     spdlog::error("Runtime error: throwing std::runtime_error");
     throw std::runtime_error("VulkanContext: no suitable memory type found");
 }
 
-VkFormat VulkanContext::findSupportedFormat(const std::vector<VkFormat> &candidates,
-                                             VkImageTiling tiling,
-                                             VkFormatFeatureFlags features) const
+VkFormat VulkanContext::findSupportedFormat(const std::vector<VkFormat> &candidates, VkImageTiling tiling,
+                                            VkFormatFeatureFlags features) const
 {
     for (VkFormat fmt : candidates)
     {
         VkFormatProperties props;
         vkGetPhysicalDeviceFormatProperties(m_physicalDevice, fmt, &props);
 
-        bool supported = (tiling == VK_IMAGE_TILING_LINEAR)
-                             ? (props.linearTilingFeatures & features) == features
-                             : (props.optimalTilingFeatures & features) == features;
+        bool supported = (tiling == VK_IMAGE_TILING_LINEAR) ? (props.linearTilingFeatures & features) == features
+                                                            : (props.optimalTilingFeatures & features) == features;
 
         if (supported)
+        {
             return fmt;
+        }
     }
     spdlog::error("Runtime error: throwing std::runtime_error");
     throw std::runtime_error("VulkanContext: no supported format found in candidates");
@@ -168,14 +186,18 @@ VkFormat VulkanContext::findSupportedFormat(const std::vector<VkFormat> &candida
 
 void VulkanContext::createInstance()
 {
-    vkEnumerateInstanceVersion(&m_apiVersion);
+    checkVk(vkEnumerateInstanceVersion(&m_apiVersion), "VulkanContext: vkEnumerateInstanceVersion");
 
     // Required layers
     if (m_config.enableValidation)
+    {
         m_layers.push_back("VK_LAYER_KHRONOS_validation");
+    }
 
     for (const char *layer : m_config.extraLayers)
+    {
         m_layers.push_back(layer);
+    }
 
     if (!checkLayerSupport(m_layers))
     {
@@ -184,10 +206,14 @@ void VulkanContext::createInstance()
 
     // Required instance extensions
     if (m_config.enableValidation || m_config.enableDebugNames)
+    {
         m_instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    }
 
     for (const char *ext : m_config.extraInstanceExtensions)
+    {
         m_instanceExtensions.push_back(ext);
+    }
 
     if (!checkInstanceExtensionSupport(m_instanceExtensions))
     {
@@ -195,59 +221,64 @@ void VulkanContext::createInstance()
     }
 
     VkApplicationInfo appInfo{};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = m_config.appName.c_str();
+    appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName   = m_config.appName.c_str();
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "lr";
-    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = m_apiVersion;
+    appInfo.pEngineName        = "lr";
+    appInfo.engineVersion      = VK_MAKE_VERSION(1, 0, 0);
+    appInfo.apiVersion         = m_apiVersion;
 
     VkInstanceCreateInfo ci{};
-    ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    ci.pApplicationInfo = &appInfo;
-    ci.enabledLayerCount = static_cast<uint32_t>(m_layers.size());
-    ci.ppEnabledLayerNames = m_layers.data();
-    ci.enabledExtensionCount = static_cast<uint32_t>(m_instanceExtensions.size());
+    ci.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    ci.pApplicationInfo        = &appInfo;
+    ci.enabledLayerCount       = static_cast<uint32_t>(m_layers.size());
+    ci.ppEnabledLayerNames     = m_layers.data();
+    ci.enabledExtensionCount   = static_cast<uint32_t>(m_instanceExtensions.size());
     ci.ppEnabledExtensionNames = m_instanceExtensions.data();
 
-    if (vkCreateInstance(&ci, nullptr, &m_instance) != VK_SUCCESS)
-    {
-        throw std::runtime_error("VulkanContext: failed to create VkInstance");
-    }
+    checkVk(vkCreateInstance(&ci, nullptr, &m_instance), "VulkanContext: vkCreateInstance");
 
-    spdlog::info("VulkanContext: instance created (API {}.{}.{})",
-                 VK_VERSION_MAJOR(m_apiVersion),
-                 VK_VERSION_MINOR(m_apiVersion),
-                 VK_VERSION_PATCH(m_apiVersion));
+    spdlog::info("VulkanContext: instance created (API {}.{}.{})", VK_VERSION_MAJOR(m_apiVersion),
+                 VK_VERSION_MINOR(m_apiVersion), VK_VERSION_PATCH(m_apiVersion));
 
     if (m_config.enableValidation)
+    {
         createDebugMessenger();
+    }
 }
 
 void VulkanContext::createDebugMessenger()
 {
     VkDebugUtilsMessengerCreateInfoEXT ci{};
     ci.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    ci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                         VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-    ci.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                     VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+    ci.messageSeverity =
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    ci.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                      VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     ci.pfnUserCallback = debugCallback;
 
     auto fn = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
         vkGetInstanceProcAddr(m_instance, "vkCreateDebugUtilsMessengerEXT"));
 
-    if (!fn || fn(m_instance, &ci, nullptr, &m_debugMessenger) != VK_SUCCESS)
+    if (!fn)
+    {
         spdlog::warn("VulkanContext: could not create debug messenger");
+        return;
+    }
+
+    const VkResult result = fn(m_instance, &ci, nullptr, &m_debugMessenger);
+    if (result != VK_SUCCESS)
+    {
+        spdlog::warn("VulkanContext: vkCreateDebugUtilsMessengerEXT failed: {} ({})", vkResultName(result),
+                     static_cast<int>(result));
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Private — physical device
 // ---------------------------------------------------------------------------
 
-VulkanContext::QueueFamilies VulkanContext::findQueueFamilies(VkPhysicalDevice device,
-                                                               VkSurfaceKHR surface) const
+VulkanContext::QueueFamilies VulkanContext::findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) const
 {
     QueueFamilies result;
 
@@ -270,7 +301,7 @@ VulkanContext::QueueFamilies VulkanContext::findQueueFamilies(VkPhysicalDevice d
     for (uint32_t i = 0; i < count; ++i)
     {
         bool hasTransfer = families[i].queueFlags & VK_QUEUE_TRANSFER_BIT;
-        bool noGraphics = !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT);
+        bool noGraphics  = !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT);
         if (hasTransfer && noGraphics)
         {
             result.transfer = static_cast<int>(i);
@@ -284,7 +315,8 @@ VulkanContext::QueueFamilies VulkanContext::findQueueFamilies(VkPhysicalDevice d
         for (uint32_t i = 0; i < count; ++i)
         {
             VkBool32 presentSupport = VK_FALSE;
-            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+            checkVk(vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport),
+                    "VulkanContext: vkGetPhysicalDeviceSurfaceSupportKHR");
             if (presentSupport)
             {
                 result.present = static_cast<int>(i);
@@ -302,11 +334,15 @@ int VulkanContext::scoreDevice(VkPhysicalDevice device, VkSurfaceKHR surface) co
 
     // Must have a graphics queue
     if (families.graphics < 0)
+    {
         return -1;
+    }
 
     // If a surface was provided, must support present
     if (surface != VK_NULL_HANDLE && families.present < 0)
+    {
         return -1;
+    }
 
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(device, &props);
@@ -320,14 +356,16 @@ int VulkanContext::scoreDevice(VkPhysicalDevice device, VkSurfaceKHR surface) co
 void VulkanContext::pickPhysicalDevice(VkSurfaceKHR surface)
 {
     uint32_t count = 0;
-    vkEnumeratePhysicalDevices(m_instance, &count, nullptr);
+    checkVk(vkEnumeratePhysicalDevices(m_instance, &count, nullptr),
+            "VulkanContext: vkEnumeratePhysicalDevices(count)");
     if (count == 0)
     {
         throw std::runtime_error("VulkanContext: no Vulkan-capable GPUs found");
     }
 
     std::vector<VkPhysicalDevice> devices(count);
-    vkEnumeratePhysicalDevices(m_instance, &count, devices.data());
+    checkVk(vkEnumeratePhysicalDevices(m_instance, &count, devices.data()),
+            "VulkanContext: vkEnumeratePhysicalDevices(data)");
 
     int bestScore = -1;
     for (VkPhysicalDevice dev : devices)
@@ -335,7 +373,7 @@ void VulkanContext::pickPhysicalDevice(VkSurfaceKHR surface)
         int score = scoreDevice(dev, surface);
         if (score > bestScore)
         {
-            bestScore = score;
+            bestScore        = score;
             m_physicalDevice = dev;
         }
     }
@@ -349,22 +387,21 @@ void VulkanContext::pickPhysicalDevice(VkSurfaceKHR surface)
     m_deviceProperties11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES;
     m_deviceProperties12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES;
     m_deviceProperties12.pNext = &m_deviceProperties11;
-    m_deviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    m_deviceProperties2.pNext = &m_deviceProperties12;
+    m_deviceProperties2.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    m_deviceProperties2.pNext  = &m_deviceProperties12;
     vkGetPhysicalDeviceProperties2(m_physicalDevice, &m_deviceProperties2);
 
     // Query features via pNext chain
     m_deviceFeatures13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     m_deviceFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     m_deviceFeatures12.pNext = &m_deviceFeatures13;
-    m_deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    m_deviceFeatures2.pNext = &m_deviceFeatures12;
+    m_deviceFeatures2.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    m_deviceFeatures2.pNext  = &m_deviceFeatures12;
     vkGetPhysicalDeviceFeatures2(m_physicalDevice, &m_deviceFeatures2);
 
     vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &m_memProperties);
 
-    spdlog::info("VulkanContext: selected GPU '{}'",
-                 m_deviceProperties2.properties.deviceName);
+    spdlog::info("VulkanContext: selected GPU '{}'", m_deviceProperties2.properties.deviceName);
 }
 
 // ---------------------------------------------------------------------------
@@ -381,60 +418,59 @@ void VulkanContext::createDevice()
     {
         uniqueFamilies.push_back(families.transfer);
         m_hasDedicatedTransfer = true;
-        m_transferQueueFamily = families.transfer;
+        m_transferQueueFamily  = families.transfer;
     }
 
-    float queuePriority = 1.0f;
+    float                                queuePriority = 1.0f;
     std::vector<VkDeviceQueueCreateInfo> queueCIs;
     queueCIs.reserve(uniqueFamilies.size());
 
     for (int family : uniqueFamilies)
     {
         VkDeviceQueueCreateInfo qci{};
-        qci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        qci.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
         qci.queueFamilyIndex = static_cast<uint32_t>(family);
-        qci.queueCount = 1;
+        qci.queueCount       = 1;
         qci.pQueuePriorities = &queuePriority;
         queueCIs.push_back(qci);
     }
 
     // Enable device extensions
     for (const char *ext : m_config.extraDeviceExtensions)
+    {
         m_deviceExtensions.push_back(ext);
+    }
 
     // Enable features — chain 1.2 and 1.3 structs
     VkPhysicalDeviceVulkan13Features features13{};
-    features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-    features13.dynamicRendering = VK_TRUE;  // useful for framegraph
+    features13.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    features13.dynamicRendering = VK_TRUE; // useful for framegraph
     features13.synchronization2 = VK_TRUE;
 
     VkPhysicalDeviceVulkan12Features features12{};
-    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    features12.pNext = &features13;
-    features12.bufferDeviceAddress = VK_TRUE;
-    features12.descriptorIndexing = VK_TRUE;
-    features12.runtimeDescriptorArray = VK_TRUE;
+    features12.sType                                     = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.pNext                                     = &features13;
+    features12.bufferDeviceAddress                       = VK_TRUE;
+    features12.descriptorIndexing                        = VK_TRUE;
+    features12.runtimeDescriptorArray                    = VK_TRUE;
     features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
 
     VkPhysicalDeviceFeatures2 features2{};
-    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    features2.pNext = &features12;
+    features2.sType                      = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext                      = &features12;
     features2.features.samplerAnisotropy = VK_TRUE;
-    features2.features.geometryShader = VK_TRUE;
+    features2.features.geometryShader    = VK_TRUE;
 
     VkDeviceCreateInfo ci{};
-    ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    ci.pNext = &features2;
-    ci.queueCreateInfoCount = static_cast<uint32_t>(queueCIs.size());
-    ci.pQueueCreateInfos = queueCIs.data();
-    ci.enabledExtensionCount = static_cast<uint32_t>(m_deviceExtensions.size());
+    ci.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    ci.pNext                   = &features2;
+    ci.queueCreateInfoCount    = static_cast<uint32_t>(queueCIs.size());
+    ci.pQueueCreateInfos       = queueCIs.data();
+    ci.enabledExtensionCount   = static_cast<uint32_t>(m_deviceExtensions.size());
     ci.ppEnabledExtensionNames = m_deviceExtensions.data();
     // Note: pEnabledFeatures must be null when using VkPhysicalDeviceFeatures2 in pNext
 
-    if (vkCreateDevice(m_physicalDevice, &ci, nullptr, &m_device) != VK_SUCCESS)
-    {
-        throw std::runtime_error("VulkanContext: failed to create logical device");
-    }
+    checkVk(vkCreateDevice(m_physicalDevice, &ci, nullptr, &m_device), "VulkanContext: vkCreateDevice");
 
     // Retrieve queue handles
     m_graphicsQueues.resize(1);
@@ -443,24 +479,27 @@ void VulkanContext::createDevice()
     vkGetDeviceQueue(m_device, static_cast<uint32_t>(families.graphics), 0, &m_graphicsQueues[0]);
 
     if (m_hasDedicatedTransfer)
+    {
         vkGetDeviceQueue(m_device, static_cast<uint32_t>(m_transferQueueFamily), 0, &m_transferQueue);
+    }
 
     if (m_config.enableDebugNames)
     {
-        m_vkSetDebugUtilsObjectName =
-            reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
-                vkGetInstanceProcAddr(m_instance, "vkSetDebugUtilsObjectNameEXT"));
+        m_vkSetDebugUtilsObjectName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
+            vkGetInstanceProcAddr(m_instance, "vkSetDebugUtilsObjectNameEXT"));
         if (!m_vkSetDebugUtilsObjectName)
+        {
             spdlog::warn("VulkanContext: vkSetDebugUtilsObjectNameEXT not available — debug names disabled");
+        }
 
-        m_vkCmdBeginDebugUtilsLabel =
-            reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
-                vkGetDeviceProcAddr(m_device, "vkCmdBeginDebugUtilsLabelEXT"));
-        m_vkCmdEndDebugUtilsLabel =
-            reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
-                vkGetDeviceProcAddr(m_device, "vkCmdEndDebugUtilsLabelEXT"));
+        m_vkCmdBeginDebugUtilsLabel = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
+            vkGetDeviceProcAddr(m_device, "vkCmdBeginDebugUtilsLabelEXT"));
+        m_vkCmdEndDebugUtilsLabel = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
+            vkGetDeviceProcAddr(m_device, "vkCmdEndDebugUtilsLabelEXT"));
         if (!m_vkCmdBeginDebugUtilsLabel || !m_vkCmdEndDebugUtilsLabel)
+        {
             spdlog::warn("VulkanContext: debug label commands unavailable — pass labels disabled");
+        }
     }
 
     spdlog::info("VulkanContext: logical device created");
@@ -473,15 +512,17 @@ void VulkanContext::createDevice()
 bool VulkanContext::checkLayerSupport(const std::vector<const char *> &layers) const
 {
     uint32_t count = 0;
-    vkEnumerateInstanceLayerProperties(&count, nullptr);
+    checkVk(vkEnumerateInstanceLayerProperties(&count, nullptr),
+            "VulkanContext: vkEnumerateInstanceLayerProperties(count)");
     std::vector<VkLayerProperties> available(count);
-    vkEnumerateInstanceLayerProperties(&count, available.data());
+    checkVk(vkEnumerateInstanceLayerProperties(&count, available.data()),
+            "VulkanContext: vkEnumerateInstanceLayerProperties(data)");
 
     for (const char *name : layers)
     {
-        bool found = std::any_of(available.begin(), available.end(),
-                                 [name](const VkLayerProperties &p)
-                                 { return std::string(p.layerName) == name; });
+        bool found = std::any_of(available.begin(), available.end(), [name](const VkLayerProperties &p) {
+            return std::string(p.layerName) == name;
+        });
         if (!found)
         {
             spdlog::error("VulkanContext: layer '{}' not available", name);
@@ -494,15 +535,17 @@ bool VulkanContext::checkLayerSupport(const std::vector<const char *> &layers) c
 bool VulkanContext::checkInstanceExtensionSupport(const std::vector<const char *> &extensions) const
 {
     uint32_t count = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+    checkVk(vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr),
+            "VulkanContext: vkEnumerateInstanceExtensionProperties(count)");
     std::vector<VkExtensionProperties> available(count);
-    vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
+    checkVk(vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data()),
+            "VulkanContext: vkEnumerateInstanceExtensionProperties(data)");
 
     for (const char *name : extensions)
     {
-        bool found = std::any_of(available.begin(), available.end(),
-                                 [name](const VkExtensionProperties &p)
-                                 { return std::string(p.extensionName) == name; });
+        bool found = std::any_of(available.begin(), available.end(), [name](const VkExtensionProperties &p) {
+            return std::string(p.extensionName) == name;
+        });
         if (!found)
         {
             spdlog::error("VulkanContext: instance extension '{}' not available", name);
@@ -512,4 +555,4 @@ bool VulkanContext::checkInstanceExtensionSupport(const std::vector<const char *
     return true;
 }
 
-}  // namespace lr
+} // namespace lr

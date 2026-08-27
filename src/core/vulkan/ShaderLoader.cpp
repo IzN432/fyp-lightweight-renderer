@@ -1,4 +1,5 @@
 #include "ShaderLoader.hpp"
+#include "VkResultUtils.hpp"
 
 #include <spdlog/spdlog.h>
 
@@ -9,8 +10,7 @@
 namespace lr
 {
 
-ShaderModule::ShaderModule(VkDevice device, const std::filesystem::path &spvPath)
-    : m_device(device)
+ShaderModule::ShaderModule(VkDevice device, const std::filesystem::path &spvPath) : m_device(device)
 {
     std::ifstream file(spvPath, std::ios::binary | std::ios::ate);
     if (!file.is_open())
@@ -29,21 +29,16 @@ ShaderModule::ShaderModule(VkDevice device, const std::filesystem::path &spvPath
     file.read(reinterpret_cast<char *>(code.data()), static_cast<std::streamsize>(fileSize));
 
     VkShaderModuleCreateInfo ci{};
-    ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    ci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     ci.codeSize = fileSize;
-    ci.pCode = code.data();
+    ci.pCode    = code.data();
 
-    if (vkCreateShaderModule(m_device, &ci, nullptr, &m_module) != VK_SUCCESS)
-    {
-        throw std::runtime_error("ShaderModule: failed to create shader module for " + spvPath.string());
-    }
+    checkVk(vkCreateShaderModule(m_device, &ci, nullptr, &m_module),
+            "ShaderModule: vkCreateShaderModule for " + spvPath.string());
 
     spdlog::debug("ShaderModule: loaded {}", spvPath.string());
 }
 
-ShaderModule::~ShaderModule()
-{
-    vkDestroyShaderModule(m_device, m_module, nullptr);
-}
+ShaderModule::~ShaderModule() { vkDestroyShaderModule(m_device, m_module, nullptr); }
 
-}  // namespace lr
+} // namespace lr

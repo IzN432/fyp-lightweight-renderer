@@ -1,6 +1,7 @@
 #include "Renderer.hpp"
 
 #include "Swapchain.hpp"
+#include "VkResultUtils.hpp"
 
 #include <spdlog/spdlog.h>
 
@@ -9,112 +10,120 @@
 namespace lr
 {
 
-Renderer::Renderer(const VulkanContext &ctx, const Swapchain &swapchain,
-                   uint32_t framesInFlight)
-    : m_ctx(ctx)
+Renderer::Renderer(const VulkanContext &ctx, const Swapchain &swapchain, uint32_t framesInFlight) : m_ctx(ctx)
 {
+    if (framesInFlight == 0)
+    {
+        throw std::invalid_argument("Renderer: framesInFlight must be greater than zero");
+    }
+
     VkDevice device = ctx.getDevice();
     m_frames.resize(framesInFlight);
 
     VkSemaphoreCreateInfo semCI{};
     semCI.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    for (auto &frame : m_frames)
+    try
     {
-        VkCommandPoolCreateInfo poolCI{};
-        poolCI.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        poolCI.queueFamilyIndex = static_cast<uint32_t>(ctx.getGraphicsQueueFamily());
-        poolCI.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-
-        if (vkCreateCommandPool(device, &poolCI, nullptr, &frame.commandPool) != VK_SUCCESS)
+        for (auto &frame : m_frames)
         {
-            spdlog::error("Runtime error: throwing std::runtime_error");
-            throw std::runtime_error("Renderer: failed to create command pool");
+            VkCommandPoolCreateInfo poolCI{};
+            poolCI.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            poolCI.queueFamilyIndex = static_cast<uint32_t>(ctx.getGraphicsQueueFamily());
+            poolCI.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+
+            checkVk(vkCreateCommandPool(device, &poolCI, nullptr, &frame.commandPool), "Renderer: vkCreateCommandPool");
+
+            VkCommandBufferAllocateInfo allocInfo{};
+            allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+            allocInfo.commandPool        = frame.commandPool;
+            allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+            allocInfo.commandBufferCount = 1;
+
+            checkVk(vkAllocateCommandBuffers(device, &allocInfo, &frame.commandBuffer),
+                    "Renderer: vkAllocateCommandBuffers");
+
+            checkVk(vkCreateSemaphore(device, &semCI, nullptr, &frame.imageAvailable),
+                    "Renderer: vkCreateSemaphore(imageAvailable)");
+
+            VkFenceCreateInfo fenceCI{};
+            fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+            fenceCI.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+            checkVk(vkCreateFence(device, &fenceCI, nullptr, &frame.inFlight), "Renderer: vkCreateFence");
         }
 
-        VkCommandBufferAllocateInfo allocInfo{};
-        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool        = frame.commandPool;
-        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandBufferCount = 1;
-
-        if (vkAllocateCommandBuffers(device, &allocInfo, &frame.commandBuffer) != VK_SUCCESS)
+        // One renderFinished semaphore per swapchain image — indexed by image index so
+        // the presentation engine always releases the semaphore before we reuse it.
+        m_renderFinishedPerImage.resize(swapchain.imageCount());
+        for (auto &sem : m_renderFinishedPerImage)
         {
-            spdlog::error("Runtime error: throwing std::runtime_error");
-            throw std::runtime_error("Renderer: failed to allocate command buffer");
+            checkVk(vkCreateSemaphore(device, &semCI, nullptr, &sem), "Renderer: vkCreateSemaphore(renderFinished)");
         }
-
-        if (vkCreateSemaphore(device, &semCI, nullptr, &frame.imageAvailable) != VK_SUCCESS)
-        {
-            spdlog::error("Runtime error: throwing std::runtime_error");
-            throw std::runtime_error("Renderer: failed to create semaphore");
-        }
-
-        VkFenceCreateInfo fenceCI{};
-        fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fenceCI.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-        if (vkCreateFence(device, &fenceCI, nullptr, &frame.inFlight) != VK_SUCCESS)
-        {
-            spdlog::error("Runtime error: throwing std::runtime_error");
-            throw std::runtime_error("Renderer: failed to create fence");
-        }
+    } catch (...)
+    {
+        destroyResources();
+        throw;
     }
 
-    // One renderFinished semaphore per swapchain image — indexed by image index so
-    // the presentation engine always releases the semaphore before we reuse it.
-    m_renderFinishedPerImage.resize(swapchain.imageCount());
-    for (auto &sem : m_renderFinishedPerImage)
-        if (vkCreateSemaphore(device, &semCI, nullptr, &sem) != VK_SUCCESS)
-        {
-            spdlog::error("Runtime error: throwing std::runtime_error");
-            throw std::runtime_error("Renderer: failed to create renderFinished semaphore");
-        }
-
-    spdlog::info("Renderer: {} frame(s) in flight, {} swapchain image(s)",
-                 framesInFlight, swapchain.imageCount());
+    spdlog::info("Renderer: {} frame(s) in flight, {} swapchain image(s)", framesInFlight, swapchain.imageCount());
 }
 
-Renderer::~Renderer()
+Renderer::~Renderer() { destroyResources(); }
+
+void Renderer::destroyResources() noexcept
 {
     VkDevice device = m_ctx.getDevice();
     for (auto &sem : m_renderFinishedPerImage)
-        vkDestroySemaphore(device, sem, nullptr);
+    {
+        if (sem != VK_NULL_HANDLE)
+        {
+            vkDestroySemaphore(device, sem, nullptr);
+        }
+    }
     for (auto &frame : m_frames)
     {
-        vkDestroyFence(device, frame.inFlight, nullptr);
-        vkDestroySemaphore(device, frame.imageAvailable, nullptr);
-        vkDestroyCommandPool(device, frame.commandPool, nullptr);
+        if (frame.inFlight != VK_NULL_HANDLE)
+        {
+            vkDestroyFence(device, frame.inFlight, nullptr);
+        }
+        if (frame.imageAvailable != VK_NULL_HANDLE)
+        {
+            vkDestroySemaphore(device, frame.imageAvailable, nullptr);
+        }
+        if (frame.commandPool != VK_NULL_HANDLE)
+        {
+            vkDestroyCommandPool(device, frame.commandPool, nullptr);
+        }
     }
 }
 
 Renderer::FrameResult Renderer::beginFrame(Swapchain &swapchain)
 {
-    VkDevice device = m_ctx.getDevice();
-    FrameData &frame = m_frames[m_currentFrame];
+    VkDevice   device = m_ctx.getDevice();
+    FrameData &frame  = m_frames[m_currentFrame];
 
     // Wait for the previous use of this frame slot to finish
-    vkWaitForFences(device, 1, &frame.inFlight, VK_TRUE, UINT64_MAX);
+    checkVk(vkWaitForFences(device, 1, &frame.inFlight, VK_TRUE, UINT64_MAX), "Renderer: vkWaitForFences");
 
     // Acquire swapchain image
     uint32_t imageIndex = swapchain.acquireNextImage(frame.imageAvailable);
     if (imageIndex == UINT32_MAX)
+    {
         return {CommandBuffer(frame.commandBuffer), UINT32_MAX};
+    }
 
     // Only reset the fence once we know we're going to submit work
-    vkResetFences(device, 1, &frame.inFlight);
+    checkVk(vkResetFences(device, 1, &frame.inFlight), "Renderer: vkResetFences");
 
     // Reset pool and begin recording
-    vkResetCommandPool(device, frame.commandPool, 0);
+    checkVk(vkResetCommandPool(device, frame.commandPool, 0), "Renderer: vkResetCommandPool");
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    if (vkBeginCommandBuffer(frame.commandBuffer, &beginInfo) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Renderer: failed to begin command buffer");
-    }
+    checkVk(vkBeginCommandBuffer(frame.commandBuffer, &beginInfo), "Renderer: vkBeginCommandBuffer");
 
     return {CommandBuffer(frame.commandBuffer), imageIndex};
 }
@@ -123,10 +132,7 @@ bool Renderer::endFrame(Swapchain &swapchain, uint32_t imageIndex)
 {
     FrameData &frame = m_frames[m_currentFrame];
 
-    if (vkEndCommandBuffer(frame.commandBuffer) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Renderer: failed to end command buffer");
-    }
+    checkVk(vkEndCommandBuffer(frame.commandBuffer), "Renderer: vkEndCommandBuffer");
 
     // Submit
     VkCommandBufferSubmitInfo cmdSubmit{};
@@ -152,10 +158,7 @@ bool Renderer::endFrame(Swapchain &swapchain, uint32_t imageIndex)
     submitInfo.signalSemaphoreInfoCount = 1;
     submitInfo.pSignalSemaphoreInfos    = &signalInfo;
 
-    if (vkQueueSubmit2(m_ctx.getGraphicsQueue(), 1, &submitInfo, frame.inFlight) != VK_SUCCESS)
-    {
-        throw std::runtime_error("Renderer: failed to submit command buffer");
-    }
+    checkVk(vkQueueSubmit2(m_ctx.getGraphicsQueue(), 1, &submitInfo, frame.inFlight), "Renderer: vkQueueSubmit2");
 
     // Present
     bool ok = swapchain.present(imageIndex, m_renderFinishedPerImage[imageIndex]);
@@ -164,37 +167,36 @@ bool Renderer::endFrame(Swapchain &swapchain, uint32_t imageIndex)
     return ok;
 }
 
-void Renderer::transitionForPresent(CommandBuffer &cmd, VkImage image,
-                                     VkImageLayout oldLayout)
+void Renderer::transitionForPresent(CommandBuffer &cmd, VkImage image, VkImageLayout oldLayout)
 {
     VkPipelineStageFlags2 srcStage;
     VkAccessFlags2        srcAccess;
 
     switch (oldLayout)
     {
-    case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-        srcStage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        srcAccess = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        break;
-    case VK_IMAGE_LAYOUT_GENERAL:
-        srcStage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        srcAccess = VK_ACCESS_2_SHADER_WRITE_BIT;
-        break;
-    default:
-        srcStage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        srcAccess = VK_ACCESS_2_MEMORY_WRITE_BIT;
-        break;
+        case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+            srcStage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            srcAccess = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+            break;
+        case VK_IMAGE_LAYOUT_GENERAL:
+            srcStage  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            srcAccess = VK_ACCESS_2_SHADER_WRITE_BIT;
+            break;
+        default:
+            srcStage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            srcAccess = VK_ACCESS_2_MEMORY_WRITE_BIT;
+            break;
     }
 
     VkImageMemoryBarrier2 barrier{};
-    barrier.sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-    barrier.srcStageMask  = srcStage;
-    barrier.srcAccessMask = srcAccess;
-    barrier.dstStageMask  = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_2_NONE;
-    barrier.oldLayout     = oldLayout;
-    barrier.newLayout     = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    barrier.image         = image;
+    barrier.sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.srcStageMask     = srcStage;
+    barrier.srcAccessMask    = srcAccess;
+    barrier.dstStageMask     = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+    barrier.dstAccessMask    = VK_ACCESS_2_NONE;
+    barrier.oldLayout        = oldLayout;
+    barrier.newLayout        = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barrier.image            = image;
     barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
     VkDependencyInfo dep{};
@@ -204,4 +206,4 @@ void Renderer::transitionForPresent(CommandBuffer &cmd, VkImage image,
     vkCmdPipelineBarrier2(cmd.get(), &dep);
 }
 
-}  // namespace lr
+} // namespace lr

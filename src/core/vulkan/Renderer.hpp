@@ -20,17 +20,16 @@ class Renderer
 public:
     // framesInFlight — how many frames the CPU can prepare ahead of the GPU.
     // 2 is standard (one being rendered, one being recorded).
-    Renderer(const VulkanContext &ctx, const Swapchain &swapchain,
-             uint32_t framesInFlight = 2);
+    Renderer(const VulkanContext &ctx, const Swapchain &swapchain, uint32_t framesInFlight = 2);
     ~Renderer();
 
-    Renderer(const Renderer &) = delete;
+    Renderer(const Renderer &)            = delete;
     Renderer &operator=(const Renderer &) = delete;
 
     struct FrameResult
     {
         CommandBuffer cmd;
-        uint32_t      imageIndex;  // UINT32_MAX if swapchain is out-of-date
+        uint32_t      imageIndex; // UINT32_MAX if swapchain is out-of-date
     };
 
     // Wait for the current frame's fence, acquire a swapchain image, begin
@@ -49,6 +48,8 @@ public:
     uint32_t currentFrame() const { return m_currentFrame; }
 
 private:
+    void destroyResources() noexcept;
+
     struct FrameData
     {
         VkCommandPool   commandPool    = VK_NULL_HANDLE;
@@ -57,10 +58,10 @@ private:
         VkFence         inFlight       = VK_NULL_HANDLE;
     };
 
-    const VulkanContext &m_ctx;
-    std::vector<FrameData>  m_frames;
-    std::vector<VkSemaphore> m_renderFinishedPerImage;  // indexed by swapchain image index
-    uint32_t m_currentFrame = 0;
+    const VulkanContext     &m_ctx;
+    std::vector<FrameData>   m_frames;
+    std::vector<VkSemaphore> m_renderFinishedPerImage; // indexed by swapchain image index
+    uint32_t                 m_currentFrame = 0;
 };
 
-}  // namespace lr
+} // namespace lr

@@ -1,111 +1,153 @@
 #include "ImageReadback.hpp"
+#include "core/vulkan/VkResultUtils.hpp"
 
 #include <cstring>
+#include <limits>
+#include <stdexcept>
 
 namespace lr
 {
 
-ImageReadback::ImageReadback(const VulkanContext &ctx, Allocator &alloc)
-    : m_ctx(ctx), m_alloc(alloc)
+ImageReadback::ImageReadback(const VulkanContext &ctx, Allocator &alloc) : m_ctx(ctx), m_alloc(alloc)
 {
     VkCommandPoolCreateInfo ci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-    ci.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT |
-                          VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    ci.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     ci.queueFamilyIndex = static_cast<uint32_t>(m_ctx.getGraphicsQueueFamily());
-    vkCreateCommandPool(m_ctx.getDevice(), &ci, nullptr, &m_commandPool);
+    checkVk(vkCreateCommandPool(m_ctx.getDevice(), &ci, nullptr, &m_commandPool), "ImageReadback: vkCreateCommandPool");
 
-    m_staging      = m_alloc.createBuffer(sizeof(uint32_t),
-                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                          VMA_MEMORY_USAGE_CPU_ONLY);
-    m_stagingPixels = 1;
+    try
+    {
+        m_staging = m_alloc.createBuffer(sizeof(uint32_t), VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+        m_stagingPixels = 1;
+    } catch (...)
+    {
+        vkDestroyCommandPool(m_ctx.getDevice(), m_commandPool, nullptr);
+        m_commandPool = VK_NULL_HANDLE;
+        throw;
+    }
 }
 
 ImageReadback::~ImageReadback()
 {
-    vkDestroyCommandPool(m_ctx.getDevice(), m_commandPool, nullptr);
+    if (m_commandPool != VK_NULL_HANDLE)
+    {
+        vkDestroyCommandPool(m_ctx.getDevice(), m_commandPool, nullptr);
+    }
     m_alloc.destroy(m_staging);
 }
 
 void ImageReadback::ensureStagingCapacity(uint32_t pixelCount)
 {
     if (pixelCount <= m_stagingPixels)
+    {
         return;
+    }
+    AllocatedBuffer replacement = m_alloc.createBuffer(static_cast<VkDeviceSize>(pixelCount) * sizeof(uint32_t),
+                                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
     m_alloc.destroy(m_staging);
-    m_staging       = m_alloc.createBuffer(pixelCount * sizeof(uint32_t),
-                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                           VMA_MEMORY_USAGE_CPU_ONLY);
+    m_staging       = replacement;
     m_stagingPixels = pixelCount;
 }
 
-std::vector<uint32_t> ImageReadback::readRect(const ResourceRegistry &resources,
-                                               const std::string &imageName,
-                                               uint32_t x, uint32_t y,
-                                               uint32_t width, uint32_t height)
+std::vector<uint32_t> ImageReadback::readRect(const ResourceRegistry &resources, const std::string &imageName,
+                                              uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
     const AllocatedImage *img = resources.getImage(imageName);
     if (!img)
+    {
         return {};
+    }
+
+    if (width == 0 || height == 0)
+    {
+        return {};
+    }
+    if (x >= img->extent.width || y >= img->extent.height || width > img->extent.width - x ||
+        height > img->extent.height - y)
+    {
+        throw std::out_of_range("ImageReadback: rectangle is outside the source image");
+    }
+    if (width > std::numeric_limits<uint32_t>::max() / height)
+    {
+        throw std::overflow_error("ImageReadback: rectangle pixel count overflows uint32_t");
+    }
 
     const uint32_t pixelCount = width * height;
     ensureStagingCapacity(pixelCount);
 
-    VkCommandBuffer cmd;
+    VkCommandBuffer             cmd = VK_NULL_HANDLE;
     VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     ai.commandPool        = m_commandPool;
     ai.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandBufferCount = 1;
-    vkAllocateCommandBuffers(m_ctx.getDevice(), &ai, &cmd);
+    checkVk(vkAllocateCommandBuffers(m_ctx.getDevice(), &ai, &cmd), "ImageReadback: vkAllocateCommandBuffers");
 
-    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &bi);
+    VkFence fence     = VK_NULL_HANDLE;
+    bool    submitted = false;
+    try
+    {
 
-    VkImageMemoryBarrier2 toSrc{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-    toSrc.srcStageMask       = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    toSrc.srcAccessMask      = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    toSrc.dstStageMask       = VK_PIPELINE_STAGE_2_COPY_BIT;
-    toSrc.dstAccessMask      = VK_ACCESS_2_TRANSFER_READ_BIT;
-    toSrc.oldLayout          = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    toSrc.newLayout          = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    toSrc.image              = img->image;
-    toSrc.subresourceRange   = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        checkVk(vkBeginCommandBuffer(cmd, &bi), "ImageReadback: vkBeginCommandBuffer");
 
-    VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-    dep.imageMemoryBarrierCount = 1;
-    dep.pImageMemoryBarriers    = &toSrc;
-    vkCmdPipelineBarrier2(cmd, &dep);
+        VkImageMemoryBarrier2 toSrc{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+        toSrc.srcStageMask     = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        toSrc.srcAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        toSrc.dstStageMask     = VK_PIPELINE_STAGE_2_COPY_BIT;
+        toSrc.dstAccessMask    = VK_ACCESS_2_TRANSFER_READ_BIT;
+        toSrc.oldLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        toSrc.newLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        toSrc.image            = img->image;
+        toSrc.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    VkBufferImageCopy region{};
-    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.imageOffset      = {static_cast<int32_t>(x), static_cast<int32_t>(y), 0};
-    region.imageExtent      = {width, height, 1};
-    vkCmdCopyImageToBuffer(cmd, img->image,
-                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           m_staging.buffer, 1, &region);
+        VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        dep.imageMemoryBarrierCount = 1;
+        dep.pImageMemoryBarriers    = &toSrc;
+        vkCmdPipelineBarrier2(cmd, &dep);
 
-    VkImageMemoryBarrier2 toAttach  = toSrc;
-    toAttach.srcStageMask  = VK_PIPELINE_STAGE_2_COPY_BIT;
-    toAttach.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
-    toAttach.dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    toAttach.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    toAttach.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    toAttach.newLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    dep.pImageMemoryBarriers = &toAttach;
-    vkCmdPipelineBarrier2(cmd, &dep);
+        VkBufferImageCopy region{};
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageOffset      = {static_cast<int32_t>(x), static_cast<int32_t>(y), 0};
+        region.imageExtent      = {width, height, 1};
+        vkCmdCopyImageToBuffer(cmd, img->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_staging.buffer, 1, &region);
 
-    vkEndCommandBuffer(cmd);
+        VkImageMemoryBarrier2 toAttach = toSrc;
+        toAttach.srcStageMask          = VK_PIPELINE_STAGE_2_COPY_BIT;
+        toAttach.srcAccessMask         = VK_ACCESS_2_TRANSFER_READ_BIT;
+        toAttach.dstStageMask          = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        toAttach.dstAccessMask         = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        toAttach.oldLayout             = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        toAttach.newLayout             = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        dep.pImageMemoryBarriers       = &toAttach;
+        vkCmdPipelineBarrier2(cmd, &dep);
 
-    VkFence fence;
-    VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    vkCreateFence(m_ctx.getDevice(), &fi, nullptr, &fence);
+        checkVk(vkEndCommandBuffer(cmd), "ImageReadback: vkEndCommandBuffer");
 
-    VkCommandBufferSubmitInfo cbInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
-    cbInfo.commandBuffer = cmd;
-    VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
-    submit.commandBufferInfoCount = 1;
-    submit.pCommandBufferInfos    = &cbInfo;
-    vkQueueSubmit2(m_ctx.getGraphicsQueue(), 1, &submit, fence);
-    vkWaitForFences(m_ctx.getDevice(), 1, &fence, VK_TRUE, UINT64_MAX);
+        VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        checkVk(vkCreateFence(m_ctx.getDevice(), &fi, nullptr, &fence), "ImageReadback: vkCreateFence");
+
+        VkCommandBufferSubmitInfo cbInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+        cbInfo.commandBuffer = cmd;
+        VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+        submit.commandBufferInfoCount = 1;
+        submit.pCommandBufferInfos    = &cbInfo;
+        checkVk(vkQueueSubmit2(m_ctx.getGraphicsQueue(), 1, &submit, fence), "ImageReadback: vkQueueSubmit2");
+        submitted = true;
+        checkVk(vkWaitForFences(m_ctx.getDevice(), 1, &fence, VK_TRUE, UINT64_MAX), "ImageReadback: vkWaitForFences");
+    } catch (...)
+    {
+        if (submitted)
+        {
+            (void)vkDeviceWaitIdle(m_ctx.getDevice());
+        }
+        if (fence != VK_NULL_HANDLE)
+        {
+            vkDestroyFence(m_ctx.getDevice(), fence, nullptr);
+        }
+        vkFreeCommandBuffers(m_ctx.getDevice(), m_commandPool, 1, &cmd);
+        throw;
+    }
     vkDestroyFence(m_ctx.getDevice(), fence, nullptr);
     vkFreeCommandBuffers(m_ctx.getDevice(), m_commandPool, 1, &cmd);
 
@@ -114,12 +156,11 @@ std::vector<uint32_t> ImageReadback::readRect(const ResourceRegistry &resources,
     return result;
 }
 
-uint32_t ImageReadback::readPixel(const ResourceRegistry &resources,
-                                   const std::string &imageName,
-                                   uint32_t x, uint32_t y)
+uint32_t ImageReadback::readPixel(const ResourceRegistry &resources, const std::string &imageName, uint32_t x,
+                                  uint32_t y)
 {
     auto pixels = readRect(resources, imageName, x, y, 1, 1);
     return pixels.empty() ? kNoData : pixels[0];
 }
 
-}  // namespace lr
+} // namespace lr

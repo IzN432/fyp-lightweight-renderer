@@ -1,6 +1,7 @@
 #include "ComputePipeline.hpp"
 
 #include "core/vulkan/ShaderLoader.hpp"
+#include "core/vulkan/VkResultUtils.hpp"
 
 #include <spdlog/spdlog.h>
 
@@ -9,9 +10,7 @@
 namespace lr
 {
 
-ComputePipeline::ComputePipeline(const VulkanContext &ctx,
-                                 const std::string   &shaderPath,
-                                 VkPipelineLayout     layout)
+ComputePipeline::ComputePipeline(const VulkanContext &ctx, const std::string &shaderPath, VkPipelineLayout layout)
     : m_ctx(ctx)
 {
     VkDevice device = ctx.getDevice();
@@ -29,21 +28,12 @@ ComputePipeline::ComputePipeline(const VulkanContext &ctx,
     pipelineCI.stage  = stageCI;
     pipelineCI.layout = layout;
 
-    const VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineCI,
-                                                     nullptr, &m_pipeline);
-    if (result != VK_SUCCESS)
-    {
-        spdlog::error("ComputePipeline: vkCreateComputePipelines failed for '{}' (VkResult={})",
-                      shaderPath, static_cast<int>(result));
-        throw std::runtime_error("ComputePipeline: failed to create pipeline");
-    }
+    checkVk(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &m_pipeline),
+            "ComputePipeline: vkCreateComputePipelines for " + shaderPath);
 
     spdlog::debug("ComputePipeline: created");
 }
 
-ComputePipeline::~ComputePipeline()
-{
-    vkDestroyPipeline(m_ctx.getDevice(), m_pipeline, nullptr);
-}
+ComputePipeline::~ComputePipeline() { vkDestroyPipeline(m_ctx.getDevice(), m_pipeline, nullptr); }
 
-}  // namespace lr
+} // namespace lr
