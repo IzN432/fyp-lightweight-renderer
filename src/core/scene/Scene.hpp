@@ -13,6 +13,8 @@ class Scene
 public:
     Scene() = default;
 
+    void onGUI();
+
     SceneObject& createSceneObject() 
     {
         m_sceneObjects.push_back(std::make_unique<SceneObject>());

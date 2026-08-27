@@ -80,6 +80,7 @@ add_library(lr_core STATIC
 
     src/core/scene/Mesh.cpp
     src/core/scene/AreaLightVisual.cpp
+    src/core/scene/Scene.cpp
     src/core/scene/SceneManager.cpp
 
     src/core/loaders/ObjLoader.cpp
