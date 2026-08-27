@@ -321,7 +321,7 @@ void FrameGraph::resize(VkExtent2D newExtent)
 void FrameGraph::sortPasses()
 {
     m_definition = framegraph::translatePassDescriptions(m_passes);
-    m_executionPlan = framegraph::buildLegacyExecutionPlan(m_definition);
+    m_executionPlan = framegraph::buildExecutionPlan(m_definition);
 
     m_sortedIndices.clear();
     m_sortedIndices.reserve(m_executionPlan.orderedPasses.size());

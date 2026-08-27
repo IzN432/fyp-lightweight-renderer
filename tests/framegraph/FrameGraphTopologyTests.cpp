@@ -47,16 +47,17 @@ lr::BindingDesc read(std::string resource)
     };
 }
 
-void passOrdering()
+void declarationOrderDefinesReadBeforeWrite()
 {
     std::vector<lr::PassDesc> passes;
-    auto &consumer = lr::framegraph::appendPass(passes, "consumer");
-    consumer.bindings.push_back(read("lighting"));
-    auto &producer = lr::framegraph::appendPass(passes, "producer");
-    producer.writes.push_back({.name = "lighting", .format = VK_FORMAT_R16G16B16A16_SFLOAT});
+    auto &reader = lr::framegraph::appendPass(passes, "reader");
+    reader.bindings.push_back(read("history"));
+    auto &writer = lr::framegraph::appendPass(passes, "writer");
+    writer.writes.push_back({.name = "history", .format = VK_FORMAT_R16G16B16A16_SFLOAT});
 
     const auto order = lr::framegraph::sortPasses(passes);
-    require(order == std::vector<size_t>({1, 0}), "producer must execute before its consumer");
+    require(order == std::vector<size_t>({0, 1}),
+            "a read declared before a write is an initial read followed by a WAR dependency");
 }
 
 void unknownDependency()
@@ -221,7 +222,7 @@ void graphDefinitionTranslation()
             "explicit dependency names should resolve to stable pass ids");
 }
 
-void executionPlanMatchesCompatibilitySort()
+void executionPlanMatchesPassDescFrontend()
 {
     std::vector<lr::PassDesc> passes;
     auto &consumer = lr::framegraph::appendPass(passes, "consumer");
@@ -230,7 +231,7 @@ void executionPlanMatchesCompatibilitySort()
     producer.writes.push_back({.name = "lighting", .format = VK_FORMAT_R16G16B16A16_SFLOAT});
 
     const auto graph = lr::framegraph::translatePassDescriptions(passes);
-    const auto plan = lr::framegraph::buildLegacyExecutionPlan(graph);
+    const auto plan = lr::framegraph::buildExecutionPlan(graph);
     const auto compatibilityOrder = lr::framegraph::sortPasses(passes);
 
     require(plan.orderedPasses.size() == compatibilityOrder.size(),
@@ -247,7 +248,7 @@ void executionPlanMatchesCompatibilitySort()
 int main()
 {
     const std::vector<Test> tests = {
-        {"pass ordering", passOrdering},
+        {"read before write declaration order", declarationOrderDefinesReadBeforeWrite},
         {"unknown dependencies", unknownDependency},
         {"cycle detection", cycleDetection},
         {"duplicate pass names", duplicatePassNames},
@@ -255,7 +256,7 @@ int main()
         {"relative and absolute extents", relativeAndAbsoluteExtents},
         {"deterministic debug dump", deterministicDebugDump},
         {"graph definition translation", graphDefinitionTranslation},
-        {"execution plan compatibility", executionPlanMatchesCompatibilitySort},
+        {"execution plan PassDesc frontend", executionPlanMatchesPassDescFrontend},
     };
 
     size_t failures = 0;

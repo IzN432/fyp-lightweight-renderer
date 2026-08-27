@@ -32,8 +32,8 @@ struct BarrierDebugInfo
 
 PassDesc &appendPass(std::vector<PassDesc> &passes, std::string name);
 
-// These functions intentionally reproduce today's behavior. They form the
-// characterization seam that later frame-graph changes will be tested against.
+// Compatibility frontend for the current PassDesc API. Sorting is delegated
+// to the backend-independent compiler so every frontend shares dependency rules.
 std::vector<size_t> sortPasses(std::span<const PassDesc> passes);
 
 std::vector<PlannedImage> planAttachmentImages(

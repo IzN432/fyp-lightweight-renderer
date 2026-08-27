@@ -72,7 +72,7 @@ PassDesc &appendPass(std::vector<PassDesc> &passes, std::string name)
 std::vector<size_t> sortPasses(std::span<const PassDesc> passes)
 {
     const GraphDefinition graph = translatePassDescriptions(passes);
-    const ExecutionPlan plan = buildLegacyExecutionPlan(graph);
+    const ExecutionPlan plan = buildExecutionPlan(graph);
 
     std::vector<size_t> sorted;
     sorted.reserve(plan.orderedPasses.size());

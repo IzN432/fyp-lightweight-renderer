@@ -14,8 +14,12 @@ struct ExecutionPlan
     std::vector<PassId> orderedPasses;
 };
 
-// Compatibility policy for the current renderer. Step 2 will replace this
-// with full RAW/WAR/WAW inference while retaining GraphDefinition unchanged.
-ExecutionPlan buildLegacyExecutionPlan(const GraphDefinition &graph);
+// Builds a deterministic execution order from logical resource accesses.
+// Accesses are interpreted in declaration order:
+//   read       depends on the most recent writer (RAW),
+//   write      depends on the most recent writer (WAW) and all readers since it (WAR),
+//   read-write applies both rules before becoming the new writer.
+// Pass declaration order breaks ties between otherwise independent passes.
+ExecutionPlan buildExecutionPlan(const GraphDefinition &graph);
 
 } // namespace lr::framegraph

@@ -1,68 +1,104 @@
 #include "GraphCompiler.hpp"
 
+#include <functional>
+#include <optional>
 #include <queue>
 #include <stdexcept>
 #include <unordered_set>
 
-namespace
-{
-
-bool isDescriptorUsage(lr::framegraph::ResourceUsage usage)
-{
-    using lr::framegraph::ResourceUsage;
-    return usage == ResourceUsage::SampledImage || usage == ResourceUsage::StorageImage ||
-           usage == ResourceUsage::UniformBuffer || usage == ResourceUsage::StorageBuffer ||
-           usage == ResourceUsage::Unknown;
-}
-
-} // namespace
-
 namespace lr::framegraph
 {
 
-ExecutionPlan buildLegacyExecutionPlan(const GraphDefinition &graph)
+ExecutionPlan buildExecutionPlan(const GraphDefinition &graph)
 {
-    const size_t count = graph.passes().size();
-    std::vector<PassId> resourceProducers(graph.resources().size());
+    const size_t passCount = graph.passes().size();
+    const size_t resourceCount = graph.resources().size();
 
+    struct AccessHistory
+    {
+        std::optional<PassId> lastWriter;
+        std::vector<PassId> readersSinceLastWrite;
+    };
+
+    std::vector<AccessHistory> histories(resourceCount);
+    std::vector<std::unordered_set<uint32_t>> outEdges(passCount);
+
+    const auto addEdge = [&](PassId source, PassId destination) {
+        if (source != destination)
+        {
+            outEdges[source.value].insert(destination.value);
+        }
+    };
+
+    // A frontend may mention the same resource more than once in one pass
+    // (for example through two descriptor bindings). Collapse those mentions
+    // before updating history so a pass can never create a dependency on itself.
     for (const PassNode &pass : graph.passes())
     {
+        struct CombinedAccess
+        {
+            bool reads = false;
+            bool writes = false;
+        };
+
+        std::vector<CombinedAccess> combined(resourceCount);
         for (const ResourceAccess &access : pass.accesses)
         {
-            const bool legacyWrite = access.usage == ResourceUsage::ColorOrDepthAttachment ||
-                                     (isDescriptorUsage(access.usage) &&
-                                      access.mode != AccessMode::Read);
-            if (legacyWrite)
-            {
-                resourceProducers[access.resource.value] = pass.id;
-            }
+            CombinedAccess &intent = combined[access.resource.value];
+            intent.reads |= access.mode != AccessMode::Write;
+            intent.writes |= access.mode != AccessMode::Read;
         }
-    }
 
-    std::vector<std::unordered_set<uint32_t>> outEdges(count);
-    for (const PassNode &consumer : graph.passes())
-    {
-        for (const ResourceAccess &access : consumer.accesses)
+        for (uint32_t resourceIndex = 0; resourceIndex < resourceCount; ++resourceIndex)
         {
-            if (!isDescriptorUsage(access.usage) || access.mode != AccessMode::Read)
+            const CombinedAccess intent = combined[resourceIndex];
+            if (!intent.reads && !intent.writes)
             {
                 continue;
             }
 
-            const PassId producer = resourceProducers[access.resource.value];
-            if (producer && producer != consumer.id)
-            {
-                outEdges[producer.value].insert(consumer.id.value);
-            }
-        }
+            AccessHistory &history = histories[resourceIndex];
 
-        for (PassId dependency : consumer.explicitDependencies)
-        {
-            outEdges[dependency.value].insert(consumer.id.value);
+            // RAW: this pass consumes the value produced by the latest writer.
+            if (intent.reads && history.lastWriter)
+            {
+                addEdge(*history.lastWriter, pass.id);
+            }
+
+            if (intent.writes)
+            {
+                // WAW: preserve the order of successive writes.
+                if (history.lastWriter)
+                {
+                    addEdge(*history.lastWriter, pass.id);
+                }
+
+                // WAR: do not overwrite a value until all preceding readers
+                // that consumed it have completed.
+                for (PassId reader : history.readersSinceLastWrite)
+                {
+                    addEdge(reader, pass.id);
+                }
+
+                history.readersSinceLastWrite.clear();
+                history.lastWriter = pass.id;
+            }
+            else
+            {
+                history.readersSinceLastWrite.push_back(pass.id);
+            }
         }
     }
 
-    std::vector<size_t> inDegree(count, 0);
+    for (const PassNode &pass : graph.passes())
+    {
+        for (PassId dependency : pass.explicitDependencies)
+        {
+            addEdge(dependency, pass.id);
+        }
+    }
+
+    std::vector<size_t> inDegree(passCount, 0);
     for (const auto &edges : outEdges)
     {
         for (uint32_t destination : edges)
@@ -71,8 +107,10 @@ ExecutionPlan buildLegacyExecutionPlan(const GraphDefinition &graph)
         }
     }
 
-    std::queue<uint32_t> ready;
-    for (uint32_t index = 0; index < count; ++index)
+    // Always choose the earliest-declared ready pass. This makes compilation
+    // reproducible even though edge de-duplication uses unordered sets.
+    std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<>> ready;
+    for (uint32_t index = 0; index < passCount; ++index)
     {
         if (inDegree[index] == 0)
         {
@@ -81,10 +119,10 @@ ExecutionPlan buildLegacyExecutionPlan(const GraphDefinition &graph)
     }
 
     ExecutionPlan plan;
-    plan.orderedPasses.reserve(count);
+    plan.orderedPasses.reserve(passCount);
     while (!ready.empty())
     {
-        const uint32_t pass = ready.front();
+        const uint32_t pass = ready.top();
         ready.pop();
         plan.orderedPasses.push_back(PassId{pass});
 
@@ -97,7 +135,7 @@ ExecutionPlan buildLegacyExecutionPlan(const GraphDefinition &graph)
         }
     }
 
-    if (plan.orderedPasses.size() != count)
+    if (plan.orderedPasses.size() != passCount)
     {
         throw std::runtime_error("FrameGraph: cycle detected in pass dependencies");
     }
