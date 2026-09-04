@@ -42,10 +42,10 @@ public:
     SceneManager(ResourceRegistry &registry, uint32_t materialCapacity,
                  std::function<Material()> defaultMaterialFactory);
 
-    void setScene(Scene& scene) { m_scene = &scene; }
-    Scene& scene() { return *m_scene; }
+    void   setScene(Scene &scene) { m_scene = &scene; }
+    Scene &scene() { return *m_scene; }
 
-    MaterialStore& materialStore() { return m_materialStore; }
+    MaterialStore &materialStore() { return m_materialStore; }
 
     // The scene's single non-light-visual mesh — its Transform is applied via the model matrix at
     // draw time (unlike light visuals, which bake their Transform into vertex positions directly).
@@ -65,10 +65,8 @@ public:
     // constructs the SelectionManager that operates on the main mesh (see selectionManager()) —
     // input is needed for that. Requires setScene(), setMainMeshObject() and setDefaultCamera() to
     // have been called first.
-    void initialize(const AreaLightVisualConfig &areaLightVisualConfig,
-                     const GpuMaterialLayout &materialLayout,
-                     const std::vector<std::string> &vertexAttributeNames,
-                     InputHandler &input);
+    void initialize(const AreaLightVisualConfig &areaLightVisualConfig, const GpuMaterialLayout &materialLayout,
+                    const std::vector<std::string> &vertexAttributeNames, InputHandler &input);
 
     // Registers the per-frame callbacks SceneManager needs — an onUpdate that tracks the
     // swapchain aspect ratio (see setAspect), an onUpdate that drives the SelectionManager's mouse/
@@ -131,33 +129,33 @@ public:
 
     const std::string &cameraBufferName() const { return m_cameraUploader.bufferName(); }
 
-    const std::string &mainMeshPositionBufferName()  const { return m_mainMeshPositionBufferName; }
+    const std::string &mainMeshPositionBufferName() const { return m_mainMeshPositionBufferName; }
     // Interleaved unique/deduped position + color buffer — see m_mainMeshPointsBufferName. Distinct
     // from mainMeshPositionBufferName(), which is duped per UV-seam corner for GeometryPass.
-    const std::string &mainMeshPointsBufferName()    const { return m_mainMeshPointsBufferName; }
-    const std::string &mainMeshVertexBufferName()    const { return m_mainMeshVertexBufferName; }
-    const std::string &mainMeshIndexBufferName()     const { return m_mainMeshIndexBufferName; }
+    const std::string &mainMeshPointsBufferName() const { return m_mainMeshPointsBufferName; }
+    const std::string &mainMeshVertexBufferName() const { return m_mainMeshVertexBufferName; }
+    const std::string &mainMeshIndexBufferName() const { return m_mainMeshIndexBufferName; }
     const std::string &mainMeshFaceGroupBufferName() const { return m_mainMeshFaceGroupBufferName; }
     // Interleaved position + color buffer, duped per UV-seam corner like mainMeshVertexBufferName()
     // (unlike mainMeshPointsBufferName(), which is deduped) — for HeatmapPass, which needs the
     // color Gouraud-interpolated across the same triangles GeometryPass draws, so it must share
     // GeometryPass's corner-indexed topology (see mainMeshIndexBufferName()) rather than the
     // deduped-position space the points overlay uses.
-    const std::string &mainMeshHeatmapBufferName()   const { return m_mainMeshHeatmapBufferName; }
+    const std::string &mainMeshHeatmapBufferName() const { return m_mainMeshHeatmapBufferName; }
 
     const VertexBufferUploadResult &meshPositions() const { return m_meshPositions; }
     // Main mesh's unique/deduped position+color buffer — see mainMeshPointsBufferName().
     const VertexBufferUploadResult &mainMeshPoints() const { return m_mainMeshPoints; }
     // Main mesh's corner-domain position+color buffer — see mainMeshHeatmapBufferName(). Only
     // ever holds one mesh (singleMeshResults[0]), unlike meshPositions()/indexBuffer().
-    const VertexBufferUploadResult &mainMeshHeatmap() const { return m_mainMeshHeatmap; }
-    const IndexBufferUploadResult  &indexBuffer()   const { return m_indexBuffer; }
-    const std::vector<const Transform*> &meshTransforms() const { return m_meshTransforms; }
+    const VertexBufferUploadResult       &mainMeshHeatmap() const { return m_mainMeshHeatmap; }
+    const IndexBufferUploadResult        &indexBuffer() const { return m_indexBuffer; }
+    const std::vector<const Transform *> &meshTransforms() const { return m_meshTransforms; }
 
     const MaterialUploadResult &materialUploadResult() const { return m_materialUploadResult; }
 
     const std::string &lightBufferName() const { return m_lightUploader.bufferName(); }
-    uint32_t numLights() const { return m_lightUploader.numLights(); }
+    uint32_t           numLights() const { return m_lightUploader.numLights(); }
 
 private:
     void gatherGeometry(const std::vector<std::string> &vertexAttributeNames);
@@ -184,33 +182,33 @@ private:
     // changed) — same reasoning as updateMainMeshPointsBuffer(), just in the other domain.
     void updateMainMeshHeatmapBuffer();
 
-    Scene* m_scene = nullptr;
+    Scene            *m_scene = nullptr;
     ResourceRegistry &m_registry;
 
     std::unique_ptr<SelectionManager> m_selectionManager;
-    SelectionState m_selectionState = SelectionState::View;
+    SelectionState                    m_selectionState = SelectionState::View;
 
-    MeshUploader m_meshUploader;
+    MeshUploader     m_meshUploader;
     MaterialUploader m_materialUploader;
-    LightUploader m_lightUploader;
-    CameraUploader m_cameraUploader;
-    MaterialStore m_materialStore;
+    LightUploader    m_lightUploader;
+    CameraUploader   m_cameraUploader;
+    MaterialStore    m_materialStore;
 
-    SceneObject* m_mainMeshObject = nullptr;
-    SceneObject* m_defaultCamera = nullptr;
+    SceneObject *m_mainMeshObject = nullptr;
+    SceneObject *m_defaultCamera  = nullptr;
     // Matches Viewer::Config's default window size until setAspect() is called with the real
     // swapchain extent.
-    float m_aspect = 1600.0f / 900.0f;
-    std::vector<SceneObject*> m_lightVisualObjects;
-    AreaLightVisualConfig m_areaLightVisualConfig;
+    float                      m_aspect = 1600.0f / 900.0f;
+    std::vector<SceneObject *> m_lightVisualObjects;
+    AreaLightVisualConfig      m_areaLightVisualConfig;
 
     // Cached once in uploadMeshes(), reused by updateMainMeshPositions()/updateLightVisuals() so
     // every repack targets the same combined mesh list / buffer configs.
-    std::vector<const Mesh*> m_geometryMeshes;
-    std::vector<const Transform*> m_meshTransforms;
-    VertexBufferUploadConfig m_meshPositionUploadConfig;
-    VertexBufferUploadConfig m_meshAttributeUploadConfig;
-    GpuMaterialLayout m_materialLayout;
+    std::vector<const Mesh *>      m_geometryMeshes;
+    std::vector<const Transform *> m_meshTransforms;
+    VertexBufferUploadConfig       m_meshPositionUploadConfig;
+    VertexBufferUploadConfig       m_meshAttributeUploadConfig;
+    GpuMaterialLayout              m_materialLayout;
 
     const std::string m_mainMeshPositionBufferName  = "meshPositionBuffer";
     const std::string m_mainMeshPointsBufferName    = "meshPointsBuffer";
@@ -223,17 +221,11 @@ private:
     // m_meshAttributeUploadConfig, cached so updateMainMeshPositions()/updateMainMeshHighlightColors()
     // both repack it identically.
     VertexBufferUploadConfig m_mainMeshPointsUploadConfig = {
-        .vertexBufferName     = m_mainMeshPointsBufferName,
-        .vertexAttributeNames = { "color" },
-        .includePosition      = true
-    };
+        .vertexBufferName = m_mainMeshPointsBufferName, .vertexAttributeNames = {"color"}, .includePosition = true};
 
     // Config for the corner-domain position+color buffer — see m_mainMeshHeatmapBufferName.
     VertexBufferUploadConfig m_mainMeshHeatmapUploadConfig = {
-        .vertexBufferName     = m_mainMeshHeatmapBufferName,
-        .vertexAttributeNames = { "color" },
-        .includePosition      = true
-    };
+        .vertexBufferName = m_mainMeshHeatmapBufferName, .vertexAttributeNames = {"color"}, .includePosition = true};
 
     VertexBufferUploadResult m_meshPositions;
     VertexBufferUploadResult m_mainMeshPoints;
@@ -242,4 +234,4 @@ private:
     MaterialUploadResult     m_materialUploadResult;
 };
 
-}
+} // namespace lr

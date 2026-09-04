@@ -29,7 +29,7 @@ struct AreaLightVisualConfig
 // in pbr.frag uses for the LTC quad — and facing the light's forward direction. All faces are tagged
 // with `materialHandle`, a MaterialStore handle resolved straight into the Materials SSBO.
 void buildAreaLightQuadMesh(Mesh &mesh, const Transform &transform, const AreaLight &light,
-                             MaterialHandle materialHandle, const AreaLightVisualConfig &config);
+                            MaterialHandle materialHandle, const AreaLightVisualConfig &config);
 
 // Builds the material that makes the quad read as "the light" rather than a lit surface: black
 // diffuse (it reflects nothing of its own) with emissive = light.color * light.intensity, so its

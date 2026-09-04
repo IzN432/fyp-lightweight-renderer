@@ -13,16 +13,19 @@ class BoxSelectionTool : public SelectionTool
 {
 public:
     BoxSelectionTool(InputHandler &input, SceneObject &camera, SelectionManager &selectionManager)
-        : SelectionTool(input, camera), m_selectionManager(selectionManager) {}
+        : SelectionTool(input, camera), m_selectionManager(selectionManager)
+    {}
 
     void onMouseDown(double ndcX, double ndcY, double aspect) override;
     void onMouseUp(double ndcX, double ndcY, double aspect) override;
     void dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect) override;
 
-    void selectVertices(std::unordered_set<uint32_t> &highlightedVertices, std::unordered_set<uint32_t> &selectedVertices,
+    void selectVertices(std::unordered_set<uint32_t> &highlightedVertices,
+                        std::unordered_set<uint32_t> &selectedVertices,
                         const std::vector<glm::vec3> &vertices) override;
-    void highlightVertices(std::unordered_set<uint32_t> &highlightedVertices, std::unordered_set<uint32_t> &selectedVertices,
-                        const std::vector<glm::vec3> &vertices) override;
+    void highlightVertices(std::unordered_set<uint32_t> &highlightedVertices,
+                           std::unordered_set<uint32_t> &selectedVertices,
+                           const std::vector<glm::vec3> &vertices) override;
 
 private:
     SelectionManager &m_selectionManager;

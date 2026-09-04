@@ -14,14 +14,14 @@ namespace lr
 // Call free() when done uploading, or rely on the destructor.
 struct LoadedImage
 {
-    uint8_t  *pixels = nullptr;
-    uint32_t   width  = 0;
-    uint32_t   height = 0;
-    
+    uint8_t *pixels = nullptr;
+    uint32_t width  = 0;
+    uint32_t height = 0;
+
     static LoadedImage singlePixel(glm::vec4 color)
     {
         LoadedImage defaultImage;
-        defaultImage.width = 1;
+        defaultImage.width  = 1;
         defaultImage.height = 1;
         defaultImage.pixels = static_cast<uint8_t *>(std::malloc(4 * sizeof(uint8_t)));
         if (defaultImage.pixels)
@@ -39,8 +39,7 @@ struct LoadedImage
     LoadedImage(const LoadedImage &)            = delete;
     LoadedImage &operator=(const LoadedImage &) = delete;
 
-    LoadedImage(LoadedImage &&other) noexcept
-        : pixels(other.pixels), width(other.width), height(other.height)
+    LoadedImage(LoadedImage &&other) noexcept : pixels(other.pixels), width(other.width), height(other.height)
     {
         other.pixels = nullptr;
         other.width  = 0;
@@ -108,23 +107,41 @@ struct LoadedHdrImage
         return image;
     }
 
-    LoadedHdrImage() = default;
+    LoadedHdrImage()                                  = default;
     LoadedHdrImage(const LoadedHdrImage &)            = delete;
     LoadedHdrImage &operator=(const LoadedHdrImage &) = delete;
 
-    LoadedHdrImage(LoadedHdrImage &&o) noexcept
-        : pixels(o.pixels), width(o.width), height(o.height)
-    { o.pixels = nullptr; o.width = 0; o.height = 0; }
+    LoadedHdrImage(LoadedHdrImage &&o) noexcept : pixels(o.pixels), width(o.width), height(o.height)
+    {
+        o.pixels = nullptr;
+        o.width  = 0;
+        o.height = 0;
+    }
 
     LoadedHdrImage &operator=(LoadedHdrImage &&o) noexcept
     {
-        if (this != &o) { free(); pixels = o.pixels; width = o.width; height = o.height;
-                          o.pixels = nullptr; o.width = 0; o.height = 0; }
+        if (this != &o)
+        {
+            free();
+            pixels   = o.pixels;
+            width    = o.width;
+            height   = o.height;
+            o.pixels = nullptr;
+            o.width  = 0;
+            o.height = 0;
+        }
         return *this;
     }
 
     ~LoadedHdrImage() { free(); }
-    void free() { if (pixels) { std::free(pixels); pixels = nullptr; } }
+    void free()
+    {
+        if (pixels)
+        {
+            std::free(pixels);
+            pixels = nullptr;
+        }
+    }
     bool empty() const { return pixels == nullptr; }
 };
 

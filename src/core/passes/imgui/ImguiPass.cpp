@@ -19,8 +19,8 @@
 namespace lr
 {
 
-ImguiPass::ImguiPass(const VulkanContext &ctx, const Window &window,
-                     const Swapchain &swapchain, uint32_t framesInFlight)
+ImguiPass::ImguiPass(const VulkanContext &ctx, const Window &window, const Swapchain &swapchain,
+                     uint32_t framesInFlight)
     : m_ctx(ctx)
 {
     IMGUI_CHECKVERSION();
@@ -43,8 +43,7 @@ ImguiPass::ImguiPass(const VulkanContext &ctx, const Window &window,
     initInfo.ImageCount          = framesInFlight;
     initInfo.UseDynamicRendering = true;
 
-    initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
+    initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
     initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount    = 1;
     initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchainFormat;
 
@@ -77,7 +76,7 @@ void ImguiPass::render(CommandBuffer &cmd, VkImageView targetView, VkExtent2D ex
     colorAttachment.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     colorAttachment.imageView   = targetView;
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorAttachment.loadOp      = VK_ATTACHMENT_LOAD_OP_LOAD;  // composite on top
+    colorAttachment.loadOp      = VK_ATTACHMENT_LOAD_OP_LOAD; // composite on top
     colorAttachment.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
 
     VkRenderingInfo renderingInfo{};
@@ -92,4 +91,4 @@ void ImguiPass::render(CommandBuffer &cmd, VkImageView targetView, VkExtent2D ex
     vkCmdEndRendering(cmd.get());
 }
 
-}  // namespace lr
+} // namespace lr

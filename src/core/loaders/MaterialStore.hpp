@@ -22,9 +22,9 @@ public:
     MaterialStore(uint32_t capacity, std::function<Material()> defaultMaterialFactory);
 
     MaterialHandle acquire(Material material);
-    void release(MaterialHandle handle);
+    void           release(MaterialHandle handle);
 
-    Material &get(MaterialHandle handle);
+    Material       &get(MaterialHandle handle);
     const Material &get(MaterialHandle handle) const;
 
     // A single shared "no material assigned" slot, reserved at construction and never handed out
@@ -35,13 +35,13 @@ public:
     uint32_t capacity() const { return static_cast<uint32_t>(m_materials.size()); }
 
     // Capacity-length, in handle order — feeds MaterialUploader::upload()/update() directly.
-    std::vector<const Material*> snapshot() const;
+    std::vector<const Material *> snapshot() const;
 
 private:
-    std::vector<Material> m_materials;
+    std::vector<Material>       m_materials;
     std::vector<MaterialHandle> m_freeList;
-    std::function<Material()> m_defaultMaterialFactory;
-    MaterialHandle m_defaultMaterialHandle = 0;
+    std::function<Material()>   m_defaultMaterialFactory;
+    MaterialHandle              m_defaultMaterialHandle = 0;
 };
 
-}
+} // namespace lr

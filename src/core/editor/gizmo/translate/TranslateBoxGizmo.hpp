@@ -20,13 +20,13 @@ public:
     void onMouseUp(double ndcX, double ndcY, double aspect) override;
     void dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect) override;
 
-    void setDragHandler(VertexDragHandler &handler) override { m_dragHandler = &handler; }
+    void                     setDragHandler(VertexDragHandler &handler) override { m_dragHandler = &handler; }
     const VertexDragHandler &dragHandler() const override { return *m_dragHandler; }
 
 private:
     const SceneObject  &m_camera;
     const InputHandler &m_input;
-    VertexDragHandler *m_dragHandler;
+    VertexDragHandler  *m_dragHandler;
 
     glm::vec4 m_draggingPlane;
     glm::vec3 m_draggingOrigin;

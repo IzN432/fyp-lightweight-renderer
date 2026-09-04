@@ -18,7 +18,7 @@ struct CameraGpuData
     glm::mat4 invView;
     glm::mat4 invProj;
     glm::vec3 position;
-    float padding;     // pad to 16 bytes for std140
+    float     padding; // pad to 16 bytes for std140
 };
 
 struct CameraUploadResult
@@ -26,8 +26,7 @@ struct CameraUploadResult
     std::string bufferName;
 };
 
-static_assert(sizeof(CameraGpuData) == 5 * 64 + 16,
-              "CameraGpuData layout does not match expected std140 size");
+static_assert(sizeof(CameraGpuData) == 5 * 64 + 16, "CameraGpuData layout does not match expected std140 size");
 
 class CameraUploader
 {
@@ -37,9 +36,10 @@ public:
     void upload(const SceneObject &camera, float aspectRatio);
 
     const std::string &bufferName() const { return m_bufferName; }
+
 private:
     ResourceRegistry &m_registry;
-    std::string m_bufferName;
+    std::string       m_bufferName;
 };
 
-}  // namespace lr
+} // namespace lr

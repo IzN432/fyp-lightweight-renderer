@@ -14,8 +14,8 @@ void DefaultVertexDragHandler::translate(const glm::vec3 &frameDelta)
 
 void DefaultVertexDragHandler::endDrag(const glm::vec3 &totalDelta)
 {
-    m_commandManager.appendCommandWithoutExecuting(std::make_unique<TranslatePointsCommand>(
-        m_vertexManager, m_selectionManager.getSelectedIndices(), totalDelta));
+    m_commandManager.appendCommandWithoutExecuting(
+        std::make_unique<TranslatePointsCommand>(m_vertexManager, m_selectionManager.getSelectedIndices(), totalDelta));
 }
 
 } // namespace lr

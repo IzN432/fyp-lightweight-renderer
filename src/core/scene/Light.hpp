@@ -11,12 +11,11 @@ namespace lr
 struct BaseLight
 {
     glm::vec3 color{1.0f, 1.0f, 1.0f};
-    float intensity = 1.0f;
+    float     intensity = 1.0f;
 };
 
 struct PointLight : public BaseLight
-{
-};
+{};
 
 struct SpotLight : public BaseLight
 {
@@ -30,21 +29,12 @@ struct AreaLight : public BaseLight
 };
 
 struct DirectionalLight : public BaseLight
-{
-};
+{};
 
 struct ImageLight : public BaseLight
-{
-};
+{};
 
-
-static const char* lightTypeNames[] = {
-    "Point",
-    "Spot",
-    "Area",
-    "Directional",
-    "Image"
-};
+static const char *lightTypeNames[] = {"Point", "Spot", "Area", "Directional", "Image"};
 
 using LightVariant = std::variant<PointLight, SpotLight, AreaLight, DirectionalLight, ImageLight>;
 
@@ -97,9 +87,8 @@ struct LightGUICallbacks
 struct Light : public Component
 {
     LightVariant light;
-    
-    explicit Light(const LightVariant &lightVariant)
-        : light(lightVariant), Component("Light") {}
+
+    explicit Light(const LightVariant &lightVariant) : light(lightVariant), Component("Light") {}
 
     void onGUIImpl() override
     {
@@ -107,20 +96,35 @@ struct Light : public Component
 
         int currentType = static_cast<int>(light.index());
 
-        if (ImGui::Combo("Light Type", &currentType, lightTypeNames, static_cast<int>(sizeof(lightTypeNames) / sizeof(lightTypeNames[0]))))
+        if (ImGui::Combo("Light Type", &currentType, lightTypeNames,
+                         static_cast<int>(sizeof(lightTypeNames) / sizeof(lightTypeNames[0]))))
         {
-            BaseLight &baseLight = std::visit([](auto &l) -> BaseLight& { return static_cast<BaseLight&>(l); }, light);
-            switch(currentType)
+            BaseLight &baseLight = std::visit(
+                [](auto &l) -> BaseLight & {
+                    return static_cast<BaseLight &>(l);
+                },
+                light);
+            switch (currentType)
             {
-                case 0: light = PointLight{static_cast<BaseLight>(baseLight)}; break;
-                case 1: light = SpotLight{static_cast<BaseLight>(baseLight)}; break;
-                case 2: light = AreaLight{static_cast<BaseLight>(baseLight)}; break;
-                case 3: light = DirectionalLight{static_cast<BaseLight>(baseLight)}; break;
-                case 4: light = ImageLight{static_cast<BaseLight>(baseLight)}; break;
+                case 0:
+                    light = PointLight{static_cast<BaseLight>(baseLight)};
+                    break;
+                case 1:
+                    light = SpotLight{static_cast<BaseLight>(baseLight)};
+                    break;
+                case 2:
+                    light = AreaLight{static_cast<BaseLight>(baseLight)};
+                    break;
+                case 3:
+                    light = DirectionalLight{static_cast<BaseLight>(baseLight)};
+                    break;
+                case 4:
+                    light = ImageLight{static_cast<BaseLight>(baseLight)};
+                    break;
             }
             changed |= true;
         }
-    
+
         if (std::visit(LightGUICallbacks{}, light))
         {
             changed |= true;
@@ -131,7 +135,6 @@ struct Light : public Component
             markDirty();
         }
     }
-    
 };
 
 } // namespace lr

@@ -26,10 +26,12 @@ public:
     virtual void dragCallback(double ndcX, double ndcY, double dNdcX, double dNdcY, double aspect) {}
 
     // Selection callback: override this in derived classes to implement selection behavior
-    virtual void selectVertices(std::unordered_set<uint32_t> &highlightedVertices, std::unordered_set<uint32_t> &selectedVertices,
+    virtual void selectVertices(std::unordered_set<uint32_t> &highlightedVertices,
+                                std::unordered_set<uint32_t> &selectedVertices,
                                 const std::vector<glm::vec3> &vertices) {};
-    virtual void highlightVertices(std::unordered_set<uint32_t> &highlightedVertices, std::unordered_set<uint32_t> &selectedVertices,
-                                const std::vector<glm::vec3> &vertices) {};
+    virtual void highlightVertices(std::unordered_set<uint32_t> &highlightedVertices,
+                                   std::unordered_set<uint32_t> &selectedVertices,
+                                   const std::vector<glm::vec3> &vertices) {};
 
     // Color SelectionManager paints highlighted vertices with — override to vary by tool state
     // (e.g. a different color while a modifier key changes what the in-progress drag will do to

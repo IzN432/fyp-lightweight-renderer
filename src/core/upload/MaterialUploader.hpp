@@ -9,7 +9,7 @@ namespace lr
 
 struct MaterialUploadResult
 {
-    std::string materialInfoBufferName;
+    std::string                                  materialInfoBufferName;
     std::unordered_map<std::string, std::string> textureNameMap; // materialTextureName -> registry resource name
 };
 
@@ -21,12 +21,10 @@ class MaterialUploader
 public:
     explicit MaterialUploader(ResourceRegistry &registry);
 
-    MaterialUploadResult upload(const std::vector<const Material*> &materials,
-                                const GpuMaterialLayout &gpuLayout,
+    MaterialUploadResult upload(const std::vector<const Material *> &materials, const GpuMaterialLayout &gpuLayout,
                                 const std::string &namePrefix = "material");
 
-    void update(const std::vector<const Material*> &materials,
-                const GpuMaterialLayout &gpuLayout,
+    void update(const std::vector<const Material *> &materials, const GpuMaterialLayout &gpuLayout,
                 const MaterialUploadResult &result);
 
 private:

@@ -14,11 +14,13 @@ namespace
 // the vertices it sees need to be in the same world space GeometryPass actually renders them in.
 std::vector<glm::vec3> toWorldSpace(const std::vector<glm::vec3> &local, const Transform &transform)
 {
-    const glm::mat4 model = transform.localMatrix();
+    const glm::mat4        model = transform.localMatrix();
     std::vector<glm::vec3> world;
     world.reserve(local.size());
     for (const auto &v : local)
+    {
         world.push_back(glm::vec3(model * glm::vec4(v, 1.0f)));
+    }
     return world;
 }
 } // namespace
@@ -26,22 +28,28 @@ std::vector<glm::vec3> toWorldSpace(const std::vector<glm::vec3> &local, const T
 void SelectionManager::mouseButtonCallback(int button, int action, bool shift, bool ctrl, bool alt)
 {
     if (button != GLFW_MOUSE_BUTTON_LEFT)
+    {
         return;
+    }
 
     if (action == GLFW_PRESS)
+    {
         m_mouseClickedThisFrame = true;
-    else if (action == GLFW_RELEASE)
+    } else if (action == GLFW_RELEASE)
+    {
         m_mouseReleasedThisFrame = true;
+    }
 }
 
 void SelectionManager::updateCallback(float dt, VkExtent2D extent)
 {
     if (!m_selectTool)
+    {
         return;
+    }
 
-    const float aspect = (extent.height == 0)
-        ? 1.0f
-        : static_cast<float>(extent.width) / static_cast<float>(extent.height);
+    const float aspect =
+        (extent.height == 0) ? 1.0f : static_cast<float>(extent.width) / static_cast<float>(extent.height);
 
     double mouseX, mouseY;
     m_input.getMousePos(mouseX, mouseY);
@@ -72,18 +80,28 @@ void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
     m_selectTool = std::move(tool);
     m_selectTool->registerSelectionCallback([this]() {
         if (!m_selectTool)
+        {
             return;
-        m_selectTool->selectVertices(m_highlightedVertices, m_selectedVertices, toWorldSpace(m_vertices, m_meshTransform));
+        }
+        m_selectTool->selectVertices(m_highlightedVertices, m_selectedVertices,
+                                     toWorldSpace(m_vertices, m_meshTransform));
         if (m_selectionChangedCallback)
+        {
             m_selectionChangedCallback();
+        }
     });
     m_selectTool->registerHighlightCallback([this]() {
         if (!m_selectTool)
+        {
             return;
-        m_selectTool->highlightVertices(m_highlightedVertices, m_selectedVertices, toWorldSpace(m_vertices, m_meshTransform));
+        }
+        m_selectTool->highlightVertices(m_highlightedVertices, m_selectedVertices,
+                                        toWorldSpace(m_vertices, m_meshTransform));
         rebuildColors();
         if (m_colorsChangedCallback)
+        {
             m_colorsChangedCallback();
+        }
     });
 }
 
@@ -94,16 +112,24 @@ void SelectionManager::rebuildColors()
     for (size_t i = 0; i < m_roles.size(); ++i)
     {
         if (m_roles[i] == kNoRole)
+        {
             continue;
+        }
         auto it = m_roleColors.find(m_roles[i]);
         if (it != m_roleColors.end())
+        {
             m_colors[i] = it->second;
+        }
     }
 
     const glm::vec3 highlightColor = m_selectTool ? m_selectTool->highlightColor() : kDefaultColor;
     for (uint32_t idx : m_highlightedVertices)
+    {
         if (idx < m_colors.size())
+        {
             m_colors[idx] = highlightColor;
+        }
+    }
 }
 
 void SelectionManager::clearSelection()
@@ -114,18 +140,26 @@ void SelectionManager::clearSelection()
     const bool hadSelection = !m_selectedVertices.empty();
     const bool hadHighlight = !m_highlightedVertices.empty();
     if (!hadSelection && !hadHighlight)
+    {
         return;
+    }
 
     m_selectedVertices.clear();
     m_highlightedVertices.clear();
 
     if (hadHighlight)
+    {
         rebuildColors();
+    }
 
     if (hadSelection && m_selectionChangedCallback)
+    {
         m_selectionChangedCallback();
+    }
     if (hadHighlight && m_colorsChangedCallback)
+    {
         m_colorsChangedCallback();
+    }
 }
 
 VertexRoleId SelectionManager::registerRole(const glm::vec3 &color)
@@ -138,33 +172,50 @@ VertexRoleId SelectionManager::registerRole(const glm::vec3 &color)
 void SelectionManager::classifySelectionAs(VertexRoleId role)
 {
     if (m_selectedVertices.empty())
+    {
         return;
+    }
 
     for (uint32_t idx : m_selectedVertices)
+    {
         if (idx < m_roles.size())
+        {
             m_roles[idx] = role;
+        }
+    }
 
     rebuildColors();
     if (m_colorsChangedCallback)
+    {
         m_colorsChangedCallback();
+    }
     if (m_roleChangedCallback)
+    {
         m_roleChangedCallback();
+    }
 }
 
 void SelectionManager::clearAllRoles()
 {
-    const bool anyClassified = std::any_of(m_roles.begin(), m_roles.end(),
-                                            [](VertexRoleId r) { return r != kNoRole; });
+    const bool anyClassified = std::any_of(m_roles.begin(), m_roles.end(), [](VertexRoleId r) {
+        return r != kNoRole;
+    });
     if (!anyClassified)
+    {
         return;
+    }
 
     std::fill(m_roles.begin(), m_roles.end(), kNoRole);
 
     rebuildColors();
     if (m_colorsChangedCallback)
+    {
         m_colorsChangedCallback();
+    }
     if (m_roleChangedCallback)
+    {
         m_roleChangedCallback();
+    }
 }
 
 VertexRoleId SelectionManager::getVertexRole(uint32_t index) const
@@ -176,8 +227,12 @@ std::vector<uint32_t> SelectionManager::getIndicesWithRole(VertexRoleId role) co
 {
     std::vector<uint32_t> indices;
     for (uint32_t i = 0; i < m_roles.size(); ++i)
+    {
         if (m_roles[i] == role)
+        {
             indices.push_back(i);
+        }
+    }
     return indices;
 }
 

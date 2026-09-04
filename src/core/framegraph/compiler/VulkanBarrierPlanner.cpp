@@ -17,8 +17,8 @@ using lr::framegraph::VulkanResourceState;
 
 bool isDepthFormat(VkFormat format)
 {
-    return format == VK_FORMAT_D32_SFLOAT || format == VK_FORMAT_D24_UNORM_S8_UINT ||
-           format == VK_FORMAT_D16_UNORM || format == VK_FORMAT_D32_SFLOAT_S8_UINT;
+    return format == VK_FORMAT_D32_SFLOAT || format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D16_UNORM ||
+           format == VK_FORMAT_D32_SFLOAT_S8_UINT;
 }
 
 VkPipelineStageFlags2 stagesForShader(VkShaderStageFlags stages)
@@ -65,28 +65,28 @@ struct RequiredAccess
 {
     BarrierResourceKind kind;
     VulkanResourceState state;
-    bool writes = false;
+    bool                writes = false;
 };
 
 std::optional<RequiredAccess> accessForBinding(const BindingDesc &binding)
 {
     const VkPipelineStageFlags2 stages = stagesForShader(binding.stages);
-    const bool reads = binding.access != BindingAccess::Write;
-    const bool writes = binding.access != BindingAccess::Read;
+    const bool                  reads  = binding.access != BindingAccess::Write;
+    const bool                  writes = binding.access != BindingAccess::Read;
 
     switch (binding.type)
     {
         case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
         case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
             return RequiredAccess{
-                .kind = BarrierResourceKind::Image,
+                .kind  = BarrierResourceKind::Image,
                 .state = {stages, VK_ACCESS_2_SHADER_READ_BIT, binding.imageLayout},
             };
         case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
             return RequiredAccess{
-                .kind = BarrierResourceKind::Image,
-                .state = {VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                          VK_ACCESS_2_INPUT_ATTACHMENT_READ_BIT, binding.imageLayout},
+                .kind  = BarrierResourceKind::Image,
+                .state = {VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_INPUT_ATTACHMENT_READ_BIT,
+                          binding.imageLayout},
             };
         case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE: {
             VkAccessFlags2 access = VK_ACCESS_2_NONE;
@@ -99,8 +99,8 @@ std::optional<RequiredAccess> accessForBinding(const BindingDesc &binding)
                 access |= VK_ACCESS_2_SHADER_WRITE_BIT;
             }
             return RequiredAccess{
-                .kind = BarrierResourceKind::Image,
-                .state = {stages, access, VK_IMAGE_LAYOUT_GENERAL},
+                .kind   = BarrierResourceKind::Image,
+                .state  = {stages, access, VK_IMAGE_LAYOUT_GENERAL},
                 .writes = writes,
             };
         }
@@ -108,7 +108,7 @@ std::optional<RequiredAccess> accessForBinding(const BindingDesc &binding)
         case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
         case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
             return RequiredAccess{
-                .kind = BarrierResourceKind::Buffer,
+                .kind  = BarrierResourceKind::Buffer,
                 .state = {stages, VK_ACCESS_2_UNIFORM_READ_BIT, VK_IMAGE_LAYOUT_UNDEFINED},
             };
         case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
@@ -124,8 +124,8 @@ std::optional<RequiredAccess> accessForBinding(const BindingDesc &binding)
                 access |= VK_ACCESS_2_SHADER_WRITE_BIT;
             }
             return RequiredAccess{
-                .kind = BarrierResourceKind::Buffer,
-                .state = {stages, access, VK_IMAGE_LAYOUT_UNDEFINED},
+                .kind   = BarrierResourceKind::Buffer,
+                .state  = {stages, access, VK_IMAGE_LAYOUT_UNDEFINED},
                 .writes = writes,
             };
         }
@@ -145,10 +145,9 @@ RequiredAccess accessForAttachment(const lr::ResourceDesc &attachment)
             access |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
         }
         return {
-            .kind = BarrierResourceKind::Image,
-            .state = {VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                          VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      access, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL},
+            .kind   = BarrierResourceKind::Image,
+            .state  = {VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                       access, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL},
             .writes = true,
         };
     }
@@ -159,9 +158,8 @@ RequiredAccess accessForAttachment(const lr::ResourceDesc &attachment)
         access |= VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT;
     }
     return {
-        .kind = BarrierResourceKind::Image,
-        .state = {VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, access,
-                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
+        .kind   = BarrierResourceKind::Image,
+        .state  = {VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, access, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
         .writes = true,
     };
 }
@@ -169,7 +167,7 @@ RequiredAccess accessForAttachment(const lr::ResourceDesc &attachment)
 struct ResourceKey
 {
     BarrierResourceKind kind;
-    std::string name;
+    std::string         name;
 
     friend bool operator<(const ResourceKey &lhs, const ResourceKey &rhs)
     {
@@ -177,9 +175,7 @@ struct ResourceKey
     }
 };
 
-void mergeAccess(std::map<ResourceKey, RequiredAccess> &accesses,
-                 const std::string &name,
-                 RequiredAccess incoming)
+void mergeAccess(std::map<ResourceKey, RequiredAccess> &accesses, const std::string &name, RequiredAccess incoming)
 {
     ResourceKey key{incoming.kind, name};
     auto [it, inserted] = accesses.emplace(key, incoming);
@@ -189,11 +185,9 @@ void mergeAccess(std::map<ResourceKey, RequiredAccess> &accesses,
     }
 
     RequiredAccess &existing = it->second;
-    if (incoming.kind == BarrierResourceKind::Image &&
-        existing.state.layout != incoming.state.layout)
+    if (incoming.kind == BarrierResourceKind::Image && existing.state.layout != incoming.state.layout)
     {
-        throw std::runtime_error("FrameGraph: pass uses image '" + name +
-                                 "' with incompatible layouts");
+        throw std::runtime_error("FrameGraph: pass uses image '" + name + "' with incompatible layouts");
     }
 
     existing.state.stages |= incoming.state.stages;
@@ -217,19 +211,21 @@ std::map<ResourceKey, RequiredAccess> collectPassAccesses(const PassDesc &pass)
     }
     for (const PassDesc::VertexBufferRef &vertexBuffer : pass.vertexBufferRefs)
     {
-        mergeAccess(accesses, vertexBuffer.bufferName, {
-            .kind = BarrierResourceKind::Buffer,
-            .state = {VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT,
-                      VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT, VK_IMAGE_LAYOUT_UNDEFINED},
-        });
+        mergeAccess(accesses, vertexBuffer.bufferName,
+                    {
+                        .kind  = BarrierResourceKind::Buffer,
+                        .state = {VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT, VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT,
+                                  VK_IMAGE_LAYOUT_UNDEFINED},
+                    });
     }
     if (!pass.indexBufferName.empty())
     {
-        mergeAccess(accesses, pass.indexBufferName, {
-            .kind = BarrierResourceKind::Buffer,
-            .state = {VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT,
-                      VK_ACCESS_2_INDEX_READ_BIT, VK_IMAGE_LAYOUT_UNDEFINED},
-        });
+        mergeAccess(
+            accesses, pass.indexBufferName,
+            {
+                .kind  = BarrierResourceKind::Buffer,
+                .state = {VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT, VK_ACCESS_2_INDEX_READ_BIT, VK_IMAGE_LAYOUT_UNDEFINED},
+            });
     }
     return accesses;
 }
@@ -239,19 +235,17 @@ std::map<ResourceKey, RequiredAccess> collectPassAccesses(const PassDesc &pass)
 namespace lr::framegraph
 {
 
-VulkanBarrierPlan planVulkanBarriers(
-    std::span<const PassDesc> passes,
-    std::span<const size_t> sortedPassIndices,
-    const std::unordered_map<std::string, VkImageLayout> &initialImageLayouts)
+VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, std::span<const size_t> sortedPassIndices,
+                                     const std::unordered_map<std::string, VkImageLayout> &initialImageLayouts)
 {
     struct TrackedState
     {
         VulkanResourceState state;
-        bool writes = false;
+        bool                writes = false;
     };
 
     std::map<ResourceKey, TrackedState> states;
-    VulkanBarrierPlan plan;
+    VulkanBarrierPlan                   plan;
     plan.beforePass.resize(passes.size());
 
     for (size_t passIndex : sortedPassIndices)
@@ -279,21 +273,20 @@ VulkanBarrierPlan planVulkanBarriers(
             }
 
             TrackedState &current = stateIt->second;
-            const bool layoutChanged = key.kind == BarrierResourceKind::Image &&
-                                       current.state.layout != required.state.layout;
+            const bool    layoutChanged =
+                key.kind == BarrierResourceKind::Image && current.state.layout != required.state.layout;
             const bool needsBarrier = layoutChanged || current.writes || required.writes;
 
             if (needsBarrier)
             {
                 plan.beforePass[passIndex].push_back({
-                    .kind = key.kind,
+                    .kind         = key.kind,
                     .resourceName = key.name,
-                    .source = current.state,
-                    .destination = required.state,
+                    .source       = current.state,
+                    .destination  = required.state,
                 });
                 current = {.state = required.state, .writes = required.writes};
-            }
-            else
+            } else
             {
                 // Consecutive reads need no barrier. Accumulate all reader stages
                 // so a later write waits for every outstanding read domain.

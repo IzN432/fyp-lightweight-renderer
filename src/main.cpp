@@ -74,7 +74,7 @@ try
         lr::FrameGraph iblGraph(viewer.context(), viewer.resources());
         iblPass.build(iblGraph);
         iblGraph.executeAndWait({
-            {"ibl_irradiance",  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+            {"ibl_irradiance", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             {"ibl_prefiltered", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         });
     }
@@ -86,17 +86,17 @@ try
     lr::Scene scene;
 
     lr::GltfLoaderConfig config{
-        .normalAttributeName = "normal",
-        .tangentAttributeName = "tangent",
-        .uvAttributeName = "uv",
-        .diffuseTextureName = "baseColorTexture",
-        .normalTextureName = "normalTexture",
+        .normalAttributeName          = "normal",
+        .tangentAttributeName         = "tangent",
+        .uvAttributeName              = "uv",
+        .diffuseTextureName           = "baseColorTexture",
+        .normalTextureName            = "normalTexture",
         .metallicRoughnessTextureName = "metallicRoughnessTexture",
-        .emissiveTextureName = "emissiveTexture",
-        .baseDiffuseName = "baseDiffuse",
-        .baseRoughnessName = "baseRoughness",
-        .baseMetallicName = "baseMetallic",
-        .baseEmissiveName = "baseEmissive",
+        .emissiveTextureName          = "emissiveTexture",
+        .baseDiffuseName              = "baseDiffuse",
+        .baseRoughnessName            = "baseRoughness",
+        .baseMetallicName             = "baseMetallic",
+        .baseEmissiveName             = "baseEmissive",
     };
 
     // Flat, up-front reservation for the MaterialStore's GPU-side buffer/texture-array capacity —
@@ -106,7 +106,7 @@ try
 
     lr::SceneManager sceneManager(viewer.resources(), kMaterialCapacity, [config]() {
         lr::Material material;
-        material.name = "Unused Material Slot";
+        material.name                                 = "Unused Material Slot";
         material.parameters[config.baseDiffuseName]   = lr::MaterialParam::ColorRGBA{glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)};
         material.parameters[config.baseEmissiveName]  = lr::MaterialParam::ColorRGB{glm::vec3(0.0f)};
         material.parameters[config.baseRoughnessName] = lr::MaterialParam::NormalizedFloat{1.0f};
@@ -115,7 +115,7 @@ try
     });
     sceneManager.setScene(scene);
 
-    lr::SceneObject* camera = &scene.createSceneObject();
+    lr::SceneObject *camera = &scene.createSceneObject();
     camera->addComponent<lr::Camera>();
     camera->addComponent<lr::Transform>();
     camera->name = "Main Camera";
@@ -124,10 +124,10 @@ try
     // LIGHT
     {
         lr::DirectionalLight light;
-        light.color = glm::vec3(1.0f, 1.0f, 1.0f);
+        light.color     = glm::vec3(1.0f, 1.0f, 1.0f);
         light.intensity = 1.0f;
 
-        lr::SceneObject& lightObject = scene.createSceneObject();
+        lr::SceneObject &lightObject = scene.createSceneObject();
         lightObject.addComponent<lr::Transform>();
         lightObject.addComponent<lr::Light>(light);
         lightObject.name = "Light";
@@ -140,7 +140,9 @@ try
     auto [sequence, materialHandles] = gltfLoader.load(meshPath, sceneManager.materialStore(), config);
 
     if (sequence.empty())
+    {
         throw std::runtime_error("GltfLoader returned empty sequence for '" + meshPath.string() + "'");
+    }
 
     // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets its own StaticMesh
     // component (a quad), separate from the main mesh's StaticMesh. The quad still draws through the
@@ -158,19 +160,19 @@ try
         .baseMetallicName     = config.baseMetallicName,
     };
 
-    lr::SceneObject* meshObject = &scene.createSceneObject();
+    lr::SceneObject *meshObject = &scene.createSceneObject();
     meshObject->addComponent<lr::Transform>();
     {
         // Seeds the main mesh's selection-highlight colors — one per unique/deduped position, the
         // same space VertexManager/SelectionManager and the points-picking overlay operate in.
         // SceneManager::uploadMeshes() reads this back to build the initial GPU color buffer, so it
         // must be set before sceneManager.initialize() runs.
-        lr::Mesh &m = sequence.frames.front();
+        lr::Mesh              &m = sequence.frames.front();
         std::vector<glm::vec3> colors(m.positions.size(), glm::vec3(1.0f, 0.0f, 1.0f));
         m.setPerUniqueVertexArray("color", std::span<const glm::vec3>(colors));
     }
     auto &staticMesh = meshObject->addComponent<lr::StaticMesh>(sequence.frames.front(), materialHandles,
-                                                                 sceneManager.materialStore());
+                                                                sceneManager.materialStore());
     meshObject->name = "Mesh Object";
     sceneManager.setMainMeshObject(*meshObject);
 
@@ -180,53 +182,56 @@ try
 
     // This matches the expected layout in geometry.frag
     lr::GpuMaterialLayout gpuMaterialLayout;
-    gpuMaterialLayout
-        .setStride(48)
+    gpuMaterialLayout.setStride(48)
         .addScalar(config.baseDiffuseName, 0, sizeof(glm::vec4))
         .addScalar(config.baseEmissiveName, 16, sizeof(glm::vec3))
         .addScalar(config.baseRoughnessName, 32, sizeof(float))
         .addScalar(config.baseMetallicName, 36, sizeof(float))
-        .addTexture(config.diffuseTextureName,            VK_FORMAT_R8G8B8A8_SRGB)
-        .addTexture(config.normalTextureName,             VK_FORMAT_R8G8B8A8_UNORM)
-        .addTexture(config.metallicRoughnessTextureName,  VK_FORMAT_R8G8B8A8_UNORM)
-        .addTexture(config.emissiveTextureName,           VK_FORMAT_R8G8B8A8_SRGB);
+        .addTexture(config.diffuseTextureName, VK_FORMAT_R8G8B8A8_SRGB)
+        .addTexture(config.normalTextureName, VK_FORMAT_R8G8B8A8_UNORM)
+        .addTexture(config.metallicRoughnessTextureName, VK_FORMAT_R8G8B8A8_UNORM)
+        .addTexture(config.emissiveTextureName, VK_FORMAT_R8G8B8A8_SRGB);
 
     // Builds light visuals, uploads the initial lights/mesh/material/camera buffers, and wires the
     // change listeners that keep the camera UBO and main mesh's materials SSBO in sync afterward —
     // see SceneManager::initialize().
     sceneManager.initialize(areaLightVisualConfig, gpuMaterialLayout,
-                            { config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName },
+                            {config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName},
                             viewer.input());
 
     // -------------------------------------------------------------------------
     // Frame graph passes
     // -------------------------------------------------------------------------
 
-    const VkFormat swapchainFormat =
-        viewer.frameGraph().resources().getImage("swapchain")->format;
+    const VkFormat swapchainFormat = viewer.frameGraph().resources().getImage("swapchain")->format;
 
-    lr::GeometryPass geometryPass({
-        .cameraBufferResourceName  = sceneManager.cameraBufferName(),
-        .vertexBufferResourceNames = { {0, sceneManager.mainMeshPositionBufferName()}, {1, sceneManager.mainMeshVertexBufferName()} },
-        .vertexBufferUploadResult  = sceneManager.meshPositions(),
-        .indexBufferUploadResult   = sceneManager.indexBuffer(),
-        .meshTransforms = sceneManager.meshTransforms(),
-        .indexBufferResourceName = sceneManager.mainMeshIndexBufferName(),
-        .faceGroupBufferResourceName = sceneManager.mainMeshFaceGroupBufferName(),
-        .diffuseTextureArrayResourceName = sceneManager.materialUploadResult().textureNameMap.at(config.diffuseTextureName),
-        .normalTextureArrayResourceName = sceneManager.materialUploadResult().textureNameMap.at(config.normalTextureName),
-        .metallicRoughnessTextureArrayResourceName = sceneManager.materialUploadResult().textureNameMap.at(config.metallicRoughnessTextureName),
-        .emissiveTextureArrayResourceName = sceneManager.materialUploadResult().textureNameMap.at(config.emissiveTextureName),
-        .materialBufferResourceName = sceneManager.materialUploadResult().materialInfoBufferName,
+    lr::GeometryPass  geometryPass({
+         .cameraBufferResourceName    = sceneManager.cameraBufferName(),
+         .vertexBufferResourceNames   = {{0, sceneManager.mainMeshPositionBufferName()},
+                                         {1, sceneManager.mainMeshVertexBufferName()}},
+         .vertexBufferUploadResult    = sceneManager.meshPositions(),
+         .indexBufferUploadResult     = sceneManager.indexBuffer(),
+         .meshTransforms              = sceneManager.meshTransforms(),
+         .indexBufferResourceName     = sceneManager.mainMeshIndexBufferName(),
+         .faceGroupBufferResourceName = sceneManager.mainMeshFaceGroupBufferName(),
+         .diffuseTextureArrayResourceName =
+            sceneManager.materialUploadResult().textureNameMap.at(config.diffuseTextureName),
+         .normalTextureArrayResourceName =
+            sceneManager.materialUploadResult().textureNameMap.at(config.normalTextureName),
+         .metallicRoughnessTextureArrayResourceName =
+            sceneManager.materialUploadResult().textureNameMap.at(config.metallicRoughnessTextureName),
+         .emissiveTextureArrayResourceName =
+            sceneManager.materialUploadResult().textureNameMap.at(config.emissiveTextureName),
+         .materialBufferResourceName = sceneManager.materialUploadResult().materialInfoBufferName,
 
-        .materialCount = sceneManager.materialStore().capacity(),
+         .materialCount = sceneManager.materialStore().capacity(),
     });
     lr::GpuMeshLayout gpuMeshLayout(staticMesh.mesh().layout());
 
     gpuMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
-    gpuMeshLayout.map(config.normalAttributeName,  1, 1, VK_FORMAT_R32G32B32_SFLOAT);
+    gpuMeshLayout.map(config.normalAttributeName, 1, 1, VK_FORMAT_R32G32B32_SFLOAT);
     gpuMeshLayout.map(config.tangentAttributeName, 1, 2, VK_FORMAT_R32G32B32A32_SFLOAT);
-    gpuMeshLayout.map(config.uvAttributeName,      1, 3, VK_FORMAT_R32G32_SFLOAT);
+    gpuMeshLayout.map(config.uvAttributeName, 1, 3, VK_FORMAT_R32G32_SFLOAT);
 
     geometryPass.build(viewer.frameGraph(), gpuMeshLayout);
 
@@ -253,9 +258,9 @@ try
 
     lr::PbrPass pbrPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
-        .lightBufferResourceName = sceneManager.lightBufferName(),
-        .numLights = sceneManager.numLights(),
-        .pfMips = 8,
+        .lightBufferResourceName  = sceneManager.lightBufferName(),
+        .numLights                = sceneManager.numLights(),
+        .pfMips                   = 8,
     });
     pbrPass.uploadResources(viewer.resources());
     pbrPass.build(viewer.frameGraph());
@@ -275,14 +280,14 @@ try
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
         .pointsBufferResourceName = sceneManager.mainMeshPointsBufferName(),
         .pointsBufferUploadResult = sceneManager.mainMeshPoints(),
-        .vertexCounts             = { static_cast<uint32_t>(staticMesh.mesh().positions.size()) },
+        .vertexCounts             = {static_cast<uint32_t>(staticMesh.mesh().positions.size())},
         .meshTransform            = &meshObject->getComponent<lr::Transform>(),
     });
     overlayPointsPass.build(viewer.frameGraph(), pointsMeshLayout);
 
     lr::FinalPass finalPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
-        .swapchainFormat = swapchainFormat,
+        .swapchainFormat          = swapchainFormat,
     });
     finalPass.build(viewer.frameGraph());
 
@@ -314,17 +319,20 @@ try
 
     lr::GizmoManager gizmoManager(overlayGeometryPass, viewer.input());
 
-    auto arrowXGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::X, *camera, viewer.input(), defaultHandler);
-    auto arrowYGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::Y, *camera, viewer.input(), defaultHandler);
-    auto arrowZGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::Z, *camera, viewer.input(), defaultHandler);
-    auto boxGizmo     = std::make_unique<lr::TranslateBoxGizmo>(*camera, viewer.input(), defaultHandler);
+    auto arrowXGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::X, *camera,
+                                                                 viewer.input(), defaultHandler);
+    auto arrowYGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::Y, *camera,
+                                                                 viewer.input(), defaultHandler);
+    auto arrowZGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::Z, *camera,
+                                                                 viewer.input(), defaultHandler);
+    auto boxGizmo    = std::make_unique<lr::TranslateBoxGizmo>(*camera, viewer.input(), defaultHandler);
 
     // Raw pointers kept for ArapPlugin (needs a generic DragHandlerGizmo list) and the gizmo-
     // positioning loop below (reads whichever handler is currently wired) — ownership moves to
     // gizmoManager via addGizmo() just below.
-    lr::TranslateArrowGizmo *arrowX = arrowXGizmo.get();
-    lr::TranslateArrowGizmo *arrowY = arrowYGizmo.get();
-    lr::TranslateArrowGizmo *arrowZ = arrowZGizmo.get();
+    lr::TranslateArrowGizmo *arrowX      = arrowXGizmo.get();
+    lr::TranslateArrowGizmo *arrowY      = arrowYGizmo.get();
+    lr::TranslateArrowGizmo *arrowZ      = arrowZGizmo.get();
     lr::TranslateBoxGizmo   *boxGizmoPtr = boxGizmo.get();
 
     const std::vector<int> translateGizmoIds = {
@@ -334,34 +342,44 @@ try
         gizmoManager.addGizmo(std::move(boxGizmo)),
     };
     for (int id : translateGizmoIds)
+    {
         gizmoManager.hideGizmo(id);
+    }
 
     const std::vector<lr::DragHandlerGizmo *> dragHandlerGizmos = {arrowX, arrowY, arrowZ, boxGizmoPtr};
 
-    lr::ArapPlugin arapPlugin(selectionManager, vertexManager, commandManager, staticMesh.mesh(),
-                              defaultHandler, dragHandlerGizmos);
+    lr::ArapPlugin arapPlugin(selectionManager, vertexManager, commandManager, staticMesh.mesh(), defaultHandler,
+                              dragHandlerGizmos);
 
     // Single combined LMB handler: gizmos get first refusal on a click (so
     // dragging an arrow doesn't simultaneously start a box-select), and
     // selection only sees the event if no gizmo consumed it.
     viewer.input().onMouseButton([&](int button, int action, bool shift, bool ctrl, bool alt) {
         if (button != GLFW_MOUSE_BUTTON_LEFT || ImGui::GetIO().WantCaptureMouse)
+        {
             return;
+        }
 
         const bool wasInteracting = gizmoManager.isInteracting();
         gizmoManager.mouseButtonCallback(button, action, shift, ctrl, alt);
 
         if (wasInteracting || gizmoManager.isInteracting() || sceneManager.selectionState() != lr::SelectionState::Edit)
+        {
             return;
+        }
 
         selectionManager.mouseButtonCallback(button, action, shift, ctrl, alt);
     });
 
     viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
         if (key != GLFW_KEY_TAB || action != GLFW_PRESS)
+        {
             return;
+        }
         if (ImGui::GetIO().WantCaptureKeyboard)
+        {
             return;
+        }
 
         const bool nowEditing = sceneManager.selectionState() != lr::SelectionState::Edit;
         sceneManager.setSelectionState(nowEditing ? lr::SelectionState::Edit : lr::SelectionState::View);
@@ -371,32 +389,46 @@ try
         // everything nested under it, so it can't outlive the mode it depends on (e.g. a gizmo
         // left showing/interactive after Tab-ing out of Edit).
         if (!nowEditing)
+        {
             arapPlugin.setModeActive(false);
+        }
     });
 
     viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
         if (key != GLFW_KEY_Z || action != GLFW_PRESS || !ctrl)
+        {
             return;
+        }
         if (ImGui::GetIO().WantCaptureKeyboard)
+        {
             return;
+        }
 
         commandManager.undo();
     });
 
     viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
         if (key != GLFW_KEY_A || action != GLFW_PRESS)
+        {
             return;
+        }
         if (ImGui::GetIO().WantCaptureKeyboard)
+        {
             return;
+        }
 
         arapPlugin.setModeActive(!arapPlugin.isModeActive());
     });
 
     viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
         if (key != GLFW_KEY_H || action != GLFW_PRESS)
+        {
             return;
+        }
         if (ImGui::GetIO().WantCaptureKeyboard)
+        {
             return;
+        }
 
         heatmapPass.setEnabled(!heatmapPass.isEnabled());
     });
@@ -405,8 +437,8 @@ try
     // -------------------------------------------------------------------------
 
     std::optional<fs::path> environmentHdriPath;
-    std::string environmentLoadError;
-    bool environmentDirty = false;
+    std::string             environmentLoadError;
+    bool                    environmentDirty = false;
 
     viewer.onGui([&]() {
         ImGui::Begin("Scene Hierarchy");
@@ -418,22 +450,21 @@ try
             ImGui::TextUnformatted("HDRI");
             ImGui::SameLine();
             if (environmentHdriPath)
+            {
                 ImGui::TextWrapped("%s", environmentHdriPath->filename().string().c_str());
-            else
+            } else
+            {
                 ImGui::TextDisabled("None (black environment)");
+            }
 
             if (ImGui::Button("Load HDRI..."))
             {
                 IGFD::FileDialogConfig dialogConfig;
-                dialogConfig.path = environmentHdriPath
-                    ? environmentHdriPath->parent_path().string()
-                    : ".";
-                dialogConfig.flags = ImGuiFileDialogFlags_Modal |
-                                     ImGuiFileDialogFlags_ReadOnlyFileNameField |
+                dialogConfig.path  = environmentHdriPath ? environmentHdriPath->parent_path().string() : ".";
+                dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_ReadOnlyFileNameField |
                                      ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
                                      ImGuiFileDialogFlags_ShowDevicesButton;
-                ImGuiFileDialog::Instance()->OpenDialog(
-                    "ChooseEnvironmentHdri", "Select HDRI", ".hdr", dialogConfig);
+                ImGuiFileDialog::Instance()->OpenDialog("ChooseEnvironmentHdri", "Select HDRI", ".hdr", dialogConfig);
             }
             ImGui::SameLine();
 
@@ -450,16 +481,14 @@ try
             ImGui::TextDisabled("Supported format: Radiance HDR (.hdr)");
             if (!environmentLoadError.empty())
             {
-                ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f),
-                                   "Load failed: %s", environmentLoadError.c_str());
+                ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Load failed: %s", environmentLoadError.c_str());
             }
 
             ImGui::Unindent();
         }
 
-        if (ImGuiFileDialog::Instance()->Display(
-                "ChooseEnvironmentHdri", ImGuiWindowFlags_NoCollapse,
-                ImVec2(640.0f, 360.0f)))
+        if (ImGuiFileDialog::Instance()->Display("ChooseEnvironmentHdri", ImGuiWindowFlags_NoCollapse,
+                                                 ImVec2(640.0f, 360.0f)))
         {
             if (ImGuiFileDialog::Instance()->IsOk())
             {
@@ -483,11 +512,13 @@ try
     // frame-graph and resource-registry bindings without Scene knowing what an environment is.
     viewer.onLateUpdate([&](float, VkExtent2D) {
         if (!environmentDirty)
+        {
             return;
+        }
 
         try
         {
-            auto reloadConfig = iblConfig;
+            auto reloadConfig     = iblConfig;
             reloadConfig.hdriPath = environmentHdriPath.value_or(fs::path{});
             lr::IBLPass iblPass(std::move(reloadConfig));
 
@@ -498,13 +529,12 @@ try
             lr::FrameGraph iblGraph(viewer.context(), viewer.resources());
             iblPass.build(iblGraph);
             iblGraph.executeAndWait({
-                {"ibl_irradiance",  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                {"ibl_irradiance", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {"ibl_prefiltered", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             });
 
             environmentLoadError.clear();
-        }
-        catch (const std::exception &e)
+        } catch (const std::exception &e)
         {
             environmentLoadError = e.what();
             spdlog::error("Failed to update environment: {}", e.what());
@@ -530,7 +560,8 @@ try
     // default, or the handle set once an ARAP precompute has succeeded) — shown only while that
     // set is non-empty, and pushes the result to the overlay pass.
     viewer.onUpdate([&](float dt, VkExtent2D extent) {
-        const float     aspect   = (extent.height == 0) ? 1.0f : static_cast<float>(extent.width) / static_cast<float>(extent.height);
+        const float aspect =
+            (extent.height == 0) ? 1.0f : static_cast<float>(extent.width) / static_cast<float>(extent.height);
         const glm::mat4 viewProj = camera->getComponent<lr::Camera>().viewProjectionMatrix(aspect);
 
         // Average in local space, then transform once — valid since centroid-of-transformed-points
@@ -540,7 +571,9 @@ try
         auto worldCentroidOf = [&](const std::unordered_set<uint32_t> &idxs) {
             glm::vec3 localCentroid(0.0f);
             for (uint32_t idx : idxs)
+            {
                 localCentroid += vertexManager.getPositions()[idx];
+            }
             localCentroid /= static_cast<float>(idxs.size());
             return glm::vec3(meshObject->getComponent<lr::Transform>().localMatrix() * glm::vec4(localCentroid, 1.0f));
         };
@@ -551,7 +584,7 @@ try
         // All 4 gizmos always share the same handler (ArapPlugin swaps them together), so any one
         // of them tells us which is currently active.
         const lr::VertexDragHandler &activeHandler = arrowX->dragHandler();
-        const auto &driven = activeHandler.indices();
+        const auto                  &driven        = activeHandler.indices();
         // While ARAP mode is active but no precompute has succeeded yet, the default drag gizmo
         // would otherwise appear over the very selection the anchor/handle popup is asking about —
         // suppress it until Solve actually swaps the handler.
@@ -565,9 +598,10 @@ try
         if (!editingAllowed || driven.empty() || suppressedByArapMode)
         {
             for (int id : translateGizmoIds)
+            {
                 gizmoManager.hideGizmo(id);
-        }
-        else
+            }
+        } else
         {
             const glm::vec3 centroid = worldCentroidOf(driven);
 
@@ -584,8 +618,7 @@ try
                 lr::Gizmo &gizmo = gizmoManager.getGizmo(translateGizmoIds[i]);
                 gizmo.setPosition(centroid);
                 // First 3 gizmos are the X/Y/Z arrows, the 4th is the screen-plane box.
-                gizmo.setScale(i < 3 ? glm::vec3(rad, len, rad)
-                                     : glm::vec3(rad * 0.45f, rad * 0.45f, rad * 0.45f));
+                gizmo.setScale(i < 3 ? glm::vec3(rad, len, rad) : glm::vec3(rad * 0.45f, rad * 0.45f, rad * 0.45f));
             }
         }
 
@@ -601,8 +634,7 @@ try
     viewer.addImguiPass();
     viewer.run();
     return 0;
-}
-catch (const std::exception &e)
+} catch (const std::exception &e)
 {
     spdlog::error("Fatal: {}", e.what());
     throw;

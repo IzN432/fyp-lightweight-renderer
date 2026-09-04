@@ -5,14 +5,15 @@
 namespace lr::math
 {
 
-glm::vec3 closestPointOnLineToLine(const glm::vec3 &origin, const glm::vec3 &dir, const glm::vec3 &targetOrigin, const glm::vec3 &targetDir)
+glm::vec3 closestPointOnLineToLine(const glm::vec3 &origin, const glm::vec3 &dir, const glm::vec3 &targetOrigin,
+                                   const glm::vec3 &targetDir)
 {
     const glm::vec3 r = origin - targetOrigin;
-    const float a     = glm::dot(dir, dir);
-    const float b     = glm::dot(dir, targetDir);
-    const float c     = glm::dot(targetDir, targetDir);
-    const float d     = glm::dot(dir, r);
-    const float e     = glm::dot(targetDir, r);
+    const float     a = glm::dot(dir, dir);
+    const float     b = glm::dot(dir, targetDir);
+    const float     c = glm::dot(targetDir, targetDir);
+    const float     d = glm::dot(dir, r);
+    const float     e = glm::dot(targetDir, r);
 
     const float denom = a * c - b * b;
     if (denom < 1e-8f)
@@ -42,7 +43,6 @@ glm::vec3 intersectionBetweenRayAndPlane(const glm::vec3 &rayOrigin, const glm::
 
     float t = -(glm::dot(glm::vec3(plane), rayOrigin) + plane.w) / denom;
     return rayOrigin + t * rayDir;
-
 }
 
 glm::vec2 worldToScreenPixels(const glm::vec3 &worldPos, const glm::mat4 &viewProj, VkExtent2D extent)
@@ -50,7 +50,7 @@ glm::vec2 worldToScreenPixels(const glm::vec3 &worldPos, const glm::mat4 &viewPr
     const glm::vec4 clip = viewProj * glm::vec4(worldPos, 1.0f);
     const glm::vec3 ndc  = glm::vec3(clip) / clip.w;
     return glm::vec2((ndc.x * 0.5f + 0.5f) * static_cast<float>(extent.width),
-                      (ndc.y * 0.5f + 0.5f) * static_cast<float>(extent.height));
+                     (ndc.y * 0.5f + 0.5f) * static_cast<float>(extent.height));
 }
 
 } // namespace lr::math

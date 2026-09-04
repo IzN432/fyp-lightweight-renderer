@@ -10,17 +10,18 @@ namespace lr
 namespace
 {
 
-
 struct VertexBuffer
 {
     std::vector<std::byte> vertexAttributeBuffer;
 };
 
 // Packs the vertex attributes of the provided meshes into a contiguous buffer
-VertexBuffer packVertexAttributes(const std::vector<const Mesh*> &meshes, const VertexBufferUploadConfig &config)
+VertexBuffer packVertexAttributes(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config)
 {
     if (meshes.empty())
+    {
         throw std::invalid_argument("packVertexAttributes: meshes must not be empty");
+    }
 
     VertexBuffer out;
 
@@ -31,7 +32,9 @@ VertexBuffer packVertexAttributes(const std::vector<const Mesh*> &meshes, const 
     {
         const auto *attr = layout.findPerVertexAttr(attribute);
         if (!attr)
+        {
             throw std::invalid_argument("packVertexAttributes: attribute '" + attribute + "' not found in mesh layout");
+        }
         stride += attr->stride;
     }
     if (config.includePosition)
@@ -50,7 +53,7 @@ VertexBuffer packVertexAttributes(const std::vector<const Mesh*> &meshes, const 
     // Assign each attribute to an offset, based on the ordering in the config
     std::unordered_map<std::string, uint32_t> attributeOffsets;
     std::unordered_map<std::string, uint32_t> attributeStrides;
-    uint32_t currentOffset = 0;
+    uint32_t                                  currentOffset = 0;
 
     // If position is included, it goes to the start of the vertex data
     if (config.includePosition)
@@ -61,7 +64,9 @@ VertexBuffer packVertexAttributes(const std::vector<const Mesh*> &meshes, const 
     {
         const auto *attr = layout.findPerVertexAttr(attribute);
         if (!attr)
+        {
             throw std::invalid_argument("packVertexAttributes: attribute '" + attribute + "' not found in mesh layout");
+        }
         attributeOffsets[attribute] = currentOffset;
         attributeStrides[attribute] = attr->stride;
         currentOffset += attr->stride;
@@ -72,13 +77,12 @@ VertexBuffer packVertexAttributes(const std::vector<const Mesh*> &meshes, const 
     {
         const auto &mesh = *meshes[i];
 
-        auto uploadData = [&](std::span<const std::byte> data, uint32_t attributeStride, uint32_t attributeOffset)
-        {
+        auto uploadData = [&](std::span<const std::byte> data, uint32_t attributeStride, uint32_t attributeOffset) {
             for (uint32_t v = 0; v < mesh.vertexCount(); ++v)
             {
-                std::byte *vertexPtr = out.vertexAttributeBuffer.data() + ((vertexOffset + v) * stride);
-                std::byte *dst = vertexPtr + attributeOffset;
-                const std::byte *src = data.data() + (v * attributeStride);
+                std::byte       *vertexPtr = out.vertexAttributeBuffer.data() + ((vertexOffset + v) * stride);
+                std::byte       *dst       = vertexPtr + attributeOffset;
+                const std::byte *src       = data.data() + (v * attributeStride);
                 std::memcpy(dst, src, attributeStride);
             }
         };
@@ -91,7 +95,7 @@ VertexBuffer packVertexAttributes(const std::vector<const Mesh*> &meshes, const 
                 positions[v] = mesh.positions[mesh.positionIndices[v]];
             }
 
-            auto positionData = reinterpret_cast<const std::byte*>(positions.data());
+            auto                       positionData = reinterpret_cast<const std::byte *>(positions.data());
             std::span<const std::byte> data(positionData, mesh.vertexCount() * sizeof(glm::vec3));
             uploadData(data, sizeof(glm::vec3), 0);
         }
@@ -112,10 +116,12 @@ VertexBuffer packVertexAttributes(const std::vector<const Mesh*> &meshes, const 
 // Packs each mesh's unique/deduped positions (mesh.positions, not expanded through
 // positionIndices) and named per-unique-vertex attributes into a contiguous interleaved buffer —
 // the deduped-position-space analogue of packVertexAttributes() above.
-VertexBuffer packUniqueVertexAttributes(const std::vector<const Mesh*> &meshes, const VertexBufferUploadConfig &config)
+VertexBuffer packUniqueVertexAttributes(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config)
 {
     if (meshes.empty())
+    {
         throw std::invalid_argument("packUniqueVertexAttributes: meshes must not be empty");
+    }
 
     VertexBuffer out;
 
@@ -123,12 +129,17 @@ VertexBuffer packUniqueVertexAttributes(const std::vector<const Mesh*> &meshes, 
 
     uint32_t stride = 0;
     if (config.includePosition)
+    {
         stride += sizeof(glm::vec3);
+    }
     for (const auto &attribute : config.vertexAttributeNames)
     {
         const auto *attr = layout.findPerUniqueVertexAttr(attribute);
         if (!attr)
-            throw std::invalid_argument("packUniqueVertexAttributes: attribute '" + attribute + "' not found in mesh layout");
+        {
+            throw std::invalid_argument("packUniqueVertexAttributes: attribute '" + attribute +
+                                        "' not found in mesh layout");
+        }
         stride += attr->stride;
     }
 
@@ -142,7 +153,7 @@ VertexBuffer packUniqueVertexAttributes(const std::vector<const Mesh*> &meshes, 
 
     std::unordered_map<std::string, uint32_t> attributeOffsets;
     std::unordered_map<std::string, uint32_t> attributeStrides;
-    uint32_t currentOffset = 0;
+    uint32_t                                  currentOffset = 0;
 
     if (config.includePosition)
     {
@@ -150,7 +161,7 @@ VertexBuffer packUniqueVertexAttributes(const std::vector<const Mesh*> &meshes, 
     }
     for (const auto &attribute : config.vertexAttributeNames)
     {
-        const auto *attr = layout.findPerUniqueVertexAttr(attribute);
+        const auto *attr            = layout.findPerUniqueVertexAttr(attribute);
         attributeOffsets[attribute] = currentOffset;
         attributeStrides[attribute] = attr->stride;
         currentOffset += attr->stride;
@@ -161,20 +172,19 @@ VertexBuffer packUniqueVertexAttributes(const std::vector<const Mesh*> &meshes, 
     {
         const uint32_t count = static_cast<uint32_t>(mesh->positions.size());
 
-        auto uploadData = [&](std::span<const std::byte> data, uint32_t attributeStride, uint32_t attributeOffset)
-        {
+        auto uploadData = [&](std::span<const std::byte> data, uint32_t attributeStride, uint32_t attributeOffset) {
             for (uint32_t v = 0; v < count; ++v)
             {
-                std::byte *vertexPtr = out.vertexAttributeBuffer.data() + ((vertexOffset + v) * stride);
-                std::byte *dst = vertexPtr + attributeOffset;
-                const std::byte *src = data.data() + (v * attributeStride);
+                std::byte       *vertexPtr = out.vertexAttributeBuffer.data() + ((vertexOffset + v) * stride);
+                std::byte       *dst       = vertexPtr + attributeOffset;
+                const std::byte *src       = data.data() + (v * attributeStride);
                 std::memcpy(dst, src, attributeStride);
             }
         };
 
         if (config.includePosition)
         {
-            auto positionData = reinterpret_cast<const std::byte*>(mesh->positions.data());
+            auto                       positionData = reinterpret_cast<const std::byte *>(mesh->positions.data());
             std::span<const std::byte> data(positionData, count * sizeof(glm::vec3));
             uploadData(data, sizeof(glm::vec3), 0);
         }
@@ -193,13 +203,10 @@ VertexBuffer packUniqueVertexAttributes(const std::vector<const Mesh*> &meshes, 
 
 } // namespace
 
-MeshUploader::MeshUploader(ResourceRegistry &registry)
-    : m_registry(registry)
-{
-}
+MeshUploader::MeshUploader(ResourceRegistry &registry) : m_registry(registry) {}
 
-VertexBufferUploadResult MeshUploader::uploadVertexBuffer(const std::vector<const Mesh*> &meshes,
-                                                          const VertexBufferUploadConfig &config)
+VertexBufferUploadResult MeshUploader::uploadVertexBuffer(const std::vector<const Mesh *> &meshes,
+                                                          const VertexBufferUploadConfig  &config)
 {
     // We assume that all the meshes have the same layout, so we can use the first one to get the layout information.
     // In a more robust implementation, we would want to check that all meshes have the same layout
@@ -209,62 +216,58 @@ VertexBufferUploadResult MeshUploader::uploadVertexBuffer(const std::vector<cons
     const auto packed = packVertexAttributes(meshes, config);
 
     const std::string name = config.vertexBufferName;
-    m_registry.uploadBuffer(name,
-                            packed.vertexAttributeBuffer.data(),
+    m_registry.uploadBuffer(name, packed.vertexAttributeBuffer.data(),
                             static_cast<VkDeviceSize>(packed.vertexAttributeBuffer.size()),
                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
     uint32_t vertexOffset = 0;
     for (const auto &mesh : meshes)
     {
-        result.singleMeshResults.push_back({ .vertexOffset = vertexOffset });
+        result.singleMeshResults.push_back({.vertexOffset = vertexOffset});
         vertexOffset += mesh->vertexCount();
     }
-    
-    return result;
-} 
 
-void MeshUploader::updateVertexBuffer(const std::vector<const Mesh*> &meshes,
-                                       const VertexBufferUploadConfig &config)
+    return result;
+}
+
+void MeshUploader::updateVertexBuffer(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config)
 {
     const auto packed = packVertexAttributes(meshes, config);
-    m_registry.reuploadBuffer(config.vertexBufferName,
-                              packed.vertexAttributeBuffer.data(),
+    m_registry.reuploadBuffer(config.vertexBufferName, packed.vertexAttributeBuffer.data(),
                               static_cast<VkDeviceSize>(packed.vertexAttributeBuffer.size()));
 }
 
-VertexBufferUploadResult MeshUploader::uploadUniqueVertexBuffer(const std::vector<const Mesh*> &meshes,
-                                                                 const VertexBufferUploadConfig &config)
+VertexBufferUploadResult MeshUploader::uploadUniqueVertexBuffer(const std::vector<const Mesh *> &meshes,
+                                                                const VertexBufferUploadConfig  &config)
 {
     VertexBufferUploadResult result;
 
     const auto packed = packUniqueVertexAttributes(meshes, config);
 
-    m_registry.uploadBuffer(config.vertexBufferName,
-                            packed.vertexAttributeBuffer.data(),
+    m_registry.uploadBuffer(config.vertexBufferName, packed.vertexAttributeBuffer.data(),
                             static_cast<VkDeviceSize>(packed.vertexAttributeBuffer.size()),
                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
     uint32_t vertexOffset = 0;
     for (const auto &mesh : meshes)
     {
-        result.singleMeshResults.push_back({ .vertexOffset = vertexOffset });
+        result.singleMeshResults.push_back({.vertexOffset = vertexOffset});
         vertexOffset += static_cast<uint32_t>(mesh->positions.size());
     }
 
     return result;
 }
 
-void MeshUploader::updateUniqueVertexBuffer(const std::vector<const Mesh*> &meshes,
-                                            const VertexBufferUploadConfig &config)
+void MeshUploader::updateUniqueVertexBuffer(const std::vector<const Mesh *> &meshes,
+                                            const VertexBufferUploadConfig  &config)
 {
     const auto packed = packUniqueVertexAttributes(meshes, config);
-    m_registry.reuploadBuffer(config.vertexBufferName,
-                              packed.vertexAttributeBuffer.data(),
+    m_registry.reuploadBuffer(config.vertexBufferName, packed.vertexAttributeBuffer.data(),
                               static_cast<VkDeviceSize>(packed.vertexAttributeBuffer.size()));
 }
 
-IndexBufferUploadResult MeshUploader::uploadIndexBuffer(const std::vector<const Mesh*> &meshes, const IndexBufferUploadConfig &config)
+IndexBufferUploadResult MeshUploader::uploadIndexBuffer(const std::vector<const Mesh *> &meshes,
+                                                        const IndexBufferUploadConfig   &config)
 {
     IndexBufferUploadResult result;
 
@@ -280,27 +283,23 @@ IndexBufferUploadResult MeshUploader::uploadIndexBuffer(const std::vector<const 
     uint32_t faceOffset = 0;
     for (const auto &mesh : meshes)
     {
-        result.singleMeshResults.push_back({
-            .firstIndex = faceOffset * 3, // 3 indices per face
-            .indexCount = mesh->faceCount() * 3
-        });
-        std::memcpy(indexBuffer.data() + faceOffset * sizeof(glm::uvec3),
-                    mesh->faces.data(),
+        result.singleMeshResults.push_back({.firstIndex = faceOffset * 3, // 3 indices per face
+                                            .indexCount = mesh->faceCount() * 3});
+        std::memcpy(indexBuffer.data() + faceOffset * sizeof(glm::uvec3), mesh->faces.data(),
                     mesh->faceCount() * sizeof(glm::uvec3));
         faceOffset += mesh->faceCount();
     }
 
     const std::string name = config.indexBufferName;
-    m_registry.uploadBuffer(name,
-                            indexBuffer.data(),
-                            static_cast<VkDeviceSize>(indexBuffer.size()),
+    m_registry.uploadBuffer(name, indexBuffer.data(), static_cast<VkDeviceSize>(indexBuffer.size()),
                             VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
     return result;
 }
 
-void MeshUploader::uploadFaceGroupBuffer(const std::vector<const Mesh*> &meshes, const FaceGroupBufferUploadConfig &config)
+void MeshUploader::uploadFaceGroupBuffer(const std::vector<const Mesh *>   &meshes,
+                                         const FaceGroupBufferUploadConfig &config)
 {
-    bool anyFaceGroups = false;
+    bool     anyFaceGroups  = false;
     uint32_t totalFaceCount = 0;
     for (const auto &mesh : meshes)
     {
@@ -321,28 +320,25 @@ void MeshUploader::uploadFaceGroupBuffer(const std::vector<const Mesh*> &meshes,
     {
         if (mesh->faceGroups.empty())
         {
-            std::memset(faceGroupBuffer.data() + faceOffset * sizeof(uint32_t), 0, mesh->faceCount() * sizeof(uint32_t));
-        }
-        else
+            std::memset(faceGroupBuffer.data() + faceOffset * sizeof(uint32_t), 0,
+                        mesh->faceCount() * sizeof(uint32_t));
+        } else
         {
-            std::memcpy(faceGroupBuffer.data() + faceOffset * sizeof(uint32_t),
-                        mesh->faceGroups.data(),
+            std::memcpy(faceGroupBuffer.data() + faceOffset * sizeof(uint32_t), mesh->faceGroups.data(),
                         mesh->faceGroups.size() * sizeof(uint32_t));
         }
         faceOffset += mesh->faceCount();
     }
 
     const std::string name = config.faceGroupBufferName;
-    m_registry.uploadBuffer(name,
-                            faceGroupBuffer.data(),
-                            static_cast<VkDeviceSize>(faceGroupBuffer.size()),
+    m_registry.uploadBuffer(name, faceGroupBuffer.data(), static_cast<VkDeviceSize>(faceGroupBuffer.size()),
                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 }
 
-void MeshUploader::uploadVertexGroupBuffers(const std::vector<const Mesh*> &meshes,
+void MeshUploader::uploadVertexGroupBuffers(const std::vector<const Mesh *>     &meshes,
                                             const VertexGroupBufferUploadConfig &config)
 {
-    bool anyVertexGroups = false;
+    bool     anyVertexGroups  = false;
     uint32_t totalVertexCount = 0;
     uint32_t totalEntryCount  = 0;
     for (const auto &mesh : meshes)
@@ -356,12 +352,14 @@ void MeshUploader::uploadVertexGroupBuffers(const std::vector<const Mesh*> &mesh
     }
 
     if (!anyVertexGroups)
+    {
         throw std::invalid_argument("uploadVertexGroupBuffers: meshes must have vertex groups enabled");
+    }
 
     // Guarantee a non-zero entries buffer (Vulkan disallows zero-size storage buffers)
     std::vector<VertexGroupEntry> entries(std::max(totalEntryCount, 1u));
     std::vector<uint32_t>         offsets(totalVertexCount, 0u);
-    std::vector<uint32_t>         counts(totalVertexCount,  0u);
+    std::vector<uint32_t>         counts(totalVertexCount, 0u);
 
     uint32_t vertexCursor = 0;
     uint32_t entryCursor  = 0;
@@ -374,14 +372,13 @@ void MeshUploader::uploadVertexGroupBuffers(const std::vector<const Mesh*> &mesh
             auto meshOffsets = mesh->rawGroupOffsets();
             auto meshCounts  = mesh->rawGroupCounts();
 
-            std::memcpy(entries.data() + entryCursor,
-                        meshEntries.data(),
+            std::memcpy(entries.data() + entryCursor, meshEntries.data(),
                         meshEntries.size() * sizeof(VertexGroupEntry));
 
             for (uint32_t v = 0; v < vCount; ++v)
             {
                 offsets[vertexCursor + v] = meshOffsets[v] + entryCursor;
-                counts [vertexCursor + v] = meshCounts[v];
+                counts[vertexCursor + v]  = meshCounts[v];
             }
 
             entryCursor += static_cast<uint32_t>(meshEntries.size());
@@ -391,18 +388,15 @@ void MeshUploader::uploadVertexGroupBuffers(const std::vector<const Mesh*> &mesh
         vertexCursor += vCount;
     }
 
-    m_registry.uploadBuffer(config.entriesBufferName,
-                            entries.data(),
+    m_registry.uploadBuffer(config.entriesBufferName, entries.data(),
                             static_cast<VkDeviceSize>(entries.size() * sizeof(VertexGroupEntry)),
                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
-    m_registry.uploadBuffer(config.offsetsBufferName,
-                            offsets.data(),
+    m_registry.uploadBuffer(config.offsetsBufferName, offsets.data(),
                             static_cast<VkDeviceSize>(offsets.size() * sizeof(uint32_t)),
                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
-    m_registry.uploadBuffer(config.countsBufferName,
-                            counts.data(),
+    m_registry.uploadBuffer(config.countsBufferName, counts.data(),
                             static_cast<VkDeviceSize>(counts.size() * sizeof(uint32_t)),
                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 }

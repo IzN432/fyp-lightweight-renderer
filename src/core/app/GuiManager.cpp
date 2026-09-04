@@ -8,27 +8,23 @@ namespace lr
 {
 
 GuiManager::GuiManager(ImguiPass &imguiPass)
-    : m_imguiPass(imguiPass)
-    , m_renderCallback([]() { ImGui::ShowDemoWindow(); })
-{
-}
+    : m_imguiPass(imguiPass), m_renderCallback([]() {
+          ImGui::ShowDemoWindow();
+      })
+{}
 
 GuiManager::~GuiManager() = default;
 
-void GuiManager::setRenderCallback(std::function<void()> callback)
-{
-    m_renderCallback = callback;
-}
+void GuiManager::setRenderCallback(std::function<void()> callback) { m_renderCallback = callback; }
 
-void GuiManager::beginFrame()
-{
-    m_imguiPass.beginFrame();
-}
+void GuiManager::beginFrame() { m_imguiPass.beginFrame(); }
 
 void GuiManager::render()
 {
     if (m_renderCallback)
+    {
         m_renderCallback();
+    }
 }
 
-}  // namespace lr
+} // namespace lr

@@ -11,26 +11,45 @@ namespace lr
 // MeshLayout
 // =============================================================================
 
-
 MeshLayout &MeshLayout::enableVertexGroups()
 {
     m_vertexGroupsEnabled = true;
     return *this;
 }
 
-static const MeshLayout::AttributeDesc *findInList(
-    const std::vector<MeshLayout::AttributeDesc> &vec, const std::string &name)
+static const MeshLayout::AttributeDesc *findInList(const std::vector<MeshLayout::AttributeDesc> &vec,
+                                                   const std::string                            &name)
 {
     for (const auto &d : vec)
-        if (d.name == name) return &d;
+    {
+        if (d.name == name)
+        {
+            return &d;
+        }
+    }
     return nullptr;
 }
 
-const MeshLayout::AttributeDesc *MeshLayout::findPerVertexAttr(const std::string &name)       const { return findInList(m_perVertex,       name); }
-const MeshLayout::AttributeDesc *MeshLayout::findPerUniqueVertexAttr(const std::string &name) const { return findInList(m_perUniqueVertex, name); }
-const MeshLayout::AttributeDesc *MeshLayout::findPerFaceAttr(const std::string &name)         const { return findInList(m_perFace,         name); }
-const MeshLayout::AttributeDesc *MeshLayout::findFaceGroupAttr(const std::string &name)       const { return findInList(m_faceGroup,       name); }
-const MeshLayout::AttributeDesc *MeshLayout::findVertexGroupAttr(const std::string &name)     const { return findInList(m_vertexGroup,     name); }
+const MeshLayout::AttributeDesc *MeshLayout::findPerVertexAttr(const std::string &name) const
+{
+    return findInList(m_perVertex, name);
+}
+const MeshLayout::AttributeDesc *MeshLayout::findPerUniqueVertexAttr(const std::string &name) const
+{
+    return findInList(m_perUniqueVertex, name);
+}
+const MeshLayout::AttributeDesc *MeshLayout::findPerFaceAttr(const std::string &name) const
+{
+    return findInList(m_perFace, name);
+}
+const MeshLayout::AttributeDesc *MeshLayout::findFaceGroupAttr(const std::string &name) const
+{
+    return findInList(m_faceGroup, name);
+}
+const MeshLayout::AttributeDesc *MeshLayout::findVertexGroupAttr(const std::string &name) const
+{
+    return findInList(m_vertexGroup, name);
+}
 
 // =============================================================================
 // GpuMeshLayout
@@ -42,8 +61,7 @@ GpuMeshLayout &GpuMeshLayout::map(std::string name, uint32_t binding, uint32_t l
 {
     if (!m_layout.findPerVertexAttr(name))
     {
-        throw std::invalid_argument(
-            "GpuMeshLayout: '" + name + "' is not a registered per-vertex attribute");
+        throw std::invalid_argument("GpuMeshLayout: '" + name + "' is not a registered per-vertex attribute");
     }
     m_mappings.push_back({std::move(name), binding, location, format});
     return *this;
@@ -53,8 +71,7 @@ GpuMeshLayout &GpuMeshLayout::mapUniqueVertex(std::string name, uint32_t binding
 {
     if (!m_layout.findPerUniqueVertexAttr(name))
     {
-        throw std::invalid_argument(
-            "GpuMeshLayout: '" + name + "' is not a registered per-unique-vertex attribute");
+        throw std::invalid_argument("GpuMeshLayout: '" + name + "' is not a registered per-unique-vertex attribute");
     }
     m_uniqueVertexMappings.push_back({std::move(name), binding, location, format});
     return *this;
@@ -78,15 +95,21 @@ std::vector<VkVertexInputBindingDescription> GpuMeshLayout::bindingDescriptions(
     // For interleaved layouts (multiple attributes per binding) this is the total stride.
     std::unordered_map<uint32_t, uint32_t> bindingStrides;
     for (const auto &m : m_mappings)
-        bindingStrides[m.binding] += m.isPosition ? static_cast<uint32_t>(sizeof(glm::vec3))
-                                                   : strideOf(m_layout.findPerVertexAttr(m.name));
+    {
+        bindingStrides[m.binding] +=
+            m.isPosition ? static_cast<uint32_t>(sizeof(glm::vec3)) : strideOf(m_layout.findPerVertexAttr(m.name));
+    }
     for (const auto &m : m_uniqueVertexMappings)
+    {
         bindingStrides[m.binding] += strideOf(m_layout.findPerUniqueVertexAttr(m.name));
+    }
 
     std::vector<VkVertexInputBindingDescription> result;
     result.reserve(bindingStrides.size());
     for (const auto &[binding, stride] : bindingStrides)
+    {
         result.push_back({binding, stride, VK_VERTEX_INPUT_RATE_VERTEX});
+    }
     return result;
 }
 
@@ -100,8 +123,7 @@ std::vector<VkVertexInputAttributeDescription> GpuMeshLayout::attributeDescripti
     std::vector<VkVertexInputAttributeDescription> result;
     result.reserve(m_mappings.size() + m_uniqueVertexMappings.size());
 
-    auto append = [&](const std::vector<AttributeMapping> &mappings, auto strideFn)
-    {
+    auto append = [&](const std::vector<AttributeMapping> &mappings, auto strideFn) {
         for (const auto &m : mappings)
         {
             uint32_t stride = strideFn(m);
@@ -118,8 +140,7 @@ std::vector<VkVertexInputAttributeDescription> GpuMeshLayout::attributeDescripti
     };
 
     append(m_mappings, [&](const AttributeMapping &m) {
-        return m.isPosition ? static_cast<uint32_t>(sizeof(glm::vec3))
-                             : strideOf(m_layout.findPerVertexAttr(m.name));
+        return m.isPosition ? static_cast<uint32_t>(sizeof(glm::vec3)) : strideOf(m_layout.findPerVertexAttr(m.name));
     });
     append(m_uniqueVertexMappings, [&](const AttributeMapping &m) {
         return strideOf(m_layout.findPerUniqueVertexAttr(m.name));
@@ -132,14 +153,14 @@ std::vector<VkVertexInputAttributeDescription> GpuMeshLayout::attributeDescripti
 // Mesh — private helpers
 // =============================================================================
 
-Mesh::AttributeStore &Mesh::requireStore(
-    std::unordered_map<std::string, AttributeStore> &stores,
-    const std::vector<MeshLayout::AttributeDesc> &descs,
-    const std::string &name)
+Mesh::AttributeStore &Mesh::requireStore(std::unordered_map<std::string, AttributeStore> &stores,
+                                         const std::vector<MeshLayout::AttributeDesc> &descs, const std::string &name)
 {
     auto it = stores.find(name);
     if (it != stores.end())
+    {
         return it->second;
+    }
 
     for (const auto &desc : descs)
     {
@@ -153,9 +174,8 @@ Mesh::AttributeStore &Mesh::requireStore(
     throw std::invalid_argument("Mesh: '" + name + "' not registered in layout for this domain");
 }
 
-const Mesh::AttributeStore &Mesh::getStore(
-    const std::unordered_map<std::string, AttributeStore> &stores,
-    const std::string &name) const
+const Mesh::AttributeStore &Mesh::getStore(const std::unordered_map<std::string, AttributeStore> &stores,
+                                           const std::string                                     &name) const
 {
     auto it = stores.find(name);
     if (it == stores.end())
@@ -165,10 +185,8 @@ const Mesh::AttributeStore &Mesh::getStore(
     return it->second;
 }
 
-void Mesh::allocateDomain(
-    std::unordered_map<std::string, AttributeStore> &stores,
-    const std::vector<MeshLayout::AttributeDesc> &descs,
-    uint32_t count)
+void Mesh::allocateDomain(std::unordered_map<std::string, AttributeStore> &stores,
+                          const std::vector<MeshLayout::AttributeDesc> &descs, uint32_t count)
 {
     for (const auto &desc : descs)
     {
@@ -191,9 +209,7 @@ void Mesh::rebuildGroupCSR() const
     {
         m_groupOffsets[v] = static_cast<uint32_t>(m_groupEntries.size());
         m_groupCounts[v]  = static_cast<uint32_t>(m_pendingGroupEntries[v].size());
-        m_groupEntries.insert(m_groupEntries.end(),
-                              m_pendingGroupEntries[v].begin(),
-                              m_pendingGroupEntries[v].end());
+        m_groupEntries.insert(m_groupEntries.end(), m_pendingGroupEntries[v].begin(), m_pendingGroupEntries[v].end());
     }
 
     m_csrDirty = false;
@@ -258,14 +274,12 @@ void Mesh::setVertexGroups(uint32_t vertexIndex, std::span<const VertexGroupEntr
 {
     if (!m_vertexCountExplicit)
     {
-        throw std::logic_error(
-            "Mesh: setVertexCount() must be called explicitly before setVertexGroups()");
+        throw std::logic_error("Mesh: setVertexCount() must be called explicitly before setVertexGroups()");
     }
     if (vertexIndex >= m_vertexCount)
     {
-        throw std::out_of_range(
-            "Mesh: vertexIndex " + std::to_string(vertexIndex) +
-            " >= vertexCount "  + std::to_string(m_vertexCount));
+        throw std::out_of_range("Mesh: vertexIndex " + std::to_string(vertexIndex) + " >= vertexCount " +
+                                std::to_string(m_vertexCount));
     }
 
     m_pendingGroupEntries[vertexIndex].assign(entries.begin(), entries.end());
@@ -280,7 +294,9 @@ std::span<const VertexGroupEntry> Mesh::getVertexGroups(uint32_t vertexIndex) co
     }
 
     if (m_csrDirty)
+    {
         rebuildGroupCSR();
+    }
 
     return {m_groupEntries.data() + m_groupOffsets[vertexIndex], m_groupCounts[vertexIndex]};
 }
@@ -316,20 +332,29 @@ std::span<const std::byte> Mesh::rawVertexGroupAttributeData(const std::string &
 
 std::span<const VertexGroupEntry> Mesh::rawGroupEntries() const
 {
-    if (m_csrDirty) rebuildGroupCSR();
+    if (m_csrDirty)
+    {
+        rebuildGroupCSR();
+    }
     return m_groupEntries;
 }
 
 std::span<const uint32_t> Mesh::rawGroupOffsets() const
 {
-    if (m_csrDirty) rebuildGroupCSR();
+    if (m_csrDirty)
+    {
+        rebuildGroupCSR();
+    }
     return m_groupOffsets;
 }
 
 std::span<const uint32_t> Mesh::rawGroupCounts() const
 {
-    if (m_csrDirty) rebuildGroupCSR();
+    if (m_csrDirty)
+    {
+        rebuildGroupCSR();
+    }
     return m_groupCounts;
 }
 
-}  // namespace lr
+} // namespace lr

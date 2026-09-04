@@ -42,20 +42,20 @@ private:
     void onSolveClicked();
     void resetToDefaultHandler();
 
-    SelectionManager &m_selectionManager;
-    VertexManager &m_vertexManager;
-    CommandManager &m_commandManager;
-    const Mesh &m_mesh;
-    VertexDragHandler &m_defaultHandler;
+    SelectionManager               &m_selectionManager;
+    VertexManager                  &m_vertexManager;
+    CommandManager                 &m_commandManager;
+    const Mesh                     &m_mesh;
+    VertexDragHandler              &m_defaultHandler;
     std::vector<DragHandlerGizmo *> m_gizmos;
 
     VertexRoleId m_anchorRole;
     VertexRoleId m_handleRole;
 
-    ArapSolver m_solver;
+    ArapSolver      m_solver;
     ArapDragHandler m_arapHandler;
 
-    bool m_modeActive = false;
+    bool m_modeActive      = false;
     bool m_lastSolveFailed = false;
 };
 

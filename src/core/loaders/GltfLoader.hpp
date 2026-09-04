@@ -10,34 +10,34 @@ namespace lr
 
 struct GltfMeshLoadResult
 {
-	MeshSequence sequence;
-	// Parallel to the glTF material indices (index 0 = the synthetic default material) — already
-	// resolved to their MaterialStore slots, matching what got baked into each Mesh's faceGroups.
-	std::vector<MaterialHandle> materialHandles;
+    MeshSequence sequence;
+    // Parallel to the glTF material indices (index 0 = the synthetic default material) — already
+    // resolved to their MaterialStore slots, matching what got baked into each Mesh's faceGroups.
+    std::vector<MaterialHandle> materialHandles;
 };
 
 struct GltfLoaderConfig
 {
-	// Per-vertex attributes
-	std::string normalAttributeName = "normal";
-	std::string tangentAttributeName = "tangent";
-	std::string uvAttributeName = "uv";
+    // Per-vertex attributes
+    std::string normalAttributeName  = "normal";
+    std::string tangentAttributeName = "tangent";
+    std::string uvAttributeName      = "uv";
 
-	// Material
-	std::string diffuseTextureName = "diffuseTexture";
-	std::string normalTextureName = "normalTexture";
-	std::string metallicRoughnessTextureName = "metallicRoughnessTexture";
-	std::string emissiveTextureName = "emissiveTexture";
+    // Material
+    std::string diffuseTextureName           = "diffuseTexture";
+    std::string normalTextureName            = "normalTexture";
+    std::string metallicRoughnessTextureName = "metallicRoughnessTexture";
+    std::string emissiveTextureName          = "emissiveTexture";
 
-	std::string baseDiffuseName = "baseDiffuse";
-	std::string baseRoughnessName = "baseRoughness";
-	std::string baseMetallicName = "baseMetallic";
-	std::string baseEmissiveName = "baseEmissive";
+    std::string baseDiffuseName   = "baseDiffuse";
+    std::string baseRoughnessName = "baseRoughness";
+    std::string baseMetallicName  = "baseMetallic";
+    std::string baseEmissiveName  = "baseEmissive";
 };
 
 /**
  * Loads glTF/GLB files into the internal Mesh format.
- * 
+ *
  * Per-vertex attributes (names from config):
  *   - normalAttr  (vec3)  vertex normal
  *   - uvAttr      (vec2)  primary texture coordinate
@@ -57,10 +57,10 @@ struct GltfLoaderConfig
 class GltfLoader
 {
 public:
-	// Materials are registered into `materialStore` as they're parsed, so the returned Mesh's
-	// faceGroups already hold global MaterialHandles — no remapping needed at the call site.
-	GltfMeshLoadResult load(const std::filesystem::path &path, MaterialStore &materialStore,
-	                         const GltfLoaderConfig &config = {}) const;
+    // Materials are registered into `materialStore` as they're parsed, so the returned Mesh's
+    // faceGroups already hold global MaterialHandles — no remapping needed at the call site.
+    GltfMeshLoadResult load(const std::filesystem::path &path, MaterialStore &materialStore,
+                            const GltfLoaderConfig &config = {}) const;
 };
 
-}  // namespace lr
+} // namespace lr

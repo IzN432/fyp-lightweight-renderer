@@ -36,8 +36,8 @@ struct Camera : public Component
 
     [[nodiscard]] glm::mat4 viewMatrix() const
     {
-        const lr::Transform& transform = getOwningObject().getComponent<Transform>();
-        const glm::vec3 &eye = transform.position();
+        const lr::Transform &transform = getOwningObject().getComponent<Transform>();
+        const glm::vec3     &eye       = transform.position();
         return glm::lookAt(eye, eye + transform.forward(), transform.up());
     }
 
@@ -48,15 +48,13 @@ struct Camera : public Component
         glm::mat4 projection(1.0f);
         if (projectionType == ProjectionType::Perspective)
         {
-            projection = glm::perspective(glm::radians(fovYDegrees), safeAspect,
-                                          nearPlane, farPlane);
+            projection = glm::perspective(glm::radians(fovYDegrees), safeAspect, nearPlane, farPlane);
             projection[1][1] *= -1.0f;
-        }
-        else
+        } else
         {
             const float halfH = orthoHeight * 0.5f;
             const float halfW = halfH * safeAspect;
-            projection = glm::ortho(-halfW, halfW, -halfH, halfH, nearPlane, farPlane);
+            projection        = glm::ortho(-halfW, halfW, -halfH, halfH, nearPlane, farPlane);
             projection[1][1] *= -1.0f;
         }
 
@@ -77,19 +75,18 @@ struct Camera : public Component
     {
         bool changed = false;
 
-        const char* projectionTypes[] = { "Perspective", "Orthographic" };
-        int currentProjection = static_cast<int>(projectionType);
+        const char *projectionTypes[] = {"Perspective", "Orthographic"};
+        int         currentProjection = static_cast<int>(projectionType);
         if (ImGui::Combo("Projection Type", &currentProjection, projectionTypes, IM_ARRAYSIZE(projectionTypes)))
         {
             projectionType = static_cast<ProjectionType>(currentProjection);
-            changed = true;
+            changed        = true;
         }
 
         if (projectionType == ProjectionType::Perspective)
         {
             changed |= ImGui::SliderFloat("FOV Y (Degrees)", &fovYDegrees, 1.0f, 179.0f);
-        }
-        else
+        } else
         {
             changed |= ImGui::SliderFloat("Orthographic Height", &orthoHeight, 0.1f, 100.0f);
         }

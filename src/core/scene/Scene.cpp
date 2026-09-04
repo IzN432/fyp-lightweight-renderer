@@ -18,4 +18,4 @@ void Scene::onGUI()
     }
 }
 
-}  // namespace lr
+} // namespace lr

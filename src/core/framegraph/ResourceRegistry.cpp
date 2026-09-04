@@ -156,52 +156,64 @@ void ResourceRegistry::registerCubemap(const std::string &name, VkFormat format,
 void ResourceRegistry::uploadImage(const std::string &name, const void *data, uint32_t width, uint32_t height,
                                    VkFormat format, bool generateMipmaps)
 {
-    queueImageUpload(name, data, width, height, format, generateMipmaps,
-                     ImageUploadMode::Create);
+    queueImageUpload(name, data, width, height, format, generateMipmaps, ImageUploadMode::Create);
 }
 
-void ResourceRegistry::replaceUploadedImage(const std::string &name,
-                                             const void *data,
-                                             uint32_t width,
-                                             uint32_t height,
-                                             VkFormat format,
-                                             bool generateMipmaps)
+void ResourceRegistry::replaceUploadedImage(const std::string &name, const void *data, uint32_t width, uint32_t height,
+                                            VkFormat format, bool generateMipmaps)
 {
-    queueImageUpload(name, data, width, height, format, generateMipmaps,
-                     ImageUploadMode::Replace);
+    queueImageUpload(name, data, width, height, format, generateMipmaps, ImageUploadMode::Replace);
 }
 
-void ResourceRegistry::queueImageUpload(const std::string &name,
-                                        const void *data,
-                                        uint32_t width,
-                                        uint32_t height,
-                                        VkFormat format,
-                                        bool generateMipmaps,
-                                        ImageUploadMode mode)
+void ResourceRegistry::queueImageUpload(const std::string &name, const void *data, uint32_t width, uint32_t height,
+                                        VkFormat format, bool generateMipmaps, ImageUploadMode mode)
 {
     auto existing = m_images.find(name);
     if (mode == ImageUploadMode::Create && existing != m_images.end())
+    {
         throw std::runtime_error("ResourceRegistry: duplicate image '" + name + "'");
+    }
     if (mode == ImageUploadMode::Replace && existing == m_images.end())
+    {
         throw std::runtime_error("ResourceRegistry: image '" + name + "' not found");
-    if (mode == ImageUploadMode::Replace &&
-        (!existing->second.persistent || existing->second.external))
+    }
+    if (mode == ImageUploadMode::Replace && (!existing->second.persistent || existing->second.external))
+    {
         throw std::runtime_error("ResourceRegistry: image '" + name + "' is not a replaceable uploaded image");
+    }
 
     for (const auto &upload : m_pendingUploads)
+    {
         if (upload.type == PendingUpload::Type::Image && upload.resourceName == name)
+        {
             throw std::runtime_error("ResourceRegistry: image '" + name + "' already has a pending upload");
+        }
+    }
 
-    VkDeviceSize bpp = 4;  // default RGBA8
-    if (format == VK_FORMAT_R16G16B16A16_SFLOAT) bpp = 8;
-    if (format == VK_FORMAT_R32G32B32A32_SFLOAT) bpp = 16;
-    if (format == VK_FORMAT_R8_UNORM)            bpp = 1;
-    if (format == VK_FORMAT_R8G8_UNORM)          bpp = 2;
+    VkDeviceSize bpp = 4; // default RGBA8
+    if (format == VK_FORMAT_R16G16B16A16_SFLOAT)
+    {
+        bpp = 8;
+    }
+    if (format == VK_FORMAT_R32G32B32A32_SFLOAT)
+    {
+        bpp = 16;
+    }
+    if (format == VK_FORMAT_R8_UNORM)
+    {
+        bpp = 1;
+    }
+    if (format == VK_FORMAT_R8G8_UNORM)
+    {
+        bpp = 2;
+    }
 
-    const uint32_t mipLevels = generateMipmaps ? computeMipLevels(width, height) : 1;
-    VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    const uint32_t    mipLevels = generateMipmaps ? computeMipLevels(width, height) : 1;
+    VkImageUsageFlags usage     = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     if (generateMipmaps)
+    {
         usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
 
     ImageEntry prepared{};
     prepared.format        = format;
@@ -219,43 +231,43 @@ void ResourceRegistry::queueImageUpload(const std::string &name,
         // Prepare every fallible allocation before changing the registry.
         allocateImageEntry(name, prepared);
         const VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * bpp;
-        staging = m_allocator.createBuffer(
-            size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+        staging = m_allocator.createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
         std::memcpy(staging.info.pMappedData, data, size);
 
         PendingUpload pending{
-            .staging = staging,
+            .staging      = staging,
             .resourceName = name,
-            .type = PendingUpload::Type::Image,
+            .type         = PendingUpload::Type::Image,
         };
         m_pendingUploads.reserve(m_pendingUploads.size() + 1);
 
         if (mode == ImageUploadMode::Create)
         {
             m_images.emplace(name, std::move(prepared));
-        }
-        else
+        } else
         {
             AllocatedImage oldImage = std::move(existing->second.image);
-            existing->second = std::move(prepared);
+            existing->second        = std::move(prepared);
             m_allocator.destroy(oldImage);
         }
 
         // Capacity was reserved before committing the image, so this move cannot reallocate.
         m_pendingUploads.push_back(std::move(pending));
-    }
-    catch (...)
+    } catch (...)
     {
         if (staging.buffer != VK_NULL_HANDLE)
+        {
             m_allocator.destroy(staging);
+        }
         if (prepared.image.image != VK_NULL_HANDLE)
+        {
             m_allocator.destroy(prepared.image);
+        }
         throw;
     }
 
     spdlog::debug("ResourceRegistry: {} image '{}' ({}x{}, {} mips)",
-                  mode == ImageUploadMode::Create ? "queued" : "replaced",
-                  name, width, height, mipLevels);
+                  mode == ImageUploadMode::Create ? "queued" : "replaced", name, width, height, mipLevels);
 }
 
 void ResourceRegistry::uploadArrayImage(const std::string &arrayName, uint32_t index, const void *data, uint32_t width,
@@ -323,7 +335,7 @@ std::vector<const AllocatedImage *> ResourceRegistry::getImageArray(const std::s
 std::vector<VkImageLayout> ResourceRegistry::getImageArrayLayouts(const std::string &arrayName) const
 {
     std::vector<VkImageLayout> result;
-    const auto it = m_imageArrays.find(arrayName);
+    const auto                 it = m_imageArrays.find(arrayName);
     if (it == m_imageArrays.end())
     {
         return result;

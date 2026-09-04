@@ -8,8 +8,7 @@ namespace lr
 class Gizmo
 {
 public:
-    Gizmo(OverlayInstance instance)
-        : m_instance(instance) {};
+    Gizmo(OverlayInstance instance) : m_instance(instance) {};
     virtual ~Gizmo() = default;
 
     // Returns the OverlayInstance to be used in overlay geometry pass for rendering
@@ -23,6 +22,7 @@ public:
     void setPosition(const glm::vec3 &pos) { m_instance.position = pos; }
     void setScale(const glm::vec3 &scale) { m_instance.scale = scale; }
     void setPickingId(uint32_t id) { m_instance.pickingId = id; }
+
 protected:
     OverlayInstance m_instance;
 };

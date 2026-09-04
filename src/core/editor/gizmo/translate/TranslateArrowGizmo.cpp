@@ -60,8 +60,8 @@ constexpr std::array<glm::vec3, 3> kAxisVectors = {{
 
 TranslateArrowGizmo::TranslateArrowGizmo(TranslateArrowGizmoAxis axis, const SceneObject &camera,
                                          const InputHandler &input, VertexDragHandler &handler)
-    : Gizmo(kAxisInstances[static_cast<size_t>(axis)]), m_camera(camera), m_input(input),
-      m_dragHandler(&handler), m_axis(kAxisVectors[static_cast<size_t>(axis)])
+    : Gizmo(kAxisInstances[static_cast<size_t>(axis)]), m_camera(camera), m_input(input), m_dragHandler(&handler),
+      m_axis(kAxisVectors[static_cast<size_t>(axis)])
 {}
 
 void TranslateArrowGizmo::onMouseDown(double ndcX, double ndcY, double aspect)

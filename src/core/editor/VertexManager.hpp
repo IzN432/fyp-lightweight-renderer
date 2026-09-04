@@ -12,9 +12,7 @@ namespace lr
 class VertexManager
 {
 public:
-    VertexManager(std::vector<glm::vec3> &positions)
-        : m_positions(positions) 
-    {}
+    VertexManager(std::vector<glm::vec3> &positions) : m_positions(positions) {}
 
     const std::vector<glm::vec3> &getPositions() const { return m_positions; }
 
@@ -34,7 +32,7 @@ public:
 
 private:
     std::vector<glm::vec3> &m_positions;
-    std::function<void()> m_updateCallback;
+    std::function<void()>   m_updateCallback;
 };
 
-}
+} // namespace lr

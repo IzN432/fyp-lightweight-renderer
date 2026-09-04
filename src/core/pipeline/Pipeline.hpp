@@ -10,14 +10,14 @@ class Pipeline
 public:
     virtual ~Pipeline() = default;
 
-    virtual VkPipeline          get()       const = 0;
+    virtual VkPipeline          get() const       = 0;
     virtual VkPipelineBindPoint bindPoint() const = 0;
 
-    Pipeline(const Pipeline &) = delete;
+    Pipeline(const Pipeline &)            = delete;
     Pipeline &operator=(const Pipeline &) = delete;
 
 protected:
     Pipeline() = default;
 };
 
-}  // namespace lr
+} // namespace lr

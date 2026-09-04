@@ -28,15 +28,9 @@ void InputHandler::update()
     m_scrollAccum = 0.0;
 }
 
-bool InputHandler::isKeyPressed(int key) const
-{
-    return m_pressedKeys.contains(key);
-}
+bool InputHandler::isKeyPressed(int key) const { return m_pressedKeys.contains(key); }
 
-bool InputHandler::isMouseButtonPressed(int button) const
-{
-    return m_pressedButtons.contains(button);
-}
+bool InputHandler::isMouseButtonPressed(int button) const { return m_pressedButtons.contains(button); }
 
 void InputHandler::getMouseDelta(double &dx, double &dy) const
 {
@@ -44,10 +38,7 @@ void InputHandler::getMouseDelta(double &dx, double &dy) const
     dy = m_deltaMouseY;
 }
 
-double InputHandler::getScrollDelta() const
-{
-    return m_scrollDelta;
-}
+double InputHandler::getScrollDelta() const { return m_scrollDelta; }
 
 void InputHandler::getMousePos(double &x, double &y) const
 {
@@ -58,15 +49,20 @@ void InputHandler::getMousePos(double &x, double &y) const
 void InputHandler::notifyKey(int key, int action)
 {
     if (action != 0)
+    {
         m_pressedKeys.insert(key);
-    else
+    } else
+    {
         m_pressedKeys.erase(key);
+    }
 
     bool shift = isShiftPressed();
     bool ctrl  = isCtrlPressed();
     bool alt   = isAltPressed();
     for (auto &cb : m_keyPressCallbacks)
+    {
         cb(key, action, shift, ctrl, alt);
+    }
 }
 
 void InputHandler::notifyMouseMove(double x, double y)
@@ -78,20 +74,22 @@ void InputHandler::notifyMouseMove(double x, double y)
 void InputHandler::notifyMouseButton(int button, int action)
 {
     if (action != 0)
+    {
         m_pressedButtons.insert(button);
-    else
+    } else
+    {
         m_pressedButtons.erase(button);
+    }
 
     bool shift = isShiftPressed();
     bool ctrl  = isCtrlPressed();
     bool alt   = isAltPressed();
     for (auto &cb : m_mouseButtonCallbacks)
+    {
         cb(button, action, shift, ctrl, alt);
+    }
 }
 
-void InputHandler::notifyScroll(double delta)
-{
-    m_scrollAccum += delta;
-}
+void InputHandler::notifyScroll(double delta) { m_scrollAccum += delta; }
 
-}  // namespace lr
+} // namespace lr

@@ -15,7 +15,7 @@ struct ResourceId
     uint32_t value = std::numeric_limits<uint32_t>::max();
 
     friend bool operator==(ResourceId, ResourceId) = default;
-    explicit operator bool() const { return value != std::numeric_limits<uint32_t>::max(); }
+    explicit    operator bool() const { return value != std::numeric_limits<uint32_t>::max(); }
 };
 
 struct PassId
@@ -23,7 +23,7 @@ struct PassId
     uint32_t value = std::numeric_limits<uint32_t>::max();
 
     friend bool operator==(PassId, PassId) = default;
-    explicit operator bool() const { return value != std::numeric_limits<uint32_t>::max(); }
+    explicit    operator bool() const { return value != std::numeric_limits<uint32_t>::max(); }
 };
 
 enum class ResourceKind
@@ -91,25 +91,25 @@ struct PassNode
 class GraphDefinition
 {
 public:
-    PassId addPass(std::string name, PassKind kind);
+    PassId     addPass(std::string name, PassKind kind);
     ResourceId addResource(std::string name, ResourceKind kind);
-    void addAccess(PassId pass, ResourceAccess access);
-    void addDependency(PassId pass, PassId dependency);
+    void       addAccess(PassId pass, ResourceAccess access);
+    void       addDependency(PassId pass, PassId dependency);
 
     const std::vector<ResourceNode> &resources() const { return m_resources; }
-    const std::vector<PassNode> &passes() const { return m_passes; }
+    const std::vector<PassNode>     &passes() const { return m_passes; }
 
     const ResourceNode &resource(ResourceId id) const;
-    const PassNode &pass(PassId id) const;
+    const PassNode     &pass(PassId id) const;
 
     ResourceId findResource(std::string_view name) const;
-    PassId findPass(std::string_view name) const;
+    PassId     findPass(std::string_view name) const;
 
 private:
-    std::vector<ResourceNode> m_resources;
-    std::vector<PassNode> m_passes;
+    std::vector<ResourceNode>                   m_resources;
+    std::vector<PassNode>                       m_passes;
     std::unordered_map<std::string, ResourceId> m_resourceIds;
-    std::unordered_map<std::string, PassId> m_passIds;
+    std::unordered_map<std::string, PassId>     m_passIds;
 };
 
 } // namespace lr::framegraph

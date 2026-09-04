@@ -19,9 +19,9 @@ public:
     struct Config
     {
         std::string cameraBufferResourceName;
-        std::string vertexBufferName       = "overlayMeshVertexBuffer";
-        std::string indexBufferName        = "overlayMeshIndexBuffer";
-        std::string pickingImageName       = "gizmoPicking";
+        std::string vertexBufferName = "overlayMeshVertexBuffer";
+        std::string indexBufferName  = "overlayMeshIndexBuffer";
+        std::string pickingImageName = "gizmoPicking";
     };
 
     explicit OverlayGeometryPass(Config cfg);
@@ -46,4 +46,4 @@ private:
     uint32_t                     m_hoveredInstance = ~0u;
 };
 
-}  // namespace lr
+} // namespace lr

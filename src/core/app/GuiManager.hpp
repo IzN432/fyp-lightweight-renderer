@@ -24,8 +24,8 @@ public:
     void render();
 
 private:
-    ImguiPass &m_imguiPass;
+    ImguiPass            &m_imguiPass;
     std::function<void()> m_renderCallback;
 };
 
-}  // namespace lr
+} // namespace lr

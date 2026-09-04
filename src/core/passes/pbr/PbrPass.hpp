@@ -12,10 +12,10 @@ class PbrPass
 public:
     struct Config
     {
-        std::string             cameraBufferResourceName;
-        std::string             lightBufferResourceName;
-        uint32_t                numLights;
-        uint32_t                pfMips;
+        std::string cameraBufferResourceName;
+        std::string lightBufferResourceName;
+        uint32_t    numLights;
+        uint32_t    pfMips;
     };
 
     explicit PbrPass(Config cfg);
@@ -30,4 +30,4 @@ private:
     Config m_cfg;
 };
 
-}  // namespace lr
+} // namespace lr

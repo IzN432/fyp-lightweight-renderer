@@ -17,14 +17,16 @@ class GizmoManager
 {
 public:
     GizmoManager(OverlayGeometryPass &overlayGeometryPass, InputHandler &input)
-        : overlayGeometryPass(overlayGeometryPass), m_input(input) {}
+        : overlayGeometryPass(overlayGeometryPass), m_input(input)
+    {}
     ~GizmoManager() = default;
 
     // Dispatches the callbacks of each gizmo it manages
     void mouseButtonCallback(int button, int action, bool shift, bool ctrl, bool alt);
 
     // Updates the state of each gizmo it manages (e.g. hover detection)
-    void updateCallback(float dt, VkExtent2D extent, bool hasRenderedAtLeastOneFrame, ImageReadback &gizmoReadback, ResourceRegistry &resources);
+    void updateCallback(float dt, VkExtent2D extent, bool hasRenderedAtLeastOneFrame, ImageReadback &gizmoReadback,
+                        ResourceRegistry &resources);
 
     // Takes ownership of the gizmo and assigns it a picking id. Returns that id.
     int addGizmo(std::unique_ptr<Gizmo> gizmo);
@@ -43,15 +45,15 @@ public:
 
 private:
     std::unordered_map<uint32_t, std::unique_ptr<Gizmo>> m_gizmos;
-    std::unordered_map<uint32_t, bool> m_gizmoHiddenStates;
-    uint32_t m_nextGizmoId = 1;
-    OverlayGeometryPass &overlayGeometryPass;
-    uint32_t m_hoveredGizmo = ~0u;
-    uint32_t m_draggingGizmo = ~0u;
-    uint32_t m_releasedGizmo = ~0u;
-    InputHandler &m_input;
-    bool m_mouseClickedThisFrame = false;
-    bool m_mouseReleasedThisFrame = false;
+    std::unordered_map<uint32_t, bool>                   m_gizmoHiddenStates;
+    uint32_t                                             m_nextGizmoId = 1;
+    OverlayGeometryPass                                 &overlayGeometryPass;
+    uint32_t                                             m_hoveredGizmo  = ~0u;
+    uint32_t                                             m_draggingGizmo = ~0u;
+    uint32_t                                             m_releasedGizmo = ~0u;
+    InputHandler                                        &m_input;
+    bool                                                 m_mouseClickedThisFrame  = false;
+    bool                                                 m_mouseReleasedThisFrame = false;
 };
 
 } // namespace lr

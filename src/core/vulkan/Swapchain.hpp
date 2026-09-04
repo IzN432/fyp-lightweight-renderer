@@ -16,7 +16,7 @@ public:
     Swapchain(const VulkanContext &ctx, const Window &window);
     ~Swapchain();
 
-    Swapchain(const Swapchain &) = delete;
+    Swapchain(const Swapchain &)            = delete;
     Swapchain &operator=(const Swapchain &) = delete;
 
     // Acquire the next swapchain image. Signals imageAvailable when ready.
@@ -57,4 +57,4 @@ private:
     VkExtent2D m_extent = {};
 };
 
-}  // namespace lr
+} // namespace lr

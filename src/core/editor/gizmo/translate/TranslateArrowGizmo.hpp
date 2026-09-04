@@ -34,13 +34,13 @@ public:
 
     // Reassigns what this gizmo drives — e.g. swapping from the default vertex-drag behavior onto
     // an ARAP-solve handler once a precompute succeeds.
-    void setDragHandler(VertexDragHandler &handler) override { m_dragHandler = &handler; }
+    void                     setDragHandler(VertexDragHandler &handler) override { m_dragHandler = &handler; }
     const VertexDragHandler &dragHandler() const override { return *m_dragHandler; }
 
 private:
     const SceneObject  &m_camera;
     const InputHandler &m_input;
-    VertexDragHandler *m_dragHandler;
+    VertexDragHandler  *m_dragHandler;
     glm::vec3           m_axis;
 
     glm::vec3 m_currentDraggingOrigin;

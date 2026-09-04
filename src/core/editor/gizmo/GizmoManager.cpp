@@ -1,16 +1,14 @@
 #include "GizmoManager.hpp"
 
-
 #include <imgui.h>
 
 namespace lr
 {
 
-void GizmoManager::updateCallback(float dt, VkExtent2D extent, bool hasRenderedAtLeastOneFrame, ImageReadback &gizmoReadback, ResourceRegistry &resources)
+void GizmoManager::updateCallback(float dt, VkExtent2D extent, bool hasRenderedAtLeastOneFrame,
+                                  ImageReadback &gizmoReadback, ResourceRegistry &resources)
 {
-    float aspect = (extent.height == 0)
-        ? 1.0f
-        : static_cast<float>(extent.width) / static_cast<float>(extent.height);
+    float aspect = (extent.height == 0) ? 1.0f : static_cast<float>(extent.width) / static_cast<float>(extent.height);
 
     double mouseX, mouseY;
     m_input.getMousePos(mouseX, mouseY);
@@ -32,18 +30,13 @@ void GizmoManager::updateCallback(float dt, VkExtent2D extent, bool hasRenderedA
         const uint32_t py = static_cast<uint32_t>(my);
         if (px < extent.width && py < extent.height)
         {
-            const uint32_t raw = gizmoReadback.readPixel(
-                resources,
-                overlayGeometryPass.pickingImageName(),
-                px, py);
-            m_hoveredGizmo = (raw != lr::ImageReadback::kNoData && raw != 0) ? raw : ~0u;
-        }
-        else
+            const uint32_t raw = gizmoReadback.readPixel(resources, overlayGeometryPass.pickingImageName(), px, py);
+            m_hoveredGizmo     = (raw != lr::ImageReadback::kNoData && raw != 0) ? raw : ~0u;
+        } else
         {
             m_hoveredGizmo = ~0u;
         }
-    }
-    else
+    } else
     {
         m_hoveredGizmo = ~0u;
     }
@@ -58,7 +51,7 @@ void GizmoManager::updateCallback(float dt, VkExtent2D extent, bool hasRenderedA
     {
         m_gizmos[m_releasedGizmo]->onMouseUp(ndcX, ndcY, aspect);
         m_mouseReleasedThisFrame = false;
-        m_releasedGizmo = ~0u;
+        m_releasedGizmo          = ~0u;
     }
 
     if (m_draggingGizmo != ~0u)
@@ -77,18 +70,19 @@ void GizmoManager::updateCallback(float dt, VkExtent2D extent, bool hasRenderedA
 void GizmoManager::mouseButtonCallback(int button, int action, bool shift, bool ctrl, bool alt)
 {
     if (button != GLFW_MOUSE_BUTTON_LEFT)
+    {
         return;
+    }
     if (action == GLFW_PRESS)
     {
-        m_draggingGizmo = m_hoveredGizmo;
+        m_draggingGizmo         = m_hoveredGizmo;
         m_mouseClickedThisFrame = true;
-    }
-    else if (action == GLFW_RELEASE)
+    } else if (action == GLFW_RELEASE)
     {
         if (m_draggingGizmo != ~0u)
         {
             m_mouseReleasedThisFrame = true;
-            m_releasedGizmo = m_draggingGizmo;
+            m_releasedGizmo          = m_draggingGizmo;
         }
         m_draggingGizmo = ~0u;
     }
@@ -109,9 +103,11 @@ std::vector<OverlayInstance> GizmoManager::getVisibleGizmoInstances() const
     for (const auto &[id, gizmo] : m_gizmos)
     {
         if (!m_gizmoHiddenStates.at(id))
+        {
             instances.push_back(gizmo->getInstance());
+        }
     }
     return instances;
 }
 
-}
+} // namespace lr

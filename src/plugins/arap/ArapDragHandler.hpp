@@ -21,24 +21,24 @@ class ArapDragHandler : public VertexDragHandler
 {
 public:
     ArapDragHandler(ArapSolver &solver, VertexManager &vertexManager, SelectionManager &selectionManager,
-                     VertexRoleId handleRole, CommandManager &commandManager,
-                     size_t liveSolveVertexThreshold = 5000)
+                    VertexRoleId handleRole, CommandManager &commandManager, size_t liveSolveVertexThreshold = 5000)
         : m_solver(solver), m_vertexManager(vertexManager), m_selectionManager(selectionManager),
           m_handleRole(handleRole), m_commandManager(commandManager),
-          m_liveSolveVertexThreshold(liveSolveVertexThreshold) {}
+          m_liveSolveVertexThreshold(liveSolveVertexThreshold)
+    {}
 
     const std::unordered_set<uint32_t> &indices() const override;
-    void beginDrag() override;
-    void translate(const glm::vec3 &frameDelta) override;
-    void endDrag(const glm::vec3 &totalDelta) override;
+    void                                beginDrag() override;
+    void                                translate(const glm::vec3 &frameDelta) override;
+    void                                endDrag(const glm::vec3 &totalDelta) override;
 
 private:
-    ArapSolver &m_solver;
-    VertexManager &m_vertexManager;
+    ArapSolver       &m_solver;
+    VertexManager    &m_vertexManager;
     SelectionManager &m_selectionManager;
-    VertexRoleId m_handleRole;
-    CommandManager &m_commandManager;
-    size_t m_liveSolveVertexThreshold;
+    VertexRoleId      m_handleRole;
+    CommandManager   &m_commandManager;
+    size_t            m_liveSolveVertexThreshold;
 
     std::vector<glm::vec3> m_beforeDrag;
     // Backing storage for indices() — SelectionManager::getIndicesWithRole returns by value, but

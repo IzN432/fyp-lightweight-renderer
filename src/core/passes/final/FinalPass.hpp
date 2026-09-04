@@ -12,8 +12,8 @@ class FinalPass
 public:
     struct Config
     {
-        std::string             cameraBufferResourceName;
-        VkFormat                swapchainFormat;
+        std::string cameraBufferResourceName;
+        VkFormat    swapchainFormat;
     };
 
     explicit FinalPass(Config cfg);
@@ -24,4 +24,4 @@ private:
     Config m_cfg;
 };
 
-}  // namespace lr
+} // namespace lr

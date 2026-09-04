@@ -18,41 +18,40 @@ private:
     glm::vec3 m_eulerDegrees{0.0f, 0.0f, 0.0f};
     glm::vec3 m_position{0.0f, 0.0f, 0.0f};
     glm::vec3 m_scale{1.0f, 1.0f, 1.0f};
+
 public:
-    explicit Transform(glm::vec3 position = glm::vec3(0.0f), 
-                    glm::quat rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f), 
-                    glm::vec3 scale = glm::vec3(1.0f))
-        : m_position(position), m_rotation(rotation), m_scale(scale)
-        , m_eulerDegrees(glm::degrees(glm::eulerAngles(rotation)))
-        , Component("Transform")
+    explicit Transform(glm::vec3 position = glm::vec3(0.0f), glm::quat rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+                       glm::vec3 scale = glm::vec3(1.0f))
+        : m_position(position), m_rotation(rotation), m_scale(scale),
+          m_eulerDegrees(glm::degrees(glm::eulerAngles(rotation))), Component("Transform")
     {}
 
-    const glm::quat& rotation() const { return m_rotation; }
-    const glm::vec3& eulerDegrees() const { return m_eulerDegrees; }
-    const glm::vec3& position() const { return m_position; }
-    const glm::vec3& scale() const { return m_scale; }
+    const glm::quat &rotation() const { return m_rotation; }
+    const glm::vec3 &eulerDegrees() const { return m_eulerDegrees; }
+    const glm::vec3 &position() const { return m_position; }
+    const glm::vec3 &scale() const { return m_scale; }
 
-    void setRotation(const glm::quat& q)
+    void setRotation(const glm::quat &q)
     {
-        m_rotation = q;
+        m_rotation     = q;
         m_eulerDegrees = glm::degrees(glm::eulerAngles(q));
         markDirty();
     }
 
-    void setEulerDegrees(const glm::vec3& degrees)
+    void setEulerDegrees(const glm::vec3 &degrees)
     {
         m_eulerDegrees = degrees;
-        m_rotation = glm::quat(glm::radians(degrees));
+        m_rotation     = glm::quat(glm::radians(degrees));
         markDirty();
     }
 
-    void setPosition(const glm::vec3& pos)
+    void setPosition(const glm::vec3 &pos)
     {
         m_position = pos;
         markDirty();
     }
 
-    void setScale(const glm::vec3& s)
+    void setScale(const glm::vec3 &s)
     {
         m_scale = s;
         markDirty();
@@ -65,7 +64,7 @@ public:
         if (ImGui::DragFloat3("Rotation (Degrees)", &m_eulerDegrees.x, 0.1f))
         {
             m_rotation = glm::quat(glm::radians(m_eulerDegrees));
-            changed = true;
+            changed    = true;
         }
         changed |= ImGui::DragFloat3("Scale", &m_scale.x, 0.1f);
         if (changed)
@@ -82,26 +81,13 @@ public:
         return t * r * s;
     }
 
-    [[nodiscard]] glm::mat4 worldMatrix(const glm::mat4 &parentWorld) const
-    {
-        return parentWorld * localMatrix();
-    }
+    [[nodiscard]] glm::mat4 worldMatrix(const glm::mat4 &parentWorld) const { return parentWorld * localMatrix(); }
 
-    [[nodiscard]] glm::vec3 forward() const
-    {
-        return glm::normalize(m_rotation * glm::vec3(0.0f, 0.0f, -1.0f));
-    }
+    [[nodiscard]] glm::vec3 forward() const { return glm::normalize(m_rotation * glm::vec3(0.0f, 0.0f, -1.0f)); }
 
-    [[nodiscard]] glm::vec3 right() const
-    {
-        return glm::normalize(m_rotation * glm::vec3(1.0f, 0.0f, 0.0f));
-    }
+    [[nodiscard]] glm::vec3 right() const { return glm::normalize(m_rotation * glm::vec3(1.0f, 0.0f, 0.0f)); }
 
-    [[nodiscard]] glm::vec3 up() const
-    {
-        return glm::normalize(m_rotation * glm::vec3(0.0f, 1.0f, 0.0f));
-    }
-
+    [[nodiscard]] glm::vec3 up() const { return glm::normalize(m_rotation * glm::vec3(0.0f, 1.0f, 0.0f)); }
 };
 
 } // namespace lr

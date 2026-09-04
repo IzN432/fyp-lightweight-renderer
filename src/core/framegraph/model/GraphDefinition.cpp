@@ -27,8 +27,7 @@ ResourceId GraphDefinition::addResource(std::string name, ResourceKind kind)
         if (node.kind == ResourceKind::Unknown)
         {
             node.kind = kind;
-        }
-        else if (kind != ResourceKind::Unknown && node.kind != kind)
+        } else if (kind != ResourceKind::Unknown && node.kind != kind)
         {
             // The current C++ frontend historically has one shared string
             // namespace for images and buffers. Preserve it without lying

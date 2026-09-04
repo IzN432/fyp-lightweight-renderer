@@ -22,8 +22,10 @@ public:
     struct Config
     {
         std::string cameraBufferResourceName;
-        std::string vertexBufferResourceName;  // position + color, corner domain (see SceneManager::mainMeshHeatmapBufferName)
-        std::string indexBufferResourceName;    // shared mesh index buffer — only singleMeshResults[0] (the main mesh) is drawn
+        std::string
+            vertexBufferResourceName; // position + color, corner domain (see SceneManager::mainMeshHeatmapBufferName)
+        std::string
+            indexBufferResourceName; // shared mesh index buffer — only singleMeshResults[0] (the main mesh) is drawn
 
         VertexBufferUploadResult vertexBufferUploadResult;
         IndexBufferUploadResult  indexBufferUploadResult;
@@ -45,4 +47,4 @@ private:
     mutable bool m_enabled = false;
 };
 
-}  // namespace lr
+} // namespace lr

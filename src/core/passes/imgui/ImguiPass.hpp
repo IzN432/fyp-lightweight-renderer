@@ -16,11 +16,10 @@ class Swapchain;
 class ImguiPass
 {
 public:
-    ImguiPass(const VulkanContext &ctx, const Window &window,
-              const Swapchain &swapchain, uint32_t framesInFlight = 2);
+    ImguiPass(const VulkanContext &ctx, const Window &window, const Swapchain &swapchain, uint32_t framesInFlight = 2);
     ~ImguiPass();
 
-    ImguiPass(const ImguiPass &) = delete;
+    ImguiPass(const ImguiPass &)            = delete;
     ImguiPass &operator=(const ImguiPass &) = delete;
 
     // Call once per frame before fg.execute() — opens a new ImGui frame.
@@ -37,4 +36,4 @@ private:
     const VulkanContext &m_ctx;
 };
 
-}  // namespace lr
+} // namespace lr

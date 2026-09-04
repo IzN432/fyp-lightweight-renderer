@@ -17,30 +17,30 @@ class GraphicsPipeline : public Pipeline
 public:
     struct Config
     {
-        std::string vertShaderPath;
-        std::string fragShaderPath;
-        std::vector<VkVertexInputBindingDescription>   vertexBindings;    // empty for Fullscreen passes
-        std::vector<VkVertexInputAttributeDescription> vertexAttributes;  // empty for Fullscreen passes
-        PassType passType = PassType::Fullscreen;
-        VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        std::vector<VkFormat> colorAttachmentFormats;
-        VkFormat depthAttachmentFormat = VK_FORMAT_UNDEFINED;
-        VkPipelineLayout layout = VK_NULL_HANDLE;  // set by DescriptorAllocator
+        std::string                                    vertShaderPath;
+        std::string                                    fragShaderPath;
+        std::vector<VkVertexInputBindingDescription>   vertexBindings;   // empty for Fullscreen passes
+        std::vector<VkVertexInputAttributeDescription> vertexAttributes; // empty for Fullscreen passes
+        PassType                                       passType = PassType::Fullscreen;
+        VkPrimitiveTopology                            topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        std::vector<VkFormat>                          colorAttachmentFormats;
+        VkFormat                                       depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+        VkPipelineLayout                               layout = VK_NULL_HANDLE; // set by DescriptorAllocator
     };
 
 public:
     GraphicsPipeline(const VulkanContext &ctx, const Config &config);
     ~GraphicsPipeline();
 
-    GraphicsPipeline(const GraphicsPipeline &) = delete;
+    GraphicsPipeline(const GraphicsPipeline &)            = delete;
     GraphicsPipeline &operator=(const GraphicsPipeline &) = delete;
 
-    VkPipeline          get()       const override { return m_pipeline; }
+    VkPipeline          get() const override { return m_pipeline; }
     VkPipelineBindPoint bindPoint() const override { return VK_PIPELINE_BIND_POINT_GRAPHICS; }
 
 private:
     const VulkanContext &m_ctx;
-    VkPipeline m_pipeline = VK_NULL_HANDLE;
+    VkPipeline           m_pipeline = VK_NULL_HANDLE;
 };
 
-}  // namespace lr
+} // namespace lr

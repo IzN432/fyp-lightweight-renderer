@@ -18,19 +18,20 @@ class ArapDeformCommand : public Command
 public:
     struct VertexDiff
     {
-        uint32_t index;
+        uint32_t  index;
         glm::vec3 before;
         glm::vec3 after;
     };
 
     ArapDeformCommand(VertexManager &vertexManager, std::vector<VertexDiff> diffs)
-        : m_vertexManager(vertexManager), m_diffs(std::move(diffs)) {}
+        : m_vertexManager(vertexManager), m_diffs(std::move(diffs))
+    {}
 
     void execute() override;
     void undo() override;
 
 private:
-    VertexManager &m_vertexManager;
+    VertexManager          &m_vertexManager;
     std::vector<VertexDiff> m_diffs;
 };
 

@@ -19,44 +19,88 @@ struct OverlayMeshData
 namespace primitives
 {
 
-
 inline OverlayMeshData cube = {
-    .positions = {
-        // Front  (+Z)
-        {-0.5f, -0.5f,  0.5f}, { 0.5f, -0.5f,  0.5f}, { 0.5f,  0.5f,  0.5f}, {-0.5f,  0.5f,  0.5f},
-        // Back   (-Z)
-        { 0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, -0.5f}, {-0.5f,  0.5f, -0.5f}, { 0.5f,  0.5f, -0.5f},
-        // Right  (+X)
-        { 0.5f, -0.5f,  0.5f}, { 0.5f, -0.5f, -0.5f}, { 0.5f,  0.5f, -0.5f}, { 0.5f,  0.5f,  0.5f},
-        // Left   (-X)
-        {-0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f,  0.5f}, {-0.5f,  0.5f,  0.5f}, {-0.5f,  0.5f, -0.5f},
-        // Top    (+Y)
-        {-0.5f,  0.5f,  0.5f}, { 0.5f,  0.5f,  0.5f}, { 0.5f,  0.5f, -0.5f}, {-0.5f,  0.5f, -0.5f},
-        // Bottom (-Y)
-        {-0.5f, -0.5f, -0.5f}, { 0.5f, -0.5f, -0.5f}, { 0.5f, -0.5f,  0.5f}, {-0.5f, -0.5f,  0.5f},
-    },
-    .normals = {
-        // Front
-        { 0.0f,  0.0f,  1.0f}, { 0.0f,  0.0f,  1.0f}, { 0.0f,  0.0f,  1.0f}, { 0.0f,  0.0f,  1.0f},
-        // Back
-        { 0.0f,  0.0f, -1.0f}, { 0.0f,  0.0f, -1.0f}, { 0.0f,  0.0f, -1.0f}, { 0.0f,  0.0f, -1.0f},
-        // Right
-        { 1.0f,  0.0f,  0.0f}, { 1.0f,  0.0f,  0.0f}, { 1.0f,  0.0f,  0.0f}, { 1.0f,  0.0f,  0.0f},
-        // Left
-        {-1.0f,  0.0f,  0.0f}, {-1.0f,  0.0f,  0.0f}, {-1.0f,  0.0f,  0.0f}, {-1.0f,  0.0f,  0.0f},
-        // Top
-        { 0.0f,  1.0f,  0.0f}, { 0.0f,  1.0f,  0.0f}, { 0.0f,  1.0f,  0.0f}, { 0.0f,  1.0f,  0.0f},
-        // Bottom
-        { 0.0f, -1.0f,  0.0f}, { 0.0f, -1.0f,  0.0f}, { 0.0f, -1.0f,  0.0f}, { 0.0f, -1.0f,  0.0f},
-    },
-    .faces = {
-        { 0,  1,  2}, { 0,  2,  3},   // Front
-        { 4,  5,  6}, { 4,  6,  7},   // Back
-        { 8,  9, 10}, { 8, 10, 11},   // Right
-        {12, 13, 14}, {12, 14, 15},   // Left
-        {16, 17, 18}, {16, 18, 19},   // Top
-        {20, 21, 22}, {20, 22, 23},   // Bottom
-    },
+    .positions =
+        {
+            // Front  (+Z)
+            {-0.5f, -0.5f, 0.5f},
+            {0.5f, -0.5f, 0.5f},
+            {0.5f, 0.5f, 0.5f},
+            {-0.5f, 0.5f, 0.5f},
+            // Back   (-Z)
+            {0.5f, -0.5f, -0.5f},
+            {-0.5f, -0.5f, -0.5f},
+            {-0.5f, 0.5f, -0.5f},
+            {0.5f, 0.5f, -0.5f},
+            // Right  (+X)
+            {0.5f, -0.5f, 0.5f},
+            {0.5f, -0.5f, -0.5f},
+            {0.5f, 0.5f, -0.5f},
+            {0.5f, 0.5f, 0.5f},
+            // Left   (-X)
+            {-0.5f, -0.5f, -0.5f},
+            {-0.5f, -0.5f, 0.5f},
+            {-0.5f, 0.5f, 0.5f},
+            {-0.5f, 0.5f, -0.5f},
+            // Top    (+Y)
+            {-0.5f, 0.5f, 0.5f},
+            {0.5f, 0.5f, 0.5f},
+            {0.5f, 0.5f, -0.5f},
+            {-0.5f, 0.5f, -0.5f},
+            // Bottom (-Y)
+            {-0.5f, -0.5f, -0.5f},
+            {0.5f, -0.5f, -0.5f},
+            {0.5f, -0.5f, 0.5f},
+            {-0.5f, -0.5f, 0.5f},
+        },
+    .normals =
+        {
+            // Front
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+            {0.0f, 0.0f, 1.0f},
+            // Back
+            {0.0f, 0.0f, -1.0f},
+            {0.0f, 0.0f, -1.0f},
+            {0.0f, 0.0f, -1.0f},
+            {0.0f, 0.0f, -1.0f},
+            // Right
+            {1.0f, 0.0f, 0.0f},
+            {1.0f, 0.0f, 0.0f},
+            {1.0f, 0.0f, 0.0f},
+            {1.0f, 0.0f, 0.0f},
+            // Left
+            {-1.0f, 0.0f, 0.0f},
+            {-1.0f, 0.0f, 0.0f},
+            {-1.0f, 0.0f, 0.0f},
+            {-1.0f, 0.0f, 0.0f},
+            // Top
+            {0.0f, 1.0f, 0.0f},
+            {0.0f, 1.0f, 0.0f},
+            {0.0f, 1.0f, 0.0f},
+            {0.0f, 1.0f, 0.0f},
+            // Bottom
+            {0.0f, -1.0f, 0.0f},
+            {0.0f, -1.0f, 0.0f},
+            {0.0f, -1.0f, 0.0f},
+            {0.0f, -1.0f, 0.0f},
+        },
+    .faces =
+        {
+            {0, 1, 2},
+            {0, 2, 3}, // Front
+            {4, 5, 6},
+            {4, 6, 7}, // Back
+            {8, 9, 10},
+            {8, 10, 11}, // Right
+            {12, 13, 14},
+            {12, 14, 15}, // Left
+            {16, 17, 18},
+            {16, 18, 19}, // Top
+            {20, 21, 22},
+            {20, 22, 23}, // Bottom
+        },
 };
 
 inline OverlayMeshData makeSphere(int latCount = 12, int lonCount = 16)
@@ -67,7 +111,7 @@ inline OverlayMeshData makeSphere(int latCount = 12, int lonCount = 16)
         float theta = static_cast<float>(lat) * glm::pi<float>() / static_cast<float>(latCount);
         for (int lon = 0; lon <= lonCount; ++lon)
         {
-            float phi = static_cast<float>(lon) * 2.0f * glm::pi<float>() / static_cast<float>(lonCount);
+            float     phi = static_cast<float>(lon) * 2.0f * glm::pi<float>() / static_cast<float>(lonCount);
             glm::vec3 pos = {
                 std::sin(theta) * std::cos(phi),
                 std::cos(theta),
@@ -107,7 +151,7 @@ inline OverlayMeshData makeArrow(int segments = 8)
     auto addRing = [&](float y, float r, glm::vec3 flatNormal, bool useRadialNormal) {
         for (int i = 0; i < segments; ++i)
         {
-            float phi     = twoPi * static_cast<float>(i) / static_cast<float>(segments);
+            float     phi = twoPi * static_cast<float>(i) / static_cast<float>(segments);
             glm::vec3 pos = {r * std::cos(phi), y, r * std::sin(phi)};
             glm::vec3 n   = useRadialNormal ? glm::normalize(glm::vec3(pos.x, 0.0f, pos.z)) : flatNormal;
             data.positions.push_back(pos);
@@ -148,12 +192,10 @@ inline OverlayMeshData makeArrow(int segments = 8)
     uint32_t coneBaseRing = static_cast<uint32_t>(data.positions.size());
     for (int i = 0; i < segments; ++i)
     {
-        float phi     = twoPi * static_cast<float>(i) / static_cast<float>(segments);
+        float     phi = twoPi * static_cast<float>(i) / static_cast<float>(segments);
         glm::vec3 pos = {coneR * std::cos(phi), shaftTop, coneR * std::sin(phi)};
-        glm::vec3 n   = glm::normalize(glm::vec3(
-            std::cos(phi) * coneH / coneSlantL,
-            coneR / coneSlantL,
-            std::sin(phi) * coneH / coneSlantL));
+        glm::vec3 n   = glm::normalize(
+            glm::vec3(std::cos(phi) * coneH / coneSlantL, coneR / coneSlantL, std::sin(phi) * coneH / coneSlantL));
         data.positions.push_back(pos);
         data.normals.push_back(n);
     }

@@ -14,8 +14,7 @@ class CameraController
     // for update that takes in a reference to the input system and delta time and does the camera transformations
     // accordingly.
 public:
-    CameraController(SceneObject &camera, InputHandler &input)
-        : m_cameraSceneObject(camera), m_input(input) {}
+    CameraController(SceneObject &camera, InputHandler &input) : m_cameraSceneObject(camera), m_input(input) {}
     virtual ~CameraController() = default;
 
     virtual void update(float dt) = 0;

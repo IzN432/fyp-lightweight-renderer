@@ -15,4 +15,4 @@ void TranslatePointsCommand::undo()
     m_vertexManager.translateSelectedVertices(m_indices, -m_translation);
 }
 
-}
+} // namespace lr

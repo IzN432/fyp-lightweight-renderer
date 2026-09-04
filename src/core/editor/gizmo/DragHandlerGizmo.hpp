@@ -11,9 +11,9 @@ namespace lr
 class DragHandlerGizmo
 {
 public:
-    virtual ~DragHandlerGizmo() = default;
-    virtual void setDragHandler(VertexDragHandler &handler) = 0;
-    virtual const VertexDragHandler &dragHandler() const = 0;
+    virtual ~DragHandlerGizmo()                                                 = default;
+    virtual void                     setDragHandler(VertexDragHandler &handler) = 0;
+    virtual const VertexDragHandler &dragHandler() const                        = 0;
 };
 
 } // namespace lr

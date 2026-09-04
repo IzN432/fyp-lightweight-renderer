@@ -28,16 +28,10 @@ public:
     bool isKeyPressed(int key) const;
     bool isMouseButtonPressed(int button) const;
 
-    bool isShiftPressed() const {
-        return isKeyPressed(GLFW_KEY_LEFT_SHIFT) || isKeyPressed(GLFW_KEY_RIGHT_SHIFT);
-    }
-    bool isCtrlPressed() const {
-        return isKeyPressed(GLFW_KEY_LEFT_CONTROL) || isKeyPressed(GLFW_KEY_RIGHT_CONTROL);
-    }
-    bool isAltPressed() const {
-        return isKeyPressed(GLFW_KEY_LEFT_ALT) || isKeyPressed(GLFW_KEY_RIGHT_ALT);
-    }
-    
+    bool isShiftPressed() const { return isKeyPressed(GLFW_KEY_LEFT_SHIFT) || isKeyPressed(GLFW_KEY_RIGHT_SHIFT); }
+    bool isCtrlPressed() const { return isKeyPressed(GLFW_KEY_LEFT_CONTROL) || isKeyPressed(GLFW_KEY_RIGHT_CONTROL); }
+    bool isAltPressed() const { return isKeyPressed(GLFW_KEY_LEFT_ALT) || isKeyPressed(GLFW_KEY_RIGHT_ALT); }
+
     // Per-frame polling — valid after update() is called each frame
     void   getMouseDelta(double &dx, double &dy) const;
     double getScrollDelta() const;
@@ -52,18 +46,18 @@ public:
     void notifyScroll(double delta);
 
 private:
-    std::vector<std::function<void(int, int, bool, bool, bool)>>    m_keyPressCallbacks;
-    std::vector<std::function<void(int, int, bool, bool, bool)>>    m_mouseButtonCallbacks;
+    std::vector<std::function<void(int, int, bool, bool, bool)>> m_keyPressCallbacks;
+    std::vector<std::function<void(int, int, bool, bool, bool)>> m_mouseButtonCallbacks;
 
     std::unordered_set<int> m_pressedKeys;
     std::unordered_set<int> m_pressedButtons;
 
     double m_currentMouseX = 0.0, m_currentMouseY = 0.0;
-    double m_prevMouseX    = 0.0, m_prevMouseY    = 0.0;
-    double m_deltaMouseX   = 0.0, m_deltaMouseY   = 0.0;
+    double m_prevMouseX = 0.0, m_prevMouseY = 0.0;
+    double m_deltaMouseX = 0.0, m_deltaMouseY = 0.0;
 
     double m_scrollAccum = 0.0;
     double m_scrollDelta = 0.0;
 };
 
-}  // namespace lr
+} // namespace lr

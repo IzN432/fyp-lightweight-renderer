@@ -21,7 +21,7 @@ public:
     // anchorIndices/handleIndices index into mesh.positions (the deduped vertex space). Returns
     // false on failure (e.g. a free-vertex component that can't reach any anchor/handle).
     bool precompute(const Mesh &mesh, const std::vector<uint32_t> &anchorIndices,
-                                       const std::vector<uint32_t> &handleIndices);
+                    const std::vector<uint32_t> &handleIndices);
 
     bool isPrecomputed() const { return m_precomputed; }
     void invalidate() { m_precomputed = false; }
@@ -33,13 +33,13 @@ public:
     // Returns the solved position for every vertex (size == warmStart.size()). No-op (returns
     // warmStart unchanged) if not currently precomputed.
     std::vector<glm::vec3> solve(const std::unordered_map<uint32_t, glm::vec3> &handleTargets,
-                                  const std::vector<glm::vec3> &warmStart, int iterations);
+                                 const std::vector<glm::vec3> &warmStart, int iterations);
 
 private:
-    igl::ARAPData m_data;
+    igl::ARAPData   m_data;
     Eigen::MatrixXd m_restPositions; // V at precompute time — anchor bc targets are read from here
     Eigen::VectorXi m_b;             // sorted anchor+handle indices, as passed to arap_precomputation
-    bool m_precomputed = false;
+    bool            m_precomputed = false;
 };
 
 } // namespace lr

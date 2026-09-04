@@ -37,4 +37,4 @@ void CommandManager::redo()
     }
 }
 
-}
+} // namespace lr

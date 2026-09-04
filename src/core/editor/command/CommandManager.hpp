@@ -22,4 +22,4 @@ private:
     std::vector<std::unique_ptr<Command>> m_redoStack;
 };
 
-}
+} // namespace lr

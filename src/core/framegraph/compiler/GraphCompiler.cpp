@@ -11,16 +11,16 @@ namespace lr::framegraph
 
 ExecutionPlan buildExecutionPlan(const GraphDefinition &graph)
 {
-    const size_t passCount = graph.passes().size();
+    const size_t passCount     = graph.passes().size();
     const size_t resourceCount = graph.resources().size();
 
     struct AccessHistory
     {
         std::optional<PassId> lastWriter;
-        std::vector<PassId> readersSinceLastWrite;
+        std::vector<PassId>   readersSinceLastWrite;
     };
 
-    std::vector<AccessHistory> histories(resourceCount);
+    std::vector<AccessHistory>                histories(resourceCount);
     std::vector<std::unordered_set<uint32_t>> outEdges(passCount);
 
     const auto addEdge = [&](PassId source, PassId destination) {
@@ -37,7 +37,7 @@ ExecutionPlan buildExecutionPlan(const GraphDefinition &graph)
     {
         struct CombinedAccess
         {
-            bool reads = false;
+            bool reads  = false;
             bool writes = false;
         };
 
@@ -82,8 +82,7 @@ ExecutionPlan buildExecutionPlan(const GraphDefinition &graph)
 
                 history.readersSinceLastWrite.clear();
                 history.lastWriter = pass.id;
-            }
-            else
+            } else
             {
                 history.readersSinceLastWrite.push_back(pass.id);
             }

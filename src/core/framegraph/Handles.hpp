@@ -82,7 +82,7 @@ private:
     }
 
     static uint32_t fetchOrAdd(std::string_view name, std::vector<std::string> &names,
-                           std::unordered_map<std::string, uint32_t> &handles)
+                               std::unordered_map<std::string, uint32_t> &handles)
     {
         if (name.empty())
         {

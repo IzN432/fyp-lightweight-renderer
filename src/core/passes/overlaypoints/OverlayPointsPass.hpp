@@ -15,7 +15,7 @@ class OverlayPointsPass
 public:
     struct Config
     {
-        std::string              cameraBufferResourceName;
+        std::string cameraBufferResourceName;
         // Interleaved deduped position + color buffer (see SceneManager::mainMeshPointsBufferName).
         std::string              pointsBufferResourceName;
         VertexBufferUploadResult pointsBufferUploadResult;
@@ -38,4 +38,4 @@ private:
     mutable bool m_enabled = true;
 };
 
-}  // namespace lr
+} // namespace lr

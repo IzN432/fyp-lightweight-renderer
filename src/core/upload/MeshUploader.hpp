@@ -27,9 +27,9 @@ struct VertexBufferUploadResult
 
 struct VertexBufferUploadConfig
 {
-    std::string vertexBufferName;
+    std::string              vertexBufferName;
     std::vector<std::string> vertexAttributeNames;
-    bool includePosition = false; // whether to include the position attribute
+    bool                     includePosition = false; // whether to include the position attribute
 };
 
 struct IndexBufferUploadPerMeshResult
@@ -70,33 +70,29 @@ class MeshUploader
 public:
     explicit MeshUploader(ResourceRegistry &registry);
 
-    VertexBufferUploadResult uploadVertexBuffer(const std::vector<const Mesh*> &meshes,
-                                                const VertexBufferUploadConfig &config);
+    VertexBufferUploadResult uploadVertexBuffer(const std::vector<const Mesh *> &meshes,
+                                                const VertexBufferUploadConfig  &config);
 
     // Re-pack and push new vertex data into a buffer previously uploaded with dynamic=true.
-    void updateVertexBuffer(const std::vector<const Mesh*> &meshes,
-                            const VertexBufferUploadConfig &config);
+    void updateVertexBuffer(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config);
 
     // Packs each mesh's unique/deduped positions (mesh.positions verbatim, not expanded through
     // positionIndices) together with named per-unique-vertex attributes (see
     // MeshLayout::addPerUniqueVertexAttr) into one interleaved buffer — the deduped-position-space
     // analogue of uploadVertexBuffer(). For consumers that index in deduped-position space rather
     // than per-UV-seam-corner space: VertexManager, SelectionManager, points-picking overlays.
-    VertexBufferUploadResult uploadUniqueVertexBuffer(const std::vector<const Mesh*> &meshes,
-                                                       const VertexBufferUploadConfig &config);
+    VertexBufferUploadResult uploadUniqueVertexBuffer(const std::vector<const Mesh *> &meshes,
+                                                      const VertexBufferUploadConfig  &config);
 
     // Re-pack and push new data into a buffer previously uploaded with uploadUniqueVertexBuffer().
-    void updateUniqueVertexBuffer(const std::vector<const Mesh*> &meshes,
-                                  const VertexBufferUploadConfig &config);
+    void updateUniqueVertexBuffer(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config);
 
-    IndexBufferUploadResult uploadIndexBuffer(const std::vector<const Mesh*> &meshes,
-                           const IndexBufferUploadConfig &config);
+    IndexBufferUploadResult uploadIndexBuffer(const std::vector<const Mesh *> &meshes,
+                                              const IndexBufferUploadConfig   &config);
 
-    void uploadFaceGroupBuffer(const std::vector<const Mesh*> &meshes,
-                               const FaceGroupBufferUploadConfig &config);
+    void uploadFaceGroupBuffer(const std::vector<const Mesh *> &meshes, const FaceGroupBufferUploadConfig &config);
 
-    void uploadVertexGroupBuffers(const std::vector<const Mesh*> &meshes,
-                                  const VertexGroupBufferUploadConfig &config);
+    void uploadVertexGroupBuffers(const std::vector<const Mesh *> &meshes, const VertexGroupBufferUploadConfig &config);
 
 private:
     ResourceRegistry &m_registry;
