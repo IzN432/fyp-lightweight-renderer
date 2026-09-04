@@ -52,7 +52,7 @@ void directFrontendConstruction()
     graph.addAccess(producer, {
                                   .resource = output,
                                   .mode     = AccessMode::Write,
-                                  .usage    = ResourceUsage::ColorOrDepthAttachment,
+                                  .usage    = ResourceUsage::ColorAttachment,
                               });
     graph.addAccess(consumer, {
                                   .resource = output,
@@ -78,6 +78,19 @@ void stableTypedIdentity()
     require(graph.findResource("color") == first, "resource lookup should return its typed id");
     require(graph.findPass("final") == pass, "pass lookup should return its typed id");
     require(!graph.findResource("missing"), "missing resources should return an invalid id");
+}
+
+void conflictingResourceKindsAreRejected()
+{
+    using namespace lr::framegraph;
+
+    GraphDefinition graph;
+    (void)graph.addResource("shared", ResourceKind::Image);
+    requireThrowsContaining(
+        [&] {
+            (void)graph.addResource("shared", ResourceKind::Buffer);
+        },
+        "both an image and a buffer");
 }
 
 void rawDependency()
@@ -194,6 +207,7 @@ int main()
     {
         directFrontendConstruction();
         stableTypedIdentity();
+        conflictingResourceKindsAreRejected();
         rawDependency();
         warDependency();
         wawDependency();
@@ -206,6 +220,6 @@ int main()
         return 1;
     }
 
-    std::cout << "8 test(s) passed\n";
+    std::cout << "9 test(s) passed\n";
     return 0;
 }

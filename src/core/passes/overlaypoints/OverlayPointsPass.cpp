@@ -28,24 +28,9 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
     pass.vertShader((paths::shaderDir / "overlay_points.vert.spv").string())
         .fragShader((paths::shaderDir / "overlay_points.frag.spv").string())
         .pushConstantSize(sizeof(OverlayPointsPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
-        .bind({
-            {
-                .binding = 0,
-                .type    = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .stages  = VK_SHADER_STAGE_VERTEX_BIT,
-                .buffer  = fg.buffer(m_cfg.cameraBufferResourceName),
-            },
-            {
-                .binding     = 1,
-                .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .stages      = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                .image       = fg.image("gbufferDepth"),
-            },
-        })
-        .writes({
-            {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .image = fg.image("overlayPoints")},
-        })
+        .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
+        .sampledDepth(1, fg.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .colorAttachment(fg.image("overlayPoints"), VK_FORMAT_R16G16B16A16_SFLOAT)
         .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
             if (!m_enabled)
             {

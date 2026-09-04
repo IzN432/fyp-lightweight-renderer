@@ -1,6 +1,6 @@
 #pragma once
 
-#include "PassBuilder.hpp"
+#include "PassDefinition.hpp"
 
 #include <span>
 #include <string>
@@ -22,8 +22,10 @@ public:
 
     PassHandle addPass(std::string name);
 
-    ImageHandle  image(std::string_view name) { return m_resources.image(name); }
-    BufferHandle buffer(std::string_view name) { return m_resources.buffer(name); }
+    ImageHandle        image(std::string_view name) { return m_resources.image(name); }
+    BufferHandle       buffer(std::string_view name) { return m_resources.buffer(name); }
+    const std::string &name(ImageHandle handle) const { return m_resources.name(handle); }
+    const std::string &name(BufferHandle handle) const { return m_resources.name(handle); }
 
     PassDesc       &pass(PassHandle handle);
     const PassDesc &pass(PassHandle handle) const;

@@ -96,18 +96,8 @@ void IBLPass::build(FrameGraph &fg) const
     fg.addPass("ibl_hdri_to_cube")
         .type(PassType::Compute)
         .computeShader((paths::shaderDir / "hdritocubemap.comp.spv").string())
-        .bind({
-            {.binding     = 0,
-             .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-             .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-             .image       = fg.image("hdri")},
-            {.binding = 1,
-             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access  = BindingAccess::Write,
-             .image   = fg.image("ibl_env")},
-        })
+        .sampledImage(0, fg.image("hdri"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(1, fg.image("ibl_env"), VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([envRes](CommandBuffer &cmd, VkPipelineLayout) {
             cmd.dispatch((envRes + 15) / 16, (envRes + 15) / 16, 6);
         });
@@ -121,18 +111,8 @@ void IBLPass::build(FrameGraph &fg) const
         .type(PassType::Compute)
         .computeShader((paths::shaderDir / "irradiance.comp.spv").string())
         .pushConstantSize(sizeof(IrradiancePC))
-        .bind({
-            {.binding     = 0,
-             .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-             .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-             .image       = fg.image("ibl_env")},
-            {.binding = 1,
-             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access  = BindingAccess::Write,
-             .image   = fg.image("ibl_irradiance")},
-        })
+        .sampledImage(0, fg.image("ibl_env"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(1, fg.image("ibl_irradiance"), VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([irrPC, irrRes](CommandBuffer &cmd, VkPipelineLayout layout) {
             cmd.pushConstants(layout, VK_SHADER_STAGE_COMPUTE_BIT, irrPC);
             cmd.dispatch((irrRes + 15) / 16, (irrRes + 15) / 16, 6);
@@ -152,19 +132,8 @@ void IBLPass::build(FrameGraph &fg) const
             .type(PassType::Compute)
             .computeShader((paths::shaderDir / "prefilter.comp.spv").string())
             .pushConstantSize(sizeof(PrefilterPC))
-            .bind({
-                {.binding     = 0,
-                 .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                 .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-                 .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                 .image       = fg.image("ibl_env")},
-                {.binding  = 1,
-                 .type     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                 .stages   = VK_SHADER_STAGE_COMPUTE_BIT,
-                 .access   = BindingAccess::Write,
-                 .mipLevel = mip,
-                 .image    = fg.image("ibl_prefiltered")},
-            })
+            .sampledImage(0, fg.image("ibl_env"), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageImageWrite(1, ImageView::mip(fg.image("ibl_prefiltered"), mip), VK_SHADER_STAGE_COMPUTE_BIT)
             .execute([pfPC, mipSize](CommandBuffer &cmd, VkPipelineLayout layout) {
                 cmd.pushConstants(layout, VK_SHADER_STAGE_COMPUTE_BIT, pfPC);
                 cmd.dispatch((mipSize + 15) / 16, (mipSize + 15) / 16, 6);

@@ -60,25 +60,13 @@ void OverlayGeometryPass::build(FrameGraph &fg)
         .vertShader((paths::shaderDir / "overlay_geometry.vert.spv").string())
         .fragShader((paths::shaderDir / "overlay_geometry.frag.spv").string())
         .pushConstantSize(sizeof(OverlayGeometryPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
-        .bind({{
-                   .binding = 0,
-                   .type    = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                   .stages  = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                   .buffer  = fg.buffer(m_cfg.cameraBufferResourceName),
-               },
-               {
-                   .binding = 1,
-                   .type    = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                   .stages  = VK_SHADER_STAGE_FRAGMENT_BIT,
-                   .image   = fg.image("gbufferDepth"),
-               }})
-        .writes({
-            {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .image = fg.image("overlay")},
-            {.format = VK_FORMAT_R32_UINT, .image = fg.image(m_cfg.pickingImageName)},
-            {.format     = VK_FORMAT_D32_SFLOAT,
-             .clearValue = {.depthStencil = {1.0f, 0}},
-             .image      = fg.image("overlayDepth")},
-        })
+        .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName),
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledDepth(1, fg.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .colorAttachment(fg.image("overlay"), VK_FORMAT_R16G16B16A16_SFLOAT)
+        .colorAttachment(fg.image(m_cfg.pickingImageName), VK_FORMAT_R32_UINT)
+        .depthAttachment(fg.image("overlayDepth"), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,
+                         {.depthStencil = {1.0f, 0}})
         .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
             for (uint32_t i = 0; i < static_cast<uint32_t>(m_instances.size()); ++i)
             {

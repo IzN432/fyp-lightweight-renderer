@@ -33,67 +33,24 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         .vertShader((paths::shaderDir / "geometry.vert.spv").string())
         .fragShader((paths::shaderDir / "geometry.frag.spv").string())
         .pushConstantSize(sizeof(GeometryPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
-        .bind({
-            {
-                .binding = 0,
-                .type    = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .stages  = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                .buffer  = fg.buffer(m_cfg.cameraBufferResourceName),
-            },
-            {
-                .binding         = 1,
-                .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = m_cfg.materialCount,
-                .stages          = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .imageLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                .image           = fg.image(m_cfg.diffuseTextureArrayResourceName),
-            },
-            {
-                .binding         = 2,
-                .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = m_cfg.materialCount,
-                .stages          = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .imageLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                .image           = fg.image(m_cfg.normalTextureArrayResourceName),
-            },
-            {
-                .binding         = 3,
-                .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = m_cfg.materialCount,
-                .stages          = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .imageLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                .image           = fg.image(m_cfg.metallicRoughnessTextureArrayResourceName),
-            },
-            {
-                .binding         = 4,
-                .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .descriptorCount = m_cfg.materialCount,
-                .stages          = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .imageLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                .image           = fg.image(m_cfg.emissiveTextureArrayResourceName),
-            },
-            {
-                .binding = 5,
-                .type    = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .stages  = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .buffer  = fg.buffer(m_cfg.faceGroupBufferResourceName),
-            },
-            {
-                .binding = 6,
-                .type    = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .stages  = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .buffer  = fg.buffer(m_cfg.materialBufferResourceName),
-            },
-        })
-        .writes({
-            {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .image = fg.image("gbufferAlbedo")},
-            {.format = VK_FORMAT_R16G16_SFLOAT, .image = fg.image("gbufferNormal")},
-            {.format = VK_FORMAT_R16G16B16A16_UNORM, .image = fg.image("gbufferMaterial")},
-            {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .image = fg.image("gbufferEmissive")},
-            {.format     = VK_FORMAT_D32_SFLOAT,
-             .clearValue = {.depthStencil = {1.0f, 0}},
-             .image      = fg.image("gbufferDepth")},
-        })
+        .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName),
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledImageArray(1, fg.image(m_cfg.diffuseTextureArrayResourceName), m_cfg.materialCount,
+                           VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledImageArray(2, fg.image(m_cfg.normalTextureArrayResourceName), m_cfg.materialCount,
+                           VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledImageArray(3, fg.image(m_cfg.metallicRoughnessTextureArrayResourceName), m_cfg.materialCount,
+                           VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledImageArray(4, fg.image(m_cfg.emissiveTextureArrayResourceName), m_cfg.materialCount,
+                           VK_SHADER_STAGE_FRAGMENT_BIT)
+        .storageBufferRead(5, fg.buffer(m_cfg.faceGroupBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .storageBufferRead(6, fg.buffer(m_cfg.materialBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .colorAttachment(fg.image("gbufferAlbedo"), VK_FORMAT_R16G16B16A16_SFLOAT)
+        .colorAttachment(fg.image("gbufferNormal"), VK_FORMAT_R16G16_SFLOAT)
+        .colorAttachment(fg.image("gbufferMaterial"), VK_FORMAT_R16G16B16A16_UNORM)
+        .colorAttachment(fg.image("gbufferEmissive"), VK_FORMAT_R16G16B16A16_SFLOAT)
+        .depthAttachment(fg.image("gbufferDepth"), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,
+                         {.depthStencil = {1.0f, 0}})
         .execute([&](CommandBuffer &cmd, VkPipelineLayout layout) {
             for (size_t i = 0; i < m_cfg.vertexBufferUploadResult.singleMeshResults.size(); ++i)
             {

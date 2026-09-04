@@ -4,6 +4,7 @@
 
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace
 {
@@ -30,15 +31,15 @@ const char *passTypeName(lr::PassType type)
     return "unknown";
 }
 
-const char *accessName(lr::BindingAccess access)
+const char *accessName(lr::AccessMode access)
 {
     switch (access)
     {
-        case lr::BindingAccess::Read:
+        case lr::AccessMode::Read:
             return "read";
-        case lr::BindingAccess::Write:
+        case lr::AccessMode::Write:
             return "write";
-        case lr::BindingAccess::ReadWrite:
+        case lr::AccessMode::ReadWrite:
             return "read-write";
     }
     return "unknown";
@@ -54,9 +55,10 @@ template <typename T> void writeHex(std::ostringstream &out, T value)
 namespace lr::framegraph
 {
 
-std::vector<size_t> sortPasses(std::span<const PassDesc> passes)
+std::vector<size_t> sortPasses(std::span<const PassDesc> passes, const ResourceHandleRegistry &resources,
+                               uint64_t passOwner)
 {
-    const GraphDefinition graph = translatePassDescriptions(passes);
+    const GraphDefinition graph = translatePassDescriptions(passes, resources, passOwner);
     const ExecutionPlan   plan  = buildExecutionPlan(graph);
 
     std::vector<size_t> sorted;
@@ -68,39 +70,126 @@ std::vector<size_t> sortPasses(std::span<const PassDesc> passes)
     return sorted;
 }
 
-std::vector<PlannedImage> planAttachmentImages(std::span<const PassDesc> passes, VkExtent2D defaultExtent,
+std::vector<PlannedImage> planAttachmentImages(std::span<const PassDesc>     passes,
+                                               const ResourceHandleRegistry &resources, VkExtent2D defaultExtent,
                                                const std::unordered_set<std::string> &existingImages)
 {
-    std::unordered_set<std::string> knownImages = existingImages;
-    std::vector<PlannedImage>       planned;
+    struct AggregatedImage
+    {
+        PlannedImage image;
+        bool         hasAttachment = false;
+    };
+
+    std::vector<AggregatedImage>            aggregated;
+    std::unordered_map<std::string, size_t> indices;
 
     for (const auto &pass : passes)
     {
-        for (const auto &write : pass.writes)
+        for (const ImageUse &use : pass.imageUses)
         {
-            if (!knownImages.insert(write.name).second)
+            const std::string &name   = resources.name(use.image);
+            const auto [it, inserted] = indices.emplace(name, aggregated.size());
+            if (inserted)
+            {
+                aggregated.push_back({.image = {.name = name}});
+            }
+            AggregatedImage &entry = aggregated[it->second];
+
+            switch (use.usage)
+            {
+                case ImageUsage::Sampled:
+                case ImageUsage::SampledDepth:
+                case ImageUsage::SampledArray:
+                    entry.image.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+                    break;
+                case ImageUsage::Storage:
+                    entry.image.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+                    break;
+                case ImageUsage::ColorAttachment:
+                    entry.image.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+                    break;
+                case ImageUsage::DepthAttachment:
+                    entry.image.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+                    break;
+            }
+
+            if (!use.isAttachment())
             {
                 continue;
             }
+            if (use.format == VK_FORMAT_UNDEFINED)
+            {
+                throw std::runtime_error("FrameGraph: attachment image '" + name + "' has no format");
+            }
 
-            const bool depth = isDepthFormat(write.format);
-            planned.push_back({
-                .name   = write.name,
-                .format = write.format,
-                .extent = (write.extent.width == 0 || write.extent.height == 0) ? defaultExtent : write.extent,
-                .usage  = static_cast<VkImageUsageFlags>(
-                    depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
-                          : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT),
-                .aspect =
-                    static_cast<VkImageAspectFlags>(depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT),
-            });
+            const VkExtent2D extent = (use.extent.width == 0 || use.extent.height == 0) ? defaultExtent : use.extent;
+            const VkImageAspectFlags aspect =
+                use.usage == ImageUsage::DepthAttachment ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+
+            if (!entry.hasAttachment)
+            {
+                entry.image.format  = use.format;
+                entry.image.extent  = extent;
+                entry.image.aspect  = aspect;
+                entry.hasAttachment = true;
+                continue;
+            }
+            if (entry.image.format != use.format)
+            {
+                throw std::runtime_error("FrameGraph: attachment image '" + name + "' has conflicting formats");
+            }
+            if (entry.image.extent.width != extent.width || entry.image.extent.height != extent.height)
+            {
+                throw std::runtime_error("FrameGraph: attachment image '" + name + "' has conflicting extents");
+            }
+            if (entry.image.aspect != aspect)
+            {
+                throw std::runtime_error("FrameGraph: attachment image '" + name +
+                                         "' is declared as both color and depth");
+            }
         }
     }
 
+    std::vector<PlannedImage> planned;
+    for (AggregatedImage &entry : aggregated)
+    {
+        if (entry.hasAttachment && !existingImages.contains(entry.image.name))
+        {
+            planned.push_back(std::move(entry.image));
+        }
+    }
     return planned;
 }
 
-std::string dumpTopology(std::span<const PassDesc> passes, std::span<const size_t> sortedPassIndices,
+std::vector<VkExtent2D> planRenderingExtents(std::span<const PassDesc> passes, VkExtent2D defaultExtent)
+{
+    std::vector<VkExtent2D> extents(passes.size(), defaultExtent);
+    for (size_t passIndex = 0; passIndex < passes.size(); ++passIndex)
+    {
+        bool hasAttachment = false;
+        for (const ImageUse &use : passes[passIndex].imageUses)
+        {
+            if (!use.isAttachment())
+            {
+                continue;
+            }
+            const VkExtent2D extent = (use.extent.width == 0 || use.extent.height == 0) ? defaultExtent : use.extent;
+            if (!hasAttachment)
+            {
+                extents[passIndex] = extent;
+                hasAttachment      = true;
+            } else if (extents[passIndex].width != extent.width || extents[passIndex].height != extent.height)
+            {
+                throw std::runtime_error("FrameGraph: pass '" + passes[passIndex].name +
+                                         "' has attachments with different extents");
+            }
+        }
+    }
+    return extents;
+}
+
+std::string dumpTopology(std::span<const PassDesc> passes, const ResourceHandleRegistry &resources,
+                         std::span<const size_t>                        sortedPassIndices,
                          std::span<const std::vector<BarrierDebugInfo>> barriersByPass)
 {
     std::ostringstream out;
@@ -112,24 +201,34 @@ std::string dumpTopology(std::span<const PassDesc> passes, std::span<const size_
         const auto &pass = passes[i];
         out << "  [" << i << "] " << pass.name << " type=" << passTypeName(pass.type) << '\n';
 
-        for (const auto &dependency : pass.explicitDeps)
+        for (PassHandle dependency : pass.explicitDependencies)
         {
-            out << "    depends-on " << dependency << '\n';
+            out << "    depends-on " << passes[dependency.index].name << '\n';
         }
-        for (const auto &binding : pass.bindings)
+        for (const ImageUse &use : pass.imageUses)
         {
-            out << "    binding " << binding.binding << " resource=" << binding.resourceName
-                << " access=" << accessName(binding.access) << " descriptor=" << static_cast<int>(binding.type)
-                << " stages=";
-            writeHex(out, binding.stages);
-            out << " layout=" << static_cast<int>(binding.imageLayout) << " count=" << binding.descriptorCount
-                << " mip=" << binding.mipLevel << '\n';
+            out << "    image resource=" << resources.name(use.image) << " usage=" << static_cast<int>(use.usage)
+                << " access=" << accessName(use.access);
+            if (use.isDescriptor())
+            {
+                out << " binding=" << use.binding << " count=" << use.descriptorCount;
+            }
+            out << " stages=";
+            writeHex(out, use.stages);
+            out << " mip=" << use.boundMip;
+            if (use.isAttachment())
+            {
+                out << " format=" << static_cast<int>(use.format) << " extent=" << use.extent.width << 'x'
+                    << use.extent.height << " load=" << static_cast<int>(use.loadOp);
+            }
+            out << '\n';
         }
-        for (const auto &write : pass.writes)
+        for (const BufferUse &use : pass.bufferUses)
         {
-            out << "    attachment resource=" << write.name << " format=" << static_cast<int>(write.format)
-                << " extent=" << write.extent.width << 'x' << write.extent.height
-                << " load=" << static_cast<int>(write.loadOp) << '\n';
+            out << "    buffer resource=" << resources.name(use.buffer) << " usage=" << static_cast<int>(use.usage)
+                << " access=" << accessName(use.access) << " binding=" << use.binding << " stages=";
+            writeHex(out, use.stages);
+            out << '\n';
         }
     }
 

@@ -78,9 +78,7 @@ void Viewer::addImguiPass()
     m_fg->addPass("__imgui")
         .type(PassType::Custom)
         .dependsOn(priorPasses)
-        .writes({{.format = m_swapchain->getFormat(),
-                  .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                  .image  = m_fg->image("swapchain")}})
+        .colorAttachment(m_fg->image("swapchain"), m_swapchain->getFormat(), VK_ATTACHMENT_LOAD_OP_LOAD)
         .execute([this](CommandBuffer &cmd, VkPipelineLayout) {
             m_imguiPass->render(cmd, m_swapchain->getImageView(m_currentImageIndex), m_swapchain->getExtent());
         });

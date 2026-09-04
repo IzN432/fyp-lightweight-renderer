@@ -53,6 +53,4 @@ std::vector<PassHandle> FrameGraphDefinition::passHandles() const
     return handles;
 }
 
-PassDesc &PassBuilder::desc() { return m_definition.pass(m_handle); }
-
 } // namespace lr

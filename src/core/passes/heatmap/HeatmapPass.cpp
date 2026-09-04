@@ -25,20 +25,10 @@ void HeatmapPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         .vertShader((paths::shaderDir / "heatmap.vert.spv").string())
         .fragShader((paths::shaderDir / "heatmap.frag.spv").string())
         .pushConstantSize(sizeof(HeatmapPC), VK_SHADER_STAGE_VERTEX_BIT)
-        .bind({
-            {
-                .binding = 0,
-                .type    = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .stages  = VK_SHADER_STAGE_VERTEX_BIT,
-                .buffer  = fg.buffer(m_cfg.cameraBufferResourceName),
-            },
-        })
-        .writes({
-            {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .image = fg.image("heatmap")},
-            {.format     = VK_FORMAT_D32_SFLOAT,
-             .clearValue = {.depthStencil = {1.0f, 0}},
-             .image      = fg.image("heatmapDepth")},
-        })
+        .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
+        .colorAttachment(fg.image("heatmap"), VK_FORMAT_R16G16B16A16_SFLOAT)
+        .depthAttachment(fg.image("heatmapDepth"), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,
+                         {.depthStencil = {1.0f, 0}})
         .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
             if (!m_enabled)
             {

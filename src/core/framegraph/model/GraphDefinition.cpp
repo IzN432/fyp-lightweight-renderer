@@ -29,11 +29,7 @@ ResourceId GraphDefinition::addResource(std::string name, ResourceKind kind)
             node.kind = kind;
         } else if (kind != ResourceKind::Unknown && node.kind != kind)
         {
-            // The current C++ frontend historically has one shared string
-            // namespace for images and buffers. Preserve it without lying
-            // about a conflicting resource's kind; validation can reject this
-            // explicitly once compatibility constraints are removed.
-            node.kind = ResourceKind::Unknown;
+            throw std::runtime_error("FrameGraph: resource '" + name + "' is declared as both an image and a buffer");
         }
         return existing->second;
     }

@@ -95,7 +95,9 @@ void ResourceRegistry::registerExternalImage(const std::string &name, VkFormat f
     ImageEntry entry{};
     entry.format       = format;
     entry.image.format = format; // mirror so getImage()->format is valid
+    entry.usage        = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     entry.aspect       = aspect;
+    entry.extent       = m_defaultExtent;
     entry.persistent   = true;
     entry.external     = true;
     entry.mipLevels    = 1;
@@ -307,6 +309,64 @@ const AllocatedImage *ResourceRegistry::getImage(const std::string &name) const
 
 bool ResourceRegistry::hasImage(const std::string &name) const { return m_images.count(name) > 0; }
 
+void ResourceRegistry::validateImage(const std::string &name, VkFormat format, VkImageUsageFlags requiredUsage,
+                                     VkExtent2D extent, VkImageAspectFlags aspect) const
+{
+    const auto it = m_images.find(name);
+    if (it == m_images.end())
+    {
+        throw std::runtime_error("ResourceRegistry: image '" + name + "' not found");
+    }
+
+    const ImageEntry &entry = it->second;
+    if (entry.format != format)
+    {
+        throw std::runtime_error("FrameGraph: registered image '" + name + "' has an incompatible format");
+    }
+    if (entry.extent.width != extent.width || entry.extent.height != extent.height)
+    {
+        throw std::runtime_error("FrameGraph: registered image '" + name + "' has an incompatible extent");
+    }
+    if (entry.aspect != aspect)
+    {
+        throw std::runtime_error("FrameGraph: registered image '" + name + "' has an incompatible aspect");
+    }
+    if ((entry.usage & requiredUsage) != requiredUsage)
+    {
+        throw std::runtime_error("FrameGraph: registered image '" + name + "' is missing required usage flags");
+    }
+}
+
+void ResourceRegistry::validateImageUsage(const std::string &name, VkImageUsageFlags requiredUsage) const
+{
+    if (const auto image = m_images.find(name); image != m_images.end())
+    {
+        if ((image->second.usage & requiredUsage) != requiredUsage)
+        {
+            throw std::runtime_error("FrameGraph: registered image '" + name + "' is missing required usage flags");
+        }
+        return;
+    }
+
+    const auto array = m_imageArrays.find(name);
+    if (array == m_imageArrays.end())
+    {
+        throw std::runtime_error("FrameGraph: image or image array '" + name + "' not found");
+    }
+    for (const std::string &slotName : array->second)
+    {
+        if (slotName.empty())
+        {
+            continue;
+        }
+        const ImageEntry &slot = m_images.at(slotName);
+        if ((slot.usage & requiredUsage) != requiredUsage)
+        {
+            throw std::runtime_error("FrameGraph: image array '" + name + "' is missing required usage flags");
+        }
+    }
+}
+
 std::vector<const AllocatedImage *> ResourceRegistry::getImageArray(const std::string &arrayName) const
 {
     std::vector<const AllocatedImage *> result;
@@ -375,6 +435,7 @@ void ResourceRegistry::rebuild(VkExtent2D newExtent)
     {
         if (entry.external)
         {
+            entry.extent        = newExtent;
             entry.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             continue;
         }

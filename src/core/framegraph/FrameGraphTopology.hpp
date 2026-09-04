@@ -1,6 +1,6 @@
 #pragma once
 
-#include "PassBuilder.hpp"
+#include "PassDefinition.hpp"
 
 #include <span>
 #include <string>
@@ -30,15 +30,18 @@ struct BarrierDebugInfo
     VkImageLayout         newLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 };
 
-// Compatibility frontend for the current PassDesc API. Sorting is delegated
-// to the backend-independent compiler so every frontend shares dependency rules.
-std::vector<size_t> sortPasses(std::span<const PassDesc> passes);
+std::vector<size_t> sortPasses(std::span<const PassDesc> passes, const ResourceHandleRegistry &resources,
+                               uint64_t passOwner);
 
-std::vector<PlannedImage> planAttachmentImages(std::span<const PassDesc> passes, VkExtent2D defaultExtent,
+std::vector<PlannedImage> planAttachmentImages(std::span<const PassDesc>     passes,
+                                               const ResourceHandleRegistry &resources, VkExtent2D defaultExtent,
                                                const std::unordered_set<std::string> &existingImages = {});
 
+std::vector<VkExtent2D> planRenderingExtents(std::span<const PassDesc> passes, VkExtent2D defaultExtent);
+
 // Stable, handle-free text suitable for logs and snapshot comparisons.
-std::string dumpTopology(std::span<const PassDesc> passes, std::span<const size_t> sortedPassIndices,
+std::string dumpTopology(std::span<const PassDesc> passes, const ResourceHandleRegistry &resources,
+                         std::span<const size_t>                        sortedPassIndices,
                          std::span<const std::vector<BarrierDebugInfo>> barriersByPass = {});
 
 } // namespace lr::framegraph

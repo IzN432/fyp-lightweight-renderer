@@ -13,6 +13,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include <array>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -133,10 +134,27 @@ private:
         VkPipelineLayout                   pipelineLayout   = VK_NULL_HANDLE;
         VkDescriptorSet                    descriptorSet    = VK_NULL_HANDLE;
         std::unique_ptr<Pipeline>          pipeline;
+        VkExtent2D                         renderingExtent{};
         std::vector<CompiledImageBarrier>  imageBarriers;
         std::vector<CompiledBufferBarrier> bufferBarriers;
     };
     std::vector<CompiledPass> m_compiled;
+
+    // Reused per-frame scratch buffers for execute() — cleared (not deallocated) each pass
+    // to avoid steady-state heap allocations in the hot path.
+    std::vector<VkImageMemoryBarrier2>     m_scratchImageBarriers;
+    std::vector<VkBufferMemoryBarrier2>    m_scratchBufferBarriers;
+    std::vector<VkRenderingAttachmentInfo> m_scratchColorAttachments;
+    VkRenderingAttachmentInfo              m_scratchDepthAttachment{};
+
+    // execute() helpers
+    static std::array<float, 4> debugLabelColor(PassType type);
+    void                        submitResourceBarriers(CommandBuffer &cmd, const CompiledPass &compiled);
+    void                        bindVertexAndIndexBuffers(CommandBuffer &cmd, const PassDesc &pass);
+    // Populates m_scratchColorAttachments / m_scratchDepthAttachment from the pass's
+    // attachment image uses and returns a VkRenderingInfo referencing them.
+    // The returned struct is only valid until the next prepareRenderingInfo() call.
+    VkRenderingInfo prepareRenderingInfo(const PassDesc &pass, VkExtent2D extent);
 };
 
 } // namespace lr

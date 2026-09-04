@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Pipeline.hpp"
-#include "core/framegraph/PassBuilder.hpp"
+#include "core/framegraph/PassDefinition.hpp"
 #include "core/vulkan/VulkanContext.hpp"
 
 #include <vulkan/vulkan.h>

@@ -9,6 +9,7 @@
 #include <spdlog/spdlog.h>
 
 #include <stdexcept>
+#include <unordered_set>
 
 namespace
 {
@@ -62,8 +63,6 @@ void FrameGraph::compile()
     auto passes = m_graph.passes();
     spdlog::info("FrameGraph: compiling {} passes...", passes.size());
 
-    framegraph::resolveTypedHandles(passes, m_graph.resources(), m_graph.owner());
-
     destroyCompiledPasses();
     m_descriptorAllocator.reset();
     m_compiled.clear();
@@ -82,11 +81,149 @@ void FrameGraph::compile()
     spdlog::info("FrameGraph: compiled OK");
 }
 
+std::array<float, 4> FrameGraph::debugLabelColor(PassType type)
+{
+    switch (type)
+    {
+        case PassType::Geometry:
+            return {0.20f, 0.70f, 1.00f, 1.00f};
+        case PassType::Fullscreen:
+            return {0.20f, 1.00f, 0.50f, 1.00f};
+        case PassType::Compute:
+            return {1.00f, 0.65f, 0.20f, 1.00f};
+        case PassType::Custom:
+            return {0.85f, 0.40f, 1.00f, 1.00f};
+    }
+    return {};
+}
+
+void FrameGraph::submitResourceBarriers(CommandBuffer &cmd, const CompiledPass &compiled)
+{
+    if (compiled.imageBarriers.empty() && compiled.bufferBarriers.empty())
+    {
+        return;
+    }
+
+    // Patch external image handles and submit all resource barriers together.
+    m_scratchImageBarriers.clear();
+    for (const auto &cb : compiled.imageBarriers)
+    {
+        VkImageMemoryBarrier2 b  = cb.barrier;
+        auto                  it = m_externalImages.find(cb.resourceName);
+        if (it != m_externalImages.end())
+        {
+            b.image = it->second.image;
+        }
+        m_scratchImageBarriers.push_back(b);
+    }
+
+    m_scratchBufferBarriers.clear();
+    for (const auto &cb : compiled.bufferBarriers)
+    {
+        m_scratchBufferBarriers.push_back(cb.barrier);
+    }
+
+    VkDependencyInfo dep{};
+    dep.sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.imageMemoryBarrierCount  = static_cast<uint32_t>(m_scratchImageBarriers.size());
+    dep.pImageMemoryBarriers     = m_scratchImageBarriers.data();
+    dep.bufferMemoryBarrierCount = static_cast<uint32_t>(m_scratchBufferBarriers.size());
+    dep.pBufferMemoryBarriers    = m_scratchBufferBarriers.data();
+    vkCmdPipelineBarrier2(cmd.get(), &dep);
+}
+
+VkRenderingInfo FrameGraph::prepareRenderingInfo(const PassDesc &pass, VkExtent2D extent)
+{
+    m_scratchColorAttachments.clear();
+    m_scratchDepthAttachment = {};
+    bool hasDepth            = false;
+
+    for (const ImageUse &write : pass.imageUses)
+    {
+        if (!write.isAttachment())
+        {
+            continue;
+        }
+        const std::string    &name = m_graph.name(write.image);
+        const AllocatedImage *img  = m_registry.getImage(name);
+
+        // External images (e.g. swapchain) have their view injected per-frame
+        VkImageView view  = img->view;
+        auto        extIt = m_externalImages.find(name);
+        if (extIt != m_externalImages.end())
+        {
+            view = extIt->second.view;
+        }
+
+        VkRenderingAttachmentInfo ai{};
+        ai.sType      = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        ai.imageView  = view;
+        ai.loadOp     = write.loadOp;
+        ai.storeOp    = write.storeOp;
+        ai.clearValue = write.clearValue;
+
+        if (write.usage == ImageUsage::DepthAttachment)
+        {
+            ai.imageLayout           = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            m_scratchDepthAttachment = ai;
+            hasDepth                 = true;
+        } else
+        {
+            ai.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            m_scratchColorAttachments.push_back(ai);
+        }
+    }
+
+    VkRenderingInfo renderingInfo{};
+    renderingInfo.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    renderingInfo.renderArea           = {{0, 0}, extent};
+    renderingInfo.layerCount           = 1;
+    renderingInfo.colorAttachmentCount = static_cast<uint32_t>(m_scratchColorAttachments.size());
+    renderingInfo.pColorAttachments    = m_scratchColorAttachments.data();
+    renderingInfo.pDepthAttachment     = hasDepth ? &m_scratchDepthAttachment : nullptr;
+    return renderingInfo;
+}
+
+void FrameGraph::bindVertexAndIndexBuffers(CommandBuffer &cmd, const PassDesc &pass)
+{
+    for (const BufferUse &use : pass.bufferUses)
+    {
+        if (use.usage != BufferUsage::Vertex)
+        {
+            continue;
+        }
+        const std::string     &name = m_graph.name(use.buffer);
+        const AllocatedBuffer *vb   = m_registry.getBuffer(name);
+        if (!vb)
+        {
+            spdlog::error("FrameGraph::execute: pass '{}' references missing vertex buffer '{}'", pass.name, name);
+            throw std::runtime_error("FrameGraph::execute: pass '" + pass.name + "' references vertex buffer '" + name +
+                                     "' which was not registered");
+        }
+        cmd.bindVertexBuffer(use.binding, vb->buffer);
+    }
+
+    for (const BufferUse &use : pass.bufferUses)
+    {
+        if (use.usage != BufferUsage::Index)
+        {
+            continue;
+        }
+        const std::string     &name = m_graph.name(use.buffer);
+        const AllocatedBuffer *ib   = m_registry.getBuffer(name);
+        if (!ib)
+        {
+            spdlog::error("FrameGraph::execute: pass '{}' references missing index buffer '{}'", pass.name, name);
+            throw std::runtime_error("FrameGraph::execute: pass '" + pass.name + "' references index buffer '" + name +
+                                     "' which was not registered");
+        }
+        cmd.bindIndexBuffer(ib->buffer);
+    }
+}
+
 void FrameGraph::execute(CommandBuffer &cmd)
 {
     m_registry.flushUploads();
-
-    VkExtent2D extent = m_registry.getExtent();
 
     for (size_t idx : m_sortedIndices)
     {
@@ -96,58 +233,10 @@ void FrameGraph::execute(CommandBuffer &cmd)
         const bool useDebugLabels = m_ctx.debugNamesEnabled();
         if (useDebugLabels)
         {
-            std::array<float, 4> color{};
-
-            switch (pass.type)
-            {
-                case PassType::Geometry:
-                    color = {0.20f, 0.70f, 1.00f, 1.00f};
-                    break;
-                case PassType::Fullscreen:
-                    color = {0.20f, 1.00f, 0.50f, 1.00f};
-                    break;
-                case PassType::Compute:
-                    color = {1.00f, 0.65f, 0.20f, 1.00f};
-                    break;
-                case PassType::Custom:
-                    color = {0.85f, 0.40f, 1.00f, 1.00f};
-                    break;
-            }
-
-            m_ctx.beginDebugLabel(cmd.get(), pass.name, color);
+            m_ctx.beginDebugLabel(cmd.get(), pass.name, debugLabelColor(pass.type));
         }
 
-        // Patch external image handles and submit all resource barriers together.
-        if (!compiled.imageBarriers.empty() || !compiled.bufferBarriers.empty())
-        {
-            std::vector<VkImageMemoryBarrier2> patchedBarriers;
-            patchedBarriers.reserve(compiled.imageBarriers.size());
-            for (const auto &cb : compiled.imageBarriers)
-            {
-                VkImageMemoryBarrier2 b  = cb.barrier;
-                auto                  it = m_externalImages.find(cb.resourceName);
-                if (it != m_externalImages.end())
-                {
-                    b.image = it->second.image;
-                }
-                patchedBarriers.push_back(b);
-            }
-
-            std::vector<VkBufferMemoryBarrier2> bufferBarriers;
-            bufferBarriers.reserve(compiled.bufferBarriers.size());
-            for (const auto &cb : compiled.bufferBarriers)
-            {
-                bufferBarriers.push_back(cb.barrier);
-            }
-
-            VkDependencyInfo dep{};
-            dep.sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-            dep.imageMemoryBarrierCount  = static_cast<uint32_t>(patchedBarriers.size());
-            dep.pImageMemoryBarriers     = patchedBarriers.data();
-            dep.bufferMemoryBarrierCount = static_cast<uint32_t>(bufferBarriers.size());
-            dep.pBufferMemoryBarriers    = bufferBarriers.data();
-            vkCmdPipelineBarrier2(cmd.get(), &dep);
-        }
+        submitResourceBarriers(cmd, compiled);
 
         // Bind pipeline and descriptor set — common to both compute and graphics
         if (compiled.pipeline)
@@ -177,81 +266,14 @@ void FrameGraph::execute(CommandBuffer &cmd)
         }
 
         // Graphics passes: begin rendering, set dynamic state, draw, end rendering
-        std::vector<VkRenderingAttachmentInfo> colorAttachments;
-        VkRenderingAttachmentInfo              depthAttachment{};
-        bool                                   hasDepth = false;
-
-        for (const auto &write : pass.writes)
-        {
-            const AllocatedImage *img = m_registry.getImage(write.name);
-
-            // External images (e.g. swapchain) have their view injected per-frame
-            VkImageView view  = img->view;
-            auto        extIt = m_externalImages.find(write.name);
-            if (extIt != m_externalImages.end())
-            {
-                view = extIt->second.view;
-            }
-
-            VkRenderingAttachmentInfo ai{};
-            ai.sType      = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-            ai.imageView  = view;
-            ai.loadOp     = write.loadOp;
-            ai.storeOp    = VK_ATTACHMENT_STORE_OP_STORE;
-            ai.clearValue = write.clearValue;
-
-            if (isDepthFormat(write.format))
-            {
-                ai.imageLayout  = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-                depthAttachment = ai;
-                hasDepth        = true;
-            } else
-            {
-                ai.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-                colorAttachments.push_back(ai);
-            }
-        }
-
-        VkRenderingInfo renderingInfo{};
-        renderingInfo.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
-        renderingInfo.renderArea           = {{0, 0}, extent};
-        renderingInfo.layerCount           = 1;
-        renderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size());
-        renderingInfo.pColorAttachments    = colorAttachments.data();
-        renderingInfo.pDepthAttachment     = hasDepth ? &depthAttachment : nullptr;
-
+        VkRenderingInfo renderingInfo = prepareRenderingInfo(pass, compiled.renderingExtent);
         vkCmdBeginRendering(cmd.get(), &renderingInfo);
 
-        cmd.setViewport(0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height));
-        cmd.setScissor(0, 0, extent.width, extent.height);
+        cmd.setViewport(0.0f, 0.0f, static_cast<float>(compiled.renderingExtent.width),
+                        static_cast<float>(compiled.renderingExtent.height));
+        cmd.setScissor(0, 0, compiled.renderingExtent.width, compiled.renderingExtent.height);
 
-        // Bind vertex buffers declared by this pass
-        for (const auto &vbRef : pass.vertexBufferRefs)
-        {
-            const AllocatedBuffer *vb = m_registry.getBuffer(vbRef.bufferName);
-            if (!vb)
-            {
-                spdlog::error("FrameGraph::execute: pass '{}' references missing vertex buffer '{}'", pass.name,
-                              vbRef.bufferName);
-                throw std::runtime_error("FrameGraph::execute: pass '" + pass.name + "' references vertex buffer '" +
-                                         vbRef.bufferName + "' which was not registered");
-            }
-            cmd.bindVertexBuffer(vbRef.binding, vb->buffer);
-        }
-
-        // Bind index buffer if declared
-        if (!pass.indexBufferName.empty())
-        {
-            const AllocatedBuffer *ib = m_registry.getBuffer(pass.indexBufferName);
-            if (!ib)
-            {
-                spdlog::error("FrameGraph::execute: pass '{}' references missing index buffer '{}'", pass.name,
-                              pass.indexBufferName);
-                throw std::runtime_error("FrameGraph::execute: pass '" + pass.name + "' references index buffer '" +
-                                         pass.indexBufferName + "' which was not registered");
-            }
-            cmd.bindIndexBuffer(ib->buffer);
-        }
+        bindVertexAndIndexBuffers(cmd, pass);
 
         if (pass.executeCallback)
         {
@@ -280,7 +302,7 @@ void FrameGraph::resize(VkExtent2D newExtent)
 void FrameGraph::sortPasses()
 {
     const auto passes = m_graph.passes();
-    m_logicalGraph    = framegraph::translatePassDescriptions(passes);
+    m_logicalGraph    = framegraph::translatePassDescriptions(passes, m_graph.resources(), m_graph.owner());
     m_executionPlan   = framegraph::buildExecutionPlan(m_logicalGraph);
 
     m_sortedIndices.clear();
@@ -299,12 +321,36 @@ void FrameGraph::sortPasses()
 
 void FrameGraph::allocateResources()
 {
-    const auto planned = framegraph::planAttachmentImages(m_graph.passes(), m_registry.getExtent());
+    const auto planned =
+        framegraph::planAttachmentImages(m_graph.passes(), m_graph.resources(), m_registry.getExtent());
     for (const auto &image : planned)
     {
         if (!m_registry.hasImage(image.name))
         {
             m_registry.registerImage(image.name, image.format, image.usage, image.extent, image.aspect);
+        } else
+        {
+            m_registry.validateImage(image.name, image.format, image.usage, image.extent, image.aspect);
+        }
+    }
+
+    const auto renderingExtents = framegraph::planRenderingExtents(m_graph.passes(), m_registry.getExtent());
+    for (size_t passIndex = 0; passIndex < renderingExtents.size(); ++passIndex)
+    {
+        m_compiled[passIndex].renderingExtent = renderingExtents[passIndex];
+    }
+
+    for (const PassDesc &pass : m_graph.passes())
+    {
+        for (const ImageUse &use : pass.imageUses)
+        {
+            if (use.isAttachment())
+            {
+                continue;
+            }
+            const VkImageUsageFlags requiredUsage =
+                use.usage == ImageUsage::Storage ? VK_IMAGE_USAGE_STORAGE_BIT : VK_IMAGE_USAGE_SAMPLED_BIT;
+            m_registry.validateImageUsage(m_graph.name(use.image), requiredUsage);
         }
     }
 }
@@ -323,24 +369,45 @@ void FrameGraph::buildDescriptorSets()
             continue;
         }
 
-        // Build VkDescriptorSetLayoutBinding array
         std::vector<VkDescriptorSetLayoutBinding> layoutBindings;
-        layoutBindings.reserve(pass.bindings.size());
-        for (const auto &b : pass.bindings)
+        std::unordered_set<uint32_t>              usedBindings;
+        const auto addLayoutBinding = [&](uint32_t binding, VkDescriptorType type, uint32_t count,
+                                          VkShaderStageFlags stages) {
+            if (!usedBindings.insert(binding).second)
+            {
+                throw std::runtime_error("FrameGraph: duplicate descriptor binding " + std::to_string(binding) +
+                                         " in pass '" + pass.name + "'");
+            }
+            layoutBindings.push_back(
+                {.binding = binding, .descriptorType = type, .descriptorCount = count, .stageFlags = stages});
+        };
+
+        for (const ImageUse &use : pass.imageUses)
         {
-            VkDescriptorSetLayoutBinding lb{};
-            lb.binding         = b.binding;
-            lb.descriptorType  = b.type;
-            lb.descriptorCount = b.descriptorCount;
-            lb.stageFlags      = b.stages;
-            layoutBindings.push_back(lb);
+            if (!use.isDescriptor())
+            {
+                continue;
+            }
+            const VkDescriptorType type = use.usage == ImageUsage::Storage ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                                                           : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            addLayoutBinding(use.binding, type, use.descriptorCount, use.stages);
+        }
+        for (const BufferUse &use : pass.bufferUses)
+        {
+            if (!use.isDescriptor())
+            {
+                continue;
+            }
+            const VkDescriptorType type = use.usage == BufferUsage::Uniform ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+                                                                            : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            addLayoutBinding(use.binding, type, 1, use.stages);
         }
 
         compiled.descriptorLayout = m_descriptorAllocator.createLayout(layoutBindings);
         compiled.pipelineLayout   = m_descriptorAllocator.createPipelineLayout(
             compiled.descriptorLayout, pass.pushConstantSize, pass.pushConstantStages);
 
-        if (pass.bindings.empty())
+        if (layoutBindings.empty())
         {
             spdlog::debug("FrameGraph: pass '{}' - no bindings", pass.name);
             continue;
@@ -348,112 +415,87 @@ void FrameGraph::buildDescriptorSets()
 
         compiled.descriptorSet = m_descriptorAllocator.allocate(compiled.descriptorLayout);
 
-        for (const auto &b : pass.bindings)
+        for (const ImageUse &use : pass.imageUses)
         {
-            bool isImage = (b.type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
-                            b.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE || b.type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
-
-            if (isImage)
+            if (!use.isDescriptor())
             {
-                VkSampler sampler = (b.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_NULL_HANDLE : m_defaultSampler;
-
-                // Storage images must always be in GENERAL layout
-                VkImageLayout layout =
-                    (b.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : b.imageLayout;
-
-                // Try to get as array first (arrays can have any size, including 1)
-                const auto images = m_registry.getImageArray(b.resourceName);
-                // For storage images, Vulkan requires levelCount == 1 in the image
-                // view. Use a per-mip view when available (created by registerCubemap
-                // or createMipViews). Fall back to the full-range view for images
-                // with only one mip level.
-                auto pickView = [&](const AllocatedImage *img) -> VkImageView {
-                    if (b.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE && !img->mipViews.empty())
-                    {
-                        if (b.mipLevel >= img->mipViews.size())
-                        {
-                            throw std::runtime_error("FrameGraph: pass '" + pass.name +
-                                                     "' requests mipLevel=" + std::to_string(b.mipLevel) + " for '" +
-                                                     b.resourceName + "' but image only has " +
-                                                     std::to_string(img->mipViews.size()) + " mip view(s)");
-                        }
-                        return img->mipViews[b.mipLevel];
-                    }
-                    return img->view;
-                };
-
-                if (!images.empty())
-                {
-                    // It's an image array
-                    if (images.size() < b.descriptorCount)
-                    {
-                        spdlog::error("FrameGraph: pass '{}' binds image array '{}' with descriptorCount={} "
-                                      "but only {} slot(s) exist",
-                                      pass.name, b.resourceName, b.descriptorCount, images.size());
-                        throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds image array '" +
-                                                 b.resourceName +
-                                                 "' with descriptorCount=" + std::to_string(b.descriptorCount) +
-                                                 " but only " + std::to_string(images.size()) + " slot(s) exist");
-                    }
-
-                    std::vector<VkImageView> views;
-                    views.reserve(b.descriptorCount);
-                    for (uint32_t idx = 0; idx < b.descriptorCount; ++idx)
-                    {
-                        const AllocatedImage *img = images[idx];
-                        if (!img)
-                        {
-                            spdlog::error("FrameGraph: pass '{}' binds image array '{}' with empty slot at index {}",
-                                          pass.name, b.resourceName, idx);
-                            throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds image array '" +
-                                                     b.resourceName + "' with an empty slot at index " +
-                                                     std::to_string(idx));
-                        }
-                        views.push_back(pickView(img));
-                    }
-
-                    m_descriptorAllocator.writeImageArray(compiled.descriptorSet, b.binding, views, sampler, layout,
-                                                          b.type);
-                } else
-                {
-                    // Single image
-                    const AllocatedImage *img = m_registry.getImage(b.resourceName);
-                    if (!img)
-                    {
-                        spdlog::error("FrameGraph: pass '{}' binds unknown image '{}'", pass.name, b.resourceName);
-                        throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds unknown image '" +
-                                                 b.resourceName + "'");
-                    }
-
-                    m_descriptorAllocator.writeImage(compiled.descriptorSet, b.binding, pickView(img), sampler, layout,
-                                                     b.type);
-                }
-            } else
-            {
-                if (b.descriptorCount != 1)
-                {
-                    spdlog::error(
-                        "FrameGraph: pass '{}' uses unsupported descriptorCount={} for non-image binding '{}'",
-                        pass.name, b.descriptorCount, b.resourceName);
-                    throw std::runtime_error("FrameGraph: pass '" + pass.name + "' uses descriptorCount=" +
-                                             std::to_string(b.descriptorCount) + " for non-image binding '" +
-                                             b.resourceName + "', which is not supported yet");
-                }
-
-                const AllocatedBuffer *buf = m_registry.getBuffer(b.resourceName);
-                if (!buf)
-                {
-                    spdlog::error("FrameGraph: pass '{}' binds unknown buffer '{}'", pass.name, b.resourceName);
-                    throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds unknown buffer '" +
-                                             b.resourceName + "'");
-                }
-
-                m_descriptorAllocator.writeBuffer(compiled.descriptorSet, b.binding, buf->buffer, 0, buf->size, b.type);
+                continue;
             }
+            const std::string     &name    = m_graph.name(use.image);
+            const bool             storage = use.usage == ImageUsage::Storage;
+            const VkDescriptorType type =
+                storage ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            const VkSampler     sampler = storage ? VK_NULL_HANDLE : m_defaultSampler;
+            const VkImageLayout layout =
+                storage ? VK_IMAGE_LAYOUT_GENERAL
+                        : (use.usage == ImageUsage::SampledDepth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                                                 : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+            if (use.usage == ImageUsage::SampledArray)
+            {
+                const auto images = m_registry.getImageArray(name);
+                if (images.size() < use.descriptorCount)
+                {
+                    throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds image array '" + name +
+                                             "' with too few slots");
+                }
+                std::vector<VkImageView> views;
+                views.reserve(use.descriptorCount);
+                for (uint32_t index = 0; index < use.descriptorCount; ++index)
+                {
+                    if (!images[index])
+                    {
+                        throw std::runtime_error("FrameGraph: image array '" + name + "' has an empty slot");
+                    }
+                    views.push_back(images[index]->view);
+                }
+                m_descriptorAllocator.writeImageArray(compiled.descriptorSet, use.binding, views, sampler, layout,
+                                                      type);
+                continue;
+            }
+
+            const AllocatedImage *image = m_registry.getImage(name);
+            if (!image)
+            {
+                throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds unknown image '" + name + "'");
+            }
+            VkImageView view = image->view;
+            if (use.boundMip != allImageMips)
+            {
+                if (!storage)
+                {
+                    throw std::runtime_error("FrameGraph: mip-specific views are only supported for storage images");
+                }
+                if (use.boundMip >= image->mipViews.size())
+                {
+                    throw std::runtime_error("FrameGraph: pass '" + pass.name + "' requests invalid mip for '" + name +
+                                             "'");
+                }
+                view = image->mipViews[use.boundMip];
+            }
+            m_descriptorAllocator.writeImage(compiled.descriptorSet, use.binding, view, sampler, layout, type);
+        }
+
+        for (const BufferUse &use : pass.bufferUses)
+        {
+            if (!use.isDescriptor())
+            {
+                continue;
+            }
+            const std::string     &name   = m_graph.name(use.buffer);
+            const AllocatedBuffer *buffer = m_registry.getBuffer(name);
+            if (!buffer)
+            {
+                throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds unknown buffer '" + name + "'");
+            }
+            const VkDescriptorType type = use.usage == BufferUsage::Uniform ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+                                                                            : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            m_descriptorAllocator.writeBuffer(compiled.descriptorSet, use.binding, buffer->buffer, 0, buffer->size,
+                                              type);
         }
 
         m_descriptorAllocator.commit();
-        spdlog::debug("FrameGraph: pass '{}' - {} binding(s)", pass.name, pass.bindings.size());
+        spdlog::debug("FrameGraph: pass '{}' - {} binding(s)", pass.name, layoutBindings.size());
     }
 }
 
@@ -494,9 +536,13 @@ void FrameGraph::buildPipelines()
         std::vector<VkFormat> colorFormats;
         VkFormat              depthFormat = VK_FORMAT_UNDEFINED;
 
-        for (const auto &write : pass.writes)
+        for (const ImageUse &write : pass.imageUses)
         {
-            if (isDepthFormat(write.format))
+            if (!write.isAttachment())
+            {
+                continue;
+            }
+            if (write.usage == ImageUsage::DepthAttachment)
             {
                 depthFormat = write.format;
             } else
@@ -527,14 +573,15 @@ void FrameGraph::buildBarriers()
     const auto                                     passes = m_graph.passes();
     for (const PassDesc &pass : passes)
     {
-        for (const BindingDesc &binding : pass.bindings)
+        for (const ImageUse &use : pass.imageUses)
         {
-            if (m_registry.getImage(binding.resourceName))
+            const std::string &name = m_graph.name(use.image);
+            if (m_registry.getImage(name))
             {
-                initialImageLayouts.try_emplace(binding.resourceName, m_registry.getImageLayout(binding.resourceName));
-            } else if (m_registry.hasImageArray(binding.resourceName))
+                initialImageLayouts.try_emplace(name, m_registry.getImageLayout(name));
+            } else if (m_registry.hasImageArray(name))
             {
-                const std::vector<VkImageLayout> layouts = m_registry.getImageArrayLayouts(binding.resourceName);
+                const std::vector<VkImageLayout> layouts = m_registry.getImageArrayLayouts(name);
                 if (!layouts.empty())
                 {
                     const VkImageLayout commonLayout = layouts.front();
@@ -542,25 +589,18 @@ void FrameGraph::buildBarriers()
                     {
                         if (layout != commonLayout)
                         {
-                            throw std::runtime_error("FrameGraph: image array '" + binding.resourceName +
+                            throw std::runtime_error("FrameGraph: image array '" + name +
                                                      "' has mixed initial layouts");
                         }
                     }
-                    initialImageLayouts.try_emplace(binding.resourceName, commonLayout);
+                    initialImageLayouts.try_emplace(name, commonLayout);
                 }
-            }
-        }
-        for (const ResourceDesc &attachment : pass.writes)
-        {
-            if (m_registry.getImage(attachment.name))
-            {
-                initialImageLayouts.try_emplace(attachment.name, m_registry.getImageLayout(attachment.name));
             }
         }
     }
 
     const framegraph::VulkanBarrierPlan plan =
-        framegraph::planVulkanBarriers(passes, m_sortedIndices, initialImageLayouts);
+        framegraph::planVulkanBarriers(passes, m_graph.resources(), m_sortedIndices, initialImageLayouts);
 
     for (size_t passIndex = 0; passIndex < plan.beforePass.size(); ++passIndex)
     {
@@ -813,7 +853,7 @@ std::string FrameGraph::debugDump() const
         }
     }
 
-    return framegraph::dumpTopology(passes, m_sortedIndices, barriersByPass);
+    return framegraph::dumpTopology(passes, m_graph.resources(), m_sortedIndices, barriersByPass);
 }
 
 void FrameGraph::createDefaultSampler()

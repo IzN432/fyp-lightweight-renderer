@@ -63,6 +63,7 @@ add_library(lr_core STATIC
     src/core/framegraph/ResourceRegistry.cpp
     src/core/framegraph/FrameGraph.cpp
     src/core/framegraph/FrameGraphDefinition.cpp
+    src/core/framegraph/PassBuilder.cpp
     src/core/framegraph/PassDescAdapter.cpp
     src/core/framegraph/FrameGraphTopology.cpp
     src/core/framegraph/model/GraphDefinition.cpp
@@ -192,11 +193,13 @@ if(BUILD_TESTING)
     add_executable(framegraph_topology_tests
         tests/framegraph/FrameGraphTopologyTests.cpp
         src/core/framegraph/FrameGraphDefinition.cpp
+        src/core/framegraph/PassBuilder.cpp
         src/core/framegraph/PassDescAdapter.cpp
         src/core/framegraph/FrameGraphTopology.cpp
         src/core/framegraph/model/GraphDefinition.cpp
         src/core/framegraph/compiler/GraphCompiler.cpp
         src/core/framegraph/compiler/VulkanBarrierPlanner.cpp
+        src/core/scene/Mesh.cpp
     )
     target_include_directories(framegraph_topology_tests PRIVATE src)
     target_link_libraries(framegraph_topology_tests PRIVATE Vulkan::Vulkan glm::glm)

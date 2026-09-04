@@ -70,6 +70,9 @@ public:
     AllocatedImage       *getImage(const std::string &name);
     const AllocatedImage *getImage(const std::string &name) const;
     bool                  hasImage(const std::string &name) const;
+    void validateImage(const std::string &name, VkFormat format, VkImageUsageFlags requiredUsage, VkExtent2D extent,
+                       VkImageAspectFlags aspect) const;
+    void validateImageUsage(const std::string &name, VkImageUsageFlags requiredUsage) const;
 
     VkImageLayout getImageLayout(const std::string &name) const;
     void          setImageLayout(const std::string &name, VkImageLayout layout);

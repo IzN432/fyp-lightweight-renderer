@@ -57,7 +57,8 @@ enum class ResourceUsage
     StorageImage,
     UniformBuffer,
     StorageBuffer,
-    ColorOrDepthAttachment,
+    ColorAttachment,
+    DepthAttachment,
     VertexBuffer,
     IndexBuffer,
 };

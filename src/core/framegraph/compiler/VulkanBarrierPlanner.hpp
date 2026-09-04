@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/framegraph/PassBuilder.hpp"
+#include "core/framegraph/PassDefinition.hpp"
 
 #include <span>
 #include <string>
@@ -40,7 +40,8 @@ struct VulkanBarrierPlan
 
 // Converts the current Vulkan-facing PassDesc frontend into synchronization
 // barriers. Resource ordering is supplied by GraphCompiler's execution plan.
-VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, std::span<const size_t> sortedPassIndices,
+VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, const ResourceHandleRegistry &resources,
+                                     std::span<const size_t>                               sortedPassIndices,
                                      const std::unordered_map<std::string, VkImageLayout> &initialImageLayouts = {});
 
 } // namespace lr::framegraph

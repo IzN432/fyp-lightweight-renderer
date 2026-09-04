@@ -99,62 +99,16 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
     fg.addPass("hbao_deinterleave")
         .type(PassType::Compute)
         .computeShader((paths::shaderDir / "deinterleave.comp.spv").string())
-        .bind({
-            {
-                .binding     = 0,
-                .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-                .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                .image       = fg.image("gbufferDepth"),
-            },
-            {
-                .binding     = 1,
-                .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                .image       = fg.image("gbufferNormal"),
-            },
-            {.binding = 2,
-             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access  = BindingAccess::Write,
-             .image   = fg.image("hbao_depth_0")},
-            {.binding = 3,
-             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access  = BindingAccess::Write,
-             .image   = fg.image("hbao_depth_1")},
-            {.binding = 4,
-             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access  = BindingAccess::Write,
-             .image   = fg.image("hbao_depth_2")},
-            {.binding = 5,
-             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access  = BindingAccess::Write,
-             .image   = fg.image("hbao_depth_3")},
-            {.binding = 6,
-             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access  = BindingAccess::Write,
-             .image   = fg.image("hbao_normal_0")},
-            {.binding = 7,
-             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access  = BindingAccess::Write,
-             .image   = fg.image("hbao_normal_1")},
-            {.binding = 8,
-             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access  = BindingAccess::Write,
-             .image   = fg.image("hbao_normal_2")},
-            {.binding = 9,
-             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access  = BindingAccess::Write,
-             .image   = fg.image("hbao_normal_3")},
-        })
+        .sampledDepth(0, fg.image("gbufferDepth"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .sampledImage(1, fg.image("gbufferNormal"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(2, fg.image("hbao_depth_0"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(3, fg.image("hbao_depth_1"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(4, fg.image("hbao_depth_2"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(5, fg.image("hbao_depth_3"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(6, fg.image("hbao_normal_0"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(7, fg.image("hbao_normal_1"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(8, fg.image("hbao_normal_2"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(9, fg.image("hbao_normal_3"), VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([halfW, halfH](CommandBuffer &cmd, VkPipelineLayout) {
             cmd.dispatch(dispatchSize(halfW), dispatchSize(halfH), 1);
         });
@@ -169,48 +123,12 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
             .type(PassType::Compute)
             .computeShader((paths::shaderDir / "hbao.comp.spv").string())
             .pushConstantSize(sizeof(int), VK_SHADER_STAGE_COMPUTE_BIT)
-            .bind({
-                {
-                    .binding = 0,
-                    .type    = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-                    .buffer  = fg.buffer(m_cfg.cameraBufferResourceName),
-                },
-                {
-                    .binding     = 1,
-                    .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-                    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    .image       = fg.image("hbao_depth_" + std::to_string(i)),
-                },
-                {
-                    .binding     = 2,
-                    .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-                    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    .image       = fg.image("hbao_normal_" + std::to_string(i)),
-                },
-                {
-                    .binding     = 3,
-                    .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-                    .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    .image       = fg.image("hbao_directions"),
-                },
-                {
-                    .binding = 4,
-                    .type    = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-                    .buffer  = fg.buffer("hbao_params"),
-                },
-                {
-                    .binding = 5,
-                    .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                    .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-                    .access  = BindingAccess::Write,
-                    .image   = fg.image("hbao_ao_sub_" + std::to_string(i)),
-                },
-            })
+            .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_COMPUTE_BIT)
+            .sampledImage(1, fg.image("hbao_depth_" + std::to_string(i)), VK_SHADER_STAGE_COMPUTE_BIT)
+            .sampledImage(2, fg.image("hbao_normal_" + std::to_string(i)), VK_SHADER_STAGE_COMPUTE_BIT)
+            .sampledImage(3, fg.image("hbao_directions"), VK_SHADER_STAGE_COMPUTE_BIT)
+            .uniformBuffer(4, fg.buffer("hbao_params"), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageImageWrite(5, fg.image("hbao_ao_sub_" + std::to_string(i)), VK_SHADER_STAGE_COMPUTE_BIT)
             .execute([passId, halfW, halfH](CommandBuffer &cmd, VkPipelineLayout layout) {
                 cmd.pushConstants(layout, VK_SHADER_STAGE_COMPUTE_BIT, passId);
                 cmd.dispatch(dispatchSize(halfW), dispatchSize(halfH), 1);
@@ -223,33 +141,11 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
     fg.addPass("hbao_interleave")
         .type(PassType::Compute)
         .computeShader((paths::shaderDir / "interleave.comp.spv").string())
-        .bind({
-            {.binding     = 0,
-             .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-             .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-             .image       = fg.image("hbao_ao_sub_0")},
-            {.binding     = 1,
-             .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-             .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-             .image       = fg.image("hbao_ao_sub_1")},
-            {.binding     = 2,
-             .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-             .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-             .image       = fg.image("hbao_ao_sub_2")},
-            {.binding     = 3,
-             .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-             .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-             .image       = fg.image("hbao_ao_sub_3")},
-            {.binding = 4,
-             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access  = BindingAccess::Write,
-             .image   = fg.image("hbao_raw")},
-        })
+        .sampledImage(0, fg.image("hbao_ao_sub_0"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .sampledImage(1, fg.image("hbao_ao_sub_1"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .sampledImage(2, fg.image("hbao_ao_sub_2"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .sampledImage(3, fg.image("hbao_ao_sub_3"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(4, fg.image("hbao_raw"), VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([fullW, fullH](CommandBuffer &cmd, VkPipelineLayout) {
             cmd.dispatch(dispatchSize(fullW), dispatchSize(fullH), 1);
         });
@@ -260,29 +156,9 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
     fg.addPass("hbao_blur")
         .type(PassType::Compute)
         .computeShader((paths::shaderDir / "hbao_blur.comp.spv").string())
-        .bind({
-            {
-                .binding     = 0,
-                .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-                .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                .image       = fg.image("hbao_raw"),
-            },
-            {
-                .binding     = 1,
-                .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-                .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                .image       = fg.image("gbufferDepth"),
-            },
-            {
-                .binding = 2,
-                .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
-                .access  = BindingAccess::Write,
-                .image   = fg.image("hbao_ao"),
-            },
-        })
+        .sampledImage(0, fg.image("hbao_raw"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .sampledDepth(1, fg.image("gbufferDepth"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(2, fg.image("hbao_ao"), VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([fullW, fullH](CommandBuffer &cmd, VkPipelineLayout) {
             cmd.dispatch(dispatchSize(fullW), dispatchSize(fullH), 1);
         });
