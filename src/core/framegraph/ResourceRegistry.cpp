@@ -63,7 +63,7 @@ void ResourceRegistry::initCommandPool()
 // ---------------------------------------------------------------------------
 
 void ResourceRegistry::registerImage(const std::string &name, VkFormat format, VkImageUsageFlags usage,
-                                     VkExtent2D extent, VkImageAspectFlags aspect)
+                                     ExtentSpec extent, VkImageAspectFlags aspect)
 {
     if (m_images.count(name))
     {
@@ -74,7 +74,8 @@ void ResourceRegistry::registerImage(const std::string &name, VkFormat format, V
     entry.format     = format;
     entry.usage      = usage;
     entry.aspect     = aspect;
-    entry.extent     = (extent.width == 0 || extent.height == 0) ? m_defaultExtent : extent;
+    entry.extentSpec = extent;
+    entry.extent     = extent.resolve(m_defaultExtent);
     entry.persistent = false;
 
     allocateImageEntry(name, entry);
@@ -97,6 +98,7 @@ void ResourceRegistry::registerExternalImage(const std::string &name, VkFormat f
     entry.image.format = format; // mirror so getImage()->format is valid
     entry.usage        = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     entry.aspect       = aspect;
+    entry.extentSpec   = ExtentSpec::swapchain();
     entry.extent       = m_defaultExtent;
     entry.persistent   = true;
     entry.external     = true;
@@ -122,6 +124,7 @@ void ResourceRegistry::registerPersistentImage(const std::string &name, VkFormat
     entry.format     = format;
     entry.usage      = usage;
     entry.aspect     = aspect;
+    entry.extentSpec = ExtentSpec::absolute(extent.width, extent.height);
     entry.extent     = extent;
     entry.persistent = true;
 
@@ -142,6 +145,7 @@ void ResourceRegistry::registerCubemap(const std::string &name, VkFormat format,
     entry.format      = format;
     entry.usage       = usage;
     entry.aspect      = VK_IMAGE_ASPECT_COLOR_BIT;
+    entry.extentSpec  = ExtentSpec::absolute(resolution, resolution);
     entry.extent      = {resolution, resolution};
     entry.persistent  = true;
     entry.mipLevels   = mipLevels;
@@ -221,6 +225,7 @@ void ResourceRegistry::queueImageUpload(const std::string &name, const void *dat
     prepared.format        = format;
     prepared.usage         = usage;
     prepared.aspect        = VK_IMAGE_ASPECT_COLOR_BIT;
+    prepared.extentSpec    = ExtentSpec::absolute(width, height);
     prepared.extent        = {width, height};
     prepared.persistent    = true;
     prepared.mipLevels     = mipLevels;
@@ -307,10 +312,20 @@ const AllocatedImage *ResourceRegistry::getImage(const std::string &name) const
     return (it != m_images.end()) ? &it->second.image : nullptr;
 }
 
+VkExtent2D ResourceRegistry::getImageExtent(const std::string &name) const
+{
+    const auto it = m_images.find(name);
+    if (it == m_images.end())
+    {
+        throw std::runtime_error("ResourceRegistry: image '" + name + "' not found");
+    }
+    return it->second.extent;
+}
+
 bool ResourceRegistry::hasImage(const std::string &name) const { return m_images.count(name) > 0; }
 
 void ResourceRegistry::validateImage(const std::string &name, VkFormat format, VkImageUsageFlags requiredUsage,
-                                     VkExtent2D extent, VkImageAspectFlags aspect) const
+                                     ExtentSpec extent, VkImageAspectFlags aspect) const
 {
     const auto it = m_images.find(name);
     if (it == m_images.end())
@@ -323,7 +338,7 @@ void ResourceRegistry::validateImage(const std::string &name, VkFormat format, V
     {
         throw std::runtime_error("FrameGraph: registered image '" + name + "' has an incompatible format");
     }
-    if (entry.extent.width != extent.width || entry.extent.height != extent.height)
+    if (entry.extentSpec != extent)
     {
         throw std::runtime_error("FrameGraph: registered image '" + name + "' has an incompatible extent");
     }
@@ -435,7 +450,7 @@ void ResourceRegistry::rebuild(VkExtent2D newExtent)
     {
         if (entry.external)
         {
-            entry.extent        = newExtent;
+            entry.extent        = entry.extentSpec.resolve(newExtent);
             entry.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             continue;
         }
@@ -445,8 +460,14 @@ void ResourceRegistry::rebuild(VkExtent2D newExtent)
             continue;
         }
 
+        const VkExtent2D resolved = entry.extentSpec.resolve(newExtent);
+        if (entry.extent.width == resolved.width && entry.extent.height == resolved.height)
+        {
+            continue;
+        }
+
         m_allocator.destroy(entry.image);
-        entry.extent        = newExtent;
+        entry.extent        = resolved;
         entry.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         allocateImageEntry(name, entry);
         spdlog::debug("ResourceRegistry: rebuilt image '{}'", name);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ExtentSpec.hpp"
 #include "core/vulkan/Allocator.hpp"
 #include "core/vulkan/VulkanContext.hpp"
 
@@ -25,9 +26,9 @@ public:
     // Images
     // -----------------------------------------------------------------------
 
-    // Transient — sized to the swapchain, reallocated on resize.
-    // extent {0,0} means "match default extent".
-    void registerImage(const std::string &name, VkFormat format, VkImageUsageFlags usage, VkExtent2D extent = {0, 0},
+    // Transient — its symbolic extent is resolved against the swapchain on allocation and resize.
+    void registerImage(const std::string &name, VkFormat format, VkImageUsageFlags usage,
+                       ExtentSpec         extent = ExtentSpec::swapchain(),
                        VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
 
     // Persistent — fixed size, never touched on resize.
@@ -69,8 +70,9 @@ public:
 
     AllocatedImage       *getImage(const std::string &name);
     const AllocatedImage *getImage(const std::string &name) const;
+    VkExtent2D            getImageExtent(const std::string &name) const;
     bool                  hasImage(const std::string &name) const;
-    void validateImage(const std::string &name, VkFormat format, VkImageUsageFlags requiredUsage, VkExtent2D extent,
+    void validateImage(const std::string &name, VkFormat format, VkImageUsageFlags requiredUsage, ExtentSpec extent,
                        VkImageAspectFlags aspect) const;
     void validateImageUsage(const std::string &name, VkImageUsageFlags requiredUsage) const;
 
@@ -128,6 +130,7 @@ private:
         VkFormat           format;
         VkImageUsageFlags  usage;
         VkImageAspectFlags aspect;
+        ExtentSpec         extentSpec = ExtentSpec::swapchain();
         VkExtent2D         extent;
         bool               persistent = false;
         bool               external   = false;

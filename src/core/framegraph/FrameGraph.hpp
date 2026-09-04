@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FrameGraphDefinition.hpp"
+#include "PassContext.hpp"
 #include "PassBuilder.hpp"
 #include "ResourceRegistry.hpp"
 #include "compiler/GraphCompiler.hpp"

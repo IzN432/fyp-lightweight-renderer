@@ -70,8 +70,8 @@ std::vector<size_t> sortPasses(std::span<const PassDesc> passes, const ResourceH
     return sorted;
 }
 
-std::vector<PlannedImage> planAttachmentImages(std::span<const PassDesc>     passes,
-                                               const ResourceHandleRegistry &resources, VkExtent2D defaultExtent,
+std::vector<PlannedImage> planAttachmentImages(std::span<const PassDesc>              passes,
+                                               const ResourceHandleRegistry          &resources,
                                                const std::unordered_set<std::string> &existingImages)
 {
     struct AggregatedImage
@@ -122,14 +122,13 @@ std::vector<PlannedImage> planAttachmentImages(std::span<const PassDesc>     pas
                 throw std::runtime_error("FrameGraph: attachment image '" + name + "' has no format");
             }
 
-            const VkExtent2D extent = (use.extent.width == 0 || use.extent.height == 0) ? defaultExtent : use.extent;
             const VkImageAspectFlags aspect =
                 use.usage == ImageUsage::DepthAttachment ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 
             if (!entry.hasAttachment)
             {
                 entry.image.format  = use.format;
-                entry.image.extent  = extent;
+                entry.image.extent  = use.extent;
                 entry.image.aspect  = aspect;
                 entry.hasAttachment = true;
                 continue;
@@ -138,7 +137,7 @@ std::vector<PlannedImage> planAttachmentImages(std::span<const PassDesc>     pas
             {
                 throw std::runtime_error("FrameGraph: attachment image '" + name + "' has conflicting formats");
             }
-            if (entry.image.extent.width != extent.width || entry.image.extent.height != extent.height)
+            if (entry.image.extent != use.extent)
             {
                 throw std::runtime_error("FrameGraph: attachment image '" + name + "' has conflicting extents");
             }
@@ -166,23 +165,27 @@ std::vector<VkExtent2D> planRenderingExtents(std::span<const PassDesc> passes, V
     std::vector<VkExtent2D> extents(passes.size(), defaultExtent);
     for (size_t passIndex = 0; passIndex < passes.size(); ++passIndex)
     {
-        bool hasAttachment = false;
+        bool       hasAttachment = false;
+        ExtentSpec extentSpec    = ExtentSpec::swapchain();
         for (const ImageUse &use : passes[passIndex].imageUses)
         {
             if (!use.isAttachment())
             {
                 continue;
             }
-            const VkExtent2D extent = (use.extent.width == 0 || use.extent.height == 0) ? defaultExtent : use.extent;
             if (!hasAttachment)
             {
-                extents[passIndex] = extent;
-                hasAttachment      = true;
-            } else if (extents[passIndex].width != extent.width || extents[passIndex].height != extent.height)
+                extentSpec    = use.extent;
+                hasAttachment = true;
+            } else if (extentSpec != use.extent)
             {
                 throw std::runtime_error("FrameGraph: pass '" + passes[passIndex].name +
                                          "' has attachments with different extents");
             }
+        }
+        if (hasAttachment)
+        {
+            extents[passIndex] = extentSpec.resolve(defaultExtent);
         }
     }
     return extents;
@@ -218,8 +221,8 @@ std::string dumpTopology(std::span<const PassDesc> passes, const ResourceHandleR
             out << " mip=" << use.boundMip;
             if (use.isAttachment())
             {
-                out << " format=" << static_cast<int>(use.format) << " extent=" << use.extent.width << 'x'
-                    << use.extent.height << " load=" << static_cast<int>(use.loadOp);
+                out << " format=" << static_cast<int>(use.format) << " extent=" << use.extent.describe()
+                    << " load=" << static_cast<int>(use.loadOp);
             }
             out << '\n';
         }

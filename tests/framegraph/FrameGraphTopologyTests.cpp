@@ -97,6 +97,25 @@ void duplicatePassNames()
         "duplicate pass name");
 }
 
+void symbolicExtentResolution()
+{
+    const VkExtent2D base{1601, 901};
+    const VkExtent2D full  = lr::ExtentSpec::swapchain().resolve(base);
+    const VkExtent2D half  = lr::ExtentSpec::relative(1, 2).resolve(base);
+    const VkExtent2D fixed = lr::ExtentSpec::absolute(2048, 1024).resolve(base);
+
+    require(full.width == 1601 && full.height == 901, "swapchain extent should resolve unchanged");
+    require(half.width == 801 && half.height == 451, "relative extents should round odd dimensions up");
+    require(fixed.width == 2048 && fixed.height == 1024, "absolute extents should ignore the swapchain");
+    require(lr::ExtentSpec::relative(2, 4) == lr::ExtentSpec::relative(1, 2),
+            "equivalent relative ratios should have one canonical representation");
+    requireThrowsContaining(
+        [] {
+            (void)lr::ExtentSpec::relative(1, 0);
+        },
+        "non-zero");
+}
+
 void attachmentPlanningUsesSemanticDeclarations()
 {
     lr::FrameGraphDefinition definition;
@@ -104,18 +123,20 @@ void attachmentPlanningUsesSemanticDeclarations()
     const auto               depth = definition.image("depth");
     builder(definition, definition.addPass("geometry"))
         .colorAttachment(color, VK_FORMAT_R16G16B16A16_SFLOAT)
-        .depthAttachment(depth, VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR, {}, {800, 600});
+        .depthAttachment(depth, VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR, {},
+                         lr::ExtentSpec::absolute(800, 600));
     builder(definition, definition.addPass("overlay"))
         .colorAttachment(color, VK_FORMAT_R16G16B16A16_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD);
     builder(definition, definition.addPass("post-process")).storageImageWrite(0, color, VK_SHADER_STAGE_COMPUTE_BIT);
 
-    const auto images = lr::framegraph::planAttachmentImages(definition.passes(), definition.resources(), {1600, 900});
+    const auto images = lr::framegraph::planAttachmentImages(definition.passes(), definition.resources());
     require(images.size() == 2, "repeated attachment declarations should plan one image");
-    require(images[0].name == "color" && images[0].extent.width == 1600, "default extent should be used for color");
+    require(images[0].name == "color" && images[0].extent == lr::ExtentSpec::swapchain(),
+            "default extent should remain swapchain-relative");
     require((images[0].usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0 &&
                 (images[0].usage & VK_IMAGE_USAGE_STORAGE_BIT) != 0,
             "image creation flags should aggregate every declared use");
-    require(images[1].name == "depth" && images[1].extent.width == 800,
+    require(images[1].name == "depth" && images[1].extent == lr::ExtentSpec::absolute(800, 600),
             "explicit attachment extent should be retained");
 }
 
@@ -128,7 +149,7 @@ void contradictoryAttachmentDeclarationsAreRejected()
 
     requireThrowsContaining(
         [&] {
-            (void)lr::framegraph::planAttachmentImages(definition.passes(), definition.resources(), {1600, 900});
+            (void)lr::framegraph::planAttachmentImages(definition.passes(), definition.resources());
         },
         "conflicting formats");
 }
@@ -274,17 +295,18 @@ void renderingExtentPlanning()
     const auto               color = definition.image("color");
     const auto               depth = definition.image("depth");
     builder(definition, definition.addPass("half-resolution"))
-        .colorAttachment(color, VK_FORMAT_R16G16B16A16_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR, {}, {800, 450})
-        .depthAttachment(depth, VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR, {}, {800, 450});
+        .colorAttachment(color, VK_FORMAT_R16G16B16A16_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR, {},
+                         lr::ExtentSpec::relative(1, 2))
+        .depthAttachment(depth, VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR, {}, lr::ExtentSpec::relative(1, 2));
 
-    const auto extents = lr::framegraph::planRenderingExtents(definition.passes(), {1600, 900});
-    require(extents[0].width == 800 && extents[0].height == 450,
+    const auto extents = lr::framegraph::planRenderingExtents(definition.passes(), {1601, 901});
+    require(extents[0].width == 801 && extents[0].height == 451,
             "rendering extent should come from the pass attachments");
 
-    definition.pass({0, definition.owner()}).imageUses[1].extent = {400, 225};
+    definition.pass({0, definition.owner()}).imageUses[1].extent = lr::ExtentSpec::absolute(801, 451);
     requireThrowsContaining(
         [&] {
-            (void)lr::framegraph::planRenderingExtents(definition.passes(), {1600, 900});
+            (void)lr::framegraph::planRenderingExtents(definition.passes(), {1601, 901});
         },
         "different extents");
 }
@@ -321,6 +343,7 @@ int main()
         {"typed explicit dependencies", explicitDependenciesAreTyped},
         {"cycle detection", cycleDetection},
         {"duplicate pass names", duplicatePassNames},
+        {"symbolic extent resolution", symbolicExtentResolution},
         {"semantic attachment planning", attachmentPlanningUsesSemanticDeclarations},
         {"contradictory attachments", contradictoryAttachmentDeclarationsAreRejected},
         {"semantic translation", translationPreservesSemanticIntent},

@@ -250,12 +250,14 @@ void FrameGraph::execute(CommandBuffer &cmd)
                                     &compiled.descriptorSet, 0, nullptr);
         }
 
+        PassContext context(cmd, compiled.pipelineLayout, compiled.renderingExtent, m_graph, m_registry);
+
         // Compute and Custom passes skip dynamic rendering — just invoke callback and move on
         if (pass.type == PassType::Compute || pass.type == PassType::Custom)
         {
             if (pass.executeCallback)
             {
-                pass.executeCallback(cmd, compiled.pipelineLayout);
+                pass.executeCallback(context);
             }
 
             if (useDebugLabels)
@@ -277,7 +279,7 @@ void FrameGraph::execute(CommandBuffer &cmd)
 
         if (pass.executeCallback)
         {
-            pass.executeCallback(cmd, compiled.pipelineLayout);
+            pass.executeCallback(context);
         }
 
         vkCmdEndRendering(cmd.get());
@@ -321,8 +323,7 @@ void FrameGraph::sortPasses()
 
 void FrameGraph::allocateResources()
 {
-    const auto planned =
-        framegraph::planAttachmentImages(m_graph.passes(), m_graph.resources(), m_registry.getExtent());
+    const auto planned = framegraph::planAttachmentImages(m_graph.passes(), m_graph.resources());
     for (const auto &image : planned)
     {
         if (!m_registry.hasImage(image.name))

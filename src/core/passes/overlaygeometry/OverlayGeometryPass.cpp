@@ -35,7 +35,7 @@ void OverlayGeometryPass::uploadResources(ResourceRegistry &registry)
                                                              });
     m_indexUpload  = meshUploader.uploadIndexBuffer(meshes, {
                                                                 .indexBufferName = m_cfg.indexBufferName,
-                                                           });
+                                                            });
 
     m_gpuMeshLayout = GpuMeshLayout(meshes[0]->layout());
     m_gpuMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
@@ -67,7 +67,7 @@ void OverlayGeometryPass::build(FrameGraph &fg)
         .colorAttachment(fg.image(m_cfg.pickingImageName), VK_FORMAT_R32_UINT)
         .depthAttachment(fg.image("overlayDepth"), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,
                          {.depthStencil = {1.0f, 0}})
-        .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
+        .execute([&](PassContext &ctx) {
             for (uint32_t i = 0; i < static_cast<uint32_t>(m_instances.size()); ++i)
             {
                 const auto  &inst  = m_instances[i];
@@ -88,8 +88,9 @@ void OverlayGeometryPass::build(FrameGraph &fg)
                     .occludedOpacity = inst.occludedOpacity,
                     .instanceIndex   = inst.pickingId, // 1-based; 0 = background in picking image
                 };
-                cmd.pushConstants(pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
-                cmd.drawIndexed(index.indexCount, 1, index.firstIndex, vert.vertexOffset, 0);
+                ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                        pc);
+                ctx.cmd().drawIndexed(index.indexCount, 1, index.firstIndex, vert.vertexOffset, 0);
             }
         });
 }

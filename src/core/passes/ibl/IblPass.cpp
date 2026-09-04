@@ -98,8 +98,8 @@ void IBLPass::build(FrameGraph &fg) const
         .computeShader((paths::shaderDir / "hdritocubemap.comp.spv").string())
         .sampledImage(0, fg.image("hdri"), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageImageWrite(1, fg.image("ibl_env"), VK_SHADER_STAGE_COMPUTE_BIT)
-        .execute([envRes](CommandBuffer &cmd, VkPipelineLayout) {
-            cmd.dispatch((envRes + 15) / 16, (envRes + 15) / 16, 6);
+        .execute([envRes](PassContext &ctx) {
+            ctx.cmd().dispatch((envRes + 15) / 16, (envRes + 15) / 16, 6);
         });
 
     const IrradiancePC irrPC = {
@@ -113,9 +113,9 @@ void IBLPass::build(FrameGraph &fg) const
         .pushConstantSize(sizeof(IrradiancePC))
         .sampledImage(0, fg.image("ibl_env"), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageImageWrite(1, fg.image("ibl_irradiance"), VK_SHADER_STAGE_COMPUTE_BIT)
-        .execute([irrPC, irrRes](CommandBuffer &cmd, VkPipelineLayout layout) {
-            cmd.pushConstants(layout, VK_SHADER_STAGE_COMPUTE_BIT, irrPC);
-            cmd.dispatch((irrRes + 15) / 16, (irrRes + 15) / 16, 6);
+        .execute([irrPC, irrRes](PassContext &ctx) {
+            ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, irrPC);
+            ctx.cmd().dispatch((irrRes + 15) / 16, (irrRes + 15) / 16, 6);
         });
 
     for (uint32_t mip = 0; mip < pfMips; ++mip)
@@ -134,9 +134,9 @@ void IBLPass::build(FrameGraph &fg) const
             .pushConstantSize(sizeof(PrefilterPC))
             .sampledImage(0, fg.image("ibl_env"), VK_SHADER_STAGE_COMPUTE_BIT)
             .storageImageWrite(1, ImageView::mip(fg.image("ibl_prefiltered"), mip), VK_SHADER_STAGE_COMPUTE_BIT)
-            .execute([pfPC, mipSize](CommandBuffer &cmd, VkPipelineLayout layout) {
-                cmd.pushConstants(layout, VK_SHADER_STAGE_COMPUTE_BIT, pfPC);
-                cmd.dispatch((mipSize + 15) / 16, (mipSize + 15) / 16, 6);
+            .execute([pfPC, mipSize](PassContext &ctx) {
+                ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, pfPC);
+                ctx.cmd().dispatch((mipSize + 15) / 16, (mipSize + 15) / 16, 6);
             });
     }
 }

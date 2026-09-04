@@ -31,7 +31,7 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
         .sampledDepth(1, fg.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .colorAttachment(fg.image("overlayPoints"), VK_FORMAT_R16G16B16A16_SFLOAT)
-        .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
+        .execute([&](PassContext &ctx) {
             if (!m_enabled)
             {
                 return;
@@ -41,8 +41,9 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
             for (size_t i = 0; i < m_cfg.pointsBufferUploadResult.singleMeshResults.size(); ++i)
             {
                 const auto &vert = m_cfg.pointsBufferUploadResult.singleMeshResults[i];
-                cmd.pushConstants(pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
-                cmd.draw(m_cfg.vertexCounts[i], 1, vert.vertexOffset, 0);
+                ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                        pc);
+                ctx.cmd().draw(m_cfg.vertexCounts[i], 1, vert.vertexOffset, 0);
             }
         });
 }

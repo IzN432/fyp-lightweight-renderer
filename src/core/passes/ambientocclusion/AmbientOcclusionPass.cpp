@@ -34,23 +34,18 @@ AmbientOcclusionPass::AmbientOcclusionPass(Config cfg) : m_cfg(std::move(cfg)) {
 
 void AmbientOcclusionPass::uploadResources(ResourceRegistry &resources) const
 {
-    VkExtent2D full     = resources.getExtent();
-    uint32_t   halfW    = std::max(1u, full.width / 2);
-    uint32_t   halfH    = std::max(1u, full.height / 2);
-    VkExtent2D halfSize = {halfW, halfH};
-
-    // Half-res depth submaps (one per 2x2 quadrant) — persistent so they don't
-    // resize to full-res on swapchain resize (same behaviour as the reference renderer)
+    // Half-res depth, normal and AO submaps track the swapchain across resizes.
+    const ExtentSpec        halfResolution    = ExtentSpec::relative(1, 2);
     const VkImageUsageFlags storageAndSampled = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
     for (int i = 0; i < 4; i++)
     {
-        resources.registerPersistentImage("hbao_depth_" + std::to_string(i), VK_FORMAT_R32_SFLOAT, storageAndSampled,
-                                          halfSize);
-        resources.registerPersistentImage("hbao_normal_" + std::to_string(i), VK_FORMAT_R32G32_SFLOAT,
-                                          storageAndSampled, halfSize);
-        resources.registerPersistentImage("hbao_ao_sub_" + std::to_string(i), VK_FORMAT_R32_SFLOAT, storageAndSampled,
-                                          halfSize);
+        resources.registerImage("hbao_depth_" + std::to_string(i), VK_FORMAT_R32_SFLOAT, storageAndSampled,
+                                halfResolution);
+        resources.registerImage("hbao_normal_" + std::to_string(i), VK_FORMAT_R32G32_SFLOAT, storageAndSampled,
+                                halfResolution);
+        resources.registerImage("hbao_ao_sub_" + std::to_string(i), VK_FORMAT_R32_SFLOAT, storageAndSampled,
+                                halfResolution);
     }
 
     // Full-res intermediate — written by interleave compute, read by blur compute pass
@@ -85,13 +80,9 @@ void AmbientOcclusionPass::uploadResources(ResourceRegistry &resources) const
 
 void AmbientOcclusionPass::build(FrameGraph &fg) const
 {
-    // Capture dispatch sizes from the registry at build time.
-    // Persistent half-res images don't resize, so these stay correct.
-    const VkExtent2D full  = fg.resources().getExtent();
-    const uint32_t   halfW = std::max(1u, full.width / 2);
-    const uint32_t   halfH = std::max(1u, full.height / 2);
-    const uint32_t   fullW = full.width;
-    const uint32_t   fullH = full.height;
+    const ImageHandle halfOutput = fg.image("hbao_depth_0");
+    const ImageHandle rawAo      = fg.image("hbao_raw");
+    const ImageHandle finalAo    = fg.image("hbao_ao");
 
     // ------------------------------------------------------------------ //
     // 1. Deinterleave depth + normal → 4 half-res submaps each
@@ -109,8 +100,9 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
         .storageImageWrite(7, fg.image("hbao_normal_1"), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageImageWrite(8, fg.image("hbao_normal_2"), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageImageWrite(9, fg.image("hbao_normal_3"), VK_SHADER_STAGE_COMPUTE_BIT)
-        .execute([halfW, halfH](CommandBuffer &cmd, VkPipelineLayout) {
-            cmd.dispatch(dispatchSize(halfW), dispatchSize(halfH), 1);
+        .execute([halfOutput](PassContext &ctx) {
+            const VkExtent2D extent = ctx.extent(halfOutput);
+            ctx.cmd().dispatch(dispatchSize(extent.width), dispatchSize(extent.height), 1);
         });
 
     // ------------------------------------------------------------------ //
@@ -118,7 +110,8 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
     // ------------------------------------------------------------------ //
     for (int i = 0; i < 4; i++)
     {
-        const int passId = i;
+        const int         passId = i;
+        const ImageHandle output = fg.image("hbao_ao_sub_" + std::to_string(i));
         fg.addPass("hbao_ao_" + std::to_string(i))
             .type(PassType::Compute)
             .computeShader((paths::shaderDir / "hbao.comp.spv").string())
@@ -128,10 +121,11 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
             .sampledImage(2, fg.image("hbao_normal_" + std::to_string(i)), VK_SHADER_STAGE_COMPUTE_BIT)
             .sampledImage(3, fg.image("hbao_directions"), VK_SHADER_STAGE_COMPUTE_BIT)
             .uniformBuffer(4, fg.buffer("hbao_params"), VK_SHADER_STAGE_COMPUTE_BIT)
-            .storageImageWrite(5, fg.image("hbao_ao_sub_" + std::to_string(i)), VK_SHADER_STAGE_COMPUTE_BIT)
-            .execute([passId, halfW, halfH](CommandBuffer &cmd, VkPipelineLayout layout) {
-                cmd.pushConstants(layout, VK_SHADER_STAGE_COMPUTE_BIT, passId);
-                cmd.dispatch(dispatchSize(halfW), dispatchSize(halfH), 1);
+            .storageImageWrite(5, output, VK_SHADER_STAGE_COMPUTE_BIT)
+            .execute([passId, output](PassContext &ctx) {
+                const VkExtent2D extent = ctx.extent(output);
+                ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, passId);
+                ctx.cmd().dispatch(dispatchSize(extent.width), dispatchSize(extent.height), 1);
             });
     }
 
@@ -145,9 +139,10 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
         .sampledImage(1, fg.image("hbao_ao_sub_1"), VK_SHADER_STAGE_COMPUTE_BIT)
         .sampledImage(2, fg.image("hbao_ao_sub_2"), VK_SHADER_STAGE_COMPUTE_BIT)
         .sampledImage(3, fg.image("hbao_ao_sub_3"), VK_SHADER_STAGE_COMPUTE_BIT)
-        .storageImageWrite(4, fg.image("hbao_raw"), VK_SHADER_STAGE_COMPUTE_BIT)
-        .execute([fullW, fullH](CommandBuffer &cmd, VkPipelineLayout) {
-            cmd.dispatch(dispatchSize(fullW), dispatchSize(fullH), 1);
+        .storageImageWrite(4, rawAo, VK_SHADER_STAGE_COMPUTE_BIT)
+        .execute([rawAo](PassContext &ctx) {
+            const VkExtent2D extent = ctx.extent(rawAo);
+            ctx.cmd().dispatch(dispatchSize(extent.width), dispatchSize(extent.height), 1);
         });
 
     // ------------------------------------------------------------------ //
@@ -158,9 +153,10 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
         .computeShader((paths::shaderDir / "hbao_blur.comp.spv").string())
         .sampledImage(0, fg.image("hbao_raw"), VK_SHADER_STAGE_COMPUTE_BIT)
         .sampledDepth(1, fg.image("gbufferDepth"), VK_SHADER_STAGE_COMPUTE_BIT)
-        .storageImageWrite(2, fg.image("hbao_ao"), VK_SHADER_STAGE_COMPUTE_BIT)
-        .execute([fullW, fullH](CommandBuffer &cmd, VkPipelineLayout) {
-            cmd.dispatch(dispatchSize(fullW), dispatchSize(fullH), 1);
+        .storageImageWrite(2, finalAo, VK_SHADER_STAGE_COMPUTE_BIT)
+        .execute([finalAo](PassContext &ctx) {
+            const VkExtent2D extent = ctx.extent(finalAo);
+            ctx.cmd().dispatch(dispatchSize(extent.width), dispatchSize(extent.height), 1);
         });
 }
 

@@ -172,7 +172,7 @@ PassBuilder &PassBuilder::indexBuffer(BufferHandle buffer)
 }
 
 PassBuilder &PassBuilder::colorAttachment(ImageHandle image, VkFormat format, VkAttachmentLoadOp loadOp,
-                                          VkClearValue clearValue, VkExtent2D extent)
+                                          VkClearValue clearValue, ExtentSpec extent)
 {
     desc().imageUses.push_back(
         {.image      = image,
@@ -186,7 +186,7 @@ PassBuilder &PassBuilder::colorAttachment(ImageHandle image, VkFormat format, Vk
 }
 
 PassBuilder &PassBuilder::depthAttachment(ImageHandle image, VkFormat format, VkAttachmentLoadOp loadOp,
-                                          VkClearValue clearValue, VkExtent2D extent)
+                                          VkClearValue clearValue, ExtentSpec extent)
 {
     desc().imageUses.push_back(
         {.image      = image,
@@ -209,7 +209,7 @@ PassBuilder &PassBuilder::dependsOn(std::vector<PassHandle> dependencies)
     desc().explicitDependencies = std::move(dependencies);
     return *this;
 }
-PassBuilder &PassBuilder::execute(std::function<void(CommandBuffer &, VkPipelineLayout)> callback)
+PassBuilder &PassBuilder::execute(std::function<void(PassContext &)> callback)
 {
     desc().executeCallback = std::move(callback);
     return *this;

@@ -52,9 +52,9 @@ void PbrPass::build(FrameGraph &fg) const
         .storageBufferRead(11, fg.buffer(m_cfg.lightBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(12, fg.image("hbao_ao"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .colorAttachment(fg.image("pbr"), VK_FORMAT_R16G16B16A16_SFLOAT)
-        .execute([pbrPC](CommandBuffer &cmd, VkPipelineLayout layout) {
-            cmd.pushConstants(layout, VK_SHADER_STAGE_FRAGMENT_BIT, pbrPC);
-            cmd.draw(3);
+        .execute([pbrPC](PassContext &ctx) {
+            ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_FRAGMENT_BIT, pbrPC);
+            ctx.cmd().draw(3);
         });
 }
 

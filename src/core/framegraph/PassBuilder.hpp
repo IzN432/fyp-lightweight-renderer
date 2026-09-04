@@ -51,14 +51,14 @@ public:
 
     PassBuilder &colorAttachment(ImageHandle image, VkFormat format,
                                  VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, VkClearValue clearValue = {},
-                                 VkExtent2D extent = {});
+                                 ExtentSpec extent = ExtentSpec::swapchain());
     PassBuilder &depthAttachment(ImageHandle image, VkFormat format,
                                  VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, VkClearValue clearValue = {},
-                                 VkExtent2D extent = {});
+                                 ExtentSpec extent = ExtentSpec::swapchain());
 
     PassBuilder &dependsOn(PassHandle dependency);
     PassBuilder &dependsOn(std::vector<PassHandle> dependencies);
-    PassBuilder &execute(std::function<void(CommandBuffer &, VkPipelineLayout)> callback);
+    PassBuilder &execute(std::function<void(PassContext &)> callback);
 
 private:
     PassDesc    &desc();

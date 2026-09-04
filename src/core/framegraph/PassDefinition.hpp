@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ExtentSpec.hpp"
 #include "Handles.hpp"
 
 #include <vulkan/vulkan.h>
@@ -13,6 +14,7 @@ namespace lr
 {
 
 class CommandBuffer;
+class PassContext;
 
 enum class PassType
 {
@@ -68,8 +70,8 @@ struct ImageUse
     VkShaderStageFlags stages          = 0;
     uint32_t           boundMip        = allImageMips;
 
-    VkFormat            format = VK_FORMAT_UNDEFINED;
-    VkExtent2D          extent{};
+    VkFormat            format  = VK_FORMAT_UNDEFINED;
+    ExtentSpec          extent  = ExtentSpec::swapchain();
     VkAttachmentLoadOp  loadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     VkClearValue        clearValue{};
@@ -104,10 +106,10 @@ struct PassDesc
     std::vector<VkVertexInputBindingDescription>   vertexBindings;
     std::vector<VkVertexInputAttributeDescription> vertexAttributes;
 
-    std::vector<ImageUse>                                  imageUses;
-    std::vector<BufferUse>                                 bufferUses;
-    std::vector<PassHandle>                                explicitDependencies;
-    std::function<void(CommandBuffer &, VkPipelineLayout)> executeCallback;
+    std::vector<ImageUse>              imageUses;
+    std::vector<BufferUse>             bufferUses;
+    std::vector<PassHandle>            explicitDependencies;
+    std::function<void(PassContext &)> executeCallback;
 };
 
 } // namespace lr

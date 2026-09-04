@@ -14,7 +14,7 @@ struct PlannedImage
 {
     std::string        name;
     VkFormat           format = VK_FORMAT_UNDEFINED;
-    VkExtent2D         extent{};
+    ExtentSpec         extent = ExtentSpec::swapchain();
     VkImageUsageFlags  usage  = 0;
     VkImageAspectFlags aspect = 0;
 };
@@ -33,8 +33,8 @@ struct BarrierDebugInfo
 std::vector<size_t> sortPasses(std::span<const PassDesc> passes, const ResourceHandleRegistry &resources,
                                uint64_t passOwner);
 
-std::vector<PlannedImage> planAttachmentImages(std::span<const PassDesc>     passes,
-                                               const ResourceHandleRegistry &resources, VkExtent2D defaultExtent,
+std::vector<PlannedImage> planAttachmentImages(std::span<const PassDesc>              passes,
+                                               const ResourceHandleRegistry          &resources,
                                                const std::unordered_set<std::string> &existingImages = {});
 
 std::vector<VkExtent2D> planRenderingExtents(std::span<const PassDesc> passes, VkExtent2D defaultExtent);

@@ -23,8 +23,8 @@ void FinalPass::build(FrameGraph &fg) const
         .sampledImage(6, fg.image("overlayPoints"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(7, fg.image("heatmap"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .colorAttachment(fg.image("swapchain"), m_cfg.swapchainFormat)
-        .execute([](CommandBuffer &cmd, VkPipelineLayout) {
-            cmd.draw(3);
+        .execute([](PassContext &ctx) {
+            ctx.cmd().draw(3);
         });
 }
 

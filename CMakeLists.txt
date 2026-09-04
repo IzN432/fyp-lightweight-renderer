@@ -64,6 +64,7 @@ add_library(lr_core STATIC
     src/core/framegraph/FrameGraph.cpp
     src/core/framegraph/FrameGraphDefinition.cpp
     src/core/framegraph/PassBuilder.cpp
+    src/core/framegraph/PassContext.cpp
     src/core/framegraph/PassDescAdapter.cpp
     src/core/framegraph/FrameGraphTopology.cpp
     src/core/framegraph/model/GraphDefinition.cpp
