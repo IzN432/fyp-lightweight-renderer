@@ -1,4 +1,5 @@
 #include "core/framegraph/PassDescAdapter.hpp"
+#include "core/framegraph/FrameGraphDefinition.hpp"
 #include "core/framegraph/FrameGraphTopology.hpp"
 #include "core/framegraph/compiler/GraphCompiler.hpp"
 #include "core/framegraph/compiler/VulkanBarrierPlanner.hpp"
@@ -22,14 +23,12 @@ void require(bool condition, const std::string &message)
     }
 }
 
-template <typename Fn>
-void requireThrowsContaining(Fn &&fn, const std::string &needle)
+template <typename Fn> void requireThrowsContaining(Fn &&fn, const std::string &needle)
 {
     try
     {
         fn();
-    }
-    catch (const std::exception &error)
+    } catch (const std::exception &error)
     {
         require(std::string(error.what()).find(needle) != std::string::npos,
                 "exception did not contain '" + needle + "': " + error.what());
@@ -48,12 +47,18 @@ lr::BindingDesc read(std::string resource)
     };
 }
 
+lr::PassDesc &appendPass(std::vector<lr::PassDesc> &passes, std::string name)
+{
+    passes.push_back({.name = std::move(name)});
+    return passes.back();
+}
+
 void declarationOrderDefinesReadBeforeWrite()
 {
     std::vector<lr::PassDesc> passes;
-    auto &reader = lr::framegraph::appendPass(passes, "reader");
+    auto                     &reader = appendPass(passes, "reader");
     reader.bindings.push_back(read("history"));
-    auto &writer = lr::framegraph::appendPass(passes, "writer");
+    auto &writer = appendPass(passes, "writer");
     writer.writes.push_back({.name = "history", .format = VK_FORMAT_R16G16B16A16_SFLOAT});
 
     const auto order = lr::framegraph::sortPasses(passes);
@@ -64,55 +69,64 @@ void declarationOrderDefinesReadBeforeWrite()
 void unknownDependency()
 {
     std::vector<lr::PassDesc> passes;
-    auto &pass = lr::framegraph::appendPass(passes, "final");
+    auto                     &pass = appendPass(passes, "final");
     pass.explicitDeps.push_back("missing");
 
-    requireThrowsContaining([&] { (void)lr::framegraph::sortPasses(passes); }, "no such pass exists");
+    requireThrowsContaining(
+        [&] {
+            (void)lr::framegraph::sortPasses(passes);
+        },
+        "no such pass exists");
 }
 
 void cycleDetection()
 {
     std::vector<lr::PassDesc> passes;
-    auto &a = lr::framegraph::appendPass(passes, "a");
+    auto                     &a = appendPass(passes, "a");
     a.explicitDeps.push_back("b");
-    auto &b = lr::framegraph::appendPass(passes, "b");
+    auto &b = appendPass(passes, "b");
     b.explicitDeps.push_back("a");
 
-    requireThrowsContaining([&] { (void)lr::framegraph::sortPasses(passes); }, "cycle detected");
+    requireThrowsContaining(
+        [&] {
+            (void)lr::framegraph::sortPasses(passes);
+        },
+        "cycle detected");
 }
 
 void duplicatePassNames()
 {
-    std::vector<lr::PassDesc> passes;
-    (void)lr::framegraph::appendPass(passes, "geometry");
-    requireThrowsContaining([&] { (void)lr::framegraph::appendPass(passes, "geometry"); },
-                            "duplicate pass name");
+    lr::FrameGraphDefinition definition;
+    (void)definition.addPass("geometry");
+    requireThrowsContaining(
+        [&] {
+            (void)definition.addPass("geometry");
+        },
+        "duplicate pass name");
 }
 
 void attachmentResourceCreation()
 {
     std::vector<lr::PassDesc> passes(2);
-    passes[0].name = "geometry";
+    passes[0].name   = "geometry";
     passes[0].writes = {
         {.name = "color", .format = VK_FORMAT_R16G16B16A16_SFLOAT},
         {.name = "depth", .format = VK_FORMAT_D32_SFLOAT},
     };
-    passes[1].name = "overlay";
+    passes[1].name   = "overlay";
     passes[1].writes = {{.name = "color", .format = VK_FORMAT_R16G16B16A16_SFLOAT}};
 
     const auto images = lr::framegraph::planAttachmentImages(passes, {1600, 900});
     require(images.size() == 2, "duplicate attachment writes should plan one image");
     require(images[0].extent.width == 1600 && images[0].extent.height == 900,
             "implicit color extent should use the default extent");
-    require((images[0].usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0,
-            "color image needs color-attachment usage");
+    require((images[0].usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0, "color image needs color-attachment usage");
     require(images[0].aspect == VK_IMAGE_ASPECT_COLOR_BIT, "color image needs color aspect");
     require((images[1].usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0,
             "depth image needs depth-attachment usage");
     require(images[1].aspect == VK_IMAGE_ASPECT_DEPTH_BIT, "depth image needs depth aspect");
 
-    const auto excludingExisting =
-        lr::framegraph::planAttachmentImages(passes, {1600, 900}, {"color"});
+    const auto excludingExisting = lr::framegraph::planAttachmentImages(passes, {1600, 900}, {"color"});
     require(excludingExisting.size() == 1 && excludingExisting[0].name == "depth",
             "pre-registered images must not be planned again");
 }
@@ -120,7 +134,7 @@ void attachmentResourceCreation()
 void relativeAndAbsoluteExtents()
 {
     std::vector<lr::PassDesc> passes(1);
-    passes[0].name = "outputs";
+    passes[0].name   = "outputs";
     passes[0].writes = {
         {.name = "relative", .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {0, 0}},
         {.name = "partially-zero", .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {320, 0}},
@@ -132,8 +146,7 @@ void relativeAndAbsoluteExtents()
             "zero extent should resolve to the default");
     require(images[1].extent.width == 1920 && images[1].extent.height == 1080,
             "today's partially-zero extent behavior should be captured");
-    require(images[2].extent.width == 512 && images[2].extent.height == 256,
-            "absolute extent should be preserved");
+    require(images[2].extent.width == 512 && images[2].extent.height == 256, "absolute extent should be preserved");
 }
 
 void deterministicDebugDump()
@@ -144,7 +157,7 @@ void deterministicDebugDump()
     passes[0].bindings.push_back(read("pbr"));
     passes[0].writes.push_back({.name = "swapchain", .format = VK_FORMAT_B8G8R8A8_SRGB});
 
-    std::vector<size_t> order{0};
+    std::vector<size_t>                                        order{0};
     std::vector<std::vector<lr::framegraph::BarrierDebugInfo>> barriers(1);
     barriers[0].push_back({
         .resourceName = "swapchain",
@@ -159,12 +172,10 @@ void deterministicDebugDump()
     const std::string first  = lr::framegraph::dumpTopology(passes, order, barriers);
     const std::string second = lr::framegraph::dumpTopology(passes, order, barriers);
     require(first == second, "debug dump must be deterministic");
-    require(first.find("execution-order: final") != std::string::npos,
-            "debug dump must contain execution order");
+    require(first.find("execution-order: final") != std::string::npos, "debug dump must contain execution order");
     require(first.find("binding 0 resource=pbr access=read") != std::string::npos,
             "debug dump must contain resource accesses");
-    require(first.find("before=final resource=swapchain") != std::string::npos,
-            "debug dump must contain barriers");
+    require(first.find("before=final resource=swapchain") != std::string::npos, "debug dump must contain barriers");
 }
 
 void graphDefinitionTranslation()
@@ -189,23 +200,19 @@ void graphDefinitionTranslation()
     passes[1].bindings.push_back(read("gbuffer"));
     passes[1].explicitDeps.push_back("geometry");
 
-    const lr::framegraph::GraphDefinition graph =
-        lr::framegraph::translatePassDescriptions(passes);
+    const lr::framegraph::GraphDefinition graph = lr::framegraph::translatePassDescriptions(passes);
 
     require(graph.passes().size() == 2, "IR should contain every pass");
     require(graph.resources().size() == 4, "IR should intern each logical resource once");
     require(graph.pass(graph.findPass("geometry")).kind == lr::framegraph::PassKind::Graphics,
             "adapter should normalize frontend pass type");
-    require(graph.resource(graph.findResource("gbuffer")).kind ==
-                lr::framegraph::ResourceKind::Image,
+    require(graph.resource(graph.findResource("gbuffer")).kind == lr::framegraph::ResourceKind::Image,
             "attachment resources should be images");
-    require(graph.resource(graph.findResource("vertices")).kind ==
-                lr::framegraph::ResourceKind::Buffer,
+    require(graph.resource(graph.findResource("vertices")).kind == lr::framegraph::ResourceKind::Buffer,
             "vertex resources should be buffers");
 
     const auto &geometry = graph.pass(graph.findPass("geometry"));
-    require(geometry.accesses.size() == 4,
-            "IR should capture descriptor, attachment, vertex, and index accesses");
+    require(geometry.accesses.size() == 4, "IR should capture descriptor, attachment, vertex, and index accesses");
     require(geometry.accesses[0].usage == lr::framegraph::ResourceUsage::UniformBuffer &&
                 geometry.accesses[0].mode == lr::framegraph::AccessMode::Read,
             "descriptor access should be normalized");
@@ -223,16 +230,80 @@ void graphDefinitionTranslation()
             "explicit dependency names should resolve to stable pass ids");
 }
 
+void typedHandlesResolveThroughCompatibilityFrontend()
+{
+    lr::FrameGraphDefinition definition;
+    lr::PassBuilder          producer(definition, definition.addPass("producer"));
+    const lr::ImageHandle    lighting = definition.image("lighting");
+    producer.writes({{
+        .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .image  = lighting,
+    }});
+
+    lr::PassBuilder consumer(definition, definition.addPass("consumer"));
+    consumer
+        .bind({{
+            .binding = 0,
+            .type    = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .image   = lighting,
+        }})
+        .dependsOn(producer.handle());
+
+    // The producer builder remains usable after the definition grows.
+    producer.type(lr::PassType::Fullscreen);
+
+    auto passes = definition.passes();
+    lr::framegraph::resolveTypedHandles(passes, definition.resources(), definition.owner());
+    require(passes[0].writes[0].name == "lighting", "typed attachment handle should resolve to its diagnostic name");
+    require(passes[1].bindings[0].resourceName == "lighting",
+            "typed descriptor handle should resolve to its diagnostic name");
+    require(passes[1].explicitDeps == std::vector<std::string>({"producer"}),
+            "typed pass dependency should resolve to the producer name");
+
+    const auto graph = lr::framegraph::translatePassDescriptions(passes);
+    const auto plan  = lr::framegraph::buildExecutionPlan(graph);
+    require(plan.orderedPasses == std::vector<lr::framegraph::PassId>({{0}, {1}}),
+            "typed handles should preserve graph compiler ordering");
+}
+
+void typedHandlesRejectForeignGraphsAndWrongKinds()
+{
+    lr::ResourceHandleRegistry first;
+    lr::ResourceHandleRegistry second;
+    std::vector<lr::PassDesc>  passes(1);
+    passes[0].name   = "invalid";
+    passes[0].handle = {0, first.owner()};
+    passes[0].bindings.push_back({
+        .binding = 0,
+        .type    = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .image   = second.image("foreign"),
+    });
+
+    requireThrowsContaining(
+        [&] {
+            lr::framegraph::resolveTypedHandles(passes, first, first.owner());
+        },
+        "another graph");
+
+    passes[0].bindings[0].image  = {};
+    passes[0].bindings[0].buffer = first.buffer("wrong-kind");
+    requireThrowsContaining(
+        [&] {
+            lr::framegraph::resolveTypedHandles(passes, first, first.owner());
+        },
+        "buffer handle used with an image descriptor");
+}
+
 void executionPlanMatchesPassDescFrontend()
 {
     std::vector<lr::PassDesc> passes;
-    auto &consumer = lr::framegraph::appendPass(passes, "consumer");
+    auto                     &consumer = appendPass(passes, "consumer");
     consumer.bindings.push_back(read("lighting"));
-    auto &producer = lr::framegraph::appendPass(passes, "producer");
+    auto &producer = appendPass(passes, "producer");
     producer.writes.push_back({.name = "lighting", .format = VK_FORMAT_R16G16B16A16_SFLOAT});
 
-    const auto graph = lr::framegraph::translatePassDescriptions(passes);
-    const auto plan = lr::framegraph::buildExecutionPlan(graph);
+    const auto graph              = lr::framegraph::translatePassDescriptions(passes);
+    const auto plan               = lr::framegraph::buildExecutionPlan(graph);
     const auto compatibilityOrder = lr::framegraph::sortPasses(passes);
 
     require(plan.orderedPasses.size() == compatibilityOrder.size(),
@@ -249,19 +320,18 @@ void sameLayoutAttachmentHazard()
     std::vector<lr::PassDesc> passes(2);
     passes[0].name = "final";
     passes[0].writes.push_back({
-        .name = "swapchain",
+        .name   = "swapchain",
         .format = VK_FORMAT_B8G8R8A8_SRGB,
     });
     passes[1].name = "imgui";
     passes[1].writes.push_back({
-        .name = "swapchain",
+        .name   = "swapchain",
         .format = VK_FORMAT_B8G8R8A8_SRGB,
         .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
     });
 
     const auto plan = lr::framegraph::planVulkanBarriers(passes, std::vector<size_t>{0, 1});
-    require(plan.beforePass[1].size() == 1,
-            "attachment WAW must synchronize even when its layout is unchanged");
+    require(plan.beforePass[1].size() == 1, "attachment WAW must synchronize even when its layout is unchanged");
     const auto &barrier = plan.beforePass[1][0];
     require(barrier.source.layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
                 barrier.destination.layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -281,9 +351,8 @@ void readOnlyImageAccessesCoalesce()
     passes[1].name = "second reader";
     passes[1].bindings.push_back(read("texture"));
 
-    const auto plan = lr::framegraph::planVulkanBarriers(
-        passes, std::vector<size_t>{0, 1},
-        {{"texture", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}});
+    const auto plan = lr::framegraph::planVulkanBarriers(passes, std::vector<size_t>{0, 1},
+                                                         {{"texture", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}});
     require(plan.beforePass[0].empty() && plan.beforePass[1].empty(),
             "same-layout read-only accesses should not emit barriers");
 }
@@ -293,10 +362,10 @@ void storageImageSameLayoutHazard()
     auto storageWrite = [](std::string resource) {
         return lr::BindingDesc{
             .resourceName = std::move(resource),
-            .binding = 0,
-            .type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            .stages = VK_SHADER_STAGE_COMPUTE_BIT,
-            .access = lr::BindingAccess::Write,
+            .binding      = 0,
+            .type         = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .stages       = VK_SHADER_STAGE_COMPUTE_BIT,
+            .access       = lr::BindingAccess::Write,
         };
     };
 
@@ -307,11 +376,9 @@ void storageImageSameLayoutHazard()
     passes[1].bindings.push_back(storageWrite("storage"));
 
     const auto plan = lr::framegraph::planVulkanBarriers(passes, std::vector<size_t>{0, 1});
-    require(plan.beforePass[1].size() == 1,
-            "storage WAW must synchronize while remaining in GENERAL");
+    require(plan.beforePass[1].size() == 1, "storage WAW must synchronize while remaining in GENERAL");
     const auto &barrier = plan.beforePass[1][0];
-    require(barrier.source.layout == VK_IMAGE_LAYOUT_GENERAL &&
-                barrier.destination.layout == VK_IMAGE_LAYOUT_GENERAL,
+    require(barrier.source.layout == VK_IMAGE_LAYOUT_GENERAL && barrier.destination.layout == VK_IMAGE_LAYOUT_GENERAL,
             "storage WAW should use a same-layout GENERAL barrier");
     require(barrier.source.access == VK_ACCESS_2_SHADER_WRITE_BIT &&
                 barrier.destination.access == VK_ACCESS_2_SHADER_WRITE_BIT,
@@ -324,23 +391,22 @@ void bufferRawHazard()
     passes[0].name = "compute writer";
     passes[0].bindings.push_back({
         .resourceName = "values",
-        .binding = 0,
-        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .stages = VK_SHADER_STAGE_COMPUTE_BIT,
-        .access = lr::BindingAccess::Write,
+        .binding      = 0,
+        .type         = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .stages       = VK_SHADER_STAGE_COMPUTE_BIT,
+        .access       = lr::BindingAccess::Write,
     });
     passes[1].name = "fragment reader";
     passes[1].bindings.push_back({
         .resourceName = "values",
-        .binding = 0,
-        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .stages = VK_SHADER_STAGE_FRAGMENT_BIT,
-        .access = lr::BindingAccess::Read,
+        .binding      = 0,
+        .type         = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .access       = lr::BindingAccess::Read,
     });
 
     const auto plan = lr::framegraph::planVulkanBarriers(passes, std::vector<size_t>{0, 1});
-    require(plan.beforePass[1].size() == 1,
-            "storage-buffer RAW must produce a buffer barrier");
+    require(plan.beforePass[1].size() == 1, "storage-buffer RAW must produce a buffer barrier");
     const auto &barrier = plan.beforePass[1][0];
     require(barrier.kind == lr::framegraph::BarrierResourceKind::Buffer,
             "storage-buffer hazard must retain buffer identity");
@@ -358,10 +424,10 @@ void vertexShaderStageMapping()
     passes[0].name = "vertex sampler";
     passes[0].bindings.push_back({
         .resourceName = "displacement",
-        .binding = 0,
-        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .stages = VK_SHADER_STAGE_VERTEX_BIT,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .binding      = 0,
+        .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .stages       = VK_SHADER_STAGE_VERTEX_BIT,
+        .imageLayout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
     });
 
     const auto plan = lr::framegraph::planVulkanBarriers(passes, std::vector<size_t>{0});
@@ -383,6 +449,8 @@ int main()
         {"relative and absolute extents", relativeAndAbsoluteExtents},
         {"deterministic debug dump", deterministicDebugDump},
         {"graph definition translation", graphDefinitionTranslation},
+        {"typed handle compatibility frontend", typedHandlesResolveThroughCompatibilityFrontend},
+        {"typed handle validation", typedHandlesRejectForeignGraphsAndWrongKinds},
         {"execution plan PassDesc frontend", executionPlanMatchesPassDescFrontend},
         {"same-layout attachment hazard", sameLayoutAttachmentHazard},
         {"read-only image accesses coalesce", readOnlyImageAccessesCoalesce},
@@ -398,8 +466,7 @@ int main()
         {
             test();
             std::cout << "[PASS] " << name << '\n';
-        }
-        catch (const std::exception &error)
+        } catch (const std::exception &error)
         {
             ++failures;
             std::cerr << "[FAIL] " << name << ": " << error.what() << '\n';

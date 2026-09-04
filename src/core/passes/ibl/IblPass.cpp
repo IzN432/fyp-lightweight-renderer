@@ -26,16 +26,13 @@ struct IrradiancePC
 
 struct PrefilterPC
 {
-    float roughness;
+    float    roughness;
     uint32_t sampleCount;
 };
 
-}  // namespace
+} // namespace
 
-IBLPass::IBLPass(Config cfg)
-    : m_cfg(std::move(cfg))
-{
-}
+IBLPass::IBLPass(Config cfg) : m_cfg(std::move(cfg)) {}
 
 void IBLPass::uploadResources(ResourceRegistry &resources) const
 {
@@ -44,74 +41,72 @@ void IBLPass::uploadResources(ResourceRegistry &resources) const
     {
         spdlog::info("IBLPass: no HDRI configured; using a black environment");
         hdri = LoadedHdrImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
-    }
-    else
+    } else
     {
         try
         {
             hdri = loadHdrFromFile(m_cfg.hdriPath);
-        }
-        catch (const std::exception &e)
+        } catch (const std::exception &e)
         {
-            spdlog::warn("IBLPass: failed to load HDRI '{}': {}. Using a black environment.",
-                         m_cfg.hdriPath.string(), e.what());
+            spdlog::warn("IBLPass: failed to load HDRI '{}': {}. Using a black environment.", m_cfg.hdriPath.string(),
+                         e.what());
             hdri = LoadedHdrImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
         }
     }
 
     if (hdri.empty())
+    {
         throw std::runtime_error("IBLPass: failed to allocate fallback HDR pixel");
+    }
 
-    resources.uploadImage("hdri", hdri.pixels, hdri.width, hdri.height,
-                            LoadedHdrImage::format);
+    resources.uploadImage("hdri", hdri.pixels, hdri.width, hdri.height, LoadedHdrImage::format);
 
     // This LUT is used in the PBR shader, but we upload it here since it is most relevant...
     LoadedImage lut = loadImageFromFile(paths::brdfLutPath, glm::vec4(1.0f, 0.0f, 1.0f, 1.0f));
     resources.uploadImage("ibl_brdf_lut", lut.pixels, lut.width, lut.height, VK_FORMAT_R8G8B8A8_UNORM);
 
-    resources.registerCubemap("ibl_env",
-        VK_FORMAT_R16G16B16A16_SFLOAT, m_cfg.envRes, 1,
-        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-    resources.registerCubemap("ibl_irradiance",
-        VK_FORMAT_R16G16B16A16_SFLOAT, m_cfg.irrRes, 1,
-        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-    resources.registerCubemap("ibl_prefiltered",
-        VK_FORMAT_R16G16B16A16_SFLOAT, m_cfg.pfRes, m_cfg.pfMips,
-        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    resources.registerCubemap("ibl_env", VK_FORMAT_R16G16B16A16_SFLOAT, m_cfg.envRes, 1,
+                              VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    resources.registerCubemap("ibl_irradiance", VK_FORMAT_R16G16B16A16_SFLOAT, m_cfg.irrRes, 1,
+                              VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    resources.registerCubemap("ibl_prefiltered", VK_FORMAT_R16G16B16A16_SFLOAT, m_cfg.pfRes, m_cfg.pfMips,
+                              VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 }
 
 void IBLPass::replaceHdriResource(ResourceRegistry &resources) const
 {
-    LoadedHdrImage hdri = m_cfg.hdriPath.empty()
-        ? LoadedHdrImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f))
-        : loadHdrFromFile(m_cfg.hdriPath);
+    LoadedHdrImage hdri = m_cfg.hdriPath.empty() ? LoadedHdrImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f))
+                                                 : loadHdrFromFile(m_cfg.hdriPath);
 
     if (hdri.empty())
+    {
         throw std::runtime_error("IBLPass: failed to allocate fallback HDR pixel");
+    }
 
-    resources.replaceUploadedImage("hdri", hdri.pixels, hdri.width, hdri.height,
-                                   LoadedHdrImage::format);
+    resources.replaceUploadedImage("hdri", hdri.pixels, hdri.width, hdri.height, LoadedHdrImage::format);
 }
 
 void IBLPass::build(FrameGraph &fg) const
 {
-    const uint32_t envRes    = m_cfg.envRes;
-    const uint32_t irrRes    = m_cfg.irrRes;
-    const uint32_t pfRes     = m_cfg.pfRes;
-    const uint32_t pfMips    = m_cfg.pfMips;
+    const uint32_t envRes = m_cfg.envRes;
+    const uint32_t irrRes = m_cfg.irrRes;
+    const uint32_t pfRes  = m_cfg.pfRes;
+    const uint32_t pfMips = m_cfg.pfMips;
 
     fg.addPass("ibl_hdri_to_cube")
         .type(PassType::Compute)
         .computeShader((paths::shaderDir / "hdritocubemap.comp.spv").string())
         .bind({
-            {.resourceName = "hdri",    .binding = 0,
+            {.binding     = 0,
              .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
              .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-            {.resourceName = "ibl_env", .binding = 1,
-             .type   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access = BindingAccess::Write},
+             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+             .image       = fg.image("hdri")},
+            {.binding = 1,
+             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
+             .access  = BindingAccess::Write,
+             .image   = fg.image("ibl_env")},
         })
         .execute([envRes](CommandBuffer &cmd, VkPipelineLayout) {
             cmd.dispatch((envRes + 15) / 16, (envRes + 15) / 16, 6);
@@ -127,14 +122,16 @@ void IBLPass::build(FrameGraph &fg) const
         .computeShader((paths::shaderDir / "irradiance.comp.spv").string())
         .pushConstantSize(sizeof(IrradiancePC))
         .bind({
-            {.resourceName = "ibl_env",        .binding = 0,
+            {.binding     = 0,
              .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
              .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-            {.resourceName = "ibl_irradiance", .binding = 1,
-             .type   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-             .stages = VK_SHADER_STAGE_COMPUTE_BIT,
-             .access = BindingAccess::Write},
+             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+             .image       = fg.image("ibl_env")},
+            {.binding = 1,
+             .type    = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+             .stages  = VK_SHADER_STAGE_COMPUTE_BIT,
+             .access  = BindingAccess::Write,
+             .image   = fg.image("ibl_irradiance")},
         })
         .execute([irrPC, irrRes](CommandBuffer &cmd, VkPipelineLayout layout) {
             cmd.pushConstants(layout, VK_SHADER_STAGE_COMPUTE_BIT, irrPC);
@@ -147,7 +144,7 @@ void IBLPass::build(FrameGraph &fg) const
         const uint32_t mipSize   = pfRes >> mip;
 
         const PrefilterPC pfPC = {
-            .roughness = roughness,
+            .roughness   = roughness,
             .sampleCount = 4096,
         };
 
@@ -156,24 +153,23 @@ void IBLPass::build(FrameGraph &fg) const
             .computeShader((paths::shaderDir / "prefilter.comp.spv").string())
             .pushConstantSize(sizeof(PrefilterPC))
             .bind({
-                {.resourceName = "ibl_env",        .binding = 0,
+                {.binding     = 0,
                  .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                  .stages      = VK_SHADER_STAGE_COMPUTE_BIT,
-                 .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                {.resourceName = "ibl_prefiltered", .binding = 1,
+                 .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                 .image       = fg.image("ibl_env")},
+                {.binding  = 1,
                  .type     = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                  .stages   = VK_SHADER_STAGE_COMPUTE_BIT,
                  .access   = BindingAccess::Write,
-                 .mipLevel = mip},
+                 .mipLevel = mip,
+                 .image    = fg.image("ibl_prefiltered")},
             })
             .execute([pfPC, mipSize](CommandBuffer &cmd, VkPipelineLayout layout) {
                 cmd.pushConstants(layout, VK_SHADER_STAGE_COMPUTE_BIT, pfPC);
                 cmd.dispatch((mipSize + 15) / 16, (mipSize + 15) / 16, 6);
             });
     }
-
-
-
 }
 
-}  // namespace lr
+} // namespace lr

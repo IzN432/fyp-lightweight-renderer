@@ -598,6 +598,7 @@ try
     // rather than one per individual mutation) callbacks — see SceneManager::registerCallbacks.
     sceneManager.registerCallbacks(viewer);
 
+    viewer.addImguiPass();
     viewer.run();
     return 0;
 }

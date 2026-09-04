@@ -14,10 +14,7 @@ struct OverlayPointsPC
     float     occludedOpacity = 0.3f;
 };
 
-OverlayPointsPass::OverlayPointsPass(Config cfg)
-    : m_cfg(std::move(cfg))
-{
-}
+OverlayPointsPass::OverlayPointsPass(Config cfg) : m_cfg(std::move(cfg)) {}
 
 void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
 {
@@ -26,34 +23,36 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                     .topology(VK_PRIMITIVE_TOPOLOGY_POINT_LIST)
                     .vertexLayout(layout);
 
-    pass.vertexBuffer(0, m_cfg.pointsBufferResourceName);
+    pass.vertexBuffer(0, fg.buffer(m_cfg.pointsBufferResourceName));
 
     pass.vertShader((paths::shaderDir / "overlay_points.vert.spv").string())
         .fragShader((paths::shaderDir / "overlay_points.frag.spv").string())
         .pushConstantSize(sizeof(OverlayPointsPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .bind({
             {
-                .resourceName = m_cfg.cameraBufferResourceName,
-                .binding      = 0,
-                .type         = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .stages       = VK_SHADER_STAGE_VERTEX_BIT,
+                .binding = 0,
+                .type    = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .stages  = VK_SHADER_STAGE_VERTEX_BIT,
+                .buffer  = fg.buffer(m_cfg.cameraBufferResourceName),
             },
             {
-                .resourceName = "gbufferDepth",
-                .binding      = 1,
-                .type         = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .stages       = VK_SHADER_STAGE_FRAGMENT_BIT,
-                .imageLayout  = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                .binding     = 1,
+                .type        = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .stages      = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                .image       = fg.image("gbufferDepth"),
             },
         })
         .writes({
-            {.name = "overlayPoints", .format = VK_FORMAT_R16G16B16A16_SFLOAT},
+            {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .image = fg.image("overlayPoints")},
         })
         .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
-            if (!m_enabled) return;
-            const OverlayPointsPC pc{
-                .model = m_cfg.meshTransform ? m_cfg.meshTransform->localMatrix() : glm::mat4(1.0f)
-            };
+            if (!m_enabled)
+            {
+                return;
+            }
+            const OverlayPointsPC pc{.model =
+                                         m_cfg.meshTransform ? m_cfg.meshTransform->localMatrix() : glm::mat4(1.0f)};
             for (size_t i = 0; i < m_cfg.pointsBufferUploadResult.singleMeshResults.size(); ++i)
             {
                 const auto &vert = m_cfg.pointsBufferUploadResult.singleMeshResults[i];
@@ -63,4 +62,4 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         });
 }
 
-}  // namespace lr
+} // namespace lr

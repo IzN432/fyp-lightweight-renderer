@@ -62,6 +62,7 @@ add_library(lr_core STATIC
 
     src/core/framegraph/ResourceRegistry.cpp
     src/core/framegraph/FrameGraph.cpp
+    src/core/framegraph/FrameGraphDefinition.cpp
     src/core/framegraph/PassDescAdapter.cpp
     src/core/framegraph/FrameGraphTopology.cpp
     src/core/framegraph/model/GraphDefinition.cpp
@@ -190,6 +191,7 @@ if(BUILD_TESTING)
 
     add_executable(framegraph_topology_tests
         tests/framegraph/FrameGraphTopologyTests.cpp
+        src/core/framegraph/FrameGraphDefinition.cpp
         src/core/framegraph/PassDescAdapter.cpp
         src/core/framegraph/FrameGraphTopology.cpp
         src/core/framegraph/model/GraphDefinition.cpp

@@ -38,9 +38,10 @@ FrameGraph::~FrameGraph()
 
 // Add a pass with the given name and return a builder for configuring it. The pass won't be compiled until compile() is
 // called.
-PassBuilder FrameGraph::addPass(const std::string &name)
+PassBuilder FrameGraph::addPass(std::string name)
 {
-    return PassBuilder(framegraph::appendPass(m_passes, name));
+    const PassHandle handle = m_graph.addPass(std::move(name));
+    return PassBuilder(m_graph, handle);
 }
 
 // Compiles the pass graph: topological sort, resource allocation, pipeline and descriptor set creation, barrier
@@ -58,12 +59,15 @@ void FrameGraph::destroyCompiledPasses()
 
 void FrameGraph::compile()
 {
-    spdlog::info("FrameGraph: compiling {} passes...", m_passes.size());
+    auto passes = m_graph.passes();
+    spdlog::info("FrameGraph: compiling {} passes...", passes.size());
+
+    framegraph::resolveTypedHandles(passes, m_graph.resources(), m_graph.owner());
 
     destroyCompiledPasses();
     m_descriptorAllocator.reset();
     m_compiled.clear();
-    m_compiled.resize(m_passes.size());
+    m_compiled.resize(passes.size());
 
     sortPasses();
     allocateResources();
@@ -86,7 +90,7 @@ void FrameGraph::execute(CommandBuffer &cmd)
 
     for (size_t idx : m_sortedIndices)
     {
-        const PassDesc     &pass     = m_passes[idx];
+        const PassDesc     &pass     = m_graph.passes()[idx];
         const CompiledPass &compiled = m_compiled[idx];
 
         const bool useDebugLabels = m_ctx.debugNamesEnabled();
@@ -137,9 +141,9 @@ void FrameGraph::execute(CommandBuffer &cmd)
             }
 
             VkDependencyInfo dep{};
-            dep.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-            dep.imageMemoryBarrierCount = static_cast<uint32_t>(patchedBarriers.size());
-            dep.pImageMemoryBarriers    = patchedBarriers.data();
+            dep.sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            dep.imageMemoryBarrierCount  = static_cast<uint32_t>(patchedBarriers.size());
+            dep.pImageMemoryBarriers     = patchedBarriers.data();
             dep.bufferMemoryBarrierCount = static_cast<uint32_t>(bufferBarriers.size());
             dep.pBufferMemoryBarriers    = bufferBarriers.data();
             vkCmdPipelineBarrier2(cmd.get(), &dep);
@@ -275,8 +279,9 @@ void FrameGraph::resize(VkExtent2D newExtent)
 
 void FrameGraph::sortPasses()
 {
-    m_definition = framegraph::translatePassDescriptions(m_passes);
-    m_executionPlan = framegraph::buildExecutionPlan(m_definition);
+    const auto passes = m_graph.passes();
+    m_logicalGraph    = framegraph::translatePassDescriptions(passes);
+    m_executionPlan   = framegraph::buildExecutionPlan(m_logicalGraph);
 
     m_sortedIndices.clear();
     m_sortedIndices.reserve(m_executionPlan.orderedPasses.size());
@@ -288,13 +293,13 @@ void FrameGraph::sortPasses()
     spdlog::debug("FrameGraph: pass order:");
     for (size_t idx : m_sortedIndices)
     {
-        spdlog::debug("  [{}] {}", idx, m_passes[idx].name);
+        spdlog::debug("  [{}] {}", idx, passes[idx].name);
     }
 }
 
 void FrameGraph::allocateResources()
 {
-    const auto planned = framegraph::planAttachmentImages(m_passes, m_registry.getExtent());
+    const auto planned = framegraph::planAttachmentImages(m_graph.passes(), m_registry.getExtent());
     for (const auto &image : planned)
     {
         if (!m_registry.hasImage(image.name))
@@ -306,9 +311,10 @@ void FrameGraph::allocateResources()
 
 void FrameGraph::buildDescriptorSets()
 {
-    for (size_t i = 0; i < m_passes.size(); ++i)
+    const auto passes = m_graph.passes();
+    for (size_t i = 0; i < passes.size(); ++i)
     {
-        const PassDesc &pass     = m_passes[i];
+        const PassDesc &pass     = passes[i];
         CompiledPass   &compiled = m_compiled[i];
 
         if (pass.type == PassType::Custom)
@@ -453,9 +459,10 @@ void FrameGraph::buildDescriptorSets()
 
 void FrameGraph::buildPipelines()
 {
-    for (size_t i = 0; i < m_passes.size(); ++i)
+    const auto passes = m_graph.passes();
+    for (size_t i = 0; i < passes.size(); ++i)
     {
-        const PassDesc &pass = m_passes[i];
+        const PassDesc &pass = passes[i];
 
         if (pass.type == PassType::Custom)
         {
@@ -517,19 +524,17 @@ void FrameGraph::buildPipelines()
 void FrameGraph::buildBarriers()
 {
     std::unordered_map<std::string, VkImageLayout> initialImageLayouts;
-    for (const PassDesc &pass : m_passes)
+    const auto                                     passes = m_graph.passes();
+    for (const PassDesc &pass : passes)
     {
         for (const BindingDesc &binding : pass.bindings)
         {
             if (m_registry.getImage(binding.resourceName))
             {
-                initialImageLayouts.try_emplace(
-                    binding.resourceName, m_registry.getImageLayout(binding.resourceName));
-            }
-            else if (m_registry.hasImageArray(binding.resourceName))
+                initialImageLayouts.try_emplace(binding.resourceName, m_registry.getImageLayout(binding.resourceName));
+            } else if (m_registry.hasImageArray(binding.resourceName))
             {
-                const std::vector<VkImageLayout> layouts =
-                    m_registry.getImageArrayLayouts(binding.resourceName);
+                const std::vector<VkImageLayout> layouts = m_registry.getImageArrayLayouts(binding.resourceName);
                 if (!layouts.empty())
                 {
                     const VkImageLayout commonLayout = layouts.front();
@@ -537,9 +542,8 @@ void FrameGraph::buildBarriers()
                     {
                         if (layout != commonLayout)
                         {
-                            throw std::runtime_error(
-                                "FrameGraph: image array '" + binding.resourceName +
-                                "' has mixed initial layouts");
+                            throw std::runtime_error("FrameGraph: image array '" + binding.resourceName +
+                                                     "' has mixed initial layouts");
                         }
                     }
                     initialImageLayouts.try_emplace(binding.resourceName, commonLayout);
@@ -550,14 +554,13 @@ void FrameGraph::buildBarriers()
         {
             if (m_registry.getImage(attachment.name))
             {
-                initialImageLayouts.try_emplace(
-                    attachment.name, m_registry.getImageLayout(attachment.name));
+                initialImageLayouts.try_emplace(attachment.name, m_registry.getImageLayout(attachment.name));
             }
         }
     }
 
     const framegraph::VulkanBarrierPlan plan =
-        framegraph::planVulkanBarriers(m_passes, m_sortedIndices, initialImageLayouts);
+        framegraph::planVulkanBarriers(passes, m_sortedIndices, initialImageLayouts);
 
     for (size_t passIndex = 0; passIndex < plan.beforePass.size(); ++passIndex)
     {
@@ -570,64 +573,60 @@ void FrameGraph::buildBarriers()
                 if (const AllocatedImage *image = m_registry.getImage(planned.resourceName))
                 {
                     images.push_back(image);
-                }
-                else
+                } else
                 {
                     images = m_registry.getImageArray(planned.resourceName);
                 }
                 if (images.empty())
                 {
-                    throw std::runtime_error("FrameGraph: barrier references missing image '" +
-                                             planned.resourceName + "'");
+                    throw std::runtime_error("FrameGraph: barrier references missing image '" + planned.resourceName +
+                                             "'");
                 }
 
                 for (const AllocatedImage *image : images)
                 {
                     if (!image)
                     {
-                        throw std::runtime_error(
-                            "FrameGraph: barrier references empty slot in image array '" +
-                            planned.resourceName + "'");
+                        throw std::runtime_error("FrameGraph: barrier references empty slot in image array '" +
+                                                 planned.resourceName + "'");
                     }
 
                     VkImageMemoryBarrier2 barrier{};
-                    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-                    barrier.srcStageMask = planned.source.stages;
-                    barrier.srcAccessMask = planned.source.access;
-                    barrier.dstStageMask = planned.destination.stages;
-                    barrier.dstAccessMask = planned.destination.access;
-                    barrier.oldLayout = planned.source.layout;
-                    barrier.newLayout = planned.destination.layout;
+                    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+                    barrier.srcStageMask        = planned.source.stages;
+                    barrier.srcAccessMask       = planned.source.access;
+                    barrier.dstStageMask        = planned.destination.stages;
+                    barrier.dstAccessMask       = planned.destination.access;
+                    barrier.oldLayout           = planned.source.layout;
+                    barrier.newLayout           = planned.destination.layout;
                     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                    barrier.image = image->image;
-                    const VkImageAspectFlags aspect = isDepthFormat(image->format)
-                        ? VK_IMAGE_ASPECT_DEPTH_BIT
-                        : VK_IMAGE_ASPECT_COLOR_BIT;
+                    barrier.image               = image->image;
+                    const VkImageAspectFlags aspect =
+                        isDepthFormat(image->format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
                     barrier.subresourceRange = {aspect, 0, image->mipLevels, 0, image->arrayLayers};
                     compiled.imageBarriers.push_back({barrier, planned.resourceName});
                 }
-            }
-            else
+            } else
             {
                 const AllocatedBuffer *buffer = m_registry.getBuffer(planned.resourceName);
                 if (!buffer)
                 {
-                    throw std::runtime_error("FrameGraph: barrier references missing buffer '" +
-                                             planned.resourceName + "'");
+                    throw std::runtime_error("FrameGraph: barrier references missing buffer '" + planned.resourceName +
+                                             "'");
                 }
 
                 VkBufferMemoryBarrier2 barrier{};
-                barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
-                barrier.srcStageMask = planned.source.stages;
-                barrier.srcAccessMask = planned.source.access;
-                barrier.dstStageMask = planned.destination.stages;
-                barrier.dstAccessMask = planned.destination.access;
+                barrier.sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+                barrier.srcStageMask        = planned.source.stages;
+                barrier.srcAccessMask       = planned.source.access;
+                barrier.dstStageMask        = planned.destination.stages;
+                barrier.dstAccessMask       = planned.destination.access;
                 barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                 barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                barrier.buffer = buffer->buffer;
-                barrier.offset = 0;
-                barrier.size = VK_WHOLE_SIZE;
+                barrier.buffer              = buffer->buffer;
+                barrier.offset              = 0;
+                barrier.size                = VK_WHOLE_SIZE;
                 compiled.bufferBarriers.push_back({barrier, planned.resourceName});
             }
         }
@@ -638,8 +637,7 @@ void FrameGraph::buildBarriers()
         if (m_registry.hasImageArray(name))
         {
             m_registry.setImageArrayLayout(name, layout);
-        }
-        else
+        } else
         {
             m_registry.setImageLayout(name, layout);
         }
@@ -779,25 +777,16 @@ void FrameGraph::executeAndWait(std::vector<FinalLayoutDesc> finalLayouts)
     spdlog::info("FrameGraph: synchronous execution complete");
 }
 
-std::vector<std::string> FrameGraph::passNames() const
-{
-    std::vector<std::string> names;
-    names.reserve(m_passes.size());
-    for (const auto &p : m_passes)
-    {
-        names.push_back(p.name);
-    }
-    return names;
-}
+std::vector<PassHandle> FrameGraph::passHandles() const { return m_graph.passHandles(); }
 
 std::string FrameGraph::debugDump() const
 {
-    std::vector<std::vector<framegraph::BarrierDebugInfo>> barriersByPass(m_passes.size());
+    const auto                                             passes = m_graph.passes();
+    std::vector<std::vector<framegraph::BarrierDebugInfo>> barriersByPass(passes.size());
     for (size_t passIndex = 0; passIndex < m_compiled.size(); ++passIndex)
     {
         auto &output = barriersByPass[passIndex];
-        output.reserve(m_compiled[passIndex].imageBarriers.size() +
-                       m_compiled[passIndex].bufferBarriers.size());
+        output.reserve(m_compiled[passIndex].imageBarriers.size() + m_compiled[passIndex].bufferBarriers.size());
         for (const auto &compiledBarrier : m_compiled[passIndex].imageBarriers)
         {
             const auto &barrier = compiledBarrier.barrier;
@@ -824,7 +813,7 @@ std::string FrameGraph::debugDump() const
         }
     }
 
-    return framegraph::dumpTopology(m_passes, m_sortedIndices, barriersByPass);
+    return framegraph::dumpTopology(passes, m_sortedIndices, barriersByPass);
 }
 
 void FrameGraph::createDefaultSampler()

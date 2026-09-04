@@ -11,38 +11,39 @@ struct HeatmapPC
 {
     glm::mat4 model;
 };
-}
+} // namespace
 
-HeatmapPass::HeatmapPass(Config cfg)
-    : m_cfg(std::move(cfg))
-{
-}
+HeatmapPass::HeatmapPass(Config cfg) : m_cfg(std::move(cfg)) {}
 
 void HeatmapPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
 {
     fg.addPass("heatmap")
         .type(PassType::Geometry)
         .vertexLayout(layout)
-        .vertexBuffer(0, m_cfg.vertexBufferResourceName)
-        .indexBuffer(m_cfg.indexBufferResourceName)
+        .vertexBuffer(0, fg.buffer(m_cfg.vertexBufferResourceName))
+        .indexBuffer(fg.buffer(m_cfg.indexBufferResourceName))
         .vertShader((paths::shaderDir / "heatmap.vert.spv").string())
         .fragShader((paths::shaderDir / "heatmap.frag.spv").string())
         .pushConstantSize(sizeof(HeatmapPC), VK_SHADER_STAGE_VERTEX_BIT)
         .bind({
             {
-                .resourceName = m_cfg.cameraBufferResourceName,
-                .binding      = 0,
-                .type         = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .stages       = VK_SHADER_STAGE_VERTEX_BIT,
+                .binding = 0,
+                .type    = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .stages  = VK_SHADER_STAGE_VERTEX_BIT,
+                .buffer  = fg.buffer(m_cfg.cameraBufferResourceName),
             },
         })
         .writes({
-            {.name = "heatmap",      .format = VK_FORMAT_R16G16B16A16_SFLOAT},
-            {.name = "heatmapDepth", .format = VK_FORMAT_D32_SFLOAT, .clearValue = {.depthStencil = {1.0f, 0}}},
+            {.format = VK_FORMAT_R16G16B16A16_SFLOAT, .image = fg.image("heatmap")},
+            {.format     = VK_FORMAT_D32_SFLOAT,
+             .clearValue = {.depthStencil = {1.0f, 0}},
+             .image      = fg.image("heatmapDepth")},
         })
         .execute([&](CommandBuffer &cmd, VkPipelineLayout pipelineLayout) {
             if (!m_enabled)
+            {
                 return;
+            }
 
             // Only the main mesh (singleMeshResults[0]) is drawn — light visuals never get a
             // "color" attribute (see SceneManager::updateMainMeshHeatmapBuffer), so they aren't
@@ -58,4 +59,4 @@ void HeatmapPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         });
 }
 
-}  // namespace lr
+} // namespace lr

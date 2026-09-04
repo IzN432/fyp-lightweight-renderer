@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FrameGraphDefinition.hpp"
 #include "PassBuilder.hpp"
 #include "ResourceRegistry.hpp"
 #include "compiler/GraphCompiler.hpp"
@@ -14,6 +15,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -26,15 +28,20 @@ public:
     FrameGraph(const VulkanContext &ctx, ResourceRegistry &registry);
     ~FrameGraph();
 
-    FrameGraph(const FrameGraph &) = delete;
+    FrameGraph(const FrameGraph &)            = delete;
     FrameGraph &operator=(const FrameGraph &) = delete;
 
-    // Declare a pass — returns a builder for fluent configuration.
-    // The returned reference is valid until compile() is called.
-    PassBuilder addPass(const std::string &name);
+    // Declare a pass — returns a handle-backed builder for fluent configuration.
+    // Builders remain valid when later addPass() calls grow the pass array.
+    PassBuilder addPass(std::string name);
+
+    // Type-safe frontend identity. String lookup remains inside this adapter
+    // layer until ResourceRegistry is split from the logical graph.
+    ImageHandle  image(std::string_view name) { return m_graph.image(name); }
+    BufferHandle buffer(std::string_view name) { return m_graph.buffer(name); }
 
     // Access the shared resource registry.
-    ResourceRegistry &resources() { return m_registry; }
+    ResourceRegistry       &resources() { return m_registry; }
     const ResourceRegistry &resources() const { return m_registry; }
 
     // Compile the graph — topological sort, resource allocation, pipeline creation.
@@ -48,9 +55,8 @@ public:
     // Call on swapchain resize — rebuilds transient images and recompiles.
     void resize(VkExtent2D newExtent);
 
-    // Returns the names of all currently declared passes, in declaration order.
-    // Used by Viewer to build the imgui pass's dependsOn list.
-    std::vector<std::string> passNames() const;
+    // Typed handles for passes declared so far.
+    std::vector<PassHandle> passHandles() const;
 
     // Deterministic topology snapshot for diagnostics and before/after comparisons.
     // Vulkan object handles are intentionally omitted.
@@ -59,7 +65,11 @@ public:
     // Describes a resource layout that the GPU image should be left in after executeAndWait().
     // Used to transition preprocessing outputs (e.g. GENERAL storage writes) into
     // a layout suitable for the main pipeline (e.g. SHADER_READ_ONLY_OPTIMAL).
-    struct FinalLayoutDesc { std::string resourceName; VkImageLayout layout; };
+    struct FinalLayoutDesc
+    {
+        std::string   resourceName;
+        VkImageLayout layout;
+    };
 
     // Compile and synchronously execute this graph's passes. This is intended for
     // short-lived graphs used for preprocessing or uploads. The call waits for the
@@ -87,23 +97,27 @@ private:
 
 private:
     const VulkanContext &m_ctx;
-    ResourceRegistry &m_registry;
-    DescriptorAllocator m_descriptorAllocator;
+    ResourceRegistry    &m_registry;
+    FrameGraphDefinition m_graph;
+    DescriptorAllocator  m_descriptorAllocator;
 
     VkSampler m_defaultSampler = VK_NULL_HANDLE;
 
-    struct ExternalImage { VkImage image; VkImageView view; };
-    std::unordered_map<std::string, ExternalImage>  m_externalImages;
+    struct ExternalImage
+    {
+        VkImage     image;
+        VkImageView view;
+    };
+    std::unordered_map<std::string, ExternalImage> m_externalImages;
 
-    std::vector<PassDesc> m_passes;         // declared passes (insertion order)
-    std::vector<size_t> m_sortedIndices;    // topological order into m_passes
-    framegraph::GraphDefinition m_definition;
-    framegraph::ExecutionPlan m_executionPlan;
+    std::vector<size_t>         m_sortedIndices; // topological order into the definition's passes
+    framegraph::GraphDefinition m_logicalGraph;
+    framegraph::ExecutionPlan   m_executionPlan;
 
     struct CompiledImageBarrier
     {
         VkImageMemoryBarrier2 barrier;
-        std::string           resourceName;  // used to patch external image handles
+        std::string           resourceName; // used to patch external image handles
     };
 
     struct CompiledBufferBarrier
@@ -115,14 +129,14 @@ private:
     // Per-pass GPU objects populated by compile()
     struct CompiledPass
     {
-        VkDescriptorSetLayout             descriptorLayout = VK_NULL_HANDLE;
-        VkPipelineLayout                  pipelineLayout   = VK_NULL_HANDLE;
-        VkDescriptorSet                   descriptorSet    = VK_NULL_HANDLE;
-        std::unique_ptr<Pipeline>         pipeline;
+        VkDescriptorSetLayout              descriptorLayout = VK_NULL_HANDLE;
+        VkPipelineLayout                   pipelineLayout   = VK_NULL_HANDLE;
+        VkDescriptorSet                    descriptorSet    = VK_NULL_HANDLE;
+        std::unique_ptr<Pipeline>          pipeline;
         std::vector<CompiledImageBarrier>  imageBarriers;
         std::vector<CompiledBufferBarrier> bufferBarriers;
     };
     std::vector<CompiledPass> m_compiled;
 };
 
-}  // namespace lr
+} // namespace lr

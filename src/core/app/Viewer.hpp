@@ -75,6 +75,9 @@ public:
   // Run — compiles the frame graph and enters the event/render loop.
   // Returns when the window is closed.
   // -----------------------------------------------------------------------
+  // Explicitly append the terminal ImGui compositing pass. Call this after
+  // declaring all application passes and before run().
+  void addImguiPass();
   void run();
 
   // True once at least one frame has been fully executed since the last
@@ -102,8 +105,10 @@ private:
   std::vector<std::function<void()>> m_guiCallbacks;
   std::vector<std::function<void(float, VkExtent2D)>> m_updateCallbacks;
   std::vector<std::function<void(float, VkExtent2D)>> m_lateUpdateCallbacks;
+  uint32_t m_currentImageIndex = 0;
   double m_lastFrameTime = 0.0;
   bool m_frameExecuted = false;
+  bool m_imguiPassAdded = false;
 };
 
 } // namespace lr

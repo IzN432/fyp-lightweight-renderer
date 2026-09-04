@@ -12,4 +12,9 @@ namespace lr::framegraph
 // on PassDesc or Vulkan and can be constructed by other frontends directly.
 GraphDefinition translatePassDescriptions(std::span<const PassDesc> passes);
 
+// Resolves typed frontend handles into the legacy string fields still consumed
+// by the Vulkan backend. Remove this bridge once semantic resource declarations
+// replace PassDesc in step 6.
+void resolveTypedHandles(std::span<PassDesc> passes, const ResourceHandleRegistry &resources, uint64_t passOwner);
+
 } // namespace lr::framegraph

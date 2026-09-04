@@ -5,6 +5,8 @@
 #include <GLFW/glfw3.h>
 #include <spdlog/spdlog.h>
 
+#include <stdexcept>
+
 namespace lr
 {
 
@@ -61,21 +63,37 @@ void Viewer::recreateSwapchain()
     m_frameExecuted = false;
 }
 
-void Viewer::run()
+void Viewer::addImguiPass()
 {
-    // Snapshot pass names before adding imgui — addPass() inserts into m_passes
-    // immediately, so calling passNames() inside the chain would include
-    // "__imgui" itself and create a self-cycle.
-    auto     priorPasses       = m_fg->passNames();
-    uint32_t currentImageIndex = 0;
+    if (m_imguiPassAdded)
+    {
+        throw std::logic_error("Viewer: ImGui pass has already been added");
+    }
+
+    // Snapshot pass handles before adding imgui to the graph definition.
+    // addPass() inserts immediately, so querying inside the builder chain would
+    // include "__imgui" itself and create a self-cycle.
+    const auto priorPasses = m_fg->passHandles();
 
     m_fg->addPass("__imgui")
         .type(PassType::Custom)
         .dependsOn(priorPasses)
-        .writes({{.name = "swapchain", .format = m_swapchain->getFormat(), .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD}})
-        .execute([this, &currentImageIndex](CommandBuffer &cmd, VkPipelineLayout) {
-            m_imguiPass->render(cmd, m_swapchain->getImageView(currentImageIndex), m_swapchain->getExtent());
+        .writes({{.format = m_swapchain->getFormat(),
+                  .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+                  .image  = m_fg->image("swapchain")}})
+        .execute([this](CommandBuffer &cmd, VkPipelineLayout) {
+            m_imguiPass->render(cmd, m_swapchain->getImageView(m_currentImageIndex), m_swapchain->getExtent());
         });
+
+    m_imguiPassAdded = true;
+}
+
+void Viewer::run()
+{
+    if (!m_imguiPassAdded)
+    {
+        throw std::logic_error("Viewer: addImguiPass() must be called before run()");
+    }
 
     m_fg->compile();
 
@@ -103,7 +121,7 @@ void Viewer::run()
             continue;
         }
 
-        currentImageIndex = imageIndex;
+        m_currentImageIndex = imageIndex;
 
         const double now = glfwGetTime();
         const float  dt  = static_cast<float>(now - m_lastFrameTime);
