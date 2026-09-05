@@ -52,6 +52,7 @@ Viewer::Viewer(const Config &config)
     });
 
     m_resources->registerExternalImage("swapchain", m_swapchain->getFormat());
+    m_backbuffer = m_fg->importBackbuffer("swapchain", m_swapchain->getFormat());
 }
 
 Viewer::~Viewer() = default;
@@ -78,7 +79,7 @@ void Viewer::addImguiPass()
     m_fg->addPass("__imgui")
         .type(PassType::Custom)
         .dependsOn(priorPasses)
-        .colorAttachment(m_fg->image("swapchain"), m_swapchain->getFormat(), VK_ATTACHMENT_LOAD_OP_LOAD)
+        .colorAttachment(m_backbuffer, m_swapchain->getFormat(), VK_ATTACHMENT_LOAD_OP_LOAD)
         .execute([this](PassContext &ctx) {
             m_imguiPass->render(ctx.cmd(), m_swapchain->getImageView(m_currentImageIndex), ctx.renderingExtent());
         });
@@ -133,11 +134,10 @@ void Viewer::run()
             cb(dt, m_swapchain->getExtent());
         }
 
-        m_fg->setExternalImage("swapchain", m_swapchain->getImage(imageIndex), m_swapchain->getImageView(imageIndex));
-        m_fg->execute(cmd);
+        ExternalImageBindings externalImages;
+        externalImages.bind(m_backbuffer, m_swapchain->getImage(imageIndex), m_swapchain->getImageView(imageIndex));
+        m_fg->execute(cmd, externalImages);
         m_frameExecuted = true;
-
-        Renderer::transitionForPresent(cmd, m_swapchain->getImage(imageIndex));
 
         if (!m_renderer->endFrame(*m_swapchain, imageIndex))
         {

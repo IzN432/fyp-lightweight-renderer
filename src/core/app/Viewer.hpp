@@ -100,6 +100,7 @@ private:
     std::unique_ptr<Renderer>         m_renderer;
     std::unique_ptr<FrameGraph>       m_fg;
     std::unique_ptr<ImguiPass>        m_imguiPass;
+    ImageHandle                       m_backbuffer;
 
     std::vector<std::function<void()>>                  m_guiCallbacks;
     std::vector<std::function<void(float, VkExtent2D)>> m_updateCallbacks;

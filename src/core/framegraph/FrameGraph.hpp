@@ -28,6 +28,7 @@ public:
     FrameGraph &operator=(const FrameGraph &) = delete;
 
     PassBuilder addPass(std::string name);
+    ImageHandle importBackbuffer(std::string_view name, VkFormat format);
 
     ImageHandle  image(std::string_view name) { return m_definition.image(name); }
     BufferHandle buffer(std::string_view name) { return m_definition.buffer(name); }
@@ -37,6 +38,7 @@ public:
 
     void compile();
     void execute(CommandBuffer &cmd);
+    void execute(CommandBuffer &cmd, const ExternalImageBindings &externalImages);
     void resize(VkExtent2D newExtent);
     void executeAndWait(std::vector<FinalLayoutDesc> finalLayouts = {});
     void setExternalImage(const std::string &name, VkImage image, VkImageView view);

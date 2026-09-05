@@ -46,27 +46,45 @@ std::array<float, 4> CompiledFrameGraph::debugLabelColor(PassType type)
     return {};
 }
 
-void CompiledFrameGraph::submitResourceBarriers(CommandBuffer &cmd, const CompiledPass &compiled)
+const ExternalImageBinding &CompiledFrameGraph::requireExternalImage(ImageHandle                  image,
+                                                                     const ExternalImageBindings &externalImages) const
 {
-    if (compiled.imageBarriers.empty() && compiled.bufferBarriers.empty())
+    const ExternalImageBinding *binding = externalImages.find(image);
+    if (!binding)
+    {
+        throw std::runtime_error("CompiledFrameGraph: external image '" + m_definition.name(image) +
+                                 "' was not bound for this execution");
+    }
+    return *binding;
+}
+
+void CompiledFrameGraph::submitResourceBarriers(CommandBuffer                            &cmd,
+                                                const std::vector<CompiledImageBarrier>  &imageBarriers,
+                                                const std::vector<CompiledBufferBarrier> &bufferBarriers,
+                                                const ExternalImageBindings              &externalImages)
+{
+    if (imageBarriers.empty() && bufferBarriers.empty())
     {
         return;
     }
 
     m_scratchImageBarriers.clear();
-    for (const CompiledImageBarrier &item : compiled.imageBarriers)
+    for (const CompiledImageBarrier &item : imageBarriers)
     {
-        VkImageMemoryBarrier2 barrier  = item.barrier;
-        const auto            external = m_externalImages.find(item.resourceName);
-        if (external != m_externalImages.end())
+        VkImageMemoryBarrier2 barrier = item.barrier;
+        for (const FrameGraphDefinition::ExternalImageDesc &external : m_definition.externalImages())
         {
-            barrier.image = external->second.image;
+            if (m_definition.name(external.image) == item.resourceName)
+            {
+                barrier.image = requireExternalImage(external.image, externalImages).image;
+                break;
+            }
         }
         m_scratchImageBarriers.push_back(barrier);
     }
 
     m_scratchBufferBarriers.clear();
-    for (const CompiledBufferBarrier &item : compiled.bufferBarriers)
+    for (const CompiledBufferBarrier &item : bufferBarriers)
     {
         m_scratchBufferBarriers.push_back(item.barrier);
     }
@@ -80,7 +98,8 @@ void CompiledFrameGraph::submitResourceBarriers(CommandBuffer &cmd, const Compil
     vkCmdPipelineBarrier2(cmd.get(), &dependency);
 }
 
-VkRenderingInfo CompiledFrameGraph::prepareRenderingInfo(const PassDesc &pass, VkExtent2D extent)
+VkRenderingInfo CompiledFrameGraph::prepareRenderingInfo(const PassDesc &pass, VkExtent2D extent,
+                                                         const ExternalImageBindings &externalImages)
 {
     m_scratchColorAttachments.clear();
     m_scratchDepthAttachment = {};
@@ -99,11 +118,14 @@ VkRenderingInfo CompiledFrameGraph::prepareRenderingInfo(const PassDesc &pass, V
             throw std::runtime_error("CompiledFrameGraph: attachment image '" + name + "' is unavailable");
         }
 
-        VkImageView view     = image->view;
-        const auto  external = m_externalImages.find(name);
-        if (external != m_externalImages.end())
+        VkImageView view = image->view;
+        for (const FrameGraphDefinition::ExternalImageDesc &external : m_definition.externalImages())
         {
-            view = external->second.view;
+            if (external.image == use.image)
+            {
+                view = requireExternalImage(use.image, externalImages).view;
+                break;
+            }
         }
 
         VkRenderingAttachmentInfo attachment{};
@@ -167,7 +189,28 @@ void CompiledFrameGraph::bindVertexAndIndexBuffers(CommandBuffer &cmd, const Pas
 
 void CompiledFrameGraph::execute(CommandBuffer &cmd)
 {
+    ExternalImageBindings bindings;
+    for (const FrameGraphDefinition::ExternalImageDesc &external : m_definition.externalImages())
+    {
+        const std::string &name   = m_definition.name(external.image);
+        const auto         legacy = m_externalImages.find(name);
+        if (legacy == m_externalImages.end())
+        {
+            throw std::runtime_error("CompiledFrameGraph: external image '" + name +
+                                     "' was not bound for this execution");
+        }
+        bindings.bind(external.image, legacy->second.image, legacy->second.view);
+    }
+    execute(cmd, bindings);
+}
+
+void CompiledFrameGraph::execute(CommandBuffer &cmd, const ExternalImageBindings &externalImages)
+{
     m_registry.flushUploads();
+    for (const FrameGraphDefinition::ExternalImageDesc &external : m_definition.externalImages())
+    {
+        (void)requireExternalImage(external.image, externalImages);
+    }
     const auto passes = m_definition.passes();
     for (size_t index : m_sortedIndices)
     {
@@ -179,7 +222,7 @@ void CompiledFrameGraph::execute(CommandBuffer &cmd)
             m_ctx.beginDebugLabel(cmd.get(), pass.name, debugLabelColor(pass.type));
         }
 
-        submitResourceBarriers(cmd, compiled);
+        submitResourceBarriers(cmd, compiled.imageBarriers, compiled.bufferBarriers, externalImages);
         if (compiled.pipeline)
         {
             vkCmdBindPipeline(cmd.get(), compiled.pipeline->bindPoint(), compiled.pipeline->get());
@@ -199,7 +242,7 @@ void CompiledFrameGraph::execute(CommandBuffer &cmd)
             }
         } else
         {
-            VkRenderingInfo rendering = prepareRenderingInfo(pass, compiled.renderingExtent);
+            VkRenderingInfo rendering = prepareRenderingInfo(pass, compiled.renderingExtent, externalImages);
             vkCmdBeginRendering(cmd.get(), &rendering);
             cmd.setViewport(0.0f, 0.0f, static_cast<float>(compiled.renderingExtent.width),
                             static_cast<float>(compiled.renderingExtent.height));
@@ -217,6 +260,7 @@ void CompiledFrameGraph::execute(CommandBuffer &cmd)
             m_ctx.endDebugLabel(cmd.get());
         }
     }
+    submitResourceBarriers(cmd, m_finalImageBarriers, {}, externalImages);
 }
 
 void CompiledFrameGraph::setExternalImage(const std::string &name, VkImage image, VkImageView view)

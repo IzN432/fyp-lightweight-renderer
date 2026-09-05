@@ -1,4 +1,5 @@
 #include "core/framegraph/FrameGraphDefinition.hpp"
+#include "core/framegraph/ExternalImageBindings.hpp"
 #include "core/framegraph/FrameGraphTopology.hpp"
 #include "core/framegraph/PassBuilder.hpp"
 #include "core/framegraph/PassDescAdapter.hpp"
@@ -259,6 +260,50 @@ void sameLayoutAttachmentHazard()
             "LOAD should synchronize the prior write to attachment read/write access");
 }
 
+void backbufferContractPlansPresentationTransitions()
+{
+    lr::FrameGraphDefinition definition;
+    const auto               backbuffer = definition.importBackbuffer("backbuffer", VK_FORMAT_B8G8R8A8_UNORM);
+    builder(definition, definition.addPass("display")).colorAttachment(backbuffer, VK_FORMAT_B8G8R8A8_UNORM);
+
+    require(definition.externalImages().size() == 1 && definition.externalImages()[0].image == backbuffer,
+            "the backbuffer should be retained as an opaque external image slot");
+
+    const auto order = sort(definition);
+    const auto plan  = lr::framegraph::planVulkanBarriers(definition.passes(), definition.resources(), order,
+                                                          {{"backbuffer", VK_IMAGE_LAYOUT_UNDEFINED}},
+                                                          {{"backbuffer", VK_IMAGE_LAYOUT_PRESENT_SRC_KHR}});
+
+    require(plan.beforePass[0].size() == 1,
+            "backbuffer rendering should transition from its discard state before the first use");
+    require(plan.beforePass[0][0].source.layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+                plan.beforePass[0][0].destination.layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            "the initial backbuffer transition should discard into COLOR_ATTACHMENT");
+    require(plan.afterGraph.size() == 1 &&
+                plan.afterGraph[0].source.layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
+                plan.afterGraph[0].destination.layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            "the graph should return the backbuffer to PRESENT after its final use");
+    require(plan.finalImageLayouts.at("backbuffer") == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            "the exported backbuffer state should be PRESENT");
+}
+
+void externalBindingsEnforceHandleOwnership()
+{
+    lr::FrameGraphDefinition first;
+    lr::FrameGraphDefinition second;
+    const auto               firstBackbuffer  = first.importBackbuffer("backbuffer", VK_FORMAT_B8G8R8A8_UNORM);
+    const auto               secondBackbuffer = second.importBackbuffer("backbuffer", VK_FORMAT_B8G8R8A8_UNORM);
+
+    lr::ExternalImageBindings bindings;
+    bindings.bind(firstBackbuffer, reinterpret_cast<VkImage>(1), reinterpret_cast<VkImageView>(2));
+    require(bindings.find(firstBackbuffer) != nullptr, "a bound external image should resolve by typed handle");
+    requireThrowsContaining(
+        [&] {
+            bindings.bind(secondBackbuffer, reinterpret_cast<VkImage>(3), reinterpret_cast<VkImageView>(4));
+        },
+        "different graphs");
+}
+
 void readOnlyImageAccessesCoalesce()
 {
     lr::FrameGraphDefinition definition;
@@ -385,6 +430,8 @@ int main()
         {"definition snapshots", definitionSnapshotsPreserveHandleIdentityAndCallbacks},
         {"whole-resource barriers", barriersRemainWholeResource},
         {"same-layout attachment hazard", sameLayoutAttachmentHazard},
+        {"backbuffer presentation contract", backbufferContractPlansPresentationTransitions},
+        {"external binding ownership", externalBindingsEnforceHandleOwnership},
         {"read-only image coalescing", readOnlyImageAccessesCoalesce},
         {"same-layout storage hazard", sameLayoutStorageHazard},
         {"buffer RAW hazard", bufferRawHazard},

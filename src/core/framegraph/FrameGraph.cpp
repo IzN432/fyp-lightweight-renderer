@@ -19,6 +19,11 @@ PassBuilder FrameGraph::addPass(std::string name)
     return PassBuilder(m_definition, handle);
 }
 
+ImageHandle FrameGraph::importBackbuffer(std::string_view name, VkFormat format)
+{
+    return m_definition.importBackbuffer(name, format);
+}
+
 void FrameGraph::compile()
 {
     // Build the replacement completely before releasing the currently usable
@@ -34,6 +39,15 @@ void FrameGraph::execute(CommandBuffer &cmd)
         throw std::logic_error("FrameGraph: execute called before compile");
     }
     m_compiled->execute(cmd);
+}
+
+void FrameGraph::execute(CommandBuffer &cmd, const ExternalImageBindings &externalImages)
+{
+    if (!m_compiled)
+    {
+        throw std::logic_error("FrameGraph: execute called before compile");
+    }
+    m_compiled->execute(cmd, externalImages);
 }
 
 void FrameGraph::resize(VkExtent2D newExtent)

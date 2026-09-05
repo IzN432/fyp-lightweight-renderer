@@ -195,7 +195,8 @@ namespace lr::framegraph
 
 VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, const ResourceHandleRegistry &resources,
                                      std::span<const size_t>                               sortedPassIndices,
-                                     const std::unordered_map<std::string, VkImageLayout> &initialImageLayouts)
+                                     const std::unordered_map<std::string, VkImageLayout> &initialImageLayouts,
+                                     const std::unordered_map<std::string, VkImageLayout> &requiredFinalLayouts)
 {
     struct TrackedState
     {
@@ -242,6 +243,23 @@ VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, const Res
             }
         }
     }
+    for (const auto &[name, requiredLayout] : requiredFinalLayouts)
+    {
+        const ResourceKey key{BarrierResourceKind::Image, name};
+        const auto        current = states.find(key);
+        if (current == states.end())
+        {
+            throw std::runtime_error("FrameGraph: exported image '" + name + "' is not used by any pass");
+        }
+        if (current->second.state.layout != requiredLayout)
+        {
+            const VulkanResourceState destination{
+                .stages = VK_PIPELINE_STAGE_2_NONE, .access = VK_ACCESS_2_NONE, .layout = requiredLayout};
+            plan.afterGraph.push_back({BarrierResourceKind::Image, name, current->second.state, destination});
+            current->second = {.state = destination, .writes = false};
+        }
+    }
+
     for (const auto &[key, tracked] : states)
     {
         if (key.kind == BarrierResourceKind::Image)

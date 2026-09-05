@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ExternalImageBindings.hpp"
 #include "FrameGraphDefinition.hpp"
 #include "PassContext.hpp"
 #include "ResourceRegistry.hpp"
@@ -42,6 +43,7 @@ public:
     CompiledFrameGraph &operator=(CompiledFrameGraph &&)      = delete;
 
     void execute(CommandBuffer &cmd);
+    void execute(CommandBuffer &cmd, const ExternalImageBindings &externalImages);
     void executeAndWait(std::vector<FinalLayoutDesc> finalLayouts = {});
 
     void        setExternalImage(const std::string &name, VkImage image, VkImageView view);
@@ -82,9 +84,14 @@ private:
     };
 
     static std::array<float, 4> debugLabelColor(PassType type);
-    void                        submitResourceBarriers(CommandBuffer &cmd, const CompiledPass &compiled);
+    void submitResourceBarriers(CommandBuffer &cmd, const std::vector<CompiledImageBarrier> &imageBarriers,
+                                const std::vector<CompiledBufferBarrier> &bufferBarriers,
+                                const ExternalImageBindings              &externalImages);
+    const ExternalImageBinding &requireExternalImage(ImageHandle                  image,
+                                                     const ExternalImageBindings &externalImages) const;
     void                        bindVertexAndIndexBuffers(CommandBuffer &cmd, const PassDesc &pass);
-    VkRenderingInfo             prepareRenderingInfo(const PassDesc &pass, VkExtent2D extent);
+    VkRenderingInfo             prepareRenderingInfo(const PassDesc &pass, VkExtent2D extent,
+                                                     const ExternalImageBindings &externalImages);
 
     const VulkanContext       &m_ctx;
     ResourceRegistry          &m_registry;
@@ -96,6 +103,7 @@ private:
     std::vector<size_t>                            m_sortedIndices;
     framegraph::ExecutionPlan                      m_executionPlan;
     std::vector<CompiledPass>                      m_passes;
+    std::vector<CompiledImageBarrier>              m_finalImageBarriers;
 
     std::vector<VkImageMemoryBarrier2>     m_scratchImageBarriers;
     std::vector<VkBufferMemoryBarrier2>    m_scratchBufferBarriers;

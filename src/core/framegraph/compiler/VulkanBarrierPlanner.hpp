@@ -35,6 +35,7 @@ struct VulkanBarrierPlan
 {
     // Indexed by pass declaration index, regardless of execution order.
     std::vector<std::vector<PlannedBarrier>>       beforePass;
+    std::vector<PlannedBarrier>                    afterGraph;
     std::unordered_map<std::string, VkImageLayout> finalImageLayouts;
 };
 
@@ -42,6 +43,7 @@ struct VulkanBarrierPlan
 // barriers. Resource ordering is supplied by GraphCompiler's execution plan.
 VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, const ResourceHandleRegistry &resources,
                                      std::span<const size_t>                               sortedPassIndices,
-                                     const std::unordered_map<std::string, VkImageLayout> &initialImageLayouts = {});
+                                     const std::unordered_map<std::string, VkImageLayout> &initialImageLayouts  = {},
+                                     const std::unordered_map<std::string, VkImageLayout> &requiredFinalLayouts = {});
 
 } // namespace lr::framegraph

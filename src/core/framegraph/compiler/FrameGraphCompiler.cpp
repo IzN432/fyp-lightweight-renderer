@@ -279,6 +279,7 @@ void FrameGraphCompiler::buildPipelines(CompiledFrameGraph &graph) const
 void FrameGraphCompiler::buildBarriers(CompiledFrameGraph &graph) const
 {
     std::unordered_map<std::string, VkImageLayout> initialLayouts;
+    std::unordered_map<std::string, VkImageLayout> finalLayouts;
     const auto                                     passes = graph.m_definition.passes();
     for (const PassDesc &pass : passes)
     {
@@ -308,8 +309,20 @@ void FrameGraphCompiler::buildBarriers(CompiledFrameGraph &graph) const
         }
     }
 
-    const auto plan =
-        framegraph::planVulkanBarriers(passes, graph.m_definition.resources(), graph.m_sortedIndices, initialLayouts);
+    // An acquired backbuffer may be a never-presented swapchain image whose
+    // layout is still UNDEFINED. Treat every frame as discard-on-entry: using
+    // UNDEFINED is valid even after an image has previously been presented and
+    // avoids carrying per-swapchain-image layout history into the graph. The
+    // graph still returns every backbuffer to PRESENT_SRC_KHR before submission.
+    for (const FrameGraphDefinition::ExternalImageDesc &external : graph.m_definition.externalImages())
+    {
+        const std::string &name = graph.m_definition.name(external.image);
+        initialLayouts[name]    = VK_IMAGE_LAYOUT_UNDEFINED;
+        finalLayouts[name]      = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    }
+
+    const auto plan = framegraph::planVulkanBarriers(passes, graph.m_definition.resources(), graph.m_sortedIndices,
+                                                     initialLayouts, finalLayouts);
     for (size_t passIndex = 0; passIndex < plan.beforePass.size(); ++passIndex)
     {
         auto &compiled = graph.m_passes[passIndex];
@@ -374,6 +387,31 @@ void FrameGraphCompiler::buildBarriers(CompiledFrameGraph &graph) const
                 compiled.bufferBarriers.push_back({barrier, planned.resourceName});
             }
         }
+    }
+
+    for (const framegraph::PlannedBarrier &planned : plan.afterGraph)
+    {
+        const AllocatedImage *image = m_registry.getImage(planned.resourceName);
+        if (!image)
+        {
+            throw std::runtime_error("FrameGraph: final barrier references missing image '" + planned.resourceName +
+                                     "'");
+        }
+        VkImageMemoryBarrier2 barrier{};
+        barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        barrier.srcStageMask        = planned.source.stages;
+        barrier.srcAccessMask       = planned.source.access;
+        barrier.dstStageMask        = planned.destination.stages;
+        barrier.dstAccessMask       = planned.destination.access;
+        barrier.oldLayout           = planned.source.layout;
+        barrier.newLayout           = planned.destination.layout;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image               = image->image;
+        const VkImageAspectFlags aspect =
+            isDepthFormat(image->format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange = {aspect, 0, image->mipLevels, 0, image->arrayLayers};
+        graph.m_finalImageBarriers.push_back({barrier, planned.resourceName});
     }
 
     for (const auto &[name, layout] : plan.finalImageLayouts)

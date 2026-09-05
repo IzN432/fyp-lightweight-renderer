@@ -24,6 +24,24 @@ PassHandle FrameGraphDefinition::addPass(std::string name)
     return handle;
 }
 
+ImageHandle FrameGraphDefinition::importBackbuffer(std::string_view name, VkFormat format)
+{
+    if (format == VK_FORMAT_UNDEFINED)
+    {
+        throw std::invalid_argument("FrameGraph: backbuffer format cannot be undefined");
+    }
+    const ImageHandle handle = image(name);
+    for (const ExternalImageDesc &external : m_externalImages)
+    {
+        if (external.image == handle)
+        {
+            throw std::runtime_error("FrameGraph: external image '" + this->name(handle) + "' is already declared");
+        }
+    }
+    m_externalImages.push_back({.image = handle, .format = format});
+    return handle;
+}
+
 PassDesc &FrameGraphDefinition::pass(PassHandle handle)
 {
     if (handle.owner != owner())
