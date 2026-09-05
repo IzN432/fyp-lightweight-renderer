@@ -17,8 +17,12 @@ class FrameGraphDefinition
 public:
     FrameGraphDefinition() = default;
 
-    FrameGraphDefinition(const FrameGraphDefinition &)            = delete;
-    FrameGraphDefinition &operator=(const FrameGraphDefinition &) = delete;
+    // Definitions are value-like so compilation can retain an immutable
+    // snapshot independent of subsequent frontend edits.
+    FrameGraphDefinition(const FrameGraphDefinition &)            = default;
+    FrameGraphDefinition &operator=(const FrameGraphDefinition &) = default;
+    FrameGraphDefinition(FrameGraphDefinition &&)                 = default;
+    FrameGraphDefinition &operator=(FrameGraphDefinition &&)      = default;
 
     PassHandle addPass(std::string name);
 

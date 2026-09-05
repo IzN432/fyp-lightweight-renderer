@@ -3,6 +3,7 @@
 #include "core/framegraph/PassBuilder.hpp"
 #include "core/framegraph/PassDescAdapter.hpp"
 #include "core/framegraph/compiler/VulkanBarrierPlanner.hpp"
+#include "core/vulkan/VkFormatUtils.hpp"
 
 #include <functional>
 #include <iostream>
@@ -116,6 +117,17 @@ void symbolicExtentResolution()
         "non-zero");
 }
 
+void depthFormatClassificationIsSharedAndComplete()
+{
+    require(lr::isDepthFormat(VK_FORMAT_D16_UNORM), "D16 should be classified as depth");
+    require(lr::isDepthFormat(VK_FORMAT_X8_D24_UNORM_PACK32), "packed D24 should be classified as depth");
+    require(lr::isDepthFormat(VK_FORMAT_D32_SFLOAT), "D32 should be classified as depth");
+    require(lr::isDepthFormat(VK_FORMAT_D16_UNORM_S8_UINT), "D16S8 should be classified as depth-stencil");
+    require(lr::isDepthFormat(VK_FORMAT_D24_UNORM_S8_UINT), "D24S8 should be classified as depth-stencil");
+    require(lr::isDepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT), "D32S8 should be classified as depth-stencil");
+    require(!lr::isDepthFormat(VK_FORMAT_R16G16B16A16_SFLOAT), "a color format must not be classified as depth");
+}
+
 void attachmentPlanningUsesSemanticDeclarations()
 {
     lr::FrameGraphDefinition definition;
@@ -182,6 +194,27 @@ void handlesCannotCrossDefinitions()
             (void)lr::framegraph::translatePassDescriptions(second.passes(), second.resources(), second.owner());
         },
         "another graph");
+}
+
+void definitionSnapshotsPreserveHandleIdentityAndCallbacks()
+{
+    lr::FrameGraphDefinition definition;
+    const auto               image  = definition.image("snapshot-output");
+    bool                     called = false;
+    builder(definition, definition.addPass("snapshot-pass"))
+        .colorAttachment(image, VK_FORMAT_R8G8B8A8_UNORM)
+        .execute([&](lr::PassContext &) {
+            called = true;
+        });
+
+    const lr::FrameGraphDefinition snapshot = definition;
+    (void)definition.addPass("later-pass");
+    require(snapshot.owner() == definition.owner(), "a definition snapshot must preserve handle ownership");
+    require(snapshot.name(image) == "snapshot-output", "existing handles must resolve in a definition snapshot");
+    require(snapshot.passes().size() == 1 && static_cast<bool>(snapshot.passes()[0].executeCallback),
+            "a definition snapshot must retain callbacks without observing later frontend edits");
+
+    (void)called;
 }
 
 void barriersRemainWholeResource()
@@ -344,10 +377,12 @@ int main()
         {"cycle detection", cycleDetection},
         {"duplicate pass names", duplicatePassNames},
         {"symbolic extent resolution", symbolicExtentResolution},
+        {"shared depth format classification", depthFormatClassificationIsSharedAndComplete},
         {"semantic attachment planning", attachmentPlanningUsesSemanticDeclarations},
         {"contradictory attachments", contradictoryAttachmentDeclarationsAreRejected},
         {"semantic translation", translationPreservesSemanticIntent},
         {"cross-definition handles", handlesCannotCrossDefinitions},
+        {"definition snapshots", definitionSnapshotsPreserveHandleIdentityAndCallbacks},
         {"whole-resource barriers", barriersRemainWholeResource},
         {"same-layout attachment hazard", sameLayoutAttachmentHazard},
         {"read-only image coalescing", readOnlyImageAccessesCoalesce},

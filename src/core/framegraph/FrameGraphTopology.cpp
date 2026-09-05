@@ -1,6 +1,7 @@
 #include "FrameGraphTopology.hpp"
 #include "PassDescAdapter.hpp"
 #include "compiler/GraphCompiler.hpp"
+#include "core/vulkan/VkFormatUtils.hpp"
 
 #include <sstream>
 #include <stdexcept>
@@ -8,12 +9,6 @@
 
 namespace
 {
-
-bool isDepthFormat(VkFormat format)
-{
-    return format == VK_FORMAT_D32_SFLOAT || format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D16_UNORM ||
-           format == VK_FORMAT_D32_SFLOAT_S8_UINT;
-}
 
 const char *passTypeName(lr::PassType type)
 {

@@ -49,8 +49,13 @@ class ResourceHandleRegistry
 public:
     ResourceHandleRegistry() : m_owner(nextOwner()) {}
 
-    ResourceHandleRegistry(const ResourceHandleRegistry &)            = delete;
-    ResourceHandleRegistry &operator=(const ResourceHandleRegistry &) = delete;
+    // Copies preserve the owner id deliberately: a compiled graph stores an
+    // immutable snapshot of the definition and its existing handles must
+    // continue to resolve against that snapshot.
+    ResourceHandleRegistry(const ResourceHandleRegistry &)            = default;
+    ResourceHandleRegistry &operator=(const ResourceHandleRegistry &) = default;
+    ResourceHandleRegistry(ResourceHandleRegistry &&)                 = default;
+    ResourceHandleRegistry &operator=(ResourceHandleRegistry &&)      = default;
 
     uint64_t owner() const { return m_owner; }
 

@@ -62,6 +62,7 @@ add_library(lr_core STATIC
 
     src/core/framegraph/ResourceRegistry.cpp
     src/core/framegraph/FrameGraph.cpp
+    src/core/framegraph/CompiledFrameGraph.cpp
     src/core/framegraph/FrameGraphDefinition.cpp
     src/core/framegraph/PassBuilder.cpp
     src/core/framegraph/PassContext.cpp
@@ -69,6 +70,7 @@ add_library(lr_core STATIC
     src/core/framegraph/FrameGraphTopology.cpp
     src/core/framegraph/model/GraphDefinition.cpp
     src/core/framegraph/compiler/GraphCompiler.cpp
+    src/core/framegraph/compiler/FrameGraphCompiler.cpp
     src/core/framegraph/compiler/VulkanBarrierPlanner.cpp
     src/core/framegraph/ImageReadback.cpp
 

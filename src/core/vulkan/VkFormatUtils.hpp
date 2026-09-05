@@ -2,16 +2,28 @@
 
 #include <vulkan/vulkan.h>
 
-#include <spdlog/spdlog.h>
 #include <cstdint>
-#include <spdlog/spdlog.h>
 #include <stdexcept>
-#include <spdlog/spdlog.h>
 #include <string>
 
-#include <spdlog/spdlog.h>
 namespace lr
 {
+
+inline constexpr bool isDepthFormat(VkFormat format)
+{
+    switch (format)
+    {
+        case VK_FORMAT_D16_UNORM:
+        case VK_FORMAT_X8_D24_UNORM_PACK32:
+        case VK_FORMAT_D32_SFLOAT:
+        case VK_FORMAT_D16_UNORM_S8_UINT:
+        case VK_FORMAT_D24_UNORM_S8_UINT:
+        case VK_FORMAT_D32_SFLOAT_S8_UINT:
+            return true;
+        default:
+            return false;
+    }
+}
 
 // Byte size of one texel/element for common vertex attribute VkFormat values.
 inline uint32_t vkFormatByteSize(VkFormat fmt)
