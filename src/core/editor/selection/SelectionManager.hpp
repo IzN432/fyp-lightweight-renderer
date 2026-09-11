@@ -52,7 +52,7 @@ public:
 
     // ---- Generic per-vertex role registry ----
     // SelectionManager never learns what a role "means" — it just hands out an id and remembers
-    // the color to paint vertices tagged with it. Callers (e.g. a plugin) define their own
+    // the color to paint vertices tagged with it. Callers (e.g. an editor feature) define their own
     // semantics on top of the ids they register.
 
     // Mints a fresh, never-reused role id and remembers its color.
@@ -81,7 +81,7 @@ public:
         m_colorsChangedCallback = std::move(callback);
     }
     // Fired only by classifySelectionAs() — distinct from colors-changed since this is meant for
-    // invalidation hooks (e.g. an ARAP plugin re-running its precompute), not GPU sync.
+    // invalidation hooks (e.g. an ARAP tool re-running its precompute), not GPU sync.
     void registerRoleChangedCallback(std::function<void()> callback) { m_roleChangedCallback = std::move(callback); }
 
 private:

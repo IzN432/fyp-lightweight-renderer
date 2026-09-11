@@ -1,4 +1,4 @@
-#include "ArapPlugin.hpp"
+#include "ArapTool.hpp"
 
 #include "core/math/LinearAlgebraHelpers.hpp"
 
@@ -14,7 +14,7 @@ constexpr glm::vec3 kAnchorColor{0.2f, 0.4f, 1.0f};
 constexpr glm::vec3 kHandleColor{1.0f, 0.6f, 0.1f};
 } // namespace
 
-ArapPlugin::ArapPlugin(SelectionManager &selectionManager, VertexManager &vertexManager, CommandManager &commandManager,
+ArapTool::ArapTool(SelectionManager &selectionManager, VertexManager &vertexManager, CommandManager &commandManager,
                        const Mesh &mesh, VertexDragHandler &defaultHandler, std::vector<DragHandlerGizmo *> gizmos)
     : m_selectionManager(selectionManager), m_vertexManager(vertexManager), m_commandManager(commandManager),
       m_mesh(mesh), m_defaultHandler(defaultHandler), m_gizmos(std::move(gizmos)),
@@ -27,7 +27,7 @@ ArapPlugin::ArapPlugin(SelectionManager &selectionManager, VertexManager &vertex
     });
 }
 
-void ArapPlugin::setModeActive(bool active)
+void ArapTool::setModeActive(bool active)
 {
     m_modeActive = active;
     if (!active)
@@ -36,13 +36,13 @@ void ArapPlugin::setModeActive(bool active)
     }
 }
 
-void ArapPlugin::onRoleChanged()
+void ArapTool::onRoleChanged()
 {
     m_solver.invalidate();
     resetToDefaultHandler();
 }
 
-void ArapPlugin::resetToDefaultHandler()
+void ArapTool::resetToDefaultHandler()
 {
     for (DragHandlerGizmo *gizmo : m_gizmos)
     {
@@ -50,7 +50,7 @@ void ArapPlugin::resetToDefaultHandler()
     }
 }
 
-void ArapPlugin::onSolveClicked()
+void ArapTool::onSolveClicked()
 {
     const auto anchors = m_selectionManager.getIndicesWithRole(m_anchorRole);
     const auto handles = m_selectionManager.getIndicesWithRole(m_handleRole);
@@ -65,7 +65,7 @@ void ArapPlugin::onSolveClicked()
     }
 }
 
-void ArapPlugin::onGui(const glm::mat4 &viewProj, VkExtent2D extent, const glm::vec3 &selectionWorldCentroid)
+void ArapTool::onGui(const glm::mat4 &viewProj, VkExtent2D extent, const glm::vec3 &selectionWorldCentroid)
 {
     if (!m_modeActive)
     {

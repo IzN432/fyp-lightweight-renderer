@@ -149,9 +149,10 @@ void SceneManager::uploadMeshes(const GpuMaterialLayout        &materialLayout,
     const auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
     m_mainMeshPoints     = m_meshUploader.uploadUniqueVertexBuffer({&mainMesh}, m_mainMeshPointsUploadConfig);
 
-    // Seeds the corner-domain "color" attribute from the per-unique-vertex one the caller already
-    // set (see main.cpp), then uploads the heatmap buffer from it.
-    m_mainMeshHeatmap = m_meshUploader.uploadVertexBuffer({&syncMainMeshCornerColor()}, m_mainMeshHeatmapUploadConfig);
+    // Seeds the corner-domain heatmap attribute from the per-unique-vertex analysis colors the
+    // caller set (see main.cpp), then uploads the heatmap buffer from it.
+    m_mainMeshHeatmap =
+        m_meshUploader.uploadVertexBuffer({&syncMainMeshCornerHeatmapColors()}, m_mainMeshHeatmapUploadConfig);
 
     m_indexBuffer = m_meshUploader.uploadIndexBuffer(m_geometryMeshes, {.indexBufferName = m_mainMeshIndexBufferName});
     m_meshUploader.uploadFaceGroupBuffer(m_geometryMeshes, {.faceGroupBufferName = m_mainMeshFaceGroupBufferName});
@@ -185,22 +186,29 @@ void SceneManager::updateMainMeshPointsBuffer()
     m_meshUploader.updateUniqueVertexBuffer({&mainMesh}, m_mainMeshPointsUploadConfig);
 }
 
-Mesh &SceneManager::syncMainMeshCornerColor()
+Mesh &SceneManager::syncMainMeshCornerHeatmapColors()
 {
-    auto                  &mainMesh    = m_mainMeshObject->getComponent<StaticMesh>().mesh();
-    const auto             uniqueColor = mainMesh.getPerUniqueVertexArray<glm::vec3>("color");
+    auto                  &mainMesh       = m_mainMeshObject->getComponent<StaticMesh>().mesh();
+    const auto             uniqueColor    = mainMesh.getPerUniqueVertexArray<glm::vec3>("heatmapColors");
     std::vector<glm::vec3> cornerColor(mainMesh.vertexCount());
     for (uint32_t v = 0; v < mainMesh.vertexCount(); ++v)
     {
         cornerColor[v] = uniqueColor[mainMesh.positionIndices[v]];
     }
-    mainMesh.setPerVertexArray<glm::vec3>("color", std::span<const glm::vec3>(cornerColor));
+    mainMesh.setPerVertexArray<glm::vec3>("heatmapColors", std::span<const glm::vec3>(cornerColor));
     return mainMesh;
 }
 
 void SceneManager::updateMainMeshHeatmapBuffer()
 {
-    m_meshUploader.updateVertexBuffer({&syncMainMeshCornerColor()}, m_mainMeshHeatmapUploadConfig);
+    m_meshUploader.updateVertexBuffer({&syncMainMeshCornerHeatmapColors()}, m_mainMeshHeatmapUploadConfig);
+}
+
+void SceneManager::setMainMeshHeatmapColors(std::span<const glm::vec3> colors)
+{
+    auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
+    mainMesh.setPerUniqueVertexArray("heatmapColors", colors);
+    updateMainMeshHeatmapBuffer();
 }
 
 void SceneManager::updateMainMeshHighlightColors()
@@ -210,7 +218,6 @@ void SceneManager::updateMainMeshHighlightColors()
     auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
     mainMesh.setPerUniqueVertexArray("color", std::span<const glm::vec3>(m_selectionManager->getColors()));
     updateMainMeshPointsBuffer();
-    updateMainMeshHeatmapBuffer();
 }
 
 void SceneManager::setSelectionState(SelectionState state)

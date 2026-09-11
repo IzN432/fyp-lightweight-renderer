@@ -22,11 +22,11 @@ namespace lr
 // The ARAP feature's entire public surface — the only class a host application (main.cpp today,
 // potentially a Python-driven one later) needs to name. Owns the anchor/handle role registration,
 // the solver, the glue drag handler, and the popup/Solve-button UI.
-class ArapPlugin
+class ArapTool
 {
 public:
-    ArapPlugin(SelectionManager &selectionManager, VertexManager &vertexManager, CommandManager &commandManager,
-               const Mesh &mesh, VertexDragHandler &defaultHandler, std::vector<DragHandlerGizmo *> gizmos);
+    ArapTool(SelectionManager &selectionManager, VertexManager &vertexManager, CommandManager &commandManager,
+             const Mesh &mesh, VertexDragHandler &defaultHandler, std::vector<DragHandlerGizmo *> gizmos);
 
     void setModeActive(bool active);
     bool isModeActive() const { return m_modeActive; }

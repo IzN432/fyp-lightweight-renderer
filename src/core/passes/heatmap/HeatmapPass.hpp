@@ -10,12 +10,11 @@
 namespace lr
 {
 
-// Rasterises the main mesh with its per-vertex "color" attribute (see SceneManager's
+// Rasterises the main mesh with its per-vertex "heatmapColors" attribute (see SceneManager's
 // heatmap buffer) Gouraud-interpolated across the surface, into its own color+depth target —
-// a debug/analysis view showing whatever scalar/color data has been written per vertex
-// (currently the selection-highlight color; could equally be strain, curvature, etc. by
-// writing different values to the same "color" attribute). FinalPass blends the result on
-// top of the lit scene when enabled. Disabled by default; toggled at runtime via setEnabled().
+// a debug/analysis view showing scalar-derived colors written per vertex. FinalPass blends
+// the result on top of the lit scene when enabled. Disabled by default; toggled at runtime
+// via setEnabled().
 class HeatmapPass
 {
 public:

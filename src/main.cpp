@@ -32,7 +32,8 @@
 #include "core/scene/SceneManager.hpp"
 #include "core/scene/Scene.hpp"
 
-#include "plugins/arap/ArapPlugin.hpp"
+#include "features/arap/ArapTool.hpp"
+#include "features/laplace_beltrami/LaplaceBeltramiTool.hpp"
 
 #include <ImGuiFileDialog.h>
 #include <imgui.h>
@@ -170,6 +171,8 @@ try
         lr::Mesh              &m = sequence.frames.front();
         std::vector<glm::vec3> colors(m.positions.size(), glm::vec3(1.0f, 0.0f, 1.0f));
         m.setPerUniqueVertexArray("color", std::span<const glm::vec3>(colors));
+        std::vector<glm::vec3> heatmapColors(m.positions.size(), glm::vec3(0.0f));
+        m.setPerUniqueVertexArray("heatmapColors", std::span<const glm::vec3>(heatmapColors));
     }
     auto &staticMesh = meshObject->addComponent<lr::StaticMesh>(sequence.frames.front(), materialHandles,
                                                                 sceneManager.materialStore());
@@ -246,7 +249,7 @@ try
 
     lr::GpuMeshLayout heatmapMeshLayout(staticMesh.mesh().layout());
     heatmapMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
-    heatmapMeshLayout.map("color", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
+    heatmapMeshLayout.map("heatmapColors", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
 
     heatmapPass.build(viewer.frameGraph(), heatmapMeshLayout);
 
@@ -313,7 +316,7 @@ try
     lr::SelectionManager &selectionManager = sceneManager.selectionManager();
     selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera, selectionManager));
 
-    // What the translate gizmos drive by default (plain vertex-drag editing). ArapPlugin swaps
+    // What the translate gizmos drive by default (plain vertex-drag editing). ArapTool swaps
     // this out for an ARAP-solve handler on the same gizmo instances once a precompute succeeds.
     lr::DefaultVertexDragHandler defaultHandler(vertexManager, selectionManager, commandManager);
 
@@ -327,7 +330,7 @@ try
                                                                  viewer.input(), defaultHandler);
     auto boxGizmo    = std::make_unique<lr::TranslateBoxGizmo>(*camera, viewer.input(), defaultHandler);
 
-    // Raw pointers kept for ArapPlugin (needs a generic DragHandlerGizmo list) and the gizmo-
+    // Raw pointers kept for ArapTool (needs a generic DragHandlerGizmo list) and the gizmo-
     // positioning loop below (reads whichever handler is currently wired) — ownership moves to
     // gizmoManager via addGizmo() just below.
     lr::TranslateArrowGizmo *arrowX      = arrowXGizmo.get();
@@ -348,8 +351,21 @@ try
 
     const std::vector<lr::DragHandlerGizmo *> dragHandlerGizmos = {arrowX, arrowY, arrowZ, boxGizmoPtr};
 
-    lr::ArapPlugin arapPlugin(selectionManager, vertexManager, commandManager, staticMesh.mesh(), defaultHandler,
-                              dragHandlerGizmos);
+    lr::ArapTool arapTool(selectionManager, vertexManager, commandManager, staticMesh.mesh(), defaultHandler,
+                          dragHandlerGizmos);
+
+    // Geometry-processing triangles index unique positions directly. This conversion removes the
+    // render-vertex/UV-seam representation before data crosses into the Laplace-Beltrami module.
+    std::vector<glm::uvec3> positionTriangles;
+    positionTriangles.reserve(staticMesh.mesh().faces.size());
+    for (const glm::uvec3 &face : staticMesh.mesh().faces)
+    {
+        positionTriangles.push_back({staticMesh.mesh().positionIndices[face.x],
+                                     staticMesh.mesh().positionIndices[face.y],
+                                     staticMesh.mesh().positionIndices[face.z]});
+    }
+    lr::LaplaceBeltramiTool laplaceBeltramiTool(staticMesh.mesh().positions, positionTriangles, sceneManager,
+                                                heatmapPass, vertexManager);
 
     // Single combined LMB handler: gizmos get first refusal on a click (so
     // dragging an arrow doesn't simultaneously start a box-select), and
@@ -390,7 +406,7 @@ try
         // left showing/interactive after Tab-ing out of Edit).
         if (!nowEditing)
         {
-            arapPlugin.setModeActive(false);
+            arapTool.setModeActive(false);
         }
     });
 
@@ -417,21 +433,9 @@ try
             return;
         }
 
-        arapPlugin.setModeActive(!arapPlugin.isModeActive());
+        arapTool.setModeActive(!arapTool.isModeActive());
     });
 
-    viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
-        if (key != GLFW_KEY_H || action != GLFW_PRESS)
-        {
-            return;
-        }
-        if (ImGui::GetIO().WantCaptureKeyboard)
-        {
-            return;
-        }
-
-        heatmapPass.setEnabled(!heatmapPass.isEnabled());
-    });
     // -------------------------------------------------------------------------
     // Per-frame callbacks
     // -------------------------------------------------------------------------
@@ -441,6 +445,8 @@ try
     bool                    environmentDirty = false;
 
     viewer.onGui([&]() {
+        laplaceBeltramiTool.onGui();
+
         ImGui::Begin("Scene Hierarchy");
 
         if (ImGui::CollapsingHeader("Environment", ImGuiTreeNodeFlags_DefaultOpen))
@@ -579,16 +585,16 @@ try
         };
 
         const auto &selected = selectionManager.getSelectedIndices();
-        arapPlugin.onGui(viewProj, extent, selected.empty() ? glm::vec3(0.0f) : worldCentroidOf(selected));
+        arapTool.onGui(viewProj, extent, selected.empty() ? glm::vec3(0.0f) : worldCentroidOf(selected));
 
-        // All 4 gizmos always share the same handler (ArapPlugin swaps them together), so any one
+        // All 4 gizmos always share the same handler (ArapTool swaps them together), so any one
         // of them tells us which is currently active.
         const lr::VertexDragHandler &activeHandler = arrowX->dragHandler();
         const auto                  &driven        = activeHandler.indices();
         // While ARAP mode is active but no precompute has succeeded yet, the default drag gizmo
         // would otherwise appear over the very selection the anchor/handle popup is asking about —
         // suppress it until Solve actually swaps the handler.
-        const bool suppressedByArapMode = arapPlugin.isModeActive() && (&activeHandler == &defaultHandler);
+        const bool suppressedByArapMode = arapTool.isModeActive() && (&activeHandler == &defaultHandler);
         // Edit mode is the top-level switch everything gizmo-related is nested under (ARAP mode
         // included — see the Tab handler above, which forces it off on leaving Edit) — a handler's
         // index list can still be non-empty outside Edit (roles/selection aren't cleared just by

@@ -36,7 +36,7 @@ void HeatmapPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
             }
 
             // Only the main mesh (singleMeshResults[0]) is drawn — light visuals never get a
-            // "color" attribute (see SceneManager::updateMainMeshHeatmapBuffer), so they aren't
+            // "heatmapColors" attribute (see SceneManager::updateMainMeshHeatmapBuffer), so they aren't
             // part of m_cfg.vertexBufferUploadResult/indexBufferUploadResult to begin with.
             const auto &vert  = m_cfg.vertexBufferUploadResult.singleMeshResults[0];
             const auto &index = m_cfg.indexBufferUploadResult.singleMeshResults[0];

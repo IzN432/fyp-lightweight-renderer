@@ -127,6 +127,7 @@ add_library(lr_core STATIC
     src/core/math/LinearAlgebraHelpers.cpp
 
     src/core/utility/ImageLoader.cpp
+    src/core/utility/HeatmapColors.cpp
 )
 target_include_directories(lr_core PUBLIC src)
 target_link_libraries(lr_core PUBLIC
@@ -167,22 +168,28 @@ add_shaders(lr_core
 
 )
 
-# ARAP plugin — physically separate from lr_core: lr_core never includes anything from
-# src/plugins/**, this links against lr_core (never the reverse), and libigl/Eigen are scoped to
-# this target only, keeping the core engine's dependency footprint unchanged. No dynamic loading
-# yet, but this compile-time boundary is what makes that a later, separate step.
-add_library(lr_arap_plugin STATIC
-    src/plugins/arap/ArapSolver.cpp
-    src/plugins/arap/ArapDragHandler.cpp
-    src/plugins/arap/ArapDeformCommand.cpp
-    src/plugins/arap/ArapPlugin.cpp
+# ARAP editor feature — physically separate from lr_core and linked by the application.
+add_library(lr_arap_feature STATIC
+    src/features/arap/ArapSolver.cpp
+    src/features/arap/ArapDragHandler.cpp
+    src/features/arap/ArapDeformCommand.cpp
+    src/features/arap/ArapTool.cpp
 )
-target_include_directories(lr_arap_plugin PUBLIC src)
-target_link_libraries(lr_arap_plugin PUBLIC lr_core igl::igl_core)
+target_include_directories(lr_arap_feature PUBLIC src)
+target_link_libraries(lr_arap_feature PUBLIC lr_core igl::igl_core)
+
+# Laplace-Beltrami analysis feature. Core owns only the generic heatmap rendering/buffer path;
+# this target owns the mesh operator, color generation, GUI, and stale-result tracking.
+add_library(lr_laplace_beltrami_feature STATIC
+    src/features/laplace_beltrami/LaplaceBeltramiOperator.cpp
+    src/features/laplace_beltrami/LaplaceBeltramiTool.cpp
+)
+target_include_directories(lr_laplace_beltrami_feature PUBLIC src)
+target_link_libraries(lr_laplace_beltrami_feature PUBLIC lr_core igl::igl_core)
 
 # Application executable
 add_executable(renderer src/main.cpp)
-target_link_libraries(renderer PRIVATE lr_core lr_arap_plugin imguiFileDialog)
+target_link_libraries(renderer PRIVATE lr_core lr_arap_feature lr_laplace_beltrami_feature imguiFileDialog)
 
 if(BUILD_TESTING)
     add_executable(framegraph_model_tests

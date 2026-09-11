@@ -28,11 +28,14 @@ public:
     // delta doesn't apply.
     void setPositions(const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &positions);
 
-    void registerUpdateCallback(std::function<void()> callback) { m_updateCallback = std::move(callback); }
+    // Multiple systems observe geometry edits (GPU upload, analysis invalidation, ...).
+    void registerUpdateCallback(std::function<void()> callback) { m_updateCallbacks.push_back(std::move(callback)); }
 
 private:
     std::vector<glm::vec3> &m_positions;
-    std::function<void()>   m_updateCallback;
+    std::vector<std::function<void()>> m_updateCallbacks;
+
+    void notifyUpdateCallbacks();
 };
 
 } // namespace lr

@@ -15,7 +15,7 @@ namespace lr
 {
 
 // Drives the current handle-role vertex set through an ArapSolver. handleRole is an opaque id
-// handed to it by ArapPlugin — meaningless to anyone else, just forwarded to
+// handed to it by ArapTool — meaningless to anyone else, just forwarded to
 // SelectionManager::getIndicesWithRole.
 class ArapDragHandler : public VertexDragHandler
 {

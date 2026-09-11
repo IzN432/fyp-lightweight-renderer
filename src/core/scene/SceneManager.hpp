@@ -112,6 +112,10 @@ public:
     // updateMainMeshPointsBuffer()) — for edits that only move vertices (vertex-drag editing).
     void updateMainMeshPositions();
 
+    // Replaces the analysis colors used by HeatmapPass without touching the selection-highlight
+    // colors used by the points overlay. Colors are indexed by mesh.positions.
+    void setMainMeshHeatmapColors(std::span<const glm::vec3> colors);
+
     // Re-uploads the materials SSBO from the MaterialStore's current contents — called by
     // flushDirty() when the main mesh's StaticMesh is dirty (e.g. a Scene Hierarchy slider edit,
     // see StaticMesh::onGUIImpl), so the edit reaches the GPU.
@@ -171,15 +175,14 @@ private:
     // the same interleaved buffer.
     void updateMainMeshPointsBuffer();
 
-    // Expands the main mesh's per-unique-vertex "color" attribute out to the corner domain (via
-    // positionIndices) and registers it as a per-vertex "color" attribute on the same Mesh, ready
+    // Expands the main mesh's per-unique-vertex "heatmapColors" attribute to the corner domain
+    // (via positionIndices) and registers the matching per-vertex attribute on the same Mesh, ready
     // for packing into m_mainMeshHeatmapBufferName. Returns the mutable mesh reference so callers
     // can pack/upload it (initial upload vs. re-upload need different MeshUploader calls).
-    Mesh &syncMainMeshCornerColor();
+    Mesh &syncMainMeshCornerHeatmapColors();
 
-    // Repacks and re-uploads m_mainMeshHeatmapBufferName after syncMainMeshCornerColor(). Shared
-    // by updateMainMeshPositions() (a vertex moved) and updateMainMeshHighlightColors() (a color
-    // changed) — same reasoning as updateMainMeshPointsBuffer(), just in the other domain.
+    // Repacks and re-uploads m_mainMeshHeatmapBufferName. Called when positions or independently
+    // stored analysis colors change.
     void updateMainMeshHeatmapBuffer();
 
     Scene            *m_scene = nullptr;
@@ -223,9 +226,11 @@ private:
     VertexBufferUploadConfig m_mainMeshPointsUploadConfig = {
         .vertexBufferName = m_mainMeshPointsBufferName, .vertexAttributeNames = {"color"}, .includePosition = true};
 
-    // Config for the corner-domain position+color buffer — see m_mainMeshHeatmapBufferName.
+    // Config for the corner-domain position+heatmapColors buffer.
     VertexBufferUploadConfig m_mainMeshHeatmapUploadConfig = {
-        .vertexBufferName = m_mainMeshHeatmapBufferName, .vertexAttributeNames = {"color"}, .includePosition = true};
+        .vertexBufferName = m_mainMeshHeatmapBufferName,
+        .vertexAttributeNames = {"heatmapColors"},
+        .includePosition = true};
 
     VertexBufferUploadResult m_meshPositions;
     VertexBufferUploadResult m_mainMeshPoints;

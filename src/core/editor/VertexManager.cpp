@@ -5,10 +5,18 @@
 namespace lr
 {
 
+void VertexManager::notifyUpdateCallbacks()
+{
+    for (const auto &callback : m_updateCallbacks)
+    {
+        callback();
+    }
+}
+
 void VertexManager::updatePosition(uint32_t index, const glm::vec3 &newPosition)
 {
     m_positions[index] = newPosition;
-    m_updateCallback();
+    notifyUpdateCallbacks();
 }
 
 void VertexManager::removeVertex(uint32_t index)
@@ -17,13 +25,13 @@ void VertexManager::removeVertex(uint32_t index)
     {
         m_positions.erase(m_positions.begin() + index);
     }
-    m_updateCallback();
+    notifyUpdateCallbacks();
 }
 
 void VertexManager::addVertex(const glm::vec3 &position)
 {
     m_positions.push_back(position);
-    m_updateCallback();
+    notifyUpdateCallbacks();
 }
 
 void VertexManager::translateSelectedVertices(const std::unordered_set<uint32_t> &indices, const glm::vec3 &translation)
@@ -35,7 +43,7 @@ void VertexManager::translateSelectedVertices(const std::unordered_set<uint32_t>
             m_positions[index] += translation;
         }
     }
-    m_updateCallback();
+    notifyUpdateCallbacks();
 }
 
 void VertexManager::setPositions(const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &positions)
@@ -48,7 +56,7 @@ void VertexManager::setPositions(const std::vector<uint32_t> &indices, const std
             m_positions[indices[i]] = positions[i];
         }
     }
-    m_updateCallback();
+    notifyUpdateCallbacks();
 }
 
 } // namespace lr
