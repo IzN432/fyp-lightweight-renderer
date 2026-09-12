@@ -96,7 +96,7 @@ public:
     // Viewer::onLateUpdate.
     void flushDirty();
 
-    // Builds one hidden quad StaticMesh (and one MaterialStore slot) per Light currently in the
+    // Builds one hidden quad MeshComponent (and one MaterialStore slot) per Light currently in the
     // scene — see AreaLightVisual.hpp for why every light gets one regardless of its current type.
     // Called by initialize(); exposed separately in case a caller needs to set up light visuals
     // without going through the full initialize() sequence.
@@ -117,8 +117,8 @@ public:
     void setMainMeshHeatmapColors(std::span<const glm::vec3> colors);
 
     // Re-uploads the materials SSBO from the MaterialStore's current contents — called by
-    // flushDirty() when the main mesh's StaticMesh is dirty (e.g. a Scene Hierarchy slider edit,
-    // see StaticMesh::onGUIImpl), so the edit reaches the GPU.
+    // flushDirty() when the main mesh's MeshComponent is dirty (e.g. a Scene Hierarchy slider edit,
+    // see MeshComponent::onGUIImpl), so the edit reaches the GPU.
     void updateMaterials();
 
     // Rebuilds every light visual's quad geometry + MaterialStore slot from its current Light/

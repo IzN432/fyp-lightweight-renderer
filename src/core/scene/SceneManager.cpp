@@ -2,7 +2,7 @@
 
 #include "Camera.hpp"
 #include "Light.hpp"
-#include "StaticMesh.hpp"
+#include "MeshComponent.hpp"
 #include "TransformComponent.hpp"
 
 #include "core/app/Viewer.hpp"
@@ -52,7 +52,7 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
     // main mesh's Mesh/TransformComponent, which only exist once uploadMeshes() above has run. The
     // highlight-changed callback keeps the GPU color buffer in sync with selection state — the
     // caller (main.cpp) still owns wiring up a SelectionTool and its own UI on top of it.
-    auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
+    auto &mainMesh = m_mainMeshObject->getComponent<MeshComponent>().mesh();
     m_selectionManager =
         std::make_unique<SelectionManager>(mainMesh.positions(),
                                            m_mainMeshObject->getComponent<TransformComponent>(), input);
@@ -106,21 +106,21 @@ void SceneManager::createLightVisuals(const AreaLightVisualConfig &config)
         Mesh quadMesh;
         buildAreaLightQuadMesh(quadMesh, transform, lightData, handle, config);
 
-        lightObject->addComponent<StaticMesh>(quadMesh, std::vector<MaterialHandle>{handle}, m_materialStore,
+        lightObject->addComponent<MeshComponent>(quadMesh, std::vector<MaterialHandle>{handle}, m_materialStore,
                                               /*hideFromGui=*/true);
     }
 }
 
 void SceneManager::gatherGeometry(const std::vector<std::string> &vertexAttributeNames)
 {
-    auto &mainStaticMesh = m_mainMeshObject->getComponent<StaticMesh>();
+    auto &mainMeshComponent = m_mainMeshObject->getComponent<MeshComponent>();
 
-    m_geometryMeshes = {&mainStaticMesh.mesh()};
+    m_geometryMeshes = {&mainMeshComponent.mesh()};
     m_meshTransforms = {&m_mainMeshObject->getComponent<TransformComponent>()};
 
     for (SceneObject *lightVisualObject : m_lightVisualObjects)
     {
-        m_geometryMeshes.push_back(&lightVisualObject->getComponent<StaticMesh>().mesh());
+        m_geometryMeshes.push_back(&lightVisualObject->getComponent<MeshComponent>().mesh());
         // Light visuals bake their TransformComponent into vertex positions directly (see
         // AreaLightVisual.hpp), so they'd be double-transformed by also applying their TransformComponent
         // here — nullptr means "draw with an identity model matrix".
@@ -147,7 +147,7 @@ void SceneManager::uploadMeshes(const GpuMaterialLayout        &materialLayout,
     // SelectionManager and the points-picking overlay already operate in. Color comes from the main
     // mesh's own "color" per-unique-vertex attribute (caller must seed it before initialize() — see
     // main.cpp), which is what SelectionManager's highlight indices are already in terms of.
-    const auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
+    const auto &mainMesh = m_mainMeshObject->getComponent<MeshComponent>().mesh();
     m_mainMeshPoints     = m_meshUploader.uploadUniqueVertexBuffer({&mainMesh}, m_mainMeshPointsUploadConfig);
 
     // Seeds the corner-domain heatmap attribute from the per-unique-vertex analysis colors the
@@ -183,13 +183,13 @@ void SceneManager::updateMainMeshPositions()
 
 void SceneManager::updateMainMeshPointsBuffer()
 {
-    const auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
+    const auto &mainMesh = m_mainMeshObject->getComponent<MeshComponent>().mesh();
     m_meshUploader.updateUniqueVertexBuffer({&mainMesh}, m_mainMeshPointsUploadConfig);
 }
 
 Mesh &SceneManager::syncMainMeshCornerHeatmapColors()
 {
-    auto                  &mainMesh       = m_mainMeshObject->getComponent<StaticMesh>().mesh();
+    auto                  &mainMesh       = m_mainMeshObject->getComponent<MeshComponent>().mesh();
     const auto             uniqueColor    = mainMesh.getPerUniqueVertexArray<glm::vec3>("heatmapColors");
     std::vector<glm::vec3> cornerColor(mainMesh.vertexCount());
     for (uint32_t v = 0; v < mainMesh.vertexCount(); ++v)
@@ -207,7 +207,7 @@ void SceneManager::updateMainMeshHeatmapBuffer()
 
 void SceneManager::setMainMeshHeatmapColors(std::span<const glm::vec3> colors)
 {
-    auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
+    auto &mainMesh = m_mainMeshObject->getComponent<MeshComponent>().mesh();
     mainMesh.setPerUniqueVertexArray("heatmapColors", colors);
     updateMainMeshHeatmapBuffer();
 }
@@ -216,7 +216,7 @@ void SceneManager::updateMainMeshHighlightColors()
 {
     // SelectionManager owns the coloring itself (persistent buffer, tool-customizable highlight
     // color) — this just pushes its result to the Mesh + GPU.
-    auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
+    auto &mainMesh = m_mainMeshObject->getComponent<MeshComponent>().mesh();
     mainMesh.setPerUniqueVertexArray("color", std::span<const glm::vec3>(m_selectionManager->getColors()));
     updateMainMeshPointsBuffer();
 }
@@ -244,10 +244,10 @@ void SceneManager::updateLightVisuals()
         const auto      *areaLight       = std::get_if<AreaLight>(&lightObject->getComponent<Light>().light);
         const AreaLight &lightData       = areaLight ? *areaLight : kHiddenAreaLightVisual;
         const TransformComponent &transform = lightObject->getComponent<TransformComponent>();
-        auto            &lightStaticMesh = lightObject->getComponent<StaticMesh>();
+        auto            &lightMesh = lightObject->getComponent<MeshComponent>();
 
-        const MaterialHandle handle = lightStaticMesh.materialHandles().front();
-        buildAreaLightQuadMesh(lightStaticMesh.mesh(), transform, lightData, handle, m_areaLightVisualConfig);
+        const MaterialHandle handle = lightMesh.materialHandles().front();
+        buildAreaLightQuadMesh(lightMesh.mesh(), transform, lightData, handle, m_areaLightVisualConfig);
         m_materialStore.get(handle) = buildAreaLightMaterial(lightData, m_areaLightVisualConfig);
     }
 
@@ -290,13 +290,13 @@ void SceneManager::flushDirty()
         }
     }
 
-    // Pushes material edits made via the Scene Hierarchy's sliders (StaticMesh::onGUIImpl) to the
+    // Pushes material edits made via the Scene Hierarchy's sliders (MeshComponent::onGUIImpl) to the
     // GPU materials SSBO — without this, dragging a slider only updates the MaterialStore's CPU copy.
-    auto &mainStaticMesh = m_mainMeshObject->getComponent<StaticMesh>();
-    if (mainStaticMesh.isDirty())
+    auto &mainMeshComponent = m_mainMeshObject->getComponent<MeshComponent>();
+    if (mainMeshComponent.isDirty())
     {
         updateMaterials();
-        mainStaticMesh.clearDirty();
+        mainMeshComponent.clearDirty();
     }
 }
 

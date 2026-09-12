@@ -18,7 +18,7 @@
 #include "core/scene/Camera.hpp"
 #include "core/scene/Light.hpp"
 #include "core/scene/Mesh.hpp"
-#include "core/scene/StaticMesh.hpp"
+#include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
 #include "core/editor/gizmo/GizmoManager.hpp"
@@ -145,8 +145,8 @@ try
         throw std::runtime_error("GltfLoader returned empty sequence for '" + meshPath.string() + "'");
     }
 
-    // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets its own StaticMesh
-    // component (a quad), separate from the main mesh's StaticMesh. The quad still draws through the
+    // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets its own MeshComponent
+    // (a quad), separate from the main mesh's MeshComponent. The quad still draws through the
     // same GeometryPass as the main mesh (see AreaLightVisual.hpp for why the visual needs to be real
     // geometry rather than an overlay); its material lives in a MaterialStore slot acquired up front,
     // so switching a light's type at runtime (see Light::onGUIImpl) just rewrites that slot in place —
@@ -174,8 +174,8 @@ try
         std::vector<glm::vec3> heatmapColors(m.uniquePositionCount(), glm::vec3(0.0f));
         m.setPerUniqueVertexArray("heatmapColors", std::span<const glm::vec3>(heatmapColors));
     }
-    auto &staticMesh = meshObject->addComponent<lr::StaticMesh>(sequence.frames.front(), materialHandles,
-                                                                sceneManager.materialStore());
+    auto &meshComponent = meshObject->addComponent<lr::MeshComponent>(sequence.frames.front(), materialHandles,
+                                                                     sceneManager.materialStore());
     meshObject->name = "Mesh Object";
     sceneManager.setMainMeshObject(*meshObject);
 
@@ -229,7 +229,7 @@ try
 
          .materialCount = sceneManager.materialStore().capacity(),
     });
-    lr::GpuMeshLayout gpuMeshLayout(staticMesh.mesh().layout());
+    lr::GpuMeshLayout gpuMeshLayout(meshComponent.mesh().layout());
 
     gpuMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
     gpuMeshLayout.map(config.normalAttributeName, 1, 1, VK_FORMAT_R32G32B32_SFLOAT);
@@ -247,7 +247,7 @@ try
         .meshTransform            = &meshObject->getComponent<lr::TransformComponent>(),
     });
 
-    lr::GpuMeshLayout heatmapMeshLayout(staticMesh.mesh().layout());
+    lr::GpuMeshLayout heatmapMeshLayout(meshComponent.mesh().layout());
     heatmapMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
     heatmapMeshLayout.map("heatmapColors", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
 
@@ -275,7 +275,7 @@ try
     overlayGeometryPass.build(viewer.frameGraph());
     overlayGeometryPass.setInstances({});
 
-    lr::GpuMeshLayout pointsMeshLayout(staticMesh.mesh().layout());
+    lr::GpuMeshLayout pointsMeshLayout(meshComponent.mesh().layout());
     pointsMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
     pointsMeshLayout.mapUniqueVertex("color", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
 
@@ -283,7 +283,7 @@ try
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
         .pointsBufferResourceName = sceneManager.mainMeshPointsBufferName(),
         .pointsBufferUploadResult = sceneManager.mainMeshPoints(),
-        .vertexCounts             = {staticMesh.mesh().uniquePositionCount()},
+        .vertexCounts             = {meshComponent.mesh().uniquePositionCount()},
         .meshTransform            = &meshObject->getComponent<lr::TransformComponent>(),
     });
     overlayPointsPass.build(viewer.frameGraph(), pointsMeshLayout);
@@ -303,7 +303,7 @@ try
     // Gizmo hover — reads the picking image from the previous frame
     lr::ImageReadback gizmoReadback(viewer.context(), viewer.allocator());
 
-    lr::VertexManager vertexManager(staticMesh.mesh());
+    lr::VertexManager vertexManager(meshComponent.mesh());
     vertexManager.registerUpdateCallback([&]() {
         sceneManager.updateMainMeshPositions();
     });
@@ -351,20 +351,20 @@ try
 
     const std::vector<lr::DragHandlerGizmo *> dragHandlerGizmos = {arrowX, arrowY, arrowZ, boxGizmoPtr};
 
-    lr::ArapTool arapTool(selectionManager, vertexManager, commandManager, staticMesh.mesh(), defaultHandler,
+    lr::ArapTool arapTool(selectionManager, vertexManager, commandManager, meshComponent.mesh(), defaultHandler,
                           dragHandlerGizmos);
 
     // Geometry-processing triangles index unique positions directly. This conversion removes the
     // render-vertex/UV-seam representation before data crosses into the Laplace-Beltrami module.
     std::vector<glm::uvec3> positionTriangles;
-    positionTriangles.reserve(staticMesh.mesh().faces().size());
-    for (const glm::uvec3 &face : staticMesh.mesh().faces())
+    positionTriangles.reserve(meshComponent.mesh().faces().size());
+    for (const glm::uvec3 &face : meshComponent.mesh().faces())
     {
-        positionTriangles.push_back({staticMesh.mesh().positionIndices()[face.x],
-                                     staticMesh.mesh().positionIndices()[face.y],
-                                     staticMesh.mesh().positionIndices()[face.z]});
+        positionTriangles.push_back({meshComponent.mesh().positionIndices()[face.x],
+                                     meshComponent.mesh().positionIndices()[face.y],
+                                     meshComponent.mesh().positionIndices()[face.z]});
     }
-    lr::LaplaceBeltramiTool laplaceBeltramiTool(staticMesh.mesh().positions(), positionTriangles, sceneManager,
+    lr::LaplaceBeltramiTool laplaceBeltramiTool(meshComponent.mesh().positions(), positionTriangles, sceneManager,
                                                 heatmapPass, vertexManager);
 
     // Single combined LMB handler: gizmos get first refusal on a click (so

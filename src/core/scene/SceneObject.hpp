@@ -6,6 +6,7 @@
 #include <typeindex>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 #include <imgui.h>
 
 namespace lr
@@ -20,10 +21,13 @@ public:
 
     template <typename T, typename... Args> T &addComponent(Args &&...args)
     {
+        static_assert(std::is_base_of_v<Component, T>, "T must derive from Component");
+
         if (components.contains(std::type_index(typeid(T))))
         {
             throw std::runtime_error("Component of this type already exists on this object");
         }
+
         auto component                         = std::make_unique<T>(std::forward<Args>(args)...);
         T   &ref                               = *component;
         ref.m_owningObject                     = this;

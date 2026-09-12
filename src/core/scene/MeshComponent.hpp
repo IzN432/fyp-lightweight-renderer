@@ -38,7 +38,7 @@ private:
     std::string m_materialName;
 };
 
-class StaticMesh : public Component
+class MeshComponent : public Component
 {
 private:
     Mesh m_mesh;
@@ -52,10 +52,10 @@ private:
     bool m_hideFromGui;
 
 public:
-    explicit StaticMesh(Mesh &mesh, std::vector<MaterialHandle> materialHandles, MaterialStore &materialStore,
-                        bool hideFromGui = false)
-        : m_mesh(std::move(mesh)), m_materialHandles(std::move(materialHandles)), m_materialStore(&materialStore),
-          m_hideFromGui(hideFromGui)
+    explicit MeshComponent(Mesh &mesh, std::vector<MaterialHandle> materialHandles, MaterialStore &materialStore,
+                           bool hideFromGui = false)
+        : Component("MeshComponent"), m_mesh(std::move(mesh)), m_materialHandles(std::move(materialHandles)),
+          m_materialStore(&materialStore), m_hideFromGui(hideFromGui)
     {}
 
     void onGUIImpl() override
