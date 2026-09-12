@@ -144,30 +144,34 @@ public:
     // First-class data
     // -------------------------------------------------------------------------
 
-    // Positions — always required. Assigning this vector directly does NOT
-    // update the internal vertex count; call setVertexCount() or use
-    // setPerVertexArray() / setPerVertexAt() which keep counts in sync.
-    std::vector<glm::vec3>  positions;
-    std::vector<uint32_t>   positionIndices; // index into positions for each vertex
-    std::vector<glm::uvec3> faces;           // triangle index triplets (uint32)
+    // Atomically establishes the unique-position, render-vertex, and face domains.
+    // positionIndices maps each render vertex to a unique position; faces index render vertices.
+    void setTopology(std::vector<glm::vec3> positions, std::vector<uint32_t> positionIndices,
+                     std::vector<glm::uvec3> faces);
 
-    // Per-face group membership — valid only when faceGroups are enabled.
-    // Indexed by face index; each value is an index into the face group table.
-    std::vector<uint32_t> faceGroups;
+    // Per-face group membership. Empty means that the mesh does not use face groups;
+    // otherwise there must be exactly one entry per face.
+    void setFaceGroups(std::vector<uint32_t> faceGroups);
+
+    const std::vector<glm::vec3>  &positions() const { return m_positions; }
+    const std::vector<uint32_t>   &positionIndices() const { return m_positionIndices; }
+    const std::vector<glm::uvec3> &faces() const { return m_faces; }
+    const std::vector<uint32_t>   &faceGroups() const { return m_faceGroups; }
+
+    // Position-only editing preserves topology and all attribute-domain sizes.
+    glm::vec3       &positionAt(uint32_t index) { return m_positions.at(index); }
+    const glm::vec3 &positionAt(uint32_t index) const { return m_positions.at(index); }
 
     // -------------------------------------------------------------------------
     // Count management
     // -------------------------------------------------------------------------
 
-    // Explicit setters — lock the count and pre-allocate all registered
-    // attribute stores for that domain.
-    void setVertexCount(uint32_t count);
-    void setFaceCount(uint32_t count);
     void setFaceGroupCount(uint32_t count);
     void setVertexGroupCount(uint32_t count);
 
-    uint32_t vertexCount() const { return m_vertexCount; }
-    uint32_t faceCount() const { return m_faceCount; }
+    uint32_t vertexCount() const { return static_cast<uint32_t>(m_positionIndices.size()); }
+    uint32_t uniquePositionCount() const { return static_cast<uint32_t>(m_positions.size()); }
+    uint32_t faceCount() const { return static_cast<uint32_t>(m_faces.size()); }
     uint32_t faceGroupCount() const { return m_faceGroupCount; }
     uint32_t vertexGroupCount() const { return m_vertexGroupCount; }
 
@@ -175,7 +179,7 @@ public:
     // Per-vertex attributes
     // -------------------------------------------------------------------------
 
-    // Bulk set — implicitly sets vertex count from data.size() if not locked.
+    // Bulk set — topology must already be established and sizes must match its domains.
     template <typename T> void setPerVertexArray(const std::string &name, std::span<const T> data);
 
     // Single-index set — vertex count must already be set.
@@ -238,8 +242,9 @@ public:
     // Set all (groupIndex, weight) pairs for one vertex.
     // Marks the CSR dirty; the flat arrays are rebuilt lazily on the first
     // rawGroupEntries/Offsets/Counts access after any call here.
-    // Throws std::out_of_range if vertexIndex >= vertexCount().
-    // Requires setVertexCount() to have been called explicitly beforehand.
+    // Entries are indexed by unique position, not by duplicated render vertex.
+    // Throws std::out_of_range if vertexIndex >= uniquePositionCount().
+    // Requires setTopology() to have been called beforehand.
     void setVertexGroups(uint32_t vertexIndex, std::span<const VertexGroupEntry> entries);
 
     std::span<const VertexGroupEntry> getVertexGroups(uint32_t vertexIndex) const;
@@ -320,19 +325,21 @@ private:
 
     MeshLayout m_layout;
 
+    std::vector<glm::vec3>  m_positions;
+    std::vector<uint32_t>   m_positionIndices;
+    std::vector<glm::uvec3> m_faces;
+    std::vector<uint32_t>   m_faceGroups;
+
     std::unordered_map<std::string, AttributeStore> m_perVertex;
     std::unordered_map<std::string, AttributeStore> m_perUniqueVertex;
     std::unordered_map<std::string, AttributeStore> m_perFace;
     std::unordered_map<std::string, AttributeStore> m_faceGroup;
     std::unordered_map<std::string, AttributeStore> m_vertexGroup;
 
-    uint32_t m_vertexCount      = 0;
-    uint32_t m_faceCount        = 0;
     uint32_t m_faceGroupCount   = 0;
     uint32_t m_vertexGroupCount = 0;
 
-    bool m_vertexCountExplicit      = false;
-    bool m_faceCountExplicit        = false;
+    bool m_topologySet              = false;
     bool m_faceGroupCountExplicit   = false;
     bool m_vertexGroupCountExplicit = false;
 
@@ -340,8 +347,8 @@ private:
     // Called lazily from rawGroup* accessors when m_csrDirty is set.
     void rebuildGroupCSR() const;
 
-    // Build buffer: m_pendingGroupEntries[v] = entries for vertex v.
-    // Sized to m_vertexCount on setVertexCount(); written by setVertexGroups().
+    // Build buffer: one row per unique position.
+    // Sized by setTopology(); written by setVertexGroups().
     std::vector<std::vector<VertexGroupEntry>> m_pendingGroupEntries;
 
     // Flat CSR arrays — mutable because they are rebuilt lazily from const accessors.
@@ -465,11 +472,17 @@ T &Mesh::implGetAt(std::unordered_map<std::string, AttributeStore> &stores,
 
 template <typename T> void Mesh::setPerVertexArray(const std::string &n, std::span<const T> d)
 {
+    if (!m_topologySet)
+    {
+        throw std::logic_error("Mesh: setTopology() must be called before setting per-vertex attributes");
+    }
     if (!m_layout.findPerVertexAttr(n))
     {
         m_layout.addPerVertexAttr<T>(n);
     }
-    implSetArray(m_perVertex, m_layout.perVertexAttrs(), n, d, m_vertexCount, m_vertexCountExplicit);
+    uint32_t count        = vertexCount();
+    bool     explicitFlag = m_topologySet;
+    implSetArray(m_perVertex, m_layout.perVertexAttrs(), n, d, count, explicitFlag);
 }
 
 template <typename T> void Mesh::setPerVertexAt(const std::string &n, uint32_t i, const T &v)
@@ -497,13 +510,17 @@ template <typename T> const T &Mesh::perVertexAt(const std::string &n, uint32_t 
 
 template <typename T> void Mesh::setPerUniqueVertexArray(const std::string &n, std::span<const T> d)
 {
+    if (!m_topologySet)
+    {
+        throw std::logic_error("Mesh: setTopology() must be called before setting per-unique-vertex attributes");
+    }
     if (!m_layout.findPerUniqueVertexAttr(n))
     {
         m_layout.addPerUniqueVertexAttr<T>(n);
     }
     // Domain count is always positions.size() — locked (explicitFlag=true) so implSetArray
     // throws rather than silently accepting a mismatched array.
-    uint32_t count        = static_cast<uint32_t>(positions.size());
+    uint32_t count        = uniquePositionCount();
     bool     explicitFlag = true;
     implSetArray(m_perUniqueVertex, m_layout.perUniqueVertexAttrs(), n, d, count, explicitFlag);
 }
@@ -533,11 +550,17 @@ template <typename T> const T &Mesh::perUniqueVertexAt(const std::string &n, uin
 
 template <typename T> void Mesh::setPerFaceArray(const std::string &n, std::span<const T> d)
 {
+    if (!m_topologySet)
+    {
+        throw std::logic_error("Mesh: setTopology() must be called before setting per-face attributes");
+    }
     if (!m_layout.findPerFaceAttr(n))
     {
         m_layout.addPerFaceAttr<T>(n);
     }
-    implSetArray(m_perFace, m_layout.perFaceAttrs(), n, d, m_faceCount, m_faceCountExplicit);
+    uint32_t count        = faceCount();
+    bool     explicitFlag = m_topologySet;
+    implSetArray(m_perFace, m_layout.perFaceAttrs(), n, d, count, explicitFlag);
 }
 
 template <typename T> void Mesh::setPerFaceAt(const std::string &n, uint32_t i, const T &v)

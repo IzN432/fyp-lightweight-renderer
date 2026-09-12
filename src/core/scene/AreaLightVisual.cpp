@@ -11,14 +11,17 @@ void buildAreaLightQuadMesh(Mesh &mesh, const Transform &transform, const AreaLi
     const glm::vec3 forward = transform.forward();
     const glm::vec3 center  = transform.position();
 
-    mesh.setVertexCount(4);
-    mesh.positions = {
+    std::vector<glm::vec3> positions = {
         center - right - up,
         center + right - up,
         center + right + up,
         center - right + up,
     };
-    mesh.positionIndices = {0, 1, 2, 3};
+    std::vector<uint32_t> positionIndices = {0, 1, 2, 3};
+    // Wound so the quad is visible (front-facing) from the `forward` side, matching the pass's
+    // CCW-front backface culling.
+    std::vector<glm::uvec3> faces = {{0, 1, 2}, {0, 2, 3}};
+    mesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
     mesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, std::vector<glm::vec3>(4, forward));
     // Tangent = local right axis; w = +1 (no bitangent mirroring) matches geometry.frag's TBN build.
     mesh.setPerVertexArray<glm::vec4>(config.tangentAttributeName,
@@ -26,11 +29,7 @@ void buildAreaLightQuadMesh(Mesh &mesh, const Transform &transform, const AreaLi
     const std::vector<glm::vec2> uvs = {{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
     mesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
 
-    mesh.setFaceCount(2);
-    // Wound so the quad is visible (front-facing) from the `forward` side, matching the pass's
-    // CCW-front backface culling.
-    mesh.faces      = {{0, 1, 2}, {0, 2, 3}};
-    mesh.faceGroups = {materialHandle, materialHandle};
+    mesh.setFaceGroups({materialHandle, materialHandle});
 }
 
 Material buildAreaLightMaterial(const AreaLight &light, const AreaLightVisualConfig &config)

@@ -56,8 +56,8 @@ struct FaceGroupBufferUploadConfig
 struct VertexGroupBufferUploadConfig
 {
     std::string entriesBufferName; // VertexGroupEntry[] — flat (groupIndex, weight) pairs
-    std::string offsetsBufferName; // uint32_t[] per vertex — start index into entries
-    std::string countsBufferName;  // uint32_t[] per vertex — number of entries for that vertex
+    std::string offsetsBufferName; // uint32_t[] per unique position — start index into entries
+    std::string countsBufferName;  // uint32_t[] per unique position — number of entries
 };
 
 /**
@@ -76,7 +76,7 @@ public:
     // Re-pack and push new vertex data into a buffer previously uploaded with dynamic=true.
     void updateVertexBuffer(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config);
 
-    // Packs each mesh's unique/deduped positions (mesh.positions verbatim, not expanded through
+    // Packs each mesh's unique/deduped positions (mesh.positions() verbatim, not expanded through
     // positionIndices) together with named per-unique-vertex attributes (see
     // MeshLayout::addPerUniqueVertexAttr) into one interleaved buffer — the deduped-position-space
     // analogue of uploadVertexBuffer(). For consumers that index in deduped-position space rather

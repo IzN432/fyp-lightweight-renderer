@@ -305,12 +305,8 @@ ObjMeshLoadResult ObjLoader::load(const std::filesystem::path &path, MaterialSto
     auto [positions, positionIndices, normals, tangents, uvs, faces, faceGroups] =
         extractMeshData(reader, path, materialHandles);
 
-    mesh.setVertexCount(static_cast<uint32_t>(positionIndices.size()));
-    mesh.setFaceCount(static_cast<uint32_t>(faces.size()));
-    mesh.positions       = std::move(positions);
-    mesh.positionIndices = std::move(positionIndices);
-    mesh.faces           = std::move(faces);
-    mesh.faceGroups      = std::move(faceGroups);
+    mesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
+    mesh.setFaceGroups(std::move(faceGroups));
 
     mesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, normals);
     mesh.setPerVertexArray<glm::vec4>(config.tangentAttributeName, tangents);

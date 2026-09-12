@@ -216,33 +216,60 @@ void Mesh::rebuildGroupCSR() const
 }
 
 // =============================================================================
-// Mesh — count management
+// Mesh — topology and count management
 // =============================================================================
 
-void Mesh::setVertexCount(uint32_t count)
+void Mesh::setTopology(std::vector<glm::vec3> positions, std::vector<uint32_t> positionIndices,
+                       std::vector<glm::uvec3> faces)
 {
-    m_vertexCount         = count;
-    m_vertexCountExplicit = true;
+    for (uint32_t index : positionIndices)
+    {
+        if (index >= positions.size())
+        {
+            throw std::invalid_argument("Mesh: position index out of range");
+        }
+    }
+    for (const glm::uvec3 &face : faces)
+    {
+        if (face.x >= positionIndices.size() || face.y >= positionIndices.size() ||
+            face.z >= positionIndices.size())
+        {
+            throw std::invalid_argument("Mesh: face vertex index out of range");
+        }
+    }
 
-    positions.resize(count);
-    allocateDomain(m_perVertex, m_layout.perVertexAttrs(), count);
+    m_positions       = std::move(positions);
+    m_positionIndices = std::move(positionIndices);
+    m_faces           = std::move(faces);
+    m_faceGroups.clear();
+    m_topologySet = true;
+
+    const uint32_t renderVertexCount = vertexCount();
+    const uint32_t positionCount     = uniquePositionCount();
+    const uint32_t triangleCount     = faceCount();
+    allocateDomain(m_perVertex, m_layout.perVertexAttrs(), renderVertexCount);
+    allocateDomain(m_perUniqueVertex, m_layout.perUniqueVertexAttrs(), positionCount);
+    allocateDomain(m_perFace, m_layout.perFaceAttrs(), triangleCount);
 
     if (m_layout.vertexGroupsEnabled())
     {
-        m_pendingGroupEntries.resize(count);
+        m_pendingGroupEntries.clear();
+        m_pendingGroupEntries.resize(positionCount);
         m_csrDirty = true;
     }
 }
 
-void Mesh::setFaceCount(uint32_t count)
+void Mesh::setFaceGroups(std::vector<uint32_t> faceGroups)
 {
-    m_faceCount         = count;
-    m_faceCountExplicit = true;
-
-    faces.resize(count);
-    allocateDomain(m_perFace, m_layout.perFaceAttrs(), count);
-
-    faceGroups.resize(count, 0u);
+    if (!m_topologySet)
+    {
+        throw std::logic_error("Mesh: setTopology() must be called before setFaceGroups()");
+    }
+    if (!faceGroups.empty() && faceGroups.size() != m_faces.size())
+    {
+        throw std::invalid_argument("Mesh: face-group count must match face count");
+    }
+    m_faceGroups = std::move(faceGroups);
 }
 
 void Mesh::setFaceGroupCount(uint32_t count)
@@ -272,14 +299,14 @@ void Mesh::setVertexGroupCount(uint32_t count)
 
 void Mesh::setVertexGroups(uint32_t vertexIndex, std::span<const VertexGroupEntry> entries)
 {
-    if (!m_vertexCountExplicit)
+    if (!m_topologySet)
     {
-        throw std::logic_error("Mesh: setVertexCount() must be called explicitly before setVertexGroups()");
+        throw std::logic_error("Mesh: setTopology() must be called before setVertexGroups()");
     }
-    if (vertexIndex >= m_vertexCount)
+    if (vertexIndex >= uniquePositionCount())
     {
-        throw std::out_of_range("Mesh: vertexIndex " + std::to_string(vertexIndex) + " >= vertexCount " +
-                                std::to_string(m_vertexCount));
+        throw std::out_of_range("Mesh: vertexIndex " + std::to_string(vertexIndex) + " >= uniquePositionCount " +
+                                std::to_string(uniquePositionCount()));
     }
 
     m_pendingGroupEntries[vertexIndex].assign(entries.begin(), entries.end());
@@ -288,7 +315,7 @@ void Mesh::setVertexGroups(uint32_t vertexIndex, std::span<const VertexGroupEntr
 
 std::span<const VertexGroupEntry> Mesh::getVertexGroups(uint32_t vertexIndex) const
 {
-    if (vertexIndex >= m_vertexCount)
+    if (vertexIndex >= uniquePositionCount())
     {
         throw std::out_of_range("Mesh: vertexIndex out of range in getVertexGroups()");
     }

@@ -169,9 +169,9 @@ try
         // SceneManager::uploadMeshes() reads this back to build the initial GPU color buffer, so it
         // must be set before sceneManager.initialize() runs.
         lr::Mesh              &m = sequence.frames.front();
-        std::vector<glm::vec3> colors(m.positions.size(), glm::vec3(1.0f, 0.0f, 1.0f));
+        std::vector<glm::vec3> colors(m.uniquePositionCount(), glm::vec3(1.0f, 0.0f, 1.0f));
         m.setPerUniqueVertexArray("color", std::span<const glm::vec3>(colors));
-        std::vector<glm::vec3> heatmapColors(m.positions.size(), glm::vec3(0.0f));
+        std::vector<glm::vec3> heatmapColors(m.uniquePositionCount(), glm::vec3(0.0f));
         m.setPerUniqueVertexArray("heatmapColors", std::span<const glm::vec3>(heatmapColors));
     }
     auto &staticMesh = meshObject->addComponent<lr::StaticMesh>(sequence.frames.front(), materialHandles,
@@ -283,7 +283,7 @@ try
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
         .pointsBufferResourceName = sceneManager.mainMeshPointsBufferName(),
         .pointsBufferUploadResult = sceneManager.mainMeshPoints(),
-        .vertexCounts             = {static_cast<uint32_t>(staticMesh.mesh().positions.size())},
+        .vertexCounts             = {staticMesh.mesh().uniquePositionCount()},
         .meshTransform            = &meshObject->getComponent<lr::Transform>(),
     });
     overlayPointsPass.build(viewer.frameGraph(), pointsMeshLayout);
@@ -303,7 +303,7 @@ try
     // Gizmo hover — reads the picking image from the previous frame
     lr::ImageReadback gizmoReadback(viewer.context(), viewer.allocator());
 
-    lr::VertexManager vertexManager(staticMesh.mesh().positions);
+    lr::VertexManager vertexManager(staticMesh.mesh());
     vertexManager.registerUpdateCallback([&]() {
         sceneManager.updateMainMeshPositions();
     });
@@ -357,14 +357,14 @@ try
     // Geometry-processing triangles index unique positions directly. This conversion removes the
     // render-vertex/UV-seam representation before data crosses into the Laplace-Beltrami module.
     std::vector<glm::uvec3> positionTriangles;
-    positionTriangles.reserve(staticMesh.mesh().faces.size());
-    for (const glm::uvec3 &face : staticMesh.mesh().faces)
+    positionTriangles.reserve(staticMesh.mesh().faces().size());
+    for (const glm::uvec3 &face : staticMesh.mesh().faces())
     {
-        positionTriangles.push_back({staticMesh.mesh().positionIndices[face.x],
-                                     staticMesh.mesh().positionIndices[face.y],
-                                     staticMesh.mesh().positionIndices[face.z]});
+        positionTriangles.push_back({staticMesh.mesh().positionIndices()[face.x],
+                                     staticMesh.mesh().positionIndices()[face.y],
+                                     staticMesh.mesh().positionIndices()[face.z]});
     }
-    lr::LaplaceBeltramiTool laplaceBeltramiTool(staticMesh.mesh().positions, positionTriangles, sceneManager,
+    lr::LaplaceBeltramiTool laplaceBeltramiTool(staticMesh.mesh().positions(), positionTriangles, sceneManager,
                                                 heatmapPass, vertexManager);
 
     // Single combined LMB handler: gizmos get first refusal on a click (so

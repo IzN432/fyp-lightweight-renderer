@@ -15,22 +15,7 @@ void VertexManager::notifyUpdateCallbacks()
 
 void VertexManager::updatePosition(uint32_t index, const glm::vec3 &newPosition)
 {
-    m_positions[index] = newPosition;
-    notifyUpdateCallbacks();
-}
-
-void VertexManager::removeVertex(uint32_t index)
-{
-    if (index < m_positions.size())
-    {
-        m_positions.erase(m_positions.begin() + index);
-    }
-    notifyUpdateCallbacks();
-}
-
-void VertexManager::addVertex(const glm::vec3 &position)
-{
-    m_positions.push_back(position);
+    m_mesh.positionAt(index) = newPosition;
     notifyUpdateCallbacks();
 }
 
@@ -38,9 +23,9 @@ void VertexManager::translateSelectedVertices(const std::unordered_set<uint32_t>
 {
     for (uint32_t index : indices)
     {
-        if (index < m_positions.size())
+        if (index < m_mesh.uniquePositionCount())
         {
-            m_positions[index] += translation;
+            m_mesh.positionAt(index) += translation;
         }
     }
     notifyUpdateCallbacks();
@@ -51,9 +36,9 @@ void VertexManager::setPositions(const std::vector<uint32_t> &indices, const std
     const size_t count = std::min(indices.size(), positions.size());
     for (size_t i = 0; i < count; ++i)
     {
-        if (indices[i] < m_positions.size())
+        if (indices[i] < m_mesh.uniquePositionCount())
         {
-            m_positions[indices[i]] = positions[i];
+            m_mesh.positionAt(indices[i]) = positions[i];
         }
     }
     notifyUpdateCallbacks();

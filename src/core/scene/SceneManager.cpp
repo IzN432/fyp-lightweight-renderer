@@ -54,7 +54,7 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
     // caller (main.cpp) still owns wiring up a SelectionTool and its own UI on top of it.
     auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
     m_selectionManager =
-        std::make_unique<SelectionManager>(mainMesh.positions, m_mainMeshObject->getComponent<Transform>(), input);
+        std::make_unique<SelectionManager>(mainMesh.positions(), m_mainMeshObject->getComponent<Transform>(), input);
     m_selectionManager->registerColorsChangedCallback([this]() {
         updateMainMeshHighlightColors();
     });
@@ -142,7 +142,7 @@ void SceneManager::uploadMeshes(const GpuMaterialLayout        &materialLayout,
     m_meshUploader.uploadVertexBuffer(m_geometryMeshes, m_meshAttributeUploadConfig);
 
     // Deduped position + color, interleaved — unlike the buffer above (duped per UV-seam corner,
-    // for GeometryPass), this is mesh.positions verbatim, matching the index space VertexManager/
+    // for GeometryPass), this is mesh.positions() verbatim, matching the index space VertexManager/
     // SelectionManager and the points-picking overlay already operate in. Color comes from the main
     // mesh's own "color" per-unique-vertex attribute (caller must seed it before initialize() — see
     // main.cpp), which is what SelectionManager's highlight indices are already in terms of.
@@ -193,7 +193,7 @@ Mesh &SceneManager::syncMainMeshCornerHeatmapColors()
     std::vector<glm::vec3> cornerColor(mainMesh.vertexCount());
     for (uint32_t v = 0; v < mainMesh.vertexCount(); ++v)
     {
-        cornerColor[v] = uniqueColor[mainMesh.positionIndices[v]];
+        cornerColor[v] = uniqueColor[mainMesh.positionIndices()[v]];
     }
     mainMesh.setPerVertexArray<glm::vec3>("heatmapColors", std::span<const glm::vec3>(cornerColor));
     return mainMesh;

@@ -113,7 +113,7 @@ public:
     void updateMainMeshPositions();
 
     // Replaces the analysis colors used by HeatmapPass without touching the selection-highlight
-    // colors used by the points overlay. Colors are indexed by mesh.positions.
+    // colors used by the points overlay. Colors are indexed by mesh.positions().
     void setMainMeshHeatmapColors(std::span<const glm::vec3> colors);
 
     // Re-uploads the materials SSBO from the MaterialStore's current contents — called by

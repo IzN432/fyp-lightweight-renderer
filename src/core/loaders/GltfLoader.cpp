@@ -542,12 +542,8 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialS
         auto [positions, positionIndices, normals, tangents, uvs, faces, faceGroups] =
             extractMeshData(mesh, model, materialHandles);
 
-        outMesh.setFaceCount(faces.size());
-        outMesh.setVertexCount(positionIndices.size());
-        outMesh.positions       = std::move(positions);
-        outMesh.positionIndices = std::move(positionIndices);
-        outMesh.faces           = std::move(faces);
-        outMesh.faceGroups      = std::move(faceGroups);
+        outMesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
+        outMesh.setFaceGroups(std::move(faceGroups));
 
         outMesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, normals);
         outMesh.setPerVertexArray<glm::vec4>(config.tangentAttributeName, tangents);

@@ -92,7 +92,7 @@ VertexBuffer packVertexAttributes(const std::vector<const Mesh *> &meshes, const
             std::vector<glm::vec3> positions(mesh.vertexCount());
             for (uint32_t v = 0; v < mesh.vertexCount(); ++v)
             {
-                positions[v] = mesh.positions[mesh.positionIndices[v]];
+                positions[v] = mesh.positions()[mesh.positionIndices()[v]];
             }
 
             auto                       positionData = reinterpret_cast<const std::byte *>(positions.data());
@@ -113,7 +113,7 @@ VertexBuffer packVertexAttributes(const std::vector<const Mesh *> &meshes, const
     return out;
 }
 
-// Packs each mesh's unique/deduped positions (mesh.positions, not expanded through
+// Packs each mesh's unique/deduped positions (mesh.positions(), not expanded through
 // positionIndices) and named per-unique-vertex attributes into a contiguous interleaved buffer —
 // the deduped-position-space analogue of packVertexAttributes() above.
 VertexBuffer packUniqueVertexAttributes(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config)
@@ -146,7 +146,7 @@ VertexBuffer packUniqueVertexAttributes(const std::vector<const Mesh *> &meshes,
     uint32_t vertexCount = 0;
     for (const auto &mesh : meshes)
     {
-        vertexCount += static_cast<uint32_t>(mesh->positions.size());
+        vertexCount += mesh->uniquePositionCount();
     }
 
     out.vertexAttributeBuffer.resize(static_cast<size_t>(vertexCount) * stride);
@@ -170,7 +170,7 @@ VertexBuffer packUniqueVertexAttributes(const std::vector<const Mesh *> &meshes,
     uint32_t vertexOffset = 0;
     for (const auto &mesh : meshes)
     {
-        const uint32_t count = static_cast<uint32_t>(mesh->positions.size());
+        const uint32_t count = mesh->uniquePositionCount();
 
         auto uploadData = [&](std::span<const std::byte> data, uint32_t attributeStride, uint32_t attributeOffset) {
             for (uint32_t v = 0; v < count; ++v)
@@ -184,7 +184,7 @@ VertexBuffer packUniqueVertexAttributes(const std::vector<const Mesh *> &meshes,
 
         if (config.includePosition)
         {
-            auto                       positionData = reinterpret_cast<const std::byte *>(mesh->positions.data());
+            auto                       positionData = reinterpret_cast<const std::byte *>(mesh->positions().data());
             std::span<const std::byte> data(positionData, count * sizeof(glm::vec3));
             uploadData(data, sizeof(glm::vec3), 0);
         }
@@ -252,7 +252,7 @@ VertexBufferUploadResult MeshUploader::uploadUniqueVertexBuffer(const std::vecto
     for (const auto &mesh : meshes)
     {
         result.singleMeshResults.push_back({.vertexOffset = vertexOffset});
-        vertexOffset += static_cast<uint32_t>(mesh->positions.size());
+        vertexOffset += mesh->uniquePositionCount();
     }
 
     return result;
@@ -285,7 +285,7 @@ IndexBufferUploadResult MeshUploader::uploadIndexBuffer(const std::vector<const 
     {
         result.singleMeshResults.push_back({.firstIndex = faceOffset * 3, // 3 indices per face
                                             .indexCount = mesh->faceCount() * 3});
-        std::memcpy(indexBuffer.data() + faceOffset * sizeof(glm::uvec3), mesh->faces.data(),
+        std::memcpy(indexBuffer.data() + faceOffset * sizeof(glm::uvec3), mesh->faces().data(),
                     mesh->faceCount() * sizeof(glm::uvec3));
         faceOffset += mesh->faceCount();
     }
@@ -304,7 +304,7 @@ void MeshUploader::uploadFaceGroupBuffer(const std::vector<const Mesh *>   &mesh
     for (const auto &mesh : meshes)
     {
         totalFaceCount += mesh->faceCount();
-        anyFaceGroups |= !mesh->faceGroups.empty();
+        anyFaceGroups |= !mesh->faceGroups().empty();
     }
 
     if (!anyFaceGroups)
@@ -318,14 +318,14 @@ void MeshUploader::uploadFaceGroupBuffer(const std::vector<const Mesh *>   &mesh
     uint32_t faceOffset = 0;
     for (const auto &mesh : meshes)
     {
-        if (mesh->faceGroups.empty())
+        if (mesh->faceGroups().empty())
         {
             std::memset(faceGroupBuffer.data() + faceOffset * sizeof(uint32_t), 0,
                         mesh->faceCount() * sizeof(uint32_t));
         } else
         {
-            std::memcpy(faceGroupBuffer.data() + faceOffset * sizeof(uint32_t), mesh->faceGroups.data(),
-                        mesh->faceGroups.size() * sizeof(uint32_t));
+            std::memcpy(faceGroupBuffer.data() + faceOffset * sizeof(uint32_t), mesh->faceGroups().data(),
+                        mesh->faceGroups().size() * sizeof(uint32_t));
         }
         faceOffset += mesh->faceCount();
     }
@@ -339,11 +339,11 @@ void MeshUploader::uploadVertexGroupBuffers(const std::vector<const Mesh *>     
                                             const VertexGroupBufferUploadConfig &config)
 {
     bool     anyVertexGroups  = false;
-    uint32_t totalVertexCount = 0;
+    uint32_t totalPositionCount = 0;
     uint32_t totalEntryCount  = 0;
     for (const auto &mesh : meshes)
     {
-        totalVertexCount += mesh->vertexCount();
+        totalPositionCount += mesh->uniquePositionCount();
         if (mesh->layout().vertexGroupsEnabled())
         {
             anyVertexGroups = true;
@@ -358,14 +358,14 @@ void MeshUploader::uploadVertexGroupBuffers(const std::vector<const Mesh *>     
 
     // Guarantee a non-zero entries buffer (Vulkan disallows zero-size storage buffers)
     std::vector<VertexGroupEntry> entries(std::max(totalEntryCount, 1u));
-    std::vector<uint32_t>         offsets(totalVertexCount, 0u);
-    std::vector<uint32_t>         counts(totalVertexCount, 0u);
+    std::vector<uint32_t>         offsets(totalPositionCount, 0u);
+    std::vector<uint32_t>         counts(totalPositionCount, 0u);
 
     uint32_t vertexCursor = 0;
     uint32_t entryCursor  = 0;
     for (const auto &mesh : meshes)
     {
-        const uint32_t vCount = mesh->vertexCount();
+        const uint32_t vCount = mesh->uniquePositionCount();
         if (mesh->layout().vertexGroupsEnabled())
         {
             auto meshEntries = mesh->rawGroupEntries();

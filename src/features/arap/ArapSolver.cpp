@@ -10,7 +10,7 @@ bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &ancho
 {
     m_precomputed = false;
 
-    const auto        &positions   = mesh.positions;
+    const auto        &positions   = mesh.positions();
     const Eigen::Index vertexCount = static_cast<Eigen::Index>(positions.size());
 
     Eigen::MatrixXd V(vertexCount, 3);
@@ -19,14 +19,14 @@ bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &ancho
         V.row(i) << positions[i].x, positions[i].y, positions[i].z;
     }
 
-    const Eigen::Index faceCount = static_cast<Eigen::Index>(mesh.faces.size());
+    const Eigen::Index faceCount = static_cast<Eigen::Index>(mesh.faces().size());
     Eigen::MatrixXi    F(faceCount, 3);
     for (Eigen::Index f = 0; f < faceCount; ++f)
     {
-        const glm::uvec3 &face = mesh.faces[f];
-        F(f, 0)                = static_cast<int>(mesh.positionIndices[face.x]);
-        F(f, 1)                = static_cast<int>(mesh.positionIndices[face.y]);
-        F(f, 2)                = static_cast<int>(mesh.positionIndices[face.z]);
+        const glm::uvec3 &face = mesh.faces()[f];
+        F(f, 0)                = static_cast<int>(mesh.positionIndices()[face.x]);
+        F(f, 1)                = static_cast<int>(mesh.positionIndices()[face.y]);
+        F(f, 2)                = static_cast<int>(mesh.positionIndices()[face.z]);
     }
 
     // std::set both dedupes and sorts — guards against an overlapping anchor/handle set as well as

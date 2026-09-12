@@ -18,7 +18,7 @@ namespace lr
 class ArapSolver
 {
 public:
-    // anchorIndices/handleIndices index into mesh.positions (the deduped vertex space). Returns
+    // anchorIndices/handleIndices index into mesh.positions() (the deduped vertex space). Returns
     // false on failure (e.g. a free-vertex component that can't reach any anchor/handle).
     bool precompute(const Mesh &mesh, const std::vector<uint32_t> &anchorIndices,
                     const std::vector<uint32_t> &handleIndices);
