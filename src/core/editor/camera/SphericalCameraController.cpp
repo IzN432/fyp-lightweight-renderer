@@ -31,8 +31,8 @@ void SphericalCameraController::update(float dt)
             // Pan: translate target in m_camera right/up plane
             auto &t        = m_cameraSceneObject.getComponent<TransformComponent>();
             float panSpeed = m_orbitRadius * 0.002f;
-            m_orbitTarget -= t.right() * (float)dx * panSpeed;
-            m_orbitTarget += t.up() * (float)dy * panSpeed;
+            m_orbitTarget -= t.transform().right() * (float)dx * panSpeed;
+            m_orbitTarget += t.transform().up() * (float)dy * panSpeed;
         } else if (mmb)
         {
             m_orbitAzimuth -= (float)dx * 0.01f;

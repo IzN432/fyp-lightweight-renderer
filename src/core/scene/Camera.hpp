@@ -37,8 +37,9 @@ struct Camera : public Component
     [[nodiscard]] glm::mat4 viewMatrix() const
     {
         const lr::TransformComponent &transform = getOwningObject().getComponent<TransformComponent>();
-        const glm::vec3     &eye       = transform.position();
-        return glm::lookAt(eye, eye + transform.forward(), transform.up());
+        const Transform &spatialTransform = transform.transform();
+        const glm::vec3 &eye              = spatialTransform.position();
+        return glm::lookAt(eye, eye + spatialTransform.forward(), spatialTransform.up());
     }
 
     [[nodiscard]] glm::mat4 projectionMatrix(float aspectRatio) const

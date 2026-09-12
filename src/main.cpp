@@ -581,7 +581,7 @@ try
                 localCentroid += vertexManager.getPositions()[idx];
             }
             localCentroid /= static_cast<float>(idxs.size());
-            return glm::vec3(meshObject->getComponent<lr::TransformComponent>().localMatrix() *
+            return glm::vec3(meshObject->getComponent<lr::TransformComponent>().transform().localMatrix() *
                              glm::vec4(localCentroid, 1.0f));
         };
 
@@ -613,7 +613,7 @@ try
             const glm::vec3 centroid = worldCentroidOf(driven);
 
             // Keep the gizmo a constant size on screen (~1/9 screen height) regardless of camera distance.
-            const glm::vec3 camPos = camera->getComponent<lr::TransformComponent>().position();
+            const glm::vec3 camPos = camera->getComponent<lr::TransformComponent>().transform().position();
             const float     d      = glm::length(camPos - centroid);
             const float     fov    = glm::radians(camera->getComponent<lr::Camera>().fovYDegrees);
             const float     len    = 2.0f * d * std::tan(fov * 0.5f) / 5.0f;

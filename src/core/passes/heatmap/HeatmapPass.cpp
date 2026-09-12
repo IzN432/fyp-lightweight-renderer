@@ -42,7 +42,7 @@ void HeatmapPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
             const auto &index = m_cfg.indexBufferUploadResult.singleMeshResults[0];
 
             const HeatmapPC pc{
-                .model = m_cfg.meshTransform ? m_cfg.meshTransform->localMatrix() : glm::mat4(1.0f),
+                .model = m_cfg.meshTransform ? m_cfg.meshTransform->transform().localMatrix() : glm::mat4(1.0f),
             };
             ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, pc);
             ctx.cmd().drawIndexed(index.indexCount, 1, index.firstIndex, vert.vertexOffset, 0);

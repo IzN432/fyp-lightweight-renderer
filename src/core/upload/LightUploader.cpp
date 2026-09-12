@@ -40,27 +40,27 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
                 if constexpr (std::is_same_v<T, PointLight>)
                 {
                     TransformComponent &transform = lightObject->getComponent<TransformComponent>();
-                    gpuData.position     = transform.position();
+                    gpuData.position     = transform.transform().position();
                     gpuData.type         = 0;
                 } else if constexpr (std::is_same_v<T, SpotLight>)
                 {
                     TransformComponent &transform   = lightObject->getComponent<TransformComponent>();
-                    gpuData.position       = transform.position();
-                    gpuData.rotation       = transform.rotation();
+                    gpuData.position       = transform.transform().position();
+                    gpuData.rotation       = transform.transform().rotation();
                     gpuData.type           = 1;
                     gpuData.innerConeAngle = glm::radians(l.innerConeAngleDegrees);
                     gpuData.outerConeAngle = glm::radians(l.outerConeAngleDegrees);
                 } else if constexpr (std::is_same_v<T, AreaLight>)
                 {
                     TransformComponent &transform = lightObject->getComponent<TransformComponent>();
-                    gpuData.position     = transform.position();
-                    gpuData.rotation     = transform.rotation();
+                    gpuData.position     = transform.transform().position();
+                    gpuData.rotation     = transform.transform().rotation();
                     gpuData.type         = 2;
                     gpuData.areaSize     = l.size;
                 } else if constexpr (std::is_same_v<T, DirectionalLight>)
                 {
                     TransformComponent &transform = lightObject->getComponent<TransformComponent>();
-                    gpuData.rotation     = transform.rotation();
+                    gpuData.rotation     = transform.transform().rotation();
                     gpuData.type         = 3;
                 } else if constexpr (std::is_same_v<T, ImageLight>)
                 {

@@ -31,7 +31,8 @@ void TranslateBoxGizmo::onMouseDown(double ndcX, double ndcY, double aspect)
     // Define the m_draggingPlane as the plane perpendicular to the camera's forward direction and passing through the
     // centroid of the selected vertices
     m_draggingPlane =
-        math::planeFromNormalAndPoint(m_camera.getComponent<TransformComponent>().forward(), m_instance.position);
+        math::planeFromNormalAndPoint(m_camera.getComponent<TransformComponent>().transform().forward(),
+                                      m_instance.position);
 
     const glm::mat4 vp                 = m_camera.getComponent<Camera>().viewProjectionMatrix(aspect);
     const glm::mat4 invVP              = glm::inverse(vp);
