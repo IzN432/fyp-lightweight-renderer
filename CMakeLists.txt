@@ -192,6 +192,13 @@ add_executable(renderer src/main.cpp)
 target_link_libraries(renderer PRIVATE lr_core lr_arap_feature lr_laplace_beltrami_feature imguiFileDialog)
 
 if(BUILD_TESTING)
+    add_executable(linear_blend_skinning_joint_tests
+        tests/linear_blend_skinning/JointTests.cpp
+    )
+    target_include_directories(linear_blend_skinning_joint_tests PRIVATE src)
+    target_link_libraries(linear_blend_skinning_joint_tests PRIVATE glm::glm)
+    add_test(NAME linear_blend_skinning.joint COMMAND linear_blend_skinning_joint_tests)
+
     add_executable(framegraph_model_tests
         tests/framegraph/GraphModelTests.cpp
         src/core/framegraph/model/GraphDefinition.cpp
