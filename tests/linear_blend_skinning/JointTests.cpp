@@ -1,10 +1,13 @@
 #include "features/linear_blend_skinning/Joint.hpp"
+#include "features/linear_blend_skinning/Skin.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/epsilon.hpp>
 
 #include <cassert>
+#include <stdexcept>
 #include <type_traits>
+#include <vector>
 
 int main()
 {
@@ -25,4 +28,52 @@ int main()
 
     const lr::Joint joint{.node = 1, .inverseBindMatrix = glm::mat4(1.0f)};
     assert(joint.node == 1);
+
+    lr::Skin skin({root, child}, {joint});
+    assert(skin.nodes().size() == 2);
+    assert(skin.joints().size() == 1);
+
+    lr::Transform posedTransform;
+    posedTransform.setPosition(glm::vec3(5.0f, 0.0f, 0.0f));
+    skin.setNodeTransform(1, posedTransform);
+    assert(skin.node(1).localTransform.position().x == 5.0f);
+
+    bool invalidJointRejected = false;
+    try
+    {
+        lr::Skin invalid({root}, {{.node = 1}});
+    }
+    catch (const std::invalid_argument &)
+    {
+        invalidJointRejected = true;
+    }
+    assert(invalidJointRejected);
+
+    bool invalidParentRejected = false;
+    try
+    {
+        lr::SkeletonNode invalidParent;
+        invalidParent.parent = 1;
+        lr::Skin invalid({invalidParent}, {});
+    }
+    catch (const std::invalid_argument &)
+    {
+        invalidParentRejected = true;
+    }
+    assert(invalidParentRejected);
+
+    bool cycleRejected = false;
+    try
+    {
+        lr::SkeletonNode first;
+        first.parent = 1;
+        lr::SkeletonNode second;
+        second.parent = 0;
+        lr::Skin invalid({first, second}, {});
+    }
+    catch (const std::invalid_argument &)
+    {
+        cycleRejected = true;
+    }
+    assert(cycleRejected);
 }
