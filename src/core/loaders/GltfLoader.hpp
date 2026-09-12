@@ -43,6 +43,11 @@ struct GltfLoaderConfig
  *   - uvAttr      (vec2)  primary texture coordinate
  *   - tangentAttr (vec3)  vertex tangent
  *
+ * Skinning attributes:
+ *   - JOINTS_n/WEIGHTS_n are combined into arbitrary-length sparse vertex groups.
+ *     Group indices remain local indices into the glTF skin's joints array; skins and
+ *     inverse-bind matrices are not loaded yet.
+ *
  * Material scalars:
  *   - baseDiffuse    (vec4)   from baseColorFactor
  *   - baseRoughness  (float)  from roughnessFactor

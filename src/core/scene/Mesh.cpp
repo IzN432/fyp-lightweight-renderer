@@ -272,6 +272,13 @@ void Mesh::setFaceGroups(std::vector<uint32_t> faceGroups)
     m_faceGroups = std::move(faceGroups);
 }
 
+void Mesh::enableVertexGroups()
+{
+    m_layout.enableVertexGroups();
+    m_pendingGroupEntries.resize(uniquePositionCount());
+    m_csrDirty = true;
+}
+
 void Mesh::setFaceGroupCount(uint32_t count)
 {
     m_faceGroupCount         = count;
@@ -299,6 +306,10 @@ void Mesh::setVertexGroupCount(uint32_t count)
 
 void Mesh::setVertexGroups(uint32_t vertexIndex, std::span<const VertexGroupEntry> entries)
 {
+    if (!m_layout.vertexGroupsEnabled())
+    {
+        throw std::logic_error("Mesh: enableVertexGroups() must be called before setVertexGroups()");
+    }
     if (!m_topologySet)
     {
         throw std::logic_error("Mesh: setTopology() must be called before setVertexGroups()");

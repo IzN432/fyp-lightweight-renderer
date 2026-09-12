@@ -128,6 +128,8 @@ struct VertexGroupEntry
 {
     uint32_t groupIndex;
     float    weight;
+
+    bool operator==(const VertexGroupEntry &) const = default;
 };
 
 class Mesh
@@ -152,6 +154,9 @@ public:
     // Per-face group membership. Empty means that the mesh does not use face groups;
     // otherwise there must be exactly one entry per face.
     void setFaceGroups(std::vector<uint32_t> faceGroups);
+
+    // Enables sparse weighted groups. Safe before or after setTopology().
+    void enableVertexGroups();
 
     const std::vector<glm::vec3>  &positions() const { return m_positions; }
     const std::vector<uint32_t>   &positionIndices() const { return m_positionIndices; }

@@ -8,6 +8,8 @@
 #include <tiny_gltf.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+#include <cmath>
 #include <optional>
 
 namespace lr
@@ -295,6 +297,132 @@ uint32_t readIndex(const AccessorView &view, size_t i)
     }
 }
 
+void validateJointView(const AccessorView &view)
+{
+    if (view.type != TINYGLTF_TYPE_VEC4 || view.normalized ||
+        (view.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE &&
+         view.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT))
+    {
+        throw std::runtime_error(
+            "GltfLoader: JOINTS_n must be a non-normalized VEC4 of unsigned bytes or unsigned shorts");
+    }
+}
+
+glm::uvec4 readJointIndices(const AccessorView &view, size_t index)
+{
+    const unsigned char *data          = view.data + index * view.stride;
+    const size_t         componentSize = tinygltf::GetComponentSizeInBytes(view.componentType);
+    glm::uvec4           result{};
+    for (size_t component = 0; component < 4; ++component)
+    {
+        const unsigned char *value = data + component * componentSize;
+        result[component]          = view.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE
+                                         ? *reinterpret_cast<const uint8_t *>(value)
+                                         : *reinterpret_cast<const uint16_t *>(value);
+    }
+    return result;
+}
+
+void validateWeightView(const AccessorView &view)
+{
+    const bool validFloat = view.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT && !view.normalized;
+    const bool validNormalizedInteger =
+        (view.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE ||
+         view.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) &&
+        view.normalized;
+    if (view.type != TINYGLTF_TYPE_VEC4 || (!validFloat && !validNormalizedInteger))
+    {
+        throw std::runtime_error(
+            "GltfLoader: WEIGHTS_n must be a VEC4 of floats or normalized unsigned bytes/shorts");
+    }
+}
+
+struct InfluenceSetViews
+{
+    AccessorView joints;
+    AccessorView weights;
+};
+
+std::vector<InfluenceSetViews> getInfluenceSetViews(const tinygltf::Primitive &primitive,
+                                                    const tinygltf::Model &model, size_t vertexCount)
+{
+    std::vector<InfluenceSetViews> sets;
+    for (size_t setIndex = 0;; ++setIndex)
+    {
+        const std::string jointsName  = "JOINTS_" + std::to_string(setIndex);
+        const std::string weightsName = "WEIGHTS_" + std::to_string(setIndex);
+        const auto        jointsIt    = primitive.attributes.find(jointsName);
+        const auto        weightsIt   = primitive.attributes.find(weightsName);
+
+        if (jointsIt == primitive.attributes.end() && weightsIt == primitive.attributes.end())
+        {
+            break;
+        }
+        if (jointsIt == primitive.attributes.end() || weightsIt == primitive.attributes.end())
+        {
+            throw std::runtime_error("GltfLoader: every JOINTS_n attribute must have a matching WEIGHTS_n");
+        }
+
+        const AccessorView jointsView = getAccessorView(model, jointsIt->second);
+        const AccessorView weightsView = getAccessorView(model, weightsIt->second);
+        validateJointView(jointsView);
+        validateWeightView(weightsView);
+        if (jointsView.count != vertexCount || weightsView.count != vertexCount)
+        {
+            throw std::runtime_error("GltfLoader: joint and weight accessor counts must match POSITION");
+        }
+
+        sets.push_back({jointsView, weightsView});
+    }
+    return sets;
+}
+
+std::vector<VertexGroupEntry> readVertexGroups(std::span<const InfluenceSetViews> sets, size_t vertexIndex)
+{
+    std::vector<VertexGroupEntry> groups;
+    groups.reserve(sets.size() * 4);
+    for (const InfluenceSetViews &set : sets)
+    {
+        const glm::uvec4 joints  = readJointIndices(set.joints, vertexIndex);
+        const glm::vec4  weights = readVec<glm::vec4>(set.weights, vertexIndex);
+        for (size_t component = 0; component < 4; ++component)
+        {
+            const float weight = weights[component];
+            if (!std::isfinite(weight) || weight < 0.0f)
+            {
+                throw std::runtime_error("GltfLoader: joint weights must be finite and non-negative");
+            }
+            if (weight > 0.0f)
+            {
+                groups.push_back({joints[component], weight});
+            }
+        }
+    }
+
+    std::ranges::sort(groups, {}, &VertexGroupEntry::groupIndex);
+    for (size_t i = 1; i < groups.size(); ++i)
+    {
+        if (groups[i - 1].groupIndex == groups[i].groupIndex)
+        {
+            throw std::runtime_error("GltfLoader: a joint may influence a vertex only once");
+        }
+    }
+
+    float weightSum = 0.0f;
+    for (const VertexGroupEntry &group : groups)
+    {
+        weightSum += group.weight;
+    }
+    if (weightSum > 0.0f)
+    {
+        for (VertexGroupEntry &group : groups)
+        {
+            group.weight /= weightSum;
+        }
+    }
+    return groups;
+}
+
 static const std::string POSITION_ATTR_NAME = "POSITION";
 static const std::string NORMAL_ATTR_NAME   = "NORMAL";
 static const std::string UV_ATTR_NAME       = "TEXCOORD_0";
@@ -317,10 +445,41 @@ struct Vector3Hash
     }
 };
 
-MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &model,
-                         const std::vector<MaterialHandle> &materialHandles)
+struct PositionAndGroups
 {
-    MeshData meshData;
+    glm::vec3                    position;
+    std::vector<VertexGroupEntry> groups;
+
+    bool operator==(const PositionAndGroups &) const = default;
+};
+
+struct PositionAndGroupsHash
+{
+    std::size_t operator()(const PositionAndGroups &key) const
+    {
+        std::size_t seed = Vector3Hash{}(key.position);
+        auto combine = [&](std::size_t value) { seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2); };
+        for (const VertexGroupEntry &group : key.groups)
+        {
+            combine(std::hash<uint32_t>{}(group.groupIndex));
+            combine(std::hash<float>{}(group.weight));
+        }
+        return seed;
+    }
+};
+
+struct ExtractedMeshData
+{
+    MeshData                                  geometry;
+    std::vector<std::vector<VertexGroupEntry>> vertexGroups;
+    bool                                      hasVertexGroups = false;
+};
+
+ExtractedMeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &model,
+                                  const std::vector<MaterialHandle> &materialHandles)
+{
+    ExtractedMeshData extracted;
+    MeshData         &meshData = extracted.geometry;
     auto    &positions       = meshData.positions;
     auto    &positionIndices = meshData.positionIndices;
     auto    &normals         = meshData.normals;
@@ -363,7 +522,7 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
     faceGroups.reserve(totalFaceCount);
 
     // Generate the position indices
-    std::unordered_map<glm::vec3, uint32_t, Vector3Hash> positionToIndex;
+    std::unordered_map<PositionAndGroups, uint32_t, PositionAndGroupsHash> positionToIndex;
 
     // For each primitive, which is a submesh, not a triangle
     for (const tinygltf::Primitive &primitive : mesh.primitives)
@@ -385,6 +544,8 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
         // ATTRIBUTE 1 - Position (required)
         AccessorView posView     = getAccessorView(model, primitive.attributes.at(POSITION_ATTR_NAME));
         size_t       vertexCount = posView.count;
+        const std::vector<InfluenceSetViews> influenceSets = getInfluenceSetViews(primitive, model, vertexCount);
+        extracted.hasVertexGroups |= !influenceSets.empty();
 
         if (posView.type != TINYGLTF_TYPE_VEC3)
         {
@@ -398,19 +559,14 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
 
         for (size_t j = 0; j < vertexCount; ++j)
         {
-            if (positionToIndex.find(readVec<glm::vec3>(posView, j)) == positionToIndex.end())
+            PositionAndGroups key{readVec<glm::vec3>(posView, j), readVertexGroups(influenceSets, j)};
+            auto [it, inserted] = positionToIndex.try_emplace(key, static_cast<uint32_t>(positions.size()));
+            if (inserted)
             {
-                // The position is not already in the map, meaning this is the first occurence, so we add the position
-                // to the positions vector
-                positionToIndex[readVec<glm::vec3>(posView, j)] = static_cast<uint32_t>(positions.size());
-                positions.push_back(readVec<glm::vec3>(posView, j));
-                positionIndices.push_back(positionToIndex[readVec<glm::vec3>(posView, j)]);
-            } else
-            {
-                // The position is already in the map, meaning this is a duplicate vertex, so we don't add it to the
-                // positions vector
-                positionIndices.push_back(positionToIndex[readVec<glm::vec3>(posView, j)]);
+                positions.push_back(key.position);
+                extracted.vertexGroups.push_back(std::move(key.groups));
             }
+            positionIndices.push_back(it->second);
         }
 
         // ATTRIBUTE 2 - Normal
@@ -477,6 +633,9 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
             for (size_t j = 0; j < vertexCount; j += 3)
             {
                 faces.push_back(glm::uvec3(baseVertex + j, baseVertex + j + 1, baseVertex + j + 2));
+                faceGroups.push_back(primitive.material >= 0
+                                         ? materialHandles.at(static_cast<size_t>(primitive.material) + 1)
+                                         : materialHandles.at(0));
             }
         } else
         {
@@ -504,7 +663,7 @@ MeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Model &mode
         generateTangents(meshData);
     }
 
-    return meshData;
+    return extracted;
 }
 
 } // namespace
@@ -539,15 +698,28 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialS
             throw std::runtime_error("GltfLoader: mesh has no primitives");
         }
 
-        auto [positions, positionIndices, normals, tangents, uvs, faces, faceGroups] =
-            extractMeshData(mesh, model, materialHandles);
+        ExtractedMeshData extracted = extractMeshData(mesh, model, materialHandles);
+        MeshData         &geometry  = extracted.geometry;
 
-        outMesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
-        outMesh.setFaceGroups(std::move(faceGroups));
+        if (extracted.hasVertexGroups)
+        {
+            outMesh.enableVertexGroups();
+        }
+        outMesh.setTopology(std::move(geometry.positions), std::move(geometry.positionIndices),
+                            std::move(geometry.faces));
+        outMesh.setFaceGroups(std::move(geometry.faceGroups));
 
-        outMesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, normals);
-        outMesh.setPerVertexArray<glm::vec4>(config.tangentAttributeName, tangents);
-        outMesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
+        if (extracted.hasVertexGroups)
+        {
+            for (uint32_t vertex = 0; vertex < extracted.vertexGroups.size(); ++vertex)
+            {
+                outMesh.setVertexGroups(vertex, extracted.vertexGroups[vertex]);
+            }
+        }
+
+        outMesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, geometry.normals);
+        outMesh.setPerVertexArray<glm::vec4>(config.tangentAttributeName, geometry.tangents);
+        outMesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, geometry.uvs);
     }
 
     return {std::move(seq), std::move(materialHandles)};
