@@ -2,7 +2,7 @@
 
 #include "core/framegraph/FrameGraph.hpp"
 #include "core/scene/Mesh.hpp"
-#include "core/scene/Transform.hpp"
+#include "core/scene/TransformComponent.hpp"
 #include "core/upload/MeshUploader.hpp"
 
 #include <vulkan/vulkan.h>
@@ -22,11 +22,11 @@ public:
         IndexBufferUploadResult                   indexBufferUploadResult;
 
         // One entry per mesh, parallel to vertexBufferUploadResult/indexBufferUploadResult's
-        // singleMeshResults — read fresh every frame so dragging a Transform moves the mesh
+        // singleMeshResults — read fresh every frame so dragging a TransformComponent moves the mesh
         // immediately with no buffer/pass rebuild. A null entry means the mesh's vertex positions
         // are already baked into world space (e.g. AreaLightVisual's quads) and should be drawn
         // with an identity model matrix rather than double-transformed.
-        std::vector<const Transform *> meshTransforms;
+        std::vector<const TransformComponent *> meshTransforms;
         std::string                    indexBufferResourceName;
         std::string                    faceGroupBufferResourceName;
         std::string                    diffuseTextureArrayResourceName;

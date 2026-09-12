@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/scene/Transform.hpp"
+#include "core/scene/TransformComponent.hpp"
 #include "core/scene/Component.hpp"
 
 #include <variant>

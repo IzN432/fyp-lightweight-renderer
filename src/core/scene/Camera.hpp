@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/scene/Transform.hpp"
+#include "core/scene/TransformComponent.hpp"
 #include "core/scene/Component.hpp"
 #include "core/scene/SceneObject.hpp"
 
@@ -36,7 +36,7 @@ struct Camera : public Component
 
     [[nodiscard]] glm::mat4 viewMatrix() const
     {
-        const lr::Transform &transform = getOwningObject().getComponent<Transform>();
+        const lr::TransformComponent &transform = getOwningObject().getComponent<TransformComponent>();
         const glm::vec3     &eye       = transform.position();
         return glm::lookAt(eye, eye + transform.forward(), transform.up());
     }

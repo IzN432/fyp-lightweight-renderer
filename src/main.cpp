@@ -118,7 +118,7 @@ try
 
     lr::SceneObject *camera = &scene.createSceneObject();
     camera->addComponent<lr::Camera>();
-    camera->addComponent<lr::Transform>();
+    camera->addComponent<lr::TransformComponent>();
     camera->name = "Main Camera";
     sceneManager.setDefaultCamera(*camera);
 
@@ -129,7 +129,7 @@ try
         light.intensity = 1.0f;
 
         lr::SceneObject &lightObject = scene.createSceneObject();
-        lightObject.addComponent<lr::Transform>();
+        lightObject.addComponent<lr::TransformComponent>();
         lightObject.addComponent<lr::Light>(light);
         lightObject.name = "Light";
     }
@@ -162,7 +162,7 @@ try
     };
 
     lr::SceneObject *meshObject = &scene.createSceneObject();
-    meshObject->addComponent<lr::Transform>();
+    meshObject->addComponent<lr::TransformComponent>();
     {
         // Seeds the main mesh's selection-highlight colors — one per unique/deduped position, the
         // same space VertexManager/SelectionManager and the points-picking overlay operate in.
@@ -244,7 +244,7 @@ try
         .indexBufferResourceName  = sceneManager.mainMeshIndexBufferName(),
         .vertexBufferUploadResult = sceneManager.mainMeshHeatmap(),
         .indexBufferUploadResult  = sceneManager.indexBuffer(),
-        .meshTransform            = &meshObject->getComponent<lr::Transform>(),
+        .meshTransform            = &meshObject->getComponent<lr::TransformComponent>(),
     });
 
     lr::GpuMeshLayout heatmapMeshLayout(staticMesh.mesh().layout());
@@ -284,7 +284,7 @@ try
         .pointsBufferResourceName = sceneManager.mainMeshPointsBufferName(),
         .pointsBufferUploadResult = sceneManager.mainMeshPoints(),
         .vertexCounts             = {staticMesh.mesh().uniquePositionCount()},
-        .meshTransform            = &meshObject->getComponent<lr::Transform>(),
+        .meshTransform            = &meshObject->getComponent<lr::TransformComponent>(),
     });
     overlayPointsPass.build(viewer.frameGraph(), pointsMeshLayout);
 
@@ -581,7 +581,8 @@ try
                 localCentroid += vertexManager.getPositions()[idx];
             }
             localCentroid /= static_cast<float>(idxs.size());
-            return glm::vec3(meshObject->getComponent<lr::Transform>().localMatrix() * glm::vec4(localCentroid, 1.0f));
+            return glm::vec3(meshObject->getComponent<lr::TransformComponent>().localMatrix() *
+                             glm::vec4(localCentroid, 1.0f));
         };
 
         const auto &selected = selectionManager.getSelectedIndices();
@@ -612,7 +613,7 @@ try
             const glm::vec3 centroid = worldCentroidOf(driven);
 
             // Keep the gizmo a constant size on screen (~1/9 screen height) regardless of camera distance.
-            const glm::vec3 camPos = camera->getComponent<lr::Transform>().position();
+            const glm::vec3 camPos = camera->getComponent<lr::TransformComponent>().position();
             const float     d      = glm::length(camPos - centroid);
             const float     fov    = glm::radians(camera->getComponent<lr::Camera>().fovYDegrees);
             const float     len    = 2.0f * d * std::tan(fov * 0.5f) / 5.0f;

@@ -3,7 +3,7 @@
 namespace lr
 {
 
-void buildAreaLightQuadMesh(Mesh &mesh, const Transform &transform, const AreaLight &light,
+void buildAreaLightQuadMesh(Mesh &mesh, const TransformComponent &transform, const AreaLight &light,
                             MaterialHandle materialHandle, const AreaLightVisualConfig &config)
 {
     const glm::vec3 right   = transform.right() * (light.size.x * 0.5f);

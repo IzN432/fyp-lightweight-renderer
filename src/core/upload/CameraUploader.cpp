@@ -16,7 +16,7 @@ void CameraUploader::upload(const SceneObject &camera, float aspectRatio)
     CameraGpuData data{};
 
     Camera    &cameraComponent = camera.getComponent<Camera>();
-    Transform &transform       = camera.getComponent<Transform>();
+    TransformComponent &transform = camera.getComponent<TransformComponent>();
 
     data.view     = cameraComponent.viewMatrix();
     data.proj     = cameraComponent.projectionMatrix(aspectRatio);

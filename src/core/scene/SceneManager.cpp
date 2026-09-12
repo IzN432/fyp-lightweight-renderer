@@ -3,7 +3,7 @@
 #include "Camera.hpp"
 #include "Light.hpp"
 #include "StaticMesh.hpp"
-#include "Transform.hpp"
+#include "TransformComponent.hpp"
 
 #include "core/app/Viewer.hpp"
 
@@ -49,19 +49,20 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
     uploadMeshes(materialLayout, vertexAttributeNames);
 
     // Constructed here rather than as a SceneManager member-initializer since it operates on the
-    // main mesh's Mesh/Transform, which only exist once uploadMeshes() above has run. The
+    // main mesh's Mesh/TransformComponent, which only exist once uploadMeshes() above has run. The
     // highlight-changed callback keeps the GPU color buffer in sync with selection state — the
     // caller (main.cpp) still owns wiring up a SelectionTool and its own UI on top of it.
     auto &mainMesh = m_mainMeshObject->getComponent<StaticMesh>().mesh();
     m_selectionManager =
-        std::make_unique<SelectionManager>(mainMesh.positions(), m_mainMeshObject->getComponent<Transform>(), input);
+        std::make_unique<SelectionManager>(mainMesh.positions(),
+                                           m_mainMeshObject->getComponent<TransformComponent>(), input);
     m_selectionManager->registerColorsChangedCallback([this]() {
         updateMainMeshHighlightColors();
     });
 
     // The camera buffer is registered by CameraUploader's constructor, but this is what actually
     // populates it, so do it once now rather than waiting for flushDirty()'s first pass. Ongoing
-    // Camera/Transform edits (Scene Hierarchy GUI, orbit controller, etc.) are picked up by
+    // Camera/TransformComponent edits (Scene Hierarchy GUI, orbit controller, etc.) are picked up by
     // flushDirty() — see its doc comment.
     updateCamera();
 }
@@ -98,7 +99,7 @@ void SceneManager::createLightVisuals(const AreaLightVisualConfig &config)
     {
         const auto      *areaLight = std::get_if<AreaLight>(&lightObject->getComponent<Light>().light);
         const AreaLight &lightData = areaLight ? *areaLight : kHiddenAreaLightVisual;
-        const Transform &transform = lightObject->getComponent<Transform>();
+        const TransformComponent &transform = lightObject->getComponent<TransformComponent>();
 
         const MaterialHandle handle = m_materialStore.acquire(buildAreaLightMaterial(lightData, config));
 
@@ -115,13 +116,13 @@ void SceneManager::gatherGeometry(const std::vector<std::string> &vertexAttribut
     auto &mainStaticMesh = m_mainMeshObject->getComponent<StaticMesh>();
 
     m_geometryMeshes = {&mainStaticMesh.mesh()};
-    m_meshTransforms = {&m_mainMeshObject->getComponent<Transform>()};
+    m_meshTransforms = {&m_mainMeshObject->getComponent<TransformComponent>()};
 
     for (SceneObject *lightVisualObject : m_lightVisualObjects)
     {
         m_geometryMeshes.push_back(&lightVisualObject->getComponent<StaticMesh>().mesh());
-        // Light visuals bake their Transform into vertex positions directly (see
-        // AreaLightVisual.hpp), so they'd be double-transformed by also applying their Transform
+        // Light visuals bake their TransformComponent into vertex positions directly (see
+        // AreaLightVisual.hpp), so they'd be double-transformed by also applying their TransformComponent
         // here — nullptr means "draw with an identity model matrix".
         m_meshTransforms.push_back(nullptr);
     }
@@ -242,7 +243,7 @@ void SceneManager::updateLightVisuals()
     {
         const auto      *areaLight       = std::get_if<AreaLight>(&lightObject->getComponent<Light>().light);
         const AreaLight &lightData       = areaLight ? *areaLight : kHiddenAreaLightVisual;
-        const Transform &transform       = lightObject->getComponent<Transform>();
+        const TransformComponent &transform = lightObject->getComponent<TransformComponent>();
         auto            &lightStaticMesh = lightObject->getComponent<StaticMesh>();
 
         const MaterialHandle handle = lightStaticMesh.materialHandles().front();
@@ -258,7 +259,7 @@ void SceneManager::updateLightVisuals()
 void SceneManager::flushDirty()
 {
     auto &cameraComponent = m_defaultCamera->getComponent<Camera>();
-    auto &cameraTransform = m_defaultCamera->getComponent<Transform>();
+    auto &cameraTransform = m_defaultCamera->getComponent<TransformComponent>();
     if (cameraComponent.isDirty() || cameraTransform.isDirty())
     {
         updateCamera();
@@ -274,7 +275,8 @@ void SceneManager::flushDirty()
     for (SceneObject *lightObject : m_lightVisualObjects)
     {
         anyLightVisualDirty |=
-            lightObject->getComponent<Light>().isDirty() || lightObject->getComponent<Transform>().isDirty();
+            lightObject->getComponent<Light>().isDirty() ||
+            lightObject->getComponent<TransformComponent>().isDirty();
     }
 
     if (anyLightVisualDirty)
@@ -284,7 +286,7 @@ void SceneManager::flushDirty()
         for (SceneObject *lightObject : m_lightVisualObjects)
         {
             lightObject->getComponent<Light>().clearDirty();
-            lightObject->getComponent<Transform>().clearDirty();
+            lightObject->getComponent<TransformComponent>().clearDirty();
         }
     }
 

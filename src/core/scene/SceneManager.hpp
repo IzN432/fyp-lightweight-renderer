@@ -47,12 +47,12 @@ public:
 
     MaterialStore &materialStore() { return m_materialStore; }
 
-    // The scene's single non-light-visual mesh — its Transform is applied via the model matrix at
-    // draw time (unlike light visuals, which bake their Transform into vertex positions directly).
+    // The scene's single non-light-visual mesh — its TransformComponent is applied via the model matrix at
+    // draw time (unlike light visuals, which bake their TransformComponent into vertex positions directly).
     // Must be set before initialize().
     void setMainMeshObject(SceneObject &object) { m_mainMeshObject = &object; }
 
-    // The camera whose Camera/Transform state drives the camera UBO. Must be set before
+    // The camera whose Camera/TransformComponent state drives the camera UBO. Must be set before
     // initialize().
     void setDefaultCamera(SceneObject &camera) { m_defaultCamera = &camera; }
 
@@ -122,13 +122,13 @@ public:
     void updateMaterials();
 
     // Rebuilds every light visual's quad geometry + MaterialStore slot from its current Light/
-    // Transform state, then re-uploads (positions, attributes, materials). Called by flushDirty()
-    // when any light-visual object's Light or Transform is dirty.
+    // TransformComponent state, then re-uploads (positions, attributes, materials). Called by flushDirty()
+    // when any light-visual object's Light or TransformComponent is dirty.
     void updateLightVisuals();
 
-    // Re-uploads the camera UBO from the default camera's current Camera/Transform state and the
+    // Re-uploads the camera UBO from the default camera's current Camera/TransformComponent state and the
     // last aspect ratio set via setAspect(). Called once during initialize(), and by flushDirty()
-    // when the default camera's Camera or Transform is dirty.
+    // when the default camera's Camera or TransformComponent is dirty.
     void updateCamera();
 
     const std::string &cameraBufferName() const { return m_cameraUploader.bufferName(); }
@@ -154,7 +154,7 @@ public:
     // ever holds one mesh (singleMeshResults[0]), unlike meshPositions()/indexBuffer().
     const VertexBufferUploadResult       &mainMeshHeatmap() const { return m_mainMeshHeatmap; }
     const IndexBufferUploadResult        &indexBuffer() const { return m_indexBuffer; }
-    const std::vector<const Transform *> &meshTransforms() const { return m_meshTransforms; }
+    const std::vector<const TransformComponent *> &meshTransforms() const { return m_meshTransforms; }
 
     const MaterialUploadResult &materialUploadResult() const { return m_materialUploadResult; }
 
@@ -208,7 +208,7 @@ private:
     // Cached once in uploadMeshes(), reused by updateMainMeshPositions()/updateLightVisuals() so
     // every repack targets the same combined mesh list / buffer configs.
     std::vector<const Mesh *>      m_geometryMeshes;
-    std::vector<const Transform *> m_meshTransforms;
+    std::vector<const TransformComponent *> m_meshTransforms;
     VertexBufferUploadConfig       m_meshPositionUploadConfig;
     VertexBufferUploadConfig       m_meshAttributeUploadConfig;
     GpuMaterialLayout              m_materialLayout;

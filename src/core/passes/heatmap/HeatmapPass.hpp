@@ -2,7 +2,7 @@
 
 #include "core/framegraph/FrameGraph.hpp"
 #include "core/scene/Mesh.hpp"
-#include "core/scene/Transform.hpp"
+#include "core/scene/TransformComponent.hpp"
 #include "core/upload/MeshUploader.hpp"
 
 #include <vulkan/vulkan.h>
@@ -30,8 +30,8 @@ public:
         IndexBufferUploadResult  indexBufferUploadResult;
 
         // Read fresh every frame, same as GeometryPass::Config::meshTransforms — dragging the
-        // mesh's Transform moves the heatmap surface immediately with no pass rebuild.
-        const Transform *meshTransform = nullptr;
+        // mesh's TransformComponent moves the heatmap surface immediately with no pass rebuild.
+        const TransformComponent *meshTransform = nullptr;
     };
 
     explicit HeatmapPass(Config cfg);

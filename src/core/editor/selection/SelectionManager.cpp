@@ -12,7 +12,7 @@ namespace
 {
 // BoxSelectionTool (and any future SelectionTool) hit-tests against camera-space projection, so
 // the vertices it sees need to be in the same world space GeometryPass actually renders them in.
-std::vector<glm::vec3> toWorldSpace(const std::vector<glm::vec3> &local, const Transform &transform)
+std::vector<glm::vec3> toWorldSpace(const std::vector<glm::vec3> &local, const TransformComponent &transform)
 {
     const glm::mat4        model = transform.localMatrix();
     std::vector<glm::vec3> world;

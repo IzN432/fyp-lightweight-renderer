@@ -1,6 +1,6 @@
 #include "SphericalCameraController.hpp"
 
-#include "core/scene/Transform.hpp"
+#include "core/scene/TransformComponent.hpp"
 
 #include <glm/glm.hpp>
 
@@ -29,7 +29,7 @@ void SphericalCameraController::update(float dt)
         if (mmb && shift)
         {
             // Pan: translate target in m_camera right/up plane
-            auto &t        = m_cameraSceneObject.getComponent<Transform>();
+            auto &t        = m_cameraSceneObject.getComponent<TransformComponent>();
             float panSpeed = m_orbitRadius * 0.002f;
             m_orbitTarget -= t.right() * (float)dx * panSpeed;
             m_orbitTarget += t.up() * (float)dy * panSpeed;
@@ -51,9 +51,9 @@ void SphericalCameraController::update(float dt)
                   m_orbitTarget.y + m_orbitRadius * std::sin(m_orbitElevation),
                   m_orbitTarget.z + m_orbitRadius * std::cos(m_orbitElevation) * std::cos(m_orbitAzimuth));
 
-    m_cameraSceneObject.getComponent<Transform>().setPosition(pos);
+    m_cameraSceneObject.getComponent<TransformComponent>().setPosition(pos);
     const glm::mat4 view = glm::lookAt(pos, m_orbitTarget, glm::vec3(0.0f, 1.0f, 0.0f));
-    m_cameraSceneObject.getComponent<Transform>().setRotation(glm::conjugate(glm::quat_cast(view)));
+    m_cameraSceneObject.getComponent<TransformComponent>().setRotation(glm::conjugate(glm::quat_cast(view)));
 }
 
 } // namespace lr

@@ -11,7 +11,7 @@ namespace lr
 {
 
 // Shared spatial transform for scene objects (camera, mesh instances, lights).
-struct Transform : public Component
+struct TransformComponent : public Component
 {
 private:
     glm::quat m_rotation{1.0f, 0.0f, 0.0f, 0.0f};
@@ -20,10 +20,10 @@ private:
     glm::vec3 m_scale{1.0f, 1.0f, 1.0f};
 
 public:
-    explicit Transform(glm::vec3 position = glm::vec3(0.0f), glm::quat rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+    explicit TransformComponent(glm::vec3 position = glm::vec3(0.0f), glm::quat rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
                        glm::vec3 scale = glm::vec3(1.0f))
         : m_position(position), m_rotation(rotation), m_scale(scale),
-          m_eulerDegrees(glm::degrees(glm::eulerAngles(rotation))), Component("Transform")
+          m_eulerDegrees(glm::degrees(glm::eulerAngles(rotation))), Component("TransformComponent")
     {}
 
     const glm::quat &rotation() const { return m_rotation; }

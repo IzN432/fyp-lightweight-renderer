@@ -1,6 +1,6 @@
 #include "core/upload/LightUploader.hpp"
 
-#include "core/scene/Transform.hpp"
+#include "core/scene/TransformComponent.hpp"
 #include "core/scene/SceneObject.hpp"
 
 namespace lr
@@ -39,12 +39,12 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
 
                 if constexpr (std::is_same_v<T, PointLight>)
                 {
-                    Transform &transform = lightObject->getComponent<Transform>();
+                    TransformComponent &transform = lightObject->getComponent<TransformComponent>();
                     gpuData.position     = transform.position();
                     gpuData.type         = 0;
                 } else if constexpr (std::is_same_v<T, SpotLight>)
                 {
-                    Transform &transform   = lightObject->getComponent<Transform>();
+                    TransformComponent &transform   = lightObject->getComponent<TransformComponent>();
                     gpuData.position       = transform.position();
                     gpuData.rotation       = transform.rotation();
                     gpuData.type           = 1;
@@ -52,14 +52,14 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
                     gpuData.outerConeAngle = glm::radians(l.outerConeAngleDegrees);
                 } else if constexpr (std::is_same_v<T, AreaLight>)
                 {
-                    Transform &transform = lightObject->getComponent<Transform>();
+                    TransformComponent &transform = lightObject->getComponent<TransformComponent>();
                     gpuData.position     = transform.position();
                     gpuData.rotation     = transform.rotation();
                     gpuData.type         = 2;
                     gpuData.areaSize     = l.size;
                 } else if constexpr (std::is_same_v<T, DirectionalLight>)
                 {
-                    Transform &transform = lightObject->getComponent<Transform>();
+                    TransformComponent &transform = lightObject->getComponent<TransformComponent>();
                     gpuData.rotation     = transform.rotation();
                     gpuData.type         = 3;
                 } else if constexpr (std::is_same_v<T, ImageLight>)

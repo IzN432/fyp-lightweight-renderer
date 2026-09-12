@@ -2,7 +2,7 @@
 
 #include "core/framegraph/FrameGraph.hpp"
 #include "core/scene/Mesh.hpp"
-#include "core/scene/Transform.hpp"
+#include "core/scene/TransformComponent.hpp"
 #include "core/upload/MeshUploader.hpp"
 
 #include <vulkan/vulkan.h>
@@ -21,10 +21,10 @@ public:
         VertexBufferUploadResult pointsBufferUploadResult;
         std::vector<uint32_t>    vertexCounts;
 
-        // The mesh's Transform, read fresh every frame so the points stay aligned with the mesh
+        // The mesh's TransformComponent, read fresh every frame so the points stay aligned with the mesh
         // as it moves — same reasoning as GeometryPass::Config::meshTransforms. Null means draw
         // with an identity model matrix.
-        const Transform *meshTransform = nullptr;
+        const TransformComponent *meshTransform = nullptr;
     };
 
     explicit OverlayPointsPass(Config cfg);

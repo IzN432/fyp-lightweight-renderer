@@ -4,7 +4,7 @@
 #include "VertexRole.hpp"
 
 #include "core/app/InputHandler.hpp"
-#include "core/scene/Transform.hpp"
+#include "core/scene/TransformComponent.hpp"
 
 #include <functional>
 #include <memory>
@@ -18,9 +18,9 @@ namespace lr
 class SelectionManager
 {
 public:
-    // meshTransform is the Transform GeometryPass applies to `vertices` at render time — hit-testing
+    // meshTransform is the TransformComponent GeometryPass applies to `vertices` at render time — hit-testing
     // needs to work in the same world space the mesh is actually drawn in, not raw local space.
-    SelectionManager(const std::vector<glm::vec3> &vertices, const Transform &meshTransform, InputHandler &input)
+    SelectionManager(const std::vector<glm::vec3> &vertices, const TransformComponent &meshTransform, InputHandler &input)
         : m_colors(vertices.size(), kDefaultColor), m_roles(vertices.size(), kNoRole), m_vertices(vertices),
           m_meshTransform(meshTransform), m_input(input)
     {}
@@ -99,7 +99,7 @@ private:
     std::unordered_map<VertexRoleId, glm::vec3> m_roleColors;
     VertexRoleId                                m_nextRoleId = kNoRole + 1;
     const std::vector<glm::vec3>               &m_vertices;
-    const Transform                            &m_meshTransform;
+    const TransformComponent                   &m_meshTransform;
     InputHandler                               &m_input;
     bool                                        m_mouseClickedThisFrame  = false;
     bool                                        m_mouseReleasedThisFrame = false;
