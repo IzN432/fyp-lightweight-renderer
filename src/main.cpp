@@ -448,9 +448,20 @@ try
     bool                    environmentDirty = false;
 
     viewer.onGui([&]() {
+        const ImGuiViewport *viewport = ImGui::GetMainViewport();
+        const ImVec2 panelSize(viewport->WorkSize.x * 0.24f, viewport->WorkSize.y * 0.32f);
+        const ImVec2 topRight(viewport->WorkPos.x + viewport->WorkSize.x - panelSize.x,
+                              viewport->WorkPos.y);
+        const ImVec2 bottomLeft(viewport->WorkPos.x,
+                                viewport->WorkPos.y + viewport->WorkSize.y - panelSize.y);
+        const ImVec2 bottomRight(viewport->WorkPos.x + viewport->WorkSize.x - panelSize.x,
+                                 viewport->WorkPos.y + viewport->WorkSize.y - panelSize.y);
+
         laplaceBeltramiTool.onGui();
 
-        ImGui::Begin("Scene Hierarchy");
+        ImGui::SetNextWindowPos(bottomLeft, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
+        ImGui::Begin("Environment");
 
         if (ImGui::CollapsingHeader("Environment", ImGuiTreeNodeFlags_DefaultOpen))
         {
@@ -512,7 +523,18 @@ try
             ImGuiFileDialog::Instance()->Close();
         }
 
-        scene.onGUI();
+        ImGui::End();
+
+        ImGui::SetNextWindowPos(topRight, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
+        ImGui::Begin("Scene Hierarchy");
+        scene.onHierarchyGUI();
+        ImGui::End();
+
+        ImGui::SetNextWindowPos(bottomRight, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
+        ImGui::Begin("Inspector");
+        scene.onInspectorGUI();
         ImGui::End();
     });
 

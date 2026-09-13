@@ -37,6 +37,10 @@ void LaplaceBeltramiTool::invalidate()
 
 void LaplaceBeltramiTool::onGui()
 {
+    const ImGuiViewport *viewport = ImGui::GetMainViewport();
+    const ImVec2 windowSize(viewport->WorkSize.x * 0.24f, viewport->WorkSize.y * 0.32f);
+    ImGui::SetNextWindowPos(viewport->WorkPos, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(windowSize, ImGuiCond_FirstUseEver);
     ImGui::Begin("Laplace-Beltrami Heatmap");
 
     if (ImGui::Button(m_hasResult ? "Recalculate" : "Calculate Laplace-Beltrami Operator"))

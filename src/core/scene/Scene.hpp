@@ -14,7 +14,8 @@ class Scene
 public:
     Scene() = default;
 
-    void onGUI();
+    void onHierarchyGUI();
+    void onInspectorGUI();
 
     SceneObject &createSceneObject();
 
@@ -26,7 +27,10 @@ public:
     const std::vector<std::unique_ptr<SceneObject>> &sceneObjects() const { return m_sceneObjects; }
 
 private:
+    void drawHierarchyNode(SceneObject &object);
+
     std::vector<std::unique_ptr<SceneObject>> m_sceneObjects;
+    std::optional<SceneObjectId>               m_selectedObject;
 };
 
 } // namespace lr

@@ -68,17 +68,60 @@ void Scene::setParent(SceneObjectId childId, std::optional<SceneObjectId> parent
     }
 }
 
-void Scene::onGUI()
+void Scene::drawHierarchyNode(SceneObject &object)
 {
-    ImGui::SeparatorText("Scene Objects");
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
+                               ImGuiTreeNodeFlags_SpanAvailWidth;
+    if (object.children().empty())
+    {
+        flags |= ImGuiTreeNodeFlags_Leaf;
+    }
+    if (m_selectedObject == object.id())
+    {
+        flags |= ImGuiTreeNodeFlags_Selected;
+    }
 
-    int id = 0;
+    const std::string label = object.name.empty() ? "Scene Object " + std::to_string(object.id()) : object.name;
+    const bool open = ImGui::TreeNodeEx(reinterpret_cast<void *>(static_cast<uintptr_t>(object.id()) + 1), flags,
+                                        "%s", label.c_str());
+    if (ImGui::IsItemClicked())
+    {
+        m_selectedObject = object.id();
+    }
+
+    if (open)
+    {
+        for (SceneObjectId childId : object.children())
+        {
+            drawHierarchyNode(getSceneObject(childId));
+        }
+        ImGui::TreePop();
+    }
+}
+
+void Scene::onHierarchyGUI()
+{
     for (auto &object : m_sceneObjects)
     {
-        ImGui::PushID(id++);
-        object->onGUI();
-        ImGui::PopID();
+        if (!object->parent())
+        {
+            drawHierarchyNode(*object);
+        }
     }
+}
+
+void Scene::onInspectorGUI()
+{
+    if (!m_selectedObject)
+    {
+        ImGui::TextDisabled("Select a scene object to inspect it.");
+        return;
+    }
+
+    SceneObject &object = getSceneObject(m_selectedObject.value());
+    ImGui::TextUnformatted(object.name.empty() ? "Unnamed Scene Object" : object.name.c_str());
+    ImGui::Separator();
+    object.onGUI();
 }
 
 } // namespace lr

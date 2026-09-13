@@ -73,14 +73,11 @@ public:
     void onGUI()
     {
         int id = 0;
-        if (ImGui::CollapsingHeader(name.c_str()))
+        for (auto &[type, component] : components)
         {
-            for (auto &[type, component] : components)
-            {
-                ImGui::PushID(id++);
-                component->onGUI();
-                ImGui::PopID();
-            }
+            ImGui::PushID(id++);
+            component->onGUI();
+            ImGui::PopID();
         }
     }
 };
