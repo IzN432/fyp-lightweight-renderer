@@ -101,6 +101,7 @@ add_library(lr_core STATIC
 
     src/core/loaders/ObjLoader.cpp
     src/core/loaders/GltfLoader.cpp
+    src/core/loaders/SceneLoader.cpp
     src/core/loaders/LoaderUtils.cpp
     src/core/loaders/MaterialStore.cpp
 

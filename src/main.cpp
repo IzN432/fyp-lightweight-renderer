@@ -1,6 +1,5 @@
 #include "core/app/Viewer.hpp"
 #include "core/Paths.hpp"
-#include "core/loaders/GltfLoader.hpp"
 #include "core/loaders/Material.hpp"
 #include "core/loaders/MaterialStore.hpp"
 #include "core/overlay/OverlayMesh.hpp"
@@ -48,6 +47,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 int main()
 try
@@ -137,15 +137,7 @@ try
     // MESH
     const fs::path meshPath = lr::paths::assetDir / "samples/models/bird_orange.glb";
 
-    lr::GltfLoader gltfLoader;
-    lr::GltfMeshLoadResult gltf = gltfLoader.load(meshPath, sceneManager.materialStore(), config);
-    auto                  &sequence = gltf.sequence;
-    auto                  &materialHandles = gltf.materialHandles;
-
-    if (sequence.empty())
-    {
-        throw std::runtime_error("GltfLoader returned empty sequence for '" + meshPath.string() + "'");
-    }
+    sceneManager.load(meshPath, {.gltf = config});
 
     // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets its own MeshComponent
     // (a quad), separate from the main mesh's MeshComponent. The quad still draws through the
@@ -163,24 +155,20 @@ try
         .baseMetallicName     = config.baseMetallicName,
     };
 
-    lr::SceneObject *meshObject = &scene.createSceneObject();
-    meshObject->addComponent<lr::TransformComponent>();
     {
         // Seeds the main mesh's selection-highlight colors — one per unique/deduped position, the
         // same space VertexManager/SelectionManager and the points-picking overlay operate in.
         // SceneManager::uploadMeshes() reads this back to build the initial GPU color buffer, so it
         // must be set before sceneManager.initialize() runs.
-        lr::Mesh              &m = sequence.frames.front();
-        std::vector<glm::vec3> colors(m.uniquePositionCount(), glm::vec3(1.0f, 0.0f, 1.0f));
-        m.setPerUniqueVertexArray("color", std::span<const glm::vec3>(colors));
-        std::vector<glm::vec3> heatmapColors(m.uniquePositionCount(), glm::vec3(0.0f));
-        m.setPerUniqueVertexArray("heatmapColors", std::span<const glm::vec3>(heatmapColors));
+        lr::Mesh              &mesh = sceneManager.mainMeshObject().getComponent<lr::MeshComponent>().mesh();
+        std::vector<glm::vec3> colors(mesh.uniquePositionCount(), glm::vec3(1.0f, 0.0f, 1.0f));
+        mesh.setPerUniqueVertexArray("color", std::span<const glm::vec3>(colors));
+        std::vector<glm::vec3> heatmapColors(mesh.uniquePositionCount(), glm::vec3(0.0f));
+        mesh.setPerUniqueVertexArray("heatmapColors", std::span<const glm::vec3>(heatmapColors));
     }
-    const lr::MeshHandle meshHandle = sceneManager.meshStore().add(std::move(sequence.frames.front()));
-    auto &meshComponent = meshObject->addComponent<lr::MeshComponent>(
-        meshHandle, sceneManager.meshStore(), materialHandles, sceneManager.materialStore());
-    meshObject->name = "Mesh Object";
-    sceneManager.setMainMeshObject(*meshObject);
+
+    lr::SceneObject *meshObject = &sceneManager.mainMeshObject();
+    auto &meshComponent = meshObject->getComponent<lr::MeshComponent>();
 
     // -------------------------------------------------------------------------
     // Resource uploads

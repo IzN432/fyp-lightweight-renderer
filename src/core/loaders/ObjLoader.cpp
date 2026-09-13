@@ -283,8 +283,8 @@ MeshData extractMeshData(const tinyobj::ObjReader &reader, const std::filesystem
 
 } // namespace
 
-ObjMeshLoadResult ObjLoader::load(const std::filesystem::path &path, MaterialStore &materialStore,
-                                  const ObjLoaderConfig &config) const
+MeshLoadResult ObjLoader::load(const std::filesystem::path &path, MaterialStore &materialStore,
+                               const ObjLoaderConfig &config)
 {
     // SECTION 1 - Load the OBJ file
 
@@ -312,7 +312,17 @@ ObjMeshLoadResult ObjLoader::load(const std::filesystem::path &path, MaterialSto
     mesh.setPerVertexArray<glm::vec4>(config.tangentAttributeName, tangents);
     mesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
 
-    return {std::move(mesh), std::move(materialHandles)};
+    MeshSequence sequence;
+    sequence.frames.push_back(std::move(mesh));
+
+    std::vector<MeshNode> nodes;
+    nodes.push_back({.name = path.stem().string(),
+                     .localTransform = Transform{},
+                     .parent = std::nullopt,
+                     .children = {},
+                     .meshIndex = 0,
+                     .skinIndex = std::nullopt});
+    return {std::move(sequence), std::move(materialHandles), {}, std::move(nodes), {0}};
 }
 
 } // namespace lr

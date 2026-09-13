@@ -7,6 +7,7 @@
 
 #include "core/app/Viewer.hpp"
 
+#include <iterator>
 #include <stdexcept>
 
 namespace lr
@@ -24,6 +25,24 @@ SceneManager::SceneManager(ResourceRegistry &registry, uint32_t materialCapacity
     : m_registry(registry), m_meshUploader(registry), m_materialUploader(registry), m_lightUploader(registry),
       m_cameraUploader(registry), m_materialStore(materialCapacity, std::move(defaultMaterialFactory))
 {}
+
+SceneObject &SceneManager::load(const std::filesystem::path &path, const SceneLoaderConfig &config)
+{
+    if (!m_scene)
+    {
+        throw std::runtime_error("SceneManager::load: scene must be set first");
+    }
+    SceneLoadResult imported = SceneLoader::load(path, *this, config);
+    if (!imported.firstMeshObject)
+    {
+        throw std::runtime_error("SceneManager::load: imported scene does not instantiate a mesh");
+    }
+
+    m_mainMeshObject = &m_scene->getSceneObject(imported.firstMeshObject.value());
+    m_skins.insert(m_skins.end(), std::make_move_iterator(imported.skins.begin()),
+                   std::make_move_iterator(imported.skins.end()));
+    return m_scene->getSceneObject(imported.rootObject);
+}
 
 void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualConfig,
                               const GpuMaterialLayout        &materialLayout,

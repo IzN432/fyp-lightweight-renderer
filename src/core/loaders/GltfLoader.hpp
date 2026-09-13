@@ -2,39 +2,12 @@
 
 #include <vector>
 
-#include "MeshSequence.hpp"
+#include "MeshLoadResult.hpp"
 #include "Material.hpp"
 #include "MaterialStore.hpp"
-#include "core/scene/Transform.hpp"
-#include "features/linear_blend_skinning/Skin.hpp"
-
-#include <cstdint>
-#include <optional>
 
 namespace lr
 {
-
-struct GltfMeshInstance
-{
-    uint32_t                sourceNodeIndex = 0;
-    uint32_t                meshIndex       = 0;
-    std::optional<uint32_t> skinIndex;
-    Transform               localTransform;
-};
-
-struct GltfMeshLoadResult
-{
-    MeshSequence sequence;
-    // Parallel to the glTF material indices (index 0 = the synthetic default material) — already
-    // resolved to their MaterialStore slots, matching what got baked into each Mesh's faceGroups.
-    std::vector<MaterialHandle> materialHandles;
-    // Parallel to glTF skins. Joint order is preserved exactly so mesh JOINTS_n values index
-    // directly into Skin::joints() and Skin::jointMatrices().
-    std::vector<Skin> skins;
-    // One entry per glTF node that instantiates a mesh. This preserves mesh-to-skin association,
-    // which belongs to nodes in glTF rather than to mesh definitions.
-    std::vector<GltfMeshInstance> meshInstances;
-};
 
 struct GltfLoaderConfig
 {
@@ -83,8 +56,8 @@ class GltfLoader
 public:
     // Materials are registered into `materialStore` as they're parsed, so the returned Mesh's
     // faceGroups already hold global MaterialHandles — no remapping needed at the call site.
-    GltfMeshLoadResult load(const std::filesystem::path &path, MaterialStore &materialStore,
-                            const GltfLoaderConfig &config = {}) const;
+    static MeshLoadResult load(const std::filesystem::path &path, MaterialStore &materialStore,
+                               const GltfLoaderConfig &config = {});
 };
 
 } // namespace lr

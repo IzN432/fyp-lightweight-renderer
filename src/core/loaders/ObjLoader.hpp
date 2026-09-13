@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/scene/Mesh.hpp"
+#include "core/loaders/MeshLoadResult.hpp"
 #include "core/loaders/Material.hpp"
 #include "core/loaders/MaterialStore.hpp"
 
@@ -8,14 +8,6 @@
 
 namespace lr
 {
-struct ObjMeshLoadResult
-{
-    Mesh mesh;
-    // Parallel to the OBJ's material indices (index 0 = the synthetic default material) — already
-    // resolved to their MaterialStore slots, matching what got baked into the Mesh's faceGroups.
-    std::vector<MaterialHandle> materialHandles;
-};
-
 struct ObjLoaderConfig
 {
     // Per-vertex attributes
@@ -46,8 +38,8 @@ class ObjLoader
 public:
     // Materials are registered into `materialStore` as they're parsed, so the returned Mesh's
     // faceGroups already hold global MaterialHandles — no remapping needed at the call site.
-    ObjMeshLoadResult load(const std::filesystem::path &path, MaterialStore &materialStore,
-                           const ObjLoaderConfig &config = {}) const;
+    static MeshLoadResult load(const std::filesystem::path &path, MaterialStore &materialStore,
+                               const ObjLoaderConfig &config = {});
 };
 
 } // namespace lr

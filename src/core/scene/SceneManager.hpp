@@ -14,6 +14,7 @@
 #include "core/framegraph/ResourceRegistry.hpp"
 #include "core/loaders/Material.hpp"
 #include "core/loaders/MaterialStore.hpp"
+#include "core/loaders/SceneLoader.hpp"
 #include "core/upload/CameraUploader.hpp"
 #include "core/upload/LightUploader.hpp"
 #include "core/upload/MaterialUploader.hpp"
@@ -49,10 +50,17 @@ public:
     MaterialStore &materialStore() { return m_materialStore; }
     MeshStore     &meshStore() { return m_meshStore; }
 
+    // Loads OBJ, glTF, or GLB content into this manager's Scene and asset
+    // stores. Returns an identity-transform container for the imported asset.
+    SceneObject &load(const std::filesystem::path &path, const SceneLoaderConfig &config = {});
+
     // The scene's single non-light-visual mesh — its TransformComponent is applied via the model matrix at
     // draw time (unlike light visuals, which bake their TransformComponent into vertex positions directly).
     // Must be set before initialize().
     void setMainMeshObject(SceneObject &object) { m_mainMeshObject = &object; }
+    SceneObject &mainMeshObject() { return *m_mainMeshObject; }
+
+    const std::vector<Skin> &skins() const { return m_skins; }
 
     // The camera whose Camera/TransformComponent state drives the camera UBO. Must be set before
     // initialize().
@@ -66,7 +74,8 @@ public:
     // caller: builds light visuals, uploads the initial lights/mesh/material/camera buffers, and
     // constructs the SelectionManager that operates on the main mesh (see selectionManager()) —
     // input is needed for that. Requires setScene(), setMainMeshObject() and setDefaultCamera() to
-    // have been called first.
+    // have been called first. load() selects the imported scene's first mesh
+    // automatically; setMainMeshObject() remains available for procedural scenes.
     void initialize(const AreaLightVisualConfig &areaLightVisualConfig, const GpuMaterialLayout &materialLayout,
                     const std::vector<std::string> &vertexAttributeNames, InputHandler &input);
 
@@ -206,7 +215,10 @@ private:
     // swapchain extent.
     float                      m_aspect = 1600.0f / 900.0f;
     std::vector<SceneObject *> m_lightVisualObjects;
-    AreaLightVisualConfig      m_areaLightVisualConfig;
+    // Retains imported skin data until joints reference scene-object IDs and
+    // skins receive their final scene representation.
+    std::vector<Skin>     m_skins;
+    AreaLightVisualConfig m_areaLightVisualConfig;
 
     // Cached once in uploadMeshes(), reused by updateMainMeshPositions()/updateLightVisuals() so
     // every repack targets the same combined mesh list / buffer configs.

@@ -523,31 +523,70 @@ std::vector<Skin> extractSkins(const tinygltf::Model &model,
     return skins;
 }
 
-std::vector<GltfMeshInstance> extractMeshInstances(const tinygltf::Model &model)
+std::vector<MeshNode> extractSceneNodes(
+    const tinygltf::Model &model, const std::vector<std::optional<uint32_t>> &parents)
 {
-    std::vector<GltfMeshInstance> instances;
+    std::vector<MeshNode> nodes;
+    nodes.reserve(model.nodes.size());
     for (uint32_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex)
     {
-        const tinygltf::Node &node = model.nodes[nodeIndex];
-        if (node.mesh < 0)
-        {
-            continue;
-        }
-        if (node.mesh >= static_cast<int>(model.meshes.size()))
+        const tinygltf::Node &source = model.nodes[nodeIndex];
+        if (source.mesh >= static_cast<int>(model.meshes.size()))
         {
             throw std::runtime_error("GltfLoader: node references an invalid mesh");
         }
-        if (node.skin >= static_cast<int>(model.skins.size()))
+        if (source.skin >= static_cast<int>(model.skins.size()))
         {
             throw std::runtime_error("GltfLoader: node references an invalid skin");
         }
+        std::vector<uint32_t> children;
+        children.reserve(source.children.size());
+        for (int child : source.children)
+        {
+            // buildNodeParents has already validated child indices.
+            children.push_back(static_cast<uint32_t>(child));
+        }
 
-        instances.push_back({.sourceNodeIndex = nodeIndex,
-                             .meshIndex = static_cast<uint32_t>(node.mesh),
-                             .skinIndex = node.skin >= 0 ? std::optional<uint32_t>(node.skin) : std::nullopt,
-                             .localTransform = extractNodeTransform(node)});
+        nodes.push_back({.name = source.name,
+                         .localTransform = extractNodeTransform(source),
+                         .parent = parents[nodeIndex],
+                         .children = std::move(children),
+                         .meshIndex = source.mesh >= 0 ? std::optional<uint32_t>(source.mesh) : std::nullopt,
+                         .skinIndex = source.skin >= 0 ? std::optional<uint32_t>(source.skin) : std::nullopt});
     }
-    return instances;
+    return nodes;
+}
+
+std::vector<uint32_t> extractSceneRoots(
+    const tinygltf::Model &model, const std::vector<std::optional<uint32_t>> &parents)
+{
+    std::vector<uint32_t> roots;
+    if (!model.scenes.empty())
+    {
+        const int sceneIndex = model.defaultScene >= 0 ? model.defaultScene : 0;
+        if (sceneIndex >= static_cast<int>(model.scenes.size()))
+        {
+            throw std::runtime_error("GltfLoader: default scene index is invalid");
+        }
+        for (int root : model.scenes[sceneIndex].nodes)
+        {
+            if (root < 0 || root >= static_cast<int>(model.nodes.size()))
+            {
+                throw std::runtime_error("GltfLoader: scene references an invalid root node");
+            }
+            roots.push_back(static_cast<uint32_t>(root));
+        }
+        return roots;
+    }
+
+    for (uint32_t nodeIndex = 0; nodeIndex < parents.size(); ++nodeIndex)
+    {
+        if (!parents[nodeIndex])
+        {
+            roots.push_back(nodeIndex);
+        }
+    }
+    return roots;
 }
 
 glm::uvec4 readJointIndices(const AccessorView &view, size_t index)
@@ -910,8 +949,8 @@ ExtractedMeshData extractMeshData(const tinygltf::Mesh &mesh, const tinygltf::Mo
 
 } // namespace
 
-GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialStore &materialStore,
-                                    const GltfLoaderConfig &config) const
+MeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialStore &materialStore,
+                                const GltfLoaderConfig &config)
 {
     // SECTION 1 - Load the glTF file using tinygltf to obtain a tinygltf::Model instance.
 
@@ -965,18 +1004,19 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialS
     }
 
     const std::vector<std::optional<uint32_t>> sourceParents = buildNodeParents(model);
-    std::vector<Skin>                          skins         = extractSkins(model, sourceParents);
-    std::vector<GltfMeshInstance>              meshInstances = extractMeshInstances(model);
+    std::vector<Skin>     skins      = extractSkins(model, sourceParents);
+    std::vector<MeshNode> nodes      = extractSceneNodes(model, sourceParents);
+    std::vector<uint32_t> sceneRoots = extractSceneRoots(model, sourceParents);
 
-    for (const GltfMeshInstance &instance : meshInstances)
+    for (const MeshNode &node : nodes)
     {
-        if (!instance.skinIndex)
+        if (!node.meshIndex || !node.skinIndex)
         {
             continue;
         }
 
-        const Mesh &mesh = seq.frames[instance.meshIndex];
-        const Skin &skin = skins[instance.skinIndex.value()];
+        const Mesh &mesh = seq.frames[node.meshIndex.value()];
+        const Skin &skin = skins[node.skinIndex.value()];
         if (!mesh.layout().vertexGroupsEnabled())
         {
             continue;
@@ -993,7 +1033,8 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialS
         }
     }
 
-    return {std::move(seq), std::move(materialHandles), std::move(skins), std::move(meshInstances)};
+    return {std::move(seq), std::move(materialHandles), std::move(skins), std::move(nodes),
+            std::move(sceneRoots)};
 }
 
 } // namespace lr
