@@ -36,6 +36,7 @@ public:
     std::string name;
 
     SceneObjectId id() const { return m_id; }
+    Scene &scene() const { return *m_scene; }
     std::optional<SceneObjectId> parent() const { return m_parent; }
     const std::vector<SceneObjectId> &children() const { return m_children; }
 

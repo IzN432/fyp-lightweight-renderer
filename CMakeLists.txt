@@ -199,10 +199,18 @@ add_library(lr_linear_blend_skinning_feature STATIC
 target_include_directories(lr_linear_blend_skinning_feature PUBLIC src)
 target_link_libraries(lr_linear_blend_skinning_feature PUBLIC lr_core glm::glm)
 
+add_library(lr_animation_feature STATIC
+    src/features/animation/AnimationTrack.cpp
+    src/features/animation/AnimationClip.cpp
+    src/features/animation/AnimatorComponent.cpp
+)
+target_include_directories(lr_animation_feature PUBLIC src)
+target_link_libraries(lr_animation_feature PUBLIC lr_core glm::glm)
+
 # Application executable
 add_executable(renderer src/main.cpp)
 target_link_libraries(renderer PRIVATE lr_core lr_arap_feature lr_laplace_beltrami_feature
-    lr_linear_blend_skinning_feature imguiFileDialog)
+    lr_linear_blend_skinning_feature lr_animation_feature imguiFileDialog)
 
 if(BUILD_TESTING)
     add_executable(scene_hierarchy_tests
@@ -226,6 +234,12 @@ if(BUILD_TESTING)
         LR_SAMPLE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/samples/models/"
     )
     add_test(NAME linear_blend_skinning.gltf_loader COMMAND gltf_skin_loader_tests)
+
+    add_executable(animation_tests
+        tests/animation/AnimationTests.cpp
+    )
+    target_link_libraries(animation_tests PRIVATE lr_animation_feature)
+    add_test(NAME animation.model COMMAND animation_tests)
 
     add_executable(framegraph_model_tests
         tests/framegraph/GraphModelTests.cpp
