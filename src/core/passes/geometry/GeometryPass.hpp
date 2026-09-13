@@ -4,6 +4,7 @@
 #include "core/scene/Mesh.hpp"
 #include "core/scene/TransformComponent.hpp"
 #include "core/upload/MeshUploader.hpp"
+#include "core/upload/SkinUploader.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -27,6 +28,7 @@ public:
         // are already baked into world space (e.g. AreaLightVisual's quads) and should be drawn
         // with an identity model matrix rather than double-transformed.
         std::vector<const TransformComponent *> meshTransforms;
+        std::vector<SkinDrawInfo>              skinDrawInfos;
         std::string                    indexBufferResourceName;
         std::string                    faceGroupBufferResourceName;
         std::string                    diffuseTextureArrayResourceName;
@@ -34,6 +36,10 @@ public:
         std::string                    metallicRoughnessTextureArrayResourceName;
         std::string                    emissiveTextureArrayResourceName;
         std::string                    materialBufferResourceName;
+        std::string                    skinInfluenceEntriesBufferResourceName;
+        std::string                    skinInfluenceOffsetsBufferResourceName;
+        std::string                    skinPositionIndicesBufferResourceName;
+        std::string                    skinJointMatricesBufferResourceName;
 
         uint32_t materialCount;
     };
@@ -42,8 +48,12 @@ public:
 
     void build(FrameGraph &fg, const GpuMeshLayout &layout) const;
 
+    void setSkinningEnabled(bool enabled) { m_skinningEnabled = enabled; }
+    bool isSkinningEnabled() const { return m_skinningEnabled; }
+
 private:
     Config m_cfg;
+    bool   m_skinningEnabled = true;
 };
 
 } // namespace lr

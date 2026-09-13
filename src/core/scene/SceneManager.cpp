@@ -4,6 +4,7 @@
 #include "Light.hpp"
 #include "MeshComponent.hpp"
 #include "TransformComponent.hpp"
+#include "features/linear_blend_skinning/SkinComponent.hpp"
 
 #include "core/app/Viewer.hpp"
 
@@ -22,7 +23,8 @@ const AreaLight kHiddenAreaLightVisual{{glm::vec3(0.0f), 0.0f}, glm::vec2(0.0f)}
 SceneManager::SceneManager(ResourceRegistry &registry, uint32_t materialCapacity,
                            std::function<Material()> defaultMaterialFactory)
     : m_registry(registry), m_meshUploader(registry), m_materialUploader(registry), m_lightUploader(registry),
-      m_cameraUploader(registry), m_materialStore(materialCapacity, std::move(defaultMaterialFactory))
+      m_cameraUploader(registry), m_skinUploader(registry),
+      m_materialStore(materialCapacity, std::move(defaultMaterialFactory))
 {}
 
 SceneObject &SceneManager::load(const std::filesystem::path &path, const SceneLoaderConfig &config)
@@ -94,6 +96,7 @@ void SceneManager::registerCallbacks(Viewer &viewer)
     });
 
     viewer.onLateUpdate([this](float dt, VkExtent2D extent) {
+        updateSkins();
         flushDirty();
     });
 }
@@ -134,6 +137,9 @@ void SceneManager::gatherGeometry(const std::vector<std::string> &vertexAttribut
 
     m_geometryMeshes = {&mainMeshComponent.mesh()};
     m_meshTransforms = {&m_mainMeshObject->getComponent<TransformComponent>()};
+    m_meshSkins = {m_mainMeshObject->hasComponent<SkinComponent>()
+                       ? &m_mainMeshObject->getComponent<SkinComponent>().skin()
+                       : nullptr};
 
     for (SceneObject *lightVisualObject : m_lightVisualObjects)
     {
@@ -142,6 +148,7 @@ void SceneManager::gatherGeometry(const std::vector<std::string> &vertexAttribut
         // AreaLightVisual.hpp), so they'd be double-transformed by also applying their TransformComponent
         // here — nullptr means "draw with an identity model matrix".
         m_meshTransforms.push_back(nullptr);
+        m_meshSkins.push_back(nullptr);
     }
 
     m_meshPositionUploadConfig  = {.vertexBufferName = m_mainMeshPositionBufferName, .includePosition = true};
@@ -174,6 +181,7 @@ void SceneManager::uploadMeshes(const GpuMaterialLayout        &materialLayout,
 
     m_indexBuffer = m_meshUploader.uploadIndexBuffer(m_geometryMeshes, {.indexBufferName = m_mainMeshIndexBufferName});
     m_meshUploader.uploadFaceGroupBuffer(m_geometryMeshes, {.faceGroupBufferName = m_mainMeshFaceGroupBufferName});
+    m_skinUploadResult = m_skinUploader.upload(m_geometryMeshes, m_meshSkins);
 
     m_materialUploadResult = m_materialUploader.upload(m_materialStore.snapshot(), m_materialLayout, "material");
 }
@@ -238,13 +246,29 @@ void SceneManager::updateMainMeshHighlightColors()
     updateMainMeshPointsBuffer();
 }
 
-void SceneManager::setSelectionState(SelectionState state)
+void SceneManager::setEditorMode(EditorMode mode)
 {
-    m_selectionState = state;
-    if (state == SelectionState::View)
+    if (mode == m_editorMode)
+    {
+        return;
+    }
+
+    const EditorMode previousMode = m_editorMode;
+    m_editorMode                  = mode;
+    if (previousMode == EditorMode::Edit && mode != EditorMode::Edit)
     {
         m_selectionManager->clearSelection();
     }
+
+    for (const auto &callback : m_editorModeChangedCallbacks)
+    {
+        callback(mode);
+    }
+}
+
+void SceneManager::registerEditorModeChangedCallback(std::function<void(EditorMode)> callback)
+{
+    m_editorModeChangedCallbacks.push_back(std::move(callback));
 }
 
 void SceneManager::updateMaterials()
@@ -253,6 +277,21 @@ void SceneManager::updateMaterials()
 }
 
 void SceneManager::updateCamera() { m_cameraUploader.upload(*m_defaultCamera, m_aspect); }
+
+void SceneManager::updateSkins()
+{
+    for (size_t i = 0; i < m_meshSkins.size(); ++i)
+    {
+        if (!m_meshSkins[i])
+        {
+            continue;
+        }
+
+        const TransformComponent *transform = m_meshTransforms[i];
+        m_meshSkins[i]->evaluate(transform ? transform->worldMatrix() : glm::mat4(1.0f));
+    }
+    m_skinUploader.updateJointMatrices(m_meshSkins);
+}
 
 void SceneManager::updateLightVisuals()
 {

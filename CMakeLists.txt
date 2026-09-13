@@ -109,6 +109,7 @@ add_library(lr_core STATIC
     src/core/upload/LightUploader.cpp
     src/core/upload/MaterialUploader.cpp
     src/core/upload/MeshUploader.cpp
+    src/core/upload/SkinUploader.cpp
 
     src/core/app/GuiManager.cpp
     src/core/app/InputHandler.cpp

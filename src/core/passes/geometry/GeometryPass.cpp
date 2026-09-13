@@ -15,6 +15,8 @@ struct GeometryPC
 {
     glm::mat4 model;
     uint32_t  primitiveIdOffset;
+    uint32_t  paletteOffset;
+    uint32_t  skinEnabled;
 };
 } // namespace
 
@@ -45,6 +47,10 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                            VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(5, fg.buffer(m_cfg.faceGroupBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(6, fg.buffer(m_cfg.materialBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .storageBufferRead(7, fg.buffer(m_cfg.skinInfluenceEntriesBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
+        .storageBufferRead(8, fg.buffer(m_cfg.skinInfluenceOffsetsBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
+        .storageBufferRead(9, fg.buffer(m_cfg.skinPositionIndicesBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
+        .storageBufferRead(10, fg.buffer(m_cfg.skinJointMatricesBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
         .colorAttachment(fg.image("gbufferAlbedo"), VK_FORMAT_R16G16B16A16_SFLOAT)
         .colorAttachment(fg.image("gbufferNormal"), VK_FORMAT_R16G16_SFLOAT)
         .colorAttachment(fg.image("gbufferMaterial"), VK_FORMAT_R16G16B16A16_UNORM)
@@ -60,7 +66,11 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                 const TransformComponent *transform = m_cfg.meshTransforms[i];
                 const glm::mat4 model = transform ? transform->worldMatrix() : glm::mat4(1.0f);
 
-                const GeometryPC pc{.model = model, .primitiveIdOffset = singleMeshIndex.firstIndex / 3};
+                const SkinDrawInfo &skin = m_cfg.skinDrawInfos[i];
+                const GeometryPC pc{.model             = model,
+                                    .primitiveIdOffset = singleMeshIndex.firstIndex / 3,
+                                    .paletteOffset     = skin.paletteOffset,
+                                    .skinEnabled       = skin.skinEnabled && m_skinningEnabled ? 1u : 0u};
                 ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                         pc);
                 ctx.cmd().drawIndexed(singleMeshIndex.indexCount, 1, singleMeshIndex.firstIndex,

@@ -16,6 +16,32 @@ layout(set = 0, binding = 0) uniform CameraUbo
     float padding;
 } cameraUbo;
 
+struct Influence
+{
+    uint jointIndex;
+    float weight;
+};
+
+layout(std430, set = 0, binding = 7) readonly buffer SkinInfluenceEntries
+{
+    Influence entries[];
+} skinInfluences;
+
+layout(std430, set = 0, binding = 8) readonly buffer SkinInfluenceOffsets
+{
+    uint offsets[];
+} skinInfluenceOffsets;
+
+layout(std430, set = 0, binding = 9) readonly buffer SkinPositionIndices
+{
+    uint indices[];
+} skinPositionIndices;
+
+layout(std430, set = 0, binding = 10) readonly buffer SkinJointMatrices
+{
+    mat4 matrices[];
+} skinJointMatrices;
+
 layout(location = 0) out vec3 outWorldPos;
 layout(location = 1) out vec3 outNormal;
 layout(location = 2) out vec4 outTangent;
@@ -28,16 +54,47 @@ layout(push_constant) uniform PC
 {
     mat4 model;
     uint primitiveIdOffset;
+    uint paletteOffset;
+    uint skinEnabled;
 } pc;
 
 void main()
 {
-    vec4 worldPos = pc.model * vec4(inPosition, 1.0);
+    vec3 position = inPosition;
+    vec3 normal = inNormal;
+    vec3 tangent = inTangent.xyz;
+
+    if (pc.skinEnabled != 0)
+    {
+        uint uniquePosition = skinPositionIndices.indices[gl_VertexIndex];
+        uint begin = skinInfluenceOffsets.offsets[uniquePosition];
+        uint end = skinInfluenceOffsets.offsets[uniquePosition + 1];
+
+        mat4 skinMatrix = mat4(0.0);
+        float weightSum = 0.0;
+        for (uint influenceIndex = begin; influenceIndex < end; ++influenceIndex)
+        {
+            Influence influence = skinInfluences.entries[influenceIndex];
+            skinMatrix += influence.weight *
+                          skinJointMatrices.matrices[pc.paletteOffset + influence.jointIndex];
+            weightSum += influence.weight;
+        }
+
+        if (weightSum > 0.0)
+        {
+            skinMatrix /= weightSum;
+            position = (skinMatrix * vec4(position, 1.0)).xyz;
+            normal = transpose(inverse(mat3(skinMatrix))) * normal;
+            tangent = mat3(skinMatrix) * tangent;
+        }
+    }
+
+    vec4 worldPos = pc.model * vec4(position, 1.0);
     outWorldPos = worldPos.xyz;
 
     mat3 normalMatrix = transpose(inverse(mat3(pc.model)));
-    outNormal = normalize(normalMatrix * inNormal);
-    outTangent = vec4(normalize(mat3(pc.model) * inTangent.xyz), inTangent.w);
+    outNormal = normalize(normalMatrix * normal);
+    outTangent = vec4(normalize(mat3(pc.model) * tangent), inTangent.w);
 
     outUv = inUv;
     gl_Position = cameraUbo.viewProj * worldPos;

@@ -201,16 +201,15 @@ void Mesh::allocateDomain(std::unordered_map<std::string, AttributeStore> &store
 void Mesh::rebuildGroupCSR() const
 {
     const size_t n = m_pendingGroupEntries.size();
-    m_groupOffsets.resize(n);
-    m_groupCounts.resize(n);
+    m_groupOffsets.resize(n + 1);
     m_groupEntries.clear();
 
     for (size_t v = 0; v < n; ++v)
     {
         m_groupOffsets[v] = static_cast<uint32_t>(m_groupEntries.size());
-        m_groupCounts[v]  = static_cast<uint32_t>(m_pendingGroupEntries[v].size());
         m_groupEntries.insert(m_groupEntries.end(), m_pendingGroupEntries[v].begin(), m_pendingGroupEntries[v].end());
     }
+    m_groupOffsets[n] = static_cast<uint32_t>(m_groupEntries.size());
 
     m_csrDirty = false;
 }
@@ -336,7 +335,9 @@ std::span<const VertexGroupEntry> Mesh::getVertexGroups(uint32_t vertexIndex) co
         rebuildGroupCSR();
     }
 
-    return {m_groupEntries.data() + m_groupOffsets[vertexIndex], m_groupCounts[vertexIndex]};
+    const uint32_t begin = m_groupOffsets[vertexIndex];
+    const uint32_t end   = m_groupOffsets[vertexIndex + 1];
+    return {m_groupEntries.data() + begin, end - begin};
 }
 
 // =============================================================================
@@ -384,15 +385,6 @@ std::span<const uint32_t> Mesh::rawGroupOffsets() const
         rebuildGroupCSR();
     }
     return m_groupOffsets;
-}
-
-std::span<const uint32_t> Mesh::rawGroupCounts() const
-{
-    if (m_csrDirty)
-    {
-        rebuildGroupCSR();
-    }
-    return m_groupCounts;
 }
 
 } // namespace lr

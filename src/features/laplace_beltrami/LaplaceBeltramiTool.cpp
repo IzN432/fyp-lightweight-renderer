@@ -10,9 +10,9 @@ namespace lr
 {
 
 LaplaceBeltramiTool::LaplaceBeltramiTool(std::span<const glm::vec3> positions,
-                                             std::span<const glm::uvec3> triangles, SceneManager &sceneManager,
-                                             HeatmapPass &heatmapPass, VertexManager &vertexManager)
-    : m_positions(positions), m_triangles(triangles), m_sceneManager(sceneManager), m_heatmapPass(heatmapPass)
+                                         std::span<const glm::uvec3> triangles, SceneManager &sceneManager,
+                                         VertexManager &vertexManager)
+    : m_positions(positions), m_triangles(triangles), m_sceneManager(sceneManager)
 {
     vertexManager.registerUpdateCallback([this]() {
         invalidate();
@@ -48,11 +48,11 @@ void LaplaceBeltramiTool::onGui()
         calculate();
     }
 
-    bool enabled = m_heatmapPass.isEnabled();
+    bool enabled = m_sceneManager.editorMode() == EditorMode::Analysis;
     ImGui::BeginDisabled(!m_hasResult);
     if (ImGui::Checkbox("Show heatmap", &enabled))
     {
-        m_heatmapPass.setEnabled(enabled);
+        m_sceneManager.setEditorMode(enabled ? EditorMode::Analysis : EditorMode::View);
     }
     ImGui::EndDisabled();
 

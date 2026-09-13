@@ -1,5 +1,6 @@
 #include "core/loaders/GltfLoader.hpp"
 #include "core/loaders/SceneLoader.hpp"
+#include "core/scene/MeshComponent.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 
 #include <glm/gtc/epsilon.hpp>
@@ -51,6 +52,17 @@ int main()
     assert(scene.getSceneObject(imported.nodeObjects[0].value()).parent().value() == imported.rootObject);
     lr::SceneObject &birdMeshObject = scene.getSceneObject(imported.nodeObjects[51].value());
     assert(birdMeshObject.hasComponent<lr::SkinComponent>());
+
+    const lr::Mesh &birdMesh = birdMeshObject.getComponent<lr::MeshComponent>().mesh();
+    const auto      influenceOffsets = birdMesh.rawGroupOffsets();
+    assert(influenceOffsets.size() == birdMesh.uniquePositionCount() + 1);
+    assert(influenceOffsets.front() == 0);
+    assert(influenceOffsets.back() == birdMesh.rawGroupEntries().size());
+    for (uint32_t position = 0; position < birdMesh.uniquePositionCount(); ++position)
+    {
+        assert(birdMesh.getVertexGroups(position).size() ==
+               influenceOffsets[position + 1] - influenceOffsets[position]);
+    }
 
     const lr::Skin &runtimeSkin = birdMeshObject.getComponent<lr::SkinComponent>().skin();
     assert(runtimeSkin.joints().size() == bird.skins[0].joints.size());

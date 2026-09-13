@@ -206,6 +206,7 @@ try
          .vertexBufferUploadResult    = sceneManager.meshPositions(),
          .indexBufferUploadResult     = sceneManager.indexBuffer(),
          .meshTransforms              = sceneManager.meshTransforms(),
+         .skinDrawInfos               = sceneManager.skinUploadResult().drawInfos,
          .indexBufferResourceName     = sceneManager.mainMeshIndexBufferName(),
          .faceGroupBufferResourceName = sceneManager.mainMeshFaceGroupBufferName(),
          .diffuseTextureArrayResourceName =
@@ -217,6 +218,10 @@ try
          .emissiveTextureArrayResourceName =
             sceneManager.materialUploadResult().textureNameMap.at(config.emissiveTextureName),
          .materialBufferResourceName = sceneManager.materialUploadResult().materialInfoBufferName,
+         .skinInfluenceEntriesBufferResourceName = sceneManager.skinInfluenceEntriesBufferName(),
+         .skinInfluenceOffsetsBufferResourceName = sceneManager.skinInfluenceOffsetsBufferName(),
+         .skinPositionIndicesBufferResourceName = sceneManager.skinPositionIndicesBufferName(),
+         .skinJointMatricesBufferResourceName = sceneManager.skinJointMatricesBufferName(),
 
          .materialCount = sceneManager.materialStore().capacity(),
     });
@@ -289,7 +294,13 @@ try
     // Editor state — vertex picking, selection and gizmo managers
     // -------------------------------------------------------------------------
 
-    overlayPointsPass.setEnabled(sceneManager.selectionState() == lr::SelectionState::Edit);
+    const auto applyEditorMode = [&](lr::EditorMode mode) {
+        geometryPass.setSkinningEnabled(mode == lr::EditorMode::View);
+        overlayPointsPass.setEnabled(mode == lr::EditorMode::Edit);
+        heatmapPass.setEnabled(mode == lr::EditorMode::Analysis);
+    };
+    sceneManager.registerEditorModeChangedCallback(applyEditorMode);
+    applyEditorMode(sceneManager.editorMode());
 
     // Gizmo hover — reads the picking image from the previous frame
     lr::ImageReadback gizmoReadback(viewer.context(), viewer.allocator());
@@ -356,7 +367,7 @@ try
                                      meshComponent.mesh().positionIndices()[face.z]});
     }
     lr::LaplaceBeltramiTool laplaceBeltramiTool(meshComponent.mesh().positions(), positionTriangles, sceneManager,
-                                                heatmapPass, vertexManager);
+                                                vertexManager);
 
     // Single combined LMB handler: gizmos get first refusal on a click (so
     // dragging an arrow doesn't simultaneously start a box-select), and
@@ -370,7 +381,7 @@ try
         const bool wasInteracting = gizmoManager.isInteracting();
         gizmoManager.mouseButtonCallback(button, action, shift, ctrl, alt);
 
-        if (wasInteracting || gizmoManager.isInteracting() || sceneManager.selectionState() != lr::SelectionState::Edit)
+        if (wasInteracting || gizmoManager.isInteracting() || sceneManager.editorMode() != lr::EditorMode::Edit)
         {
             return;
         }
@@ -388,9 +399,8 @@ try
             return;
         }
 
-        const bool nowEditing = sceneManager.selectionState() != lr::SelectionState::Edit;
-        sceneManager.setSelectionState(nowEditing ? lr::SelectionState::Edit : lr::SelectionState::View);
-        overlayPointsPass.setEnabled(nowEditing);
+        const bool nowEditing = sceneManager.editorMode() != lr::EditorMode::Edit;
+        sceneManager.setEditorMode(nowEditing ? lr::EditorMode::Edit : lr::EditorMode::View);
 
         // ARAP mode is conceptually nested inside Edit mode — leaving Edit is a hard reset for
         // everything nested under it, so it can't outlive the mode it depends on (e.g. a gizmo
@@ -613,7 +623,7 @@ try
         // included — see the Tab handler above, which forces it off on leaving Edit) — a handler's
         // index list can still be non-empty outside Edit (roles/selection aren't cleared just by
         // toggling modes), so this can't be inferred from driven.empty() alone.
-        const bool editingAllowed = sceneManager.selectionState() == lr::SelectionState::Edit;
+        const bool editingAllowed = sceneManager.editorMode() == lr::EditorMode::Edit;
 
         if (!editingAllowed || driven.empty() || suppressedByArapMode)
         {

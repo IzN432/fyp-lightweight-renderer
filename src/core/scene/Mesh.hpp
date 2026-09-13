@@ -246,7 +246,7 @@ public:
 
     // Set all (groupIndex, weight) pairs for one vertex.
     // Marks the CSR dirty; the flat arrays are rebuilt lazily on the first
-    // rawGroupEntries/Offsets/Counts access after any call here.
+    // rawGroupEntries/Offsets access after any call here.
     // Entries are indexed by unique position, not by duplicated render vertex.
     // Throws std::out_of_range if vertexIndex >= uniquePositionCount().
     // Requires setTopology() to have been called beforehand.
@@ -276,10 +276,10 @@ public:
     std::span<const std::byte> rawVertexGroupAttributeData(const std::string &name) const;
 
     // CSR buffers for weighted vertex group membership (skinning upload).
-    // Triggers a CSR rebuild if entries have been modified since the last access.
+    // Offsets contains uniquePositionCount() + 1 elements; adjacent values delimit each
+    // position's half-open range in entries. Triggers a CSR rebuild if entries have changed.
     std::span<const VertexGroupEntry> rawGroupEntries() const;
     std::span<const uint32_t>         rawGroupOffsets() const;
-    std::span<const uint32_t>         rawGroupCounts() const;
 
     const MeshLayout &layout() const { return m_layout; }
 
@@ -348,7 +348,7 @@ private:
     bool m_faceGroupCountExplicit   = false;
     bool m_vertexGroupCountExplicit = false;
 
-    // Rebuilds m_groupEntries/Offsets/Counts from m_pendingGroupEntries.
+    // Rebuilds m_groupEntries/Offsets from m_pendingGroupEntries.
     // Called lazily from rawGroup* accessors when m_csrDirty is set.
     void rebuildGroupCSR() const;
 
@@ -359,7 +359,6 @@ private:
     // Flat CSR arrays — mutable because they are rebuilt lazily from const accessors.
     mutable std::vector<VertexGroupEntry> m_groupEntries;
     mutable std::vector<uint32_t>         m_groupOffsets;
-    mutable std::vector<uint32_t>         m_groupCounts;
     mutable bool                          m_csrDirty = false;
 };
 

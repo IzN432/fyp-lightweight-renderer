@@ -19,6 +19,7 @@
 #include "core/upload/LightUploader.hpp"
 #include "core/upload/MaterialUploader.hpp"
 #include "core/upload/MeshUploader.hpp"
+#include "core/upload/SkinUploader.hpp"
 
 // SceneManager holds all the scene objects in the scene, owns the MaterialStore, and is
 // responsible for packing/uploading the GPU-facing buffers (mesh vertex/index/facegroup buffers,
@@ -29,13 +30,14 @@ namespace lr
 
 class Viewer;
 
-// The editor's current interaction mode over the main mesh — View just renders normally, Edit
-// shows the vertex-picking overlay and lets the SelectionManager's SelectionTool receive clicks.
-// Only two states for now; may grow (e.g. per-tool edit modes) later.
-enum class SelectionState
+// The editor's current interpretation of the main mesh. View displays the posed/skinned surface;
+// Edit and Analysis operate on the unskinned rest mesh so tools and derived values agree with the
+// geometry they address.
+enum class EditorMode
 {
     View,
     Edit,
+    Analysis,
 };
 
 class SceneManager
@@ -90,13 +92,13 @@ public:
     // getHighlightedIndices() for its own UI (translate gizmo placement, etc.).
     SelectionManager &selectionManager() { return *m_selectionManager; }
 
-    SelectionState selectionState() const { return m_selectionState; }
+    EditorMode editorMode() const { return m_editorMode; }
 
-    // Switches the editor's interaction mode. Leaving Edit clears the current selection (mirrors
-    // the old Tab-toggle behavior). The caller is still responsible for toggling the points-overlay
-    // pass's own visibility to match (see OverlayPointsPass::setEnabled) — SceneManager doesn't own
-    // any render passes.
-    void setSelectionState(SelectionState state);
+    // Switches between posed viewing, rest-mesh editing, and rest-mesh analysis. Leaving Edit
+    // clears the current selection. SceneManager publishes the change rather than owning render
+    // passes, allowing the application to apply one consistent visibility/skinning policy.
+    void setEditorMode(EditorMode mode);
+    void registerEditorModeChangedCallback(std::function<void(EditorMode)> callback);
 
     // Polls the camera, light visual, and main mesh components for the dirty flag their setters/
     // onGUIImpl set via Component::markDirty(), re-uploads whatever's dirty (at most once per
@@ -140,7 +142,23 @@ public:
     // when the default camera's Camera or TransformComponent is dirty.
     void updateCamera();
 
+    // Evaluates every skin against the current joint hierarchy and mesh transform, then uploads
+    // the packed joint palettes. Called every frame for the initial implementation.
+    void updateSkins();
+
     const std::string &cameraBufferName() const { return m_cameraUploader.bufferName(); }
+
+    const SkinUploadResult &skinUploadResult() const { return m_skinUploadResult; }
+    const std::string &skinInfluenceEntriesBufferName() const
+    {
+        return m_skinUploader.influenceEntriesBufferName();
+    }
+    const std::string &skinInfluenceOffsetsBufferName() const
+    {
+        return m_skinUploader.influenceOffsetsBufferName();
+    }
+    const std::string &skinPositionIndicesBufferName() const { return m_skinUploader.positionIndicesBufferName(); }
+    const std::string &skinJointMatricesBufferName() const { return m_skinUploader.jointMatricesBufferName(); }
 
     const std::string &mainMeshPositionBufferName() const { return m_mainMeshPositionBufferName; }
     // Interleaved unique/deduped position + color buffer — see m_mainMeshPointsBufferName. Distinct
@@ -198,12 +216,14 @@ private:
     ResourceRegistry &m_registry;
 
     std::unique_ptr<SelectionManager> m_selectionManager;
-    SelectionState                    m_selectionState = SelectionState::View;
+    EditorMode                        m_editorMode = EditorMode::View;
+    std::vector<std::function<void(EditorMode)>> m_editorModeChangedCallbacks;
 
     MeshUploader     m_meshUploader;
     MaterialUploader m_materialUploader;
     LightUploader    m_lightUploader;
     CameraUploader   m_cameraUploader;
+    SkinUploader     m_skinUploader;
     MaterialStore    m_materialStore;
     MeshStore        m_meshStore;
 
@@ -219,6 +239,7 @@ private:
     // every repack targets the same combined mesh list / buffer configs.
     std::vector<const Mesh *>      m_geometryMeshes;
     std::vector<const TransformComponent *> m_meshTransforms;
+    std::vector<Skin *>            m_meshSkins;
     VertexBufferUploadConfig       m_meshPositionUploadConfig;
     VertexBufferUploadConfig       m_meshAttributeUploadConfig;
     GpuMaterialLayout              m_materialLayout;
@@ -247,6 +268,7 @@ private:
     VertexBufferUploadResult m_mainMeshHeatmap;
     IndexBufferUploadResult  m_indexBuffer;
     MaterialUploadResult     m_materialUploadResult;
+    SkinUploadResult         m_skinUploadResult;
 };
 
 } // namespace lr
