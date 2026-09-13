@@ -28,6 +28,9 @@ public:
 
     const Transform &transform() const { return m_transform; }
 
+    // Includes the transforms of this object's scene ancestors.
+    glm::mat4 worldMatrix() const;
+
     void setRotation(const glm::quat &rotation)
     {
         m_transform.setRotation(rotation);

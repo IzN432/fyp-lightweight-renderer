@@ -135,7 +135,7 @@ try
     }
 
     // MESH
-    const fs::path meshPath = lr::paths::assetDir / "samples/models/lion_head_4k.glb";
+    const fs::path meshPath = lr::paths::assetDir / "samples/models/bird_orange.glb";
 
     lr::GltfLoader gltfLoader;
     lr::GltfMeshLoadResult gltf = gltfLoader.load(meshPath, sceneManager.materialStore(), config);
@@ -176,8 +176,9 @@ try
         std::vector<glm::vec3> heatmapColors(m.uniquePositionCount(), glm::vec3(0.0f));
         m.setPerUniqueVertexArray("heatmapColors", std::span<const glm::vec3>(heatmapColors));
     }
-    auto &meshComponent = meshObject->addComponent<lr::MeshComponent>(sequence.frames.front(), materialHandles,
-                                                                     sceneManager.materialStore());
+    const lr::MeshHandle meshHandle = sceneManager.meshStore().add(std::move(sequence.frames.front()));
+    auto &meshComponent = meshObject->addComponent<lr::MeshComponent>(
+        meshHandle, sceneManager.meshStore(), materialHandles, sceneManager.materialStore());
     meshObject->name = "Mesh Object";
     sceneManager.setMainMeshObject(*meshObject);
 
@@ -583,7 +584,7 @@ try
                 localCentroid += vertexManager.getPositions()[idx];
             }
             localCentroid /= static_cast<float>(idxs.size());
-            return glm::vec3(meshObject->getComponent<lr::TransformComponent>().transform().localMatrix() *
+            return glm::vec3(meshObject->getComponent<lr::TransformComponent>().worldMatrix() *
                              glm::vec4(localCentroid, 1.0f));
         };
 

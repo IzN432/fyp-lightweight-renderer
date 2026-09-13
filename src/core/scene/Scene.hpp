@@ -3,6 +3,7 @@
 #include "SceneObject.hpp"
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace lr
@@ -15,11 +16,12 @@ public:
 
     void onGUI();
 
-    SceneObject &createSceneObject()
-    {
-        m_sceneObjects.push_back(std::make_unique<SceneObject>());
-        return *m_sceneObjects.back();
-    }
+    SceneObject &createSceneObject();
+
+    SceneObject       &getSceneObject(SceneObjectId id);
+    const SceneObject &getSceneObject(SceneObjectId id) const;
+
+    void setParent(SceneObjectId child, std::optional<SceneObjectId> parent);
 
     const std::vector<std::unique_ptr<SceneObject>> &sceneObjects() const { return m_sceneObjects; }
 

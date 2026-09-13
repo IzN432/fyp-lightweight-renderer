@@ -58,7 +58,7 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                 const auto &singleMeshIndex = m_cfg.indexBufferUploadResult.singleMeshResults[i];
 
                 const TransformComponent *transform = m_cfg.meshTransforms[i];
-                const glm::mat4 model = transform ? transform->transform().localMatrix() : glm::mat4(1.0f);
+                const glm::mat4 model = transform ? transform->worldMatrix() : glm::mat4(1.0f);
 
                 const GeometryPC pc{.model = model, .primitiveIdOffset = singleMeshIndex.firstIndex / 3};
                 ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,

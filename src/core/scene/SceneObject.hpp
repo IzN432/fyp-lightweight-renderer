@@ -2,7 +2,12 @@
 
 #include "Component.hpp"
 
+#include <glm/glm.hpp>
+
 #include <unordered_map>
+#include <cstdint>
+#include <optional>
+#include <vector>
 #include <typeindex>
 #include <memory>
 #include <stdexcept>
@@ -12,12 +17,30 @@
 namespace lr
 {
 
+using SceneObjectId = uint32_t;
+
+class Scene;
+
 class SceneObject
 {
+    friend class Scene;
+
+    explicit SceneObject(Scene &scene, SceneObjectId id) : m_scene(&scene), m_id(id) {}
+
     std::unordered_map<std::type_index, std::unique_ptr<Component>> components;
+    Scene                                                    *m_scene;
+    SceneObjectId                                             m_id;
+    std::optional<SceneObjectId>                              m_parent;
+    std::vector<SceneObjectId>                                m_children;
 
 public:
     std::string name;
+
+    SceneObjectId id() const { return m_id; }
+    std::optional<SceneObjectId> parent() const { return m_parent; }
+    const std::vector<SceneObjectId> &children() const { return m_children; }
+
+    glm::mat4 worldMatrix() const;
 
     template <typename T, typename... Args> T &addComponent(Args &&...args)
     {

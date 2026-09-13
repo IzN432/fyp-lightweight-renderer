@@ -429,7 +429,7 @@ std::vector<std::optional<uint32_t>> buildNodeParents(const tinygltf::Model &mod
 }
 
 std::vector<Skin> extractSkins(const tinygltf::Model &model,
-                               const std::vector<std::optional<uint32_t>> &sourceParents)
+                               const std::vector<std::optional<uint32_t>> &gltfNodeParents)
 {
     std::vector<Skin> skins;
     skins.reserve(model.skins.size());
@@ -449,7 +449,7 @@ std::vector<Skin> extractSkins(const tinygltf::Model &model,
             while (true)
             {
                 included[current] = true;
-                if (!sourceParents[current])
+                if (!gltfNodeParents[current])
                 {
                     break;
                 }
@@ -457,7 +457,7 @@ std::vector<Skin> extractSkins(const tinygltf::Model &model,
                 {
                     throw std::runtime_error("GltfLoader: node hierarchy contains a cycle");
                 }
-                current = sourceParents[current].value();
+                current = gltfNodeParents[current].value();
             }
         }
 
@@ -477,7 +477,7 @@ std::vector<Skin> extractSkins(const tinygltf::Model &model,
 
         for (SkeletonNode &node : nodes)
         {
-            const auto sourceParent = sourceParents[node.sourceNodeIndex];
+            const auto sourceParent = gltfNodeParents[node.sourceNodeIndex];
             if (sourceParent)
             {
                 node.parent = sourceToLocal[sourceParent.value()].value();

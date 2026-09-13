@@ -8,6 +8,7 @@
 #include "SceneObject.hpp"
 #include "Scene.hpp"
 #include "AreaLightVisual.hpp"
+#include "MeshStore.hpp"
 
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/framegraph/ResourceRegistry.hpp"
@@ -46,6 +47,7 @@ public:
     Scene &scene() { return *m_scene; }
 
     MaterialStore &materialStore() { return m_materialStore; }
+    MeshStore     &meshStore() { return m_meshStore; }
 
     // The scene's single non-light-visual mesh — its TransformComponent is applied via the model matrix at
     // draw time (unlike light visuals, which bake their TransformComponent into vertex positions directly).
@@ -196,6 +198,7 @@ private:
     LightUploader    m_lightUploader;
     CameraUploader   m_cameraUploader;
     MaterialStore    m_materialStore;
+    MeshStore        m_meshStore;
 
     SceneObject *m_mainMeshObject = nullptr;
     SceneObject *m_defaultCamera  = nullptr;

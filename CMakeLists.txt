@@ -92,8 +92,11 @@ add_library(lr_core STATIC
 
     src/core/scene/Mesh.cpp
     src/core/scene/MeshComponent.cpp
+    src/core/scene/MeshStore.cpp
+    src/core/scene/TransformComponent.cpp
     src/core/scene/AreaLightVisual.cpp
     src/core/scene/Scene.cpp
+    src/core/scene/SceneObject.cpp
     src/core/scene/SceneManager.cpp
 
     src/core/loaders/ObjLoader.cpp
@@ -200,6 +203,12 @@ target_link_libraries(renderer PRIVATE lr_core lr_arap_feature lr_laplace_beltra
     lr_linear_blend_skinning_feature imguiFileDialog)
 
 if(BUILD_TESTING)
+    add_executable(scene_hierarchy_tests
+        tests/scene/SceneHierarchyTests.cpp
+    )
+    target_link_libraries(scene_hierarchy_tests PRIVATE lr_core)
+    add_test(NAME scene.hierarchy COMMAND scene_hierarchy_tests)
+
     add_executable(linear_blend_skinning_joint_tests
         tests/linear_blend_skinning/JointTests.cpp
     )

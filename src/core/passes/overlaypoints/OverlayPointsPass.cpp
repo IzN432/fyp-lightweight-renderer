@@ -37,7 +37,7 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                 return;
             }
             const OverlayPointsPC pc{.model =
-                                         m_cfg.meshTransform ? m_cfg.meshTransform->transform().localMatrix()
+                                         m_cfg.meshTransform ? m_cfg.meshTransform->worldMatrix()
                                                              : glm::mat4(1.0f)};
             for (size_t i = 0; i < m_cfg.pointsBufferUploadResult.singleMeshResults.size(); ++i)
             {

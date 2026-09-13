@@ -106,8 +106,9 @@ void SceneManager::createLightVisuals(const AreaLightVisualConfig &config)
         Mesh quadMesh;
         buildAreaLightQuadMesh(quadMesh, transform, lightData, handle, config);
 
-        lightObject->addComponent<MeshComponent>(quadMesh, std::vector<MaterialHandle>{handle}, m_materialStore,
-                                              /*hideFromGui=*/true);
+        const MeshHandle meshHandle = m_meshStore.add(std::move(quadMesh));
+        lightObject->addComponent<MeshComponent>(meshHandle, m_meshStore, std::vector<MaterialHandle>{handle},
+                                                  m_materialStore, /*hideFromGui=*/true);
     }
 }
 

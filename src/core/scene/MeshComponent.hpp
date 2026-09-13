@@ -2,7 +2,7 @@
 
 #include "core/scene/Component.hpp"
 
-#include "core/scene/Mesh.hpp"
+#include "core/scene/MeshStore.hpp"
 #include "core/loaders/MaterialStore.hpp"
 
 #include <vector>
@@ -13,7 +13,8 @@ namespace lr
 class MeshComponent : public Component
 {
 private:
-    Mesh m_mesh;
+    MeshHandle m_meshHandle;
+    MeshStore *m_meshStore;
     // Handles into the MaterialStore this mesh's faceGroups index into — not owned here, just
     // referenced so onGUIImpl can offer them up for editing.
     std::vector<MaterialHandle> m_materialHandles;
@@ -24,12 +25,14 @@ private:
     bool m_hideFromGui;
 
 public:
-    explicit MeshComponent(Mesh &mesh, std::vector<MaterialHandle> materialHandles, MaterialStore &materialStore,
+    explicit MeshComponent(MeshHandle meshHandle, MeshStore &meshStore,
+                           std::vector<MaterialHandle> materialHandles, MaterialStore &materialStore,
                            bool hideFromGui = false);
 
     void onGUIImpl() override;
 
     const std::vector<MaterialHandle> &materialHandles() const;
+    MeshHandle                         meshHandle() const { return m_meshHandle; }
     Mesh                              &mesh();
     const Mesh                        &mesh() const;
     const MeshLayout                  &layout() const;

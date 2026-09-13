@@ -45,10 +45,11 @@ struct MaterialGUICallbacks
 
 } // namespace
 
-MeshComponent::MeshComponent(Mesh &mesh, std::vector<MaterialHandle> materialHandles, MaterialStore &materialStore,
+MeshComponent::MeshComponent(MeshHandle meshHandle, MeshStore &meshStore,
+                             std::vector<MaterialHandle> materialHandles, MaterialStore &materialStore,
                              bool hideFromGui)
-    : Component("MeshComponent"), m_mesh(std::move(mesh)), m_materialHandles(std::move(materialHandles)),
-      m_materialStore(&materialStore), m_hideFromGui(hideFromGui)
+    : Component("MeshComponent"), m_meshHandle(meshHandle), m_meshStore(&meshStore),
+      m_materialHandles(std::move(materialHandles)), m_materialStore(&materialStore), m_hideFromGui(hideFromGui)
 {}
 
 void MeshComponent::onGUIImpl()
@@ -58,7 +59,8 @@ void MeshComponent::onGUIImpl()
         return;
     }
 
-    ImGui::Text("Mesh: %u vertices, %u faces", m_mesh.vertexCount(), m_mesh.faceCount());
+    const Mesh &mesh = m_meshStore->get(m_meshHandle);
+    ImGui::Text("Mesh: %u vertices, %u faces", mesh.vertexCount(), mesh.faceCount());
 
     bool changed = false;
     int  materialId = 0;
@@ -91,17 +93,17 @@ const std::vector<MaterialHandle> &MeshComponent::materialHandles() const
 
 Mesh &MeshComponent::mesh()
 {
-    return m_mesh;
+    return m_meshStore->get(m_meshHandle);
 }
 
 const Mesh &MeshComponent::mesh() const
 {
-    return m_mesh;
+    return m_meshStore->get(m_meshHandle);
 }
 
 const MeshLayout &MeshComponent::layout() const
 {
-    return m_mesh.layout();
+    return mesh().layout();
 }
 
 } // namespace lr
