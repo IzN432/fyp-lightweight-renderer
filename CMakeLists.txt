@@ -206,6 +206,16 @@ if(BUILD_TESTING)
     target_link_libraries(linear_blend_skinning_joint_tests PRIVATE lr_linear_blend_skinning_feature)
     add_test(NAME linear_blend_skinning.joint COMMAND linear_blend_skinning_joint_tests)
 
+    add_executable(gltf_skin_loader_tests
+        tests/linear_blend_skinning/GltfSkinLoaderTests.cpp
+    )
+    target_link_libraries(gltf_skin_loader_tests PRIVATE lr_core lr_linear_blend_skinning_feature)
+    target_compile_definitions(gltf_skin_loader_tests PRIVATE
+        LR_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/"
+        LR_SAMPLE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/samples/models/"
+    )
+    add_test(NAME linear_blend_skinning.gltf_loader COMMAND gltf_skin_loader_tests)
+
     add_executable(framegraph_model_tests
         tests/framegraph/GraphModelTests.cpp
         src/core/framegraph/model/GraphDefinition.cpp

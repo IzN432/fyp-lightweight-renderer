@@ -5,8 +5,22 @@
 #include "MeshSequence.hpp"
 #include "Material.hpp"
 #include "MaterialStore.hpp"
+#include "core/scene/Transform.hpp"
+#include "features/linear_blend_skinning/Skin.hpp"
+
+#include <cstdint>
+#include <optional>
+
 namespace lr
 {
+
+struct GltfMeshInstance
+{
+    uint32_t                sourceNodeIndex = 0;
+    uint32_t                meshIndex       = 0;
+    std::optional<uint32_t> skinIndex;
+    Transform               localTransform;
+};
 
 struct GltfMeshLoadResult
 {
@@ -14,6 +28,12 @@ struct GltfMeshLoadResult
     // Parallel to the glTF material indices (index 0 = the synthetic default material) — already
     // resolved to their MaterialStore slots, matching what got baked into each Mesh's faceGroups.
     std::vector<MaterialHandle> materialHandles;
+    // Parallel to glTF skins. Joint order is preserved exactly so mesh JOINTS_n values index
+    // directly into Skin::joints() and Skin::jointMatrices().
+    std::vector<Skin> skins;
+    // One entry per glTF node that instantiates a mesh. This preserves mesh-to-skin association,
+    // which belongs to nodes in glTF rather than to mesh definitions.
+    std::vector<GltfMeshInstance> meshInstances;
 };
 
 struct GltfLoaderConfig
@@ -45,8 +65,7 @@ struct GltfLoaderConfig
  *
  * Skinning attributes:
  *   - JOINTS_n/WEIGHTS_n are combined into arbitrary-length sparse vertex groups.
- *     Group indices remain local indices into the glTF skin's joints array; skins and
- *     inverse-bind matrices are not loaded yet.
+ *     Group indices remain local indices into the glTF skin's joints array.
  *
  * Material scalars:
  *   - baseDiffuse    (vec4)   from baseColorFactor

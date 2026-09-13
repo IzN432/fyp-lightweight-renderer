@@ -138,7 +138,9 @@ try
     const fs::path meshPath = lr::paths::assetDir / "samples/models/lion_head_4k.glb";
 
     lr::GltfLoader gltfLoader;
-    auto [sequence, materialHandles] = gltfLoader.load(meshPath, sceneManager.materialStore(), config);
+    lr::GltfMeshLoadResult gltf = gltfLoader.load(meshPath, sceneManager.materialStore(), config);
+    auto                  &sequence = gltf.sequence;
+    auto                  &materialHandles = gltf.materialHandles;
 
     if (sequence.empty())
     {

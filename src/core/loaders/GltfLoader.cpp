@@ -10,7 +10,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
+#include <unordered_map>
 
 namespace lr
 {
@@ -64,6 +66,88 @@ glm::vec4 toVec4(const std::vector<double> &v)
         throw std::runtime_error("Expected a vec4");
     }
     return glm::vec4(v[0], v[1], v[2], v[3]);
+}
+
+Transform extractNodeTransform(const tinygltf::Node &node)
+{
+    if (!node.matrix.empty())
+    {
+        if (node.matrix.size() != 16)
+        {
+            throw std::runtime_error("GltfLoader: node matrix must contain 16 values");
+        }
+
+        glm::mat4 matrix(1.0f);
+        for (size_t column = 0; column < 4; ++column)
+        {
+            for (size_t row = 0; row < 4; ++row)
+            {
+                matrix[column][row] = static_cast<float>(node.matrix[column * 4 + row]);
+            }
+        }
+
+        constexpr float epsilon = 1e-5f;
+        if (std::abs(matrix[0][3]) > epsilon || std::abs(matrix[1][3]) > epsilon ||
+            std::abs(matrix[2][3]) > epsilon || std::abs(matrix[3][3] - 1.0f) > epsilon)
+        {
+            throw std::runtime_error("GltfLoader: node matrix contains perspective and cannot be represented by Transform");
+        }
+
+        const glm::vec3 translation(matrix[3]);
+        glm::vec3       xAxis(matrix[0]);
+        glm::vec3       yAxis(matrix[1]);
+        glm::vec3       zAxis(matrix[2]);
+        glm::vec3       scale(glm::length(xAxis), glm::length(yAxis), glm::length(zAxis));
+        if (scale.x <= epsilon || scale.y <= epsilon || scale.z <= epsilon)
+        {
+            throw std::runtime_error("GltfLoader: node matrix with zero scale cannot be decomposed into Transform");
+        }
+
+        xAxis /= scale.x;
+        yAxis /= scale.y;
+        zAxis /= scale.z;
+        if (std::abs(glm::dot(xAxis, yAxis)) > epsilon || std::abs(glm::dot(xAxis, zAxis)) > epsilon ||
+            std::abs(glm::dot(yAxis, zAxis)) > epsilon)
+        {
+            throw std::runtime_error("GltfLoader: node matrix contains shear and cannot be represented by Transform");
+        }
+
+        glm::mat3 rotationMatrix(xAxis, yAxis, zAxis);
+        if (glm::determinant(rotationMatrix) < 0.0f)
+        {
+            scale.x = -scale.x;
+            rotationMatrix[0] = -rotationMatrix[0];
+        }
+
+        const glm::quat rotation = glm::normalize(glm::quat_cast(rotationMatrix));
+        return Transform(translation, rotation, scale);
+    }
+
+    glm::vec3 translation(0.0f);
+    glm::quat rotation(1.0f, 0.0f, 0.0f, 0.0f);
+    glm::vec3 scale(1.0f);
+
+    if (!node.translation.empty())
+    {
+        translation = toVec3(node.translation);
+    }
+    if (!node.rotation.empty())
+    {
+        const glm::vec4 value = toVec4(node.rotation);
+        rotation = glm::quat(value.w, value.x, value.y, value.z);
+        const float length = glm::length(rotation);
+        if (!std::isfinite(length) || length <= std::numeric_limits<float>::epsilon())
+        {
+            throw std::runtime_error("GltfLoader: node rotation must be a finite non-zero quaternion");
+        }
+        rotation = glm::normalize(rotation);
+    }
+    if (!node.scale.empty())
+    {
+        scale = toVec3(node.scale);
+    }
+
+    return Transform(translation, rotation, scale);
 }
 
 /**
@@ -306,6 +390,164 @@ void validateJointView(const AccessorView &view)
         throw std::runtime_error(
             "GltfLoader: JOINTS_n must be a non-normalized VEC4 of unsigned bytes or unsigned shorts");
     }
+}
+
+glm::mat4 readMatrix(const AccessorView &view, size_t index)
+{
+    if (view.type != TINYGLTF_TYPE_MAT4 || view.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT || view.normalized)
+    {
+        throw std::runtime_error("GltfLoader: inverse bind matrices must be non-normalized FLOAT MAT4 values");
+    }
+
+    glm::mat4 result(1.0f);
+    const unsigned char *data = view.data + index * view.stride;
+    std::memcpy(&result[0][0], data, sizeof(glm::mat4));
+    return result;
+}
+
+std::vector<std::optional<uint32_t>> buildNodeParents(const tinygltf::Model &model)
+{
+    std::vector<std::optional<uint32_t>> parents(model.nodes.size());
+    for (uint32_t parentIndex = 0; parentIndex < model.nodes.size(); ++parentIndex)
+    {
+        for (int childIndex : model.nodes[parentIndex].children)
+        {
+            if (childIndex < 0 || childIndex >= static_cast<int>(model.nodes.size()))
+            {
+                throw std::runtime_error("GltfLoader: node references an invalid child");
+            }
+
+            auto &parent = parents[static_cast<size_t>(childIndex)];
+            if (parent && parent.value() != parentIndex)
+            {
+                throw std::runtime_error("GltfLoader: a node cannot have multiple parents");
+            }
+            parent = parentIndex;
+        }
+    }
+    return parents;
+}
+
+std::vector<Skin> extractSkins(const tinygltf::Model &model,
+                               const std::vector<std::optional<uint32_t>> &sourceParents)
+{
+    std::vector<Skin> skins;
+    skins.reserve(model.skins.size());
+
+    for (const tinygltf::Skin &sourceSkin : model.skins)
+    {
+        std::vector<bool> included(model.nodes.size(), false);
+        for (int sourceJointIndex : sourceSkin.joints)
+        {
+            if (sourceJointIndex < 0 || sourceJointIndex >= static_cast<int>(model.nodes.size()))
+            {
+                throw std::runtime_error("GltfLoader: skin references an invalid joint node");
+            }
+
+            uint32_t current = static_cast<uint32_t>(sourceJointIndex);
+            size_t   remaining = model.nodes.size();
+            while (true)
+            {
+                included[current] = true;
+                if (!sourceParents[current])
+                {
+                    break;
+                }
+                if (remaining-- == 0)
+                {
+                    throw std::runtime_error("GltfLoader: node hierarchy contains a cycle");
+                }
+                current = sourceParents[current].value();
+            }
+        }
+
+        std::vector<std::optional<SkeletonNodeIndex>> sourceToLocal(model.nodes.size());
+        std::vector<SkeletonNode>                     nodes;
+        for (uint32_t sourceNodeIndex = 0; sourceNodeIndex < model.nodes.size(); ++sourceNodeIndex)
+        {
+            if (included[sourceNodeIndex])
+            {
+                sourceToLocal[sourceNodeIndex] = static_cast<SkeletonNodeIndex>(nodes.size());
+                nodes.push_back({.name = model.nodes[sourceNodeIndex].name,
+                                 .sourceNodeIndex = sourceNodeIndex,
+                                 .parent = std::nullopt,
+                                 .localTransform = extractNodeTransform(model.nodes[sourceNodeIndex])});
+            }
+        }
+
+        for (SkeletonNode &node : nodes)
+        {
+            const auto sourceParent = sourceParents[node.sourceNodeIndex];
+            if (sourceParent)
+            {
+                node.parent = sourceToLocal[sourceParent.value()].value();
+            }
+        }
+
+        std::vector<glm::mat4> inverseBindMatrices(sourceSkin.joints.size(), glm::mat4(1.0f));
+        if (sourceSkin.inverseBindMatrices >= 0)
+        {
+            if (sourceSkin.inverseBindMatrices >= static_cast<int>(model.accessors.size()))
+            {
+                throw std::runtime_error("GltfLoader: skin references an invalid inverse-bind accessor");
+            }
+            const tinygltf::Accessor &accessor = model.accessors[sourceSkin.inverseBindMatrices];
+            if (accessor.sparse.isSparse)
+            {
+                throw std::runtime_error("GltfLoader: sparse inverse-bind matrix accessors are not supported");
+            }
+            if (accessor.count != sourceSkin.joints.size())
+            {
+                throw std::runtime_error("GltfLoader: inverse-bind matrix count must match the joint count");
+            }
+
+            const AccessorView view = getAccessorView(model, sourceSkin.inverseBindMatrices);
+            for (size_t jointIndex = 0; jointIndex < sourceSkin.joints.size(); ++jointIndex)
+            {
+                inverseBindMatrices[jointIndex] = readMatrix(view, jointIndex);
+            }
+        }
+
+        std::vector<Joint> joints;
+        joints.reserve(sourceSkin.joints.size());
+        for (size_t jointIndex = 0; jointIndex < sourceSkin.joints.size(); ++jointIndex)
+        {
+            const uint32_t sourceNodeIndex = static_cast<uint32_t>(sourceSkin.joints[jointIndex]);
+            joints.push_back({.node = sourceToLocal[sourceNodeIndex].value(),
+                              .inverseBindMatrix = inverseBindMatrices[jointIndex]});
+        }
+
+        skins.emplace_back(std::move(nodes), std::move(joints));
+    }
+
+    return skins;
+}
+
+std::vector<GltfMeshInstance> extractMeshInstances(const tinygltf::Model &model)
+{
+    std::vector<GltfMeshInstance> instances;
+    for (uint32_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex)
+    {
+        const tinygltf::Node &node = model.nodes[nodeIndex];
+        if (node.mesh < 0)
+        {
+            continue;
+        }
+        if (node.mesh >= static_cast<int>(model.meshes.size()))
+        {
+            throw std::runtime_error("GltfLoader: node references an invalid mesh");
+        }
+        if (node.skin >= static_cast<int>(model.skins.size()))
+        {
+            throw std::runtime_error("GltfLoader: node references an invalid skin");
+        }
+
+        instances.push_back({.sourceNodeIndex = nodeIndex,
+                             .meshIndex = static_cast<uint32_t>(node.mesh),
+                             .skinIndex = node.skin >= 0 ? std::optional<uint32_t>(node.skin) : std::nullopt,
+                             .localTransform = extractNodeTransform(node)});
+    }
+    return instances;
 }
 
 glm::uvec4 readJointIndices(const AccessorView &view, size_t index)
@@ -722,7 +964,36 @@ GltfMeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialS
         outMesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, geometry.uvs);
     }
 
-    return {std::move(seq), std::move(materialHandles)};
+    const std::vector<std::optional<uint32_t>> sourceParents = buildNodeParents(model);
+    std::vector<Skin>                          skins         = extractSkins(model, sourceParents);
+    std::vector<GltfMeshInstance>              meshInstances = extractMeshInstances(model);
+
+    for (const GltfMeshInstance &instance : meshInstances)
+    {
+        if (!instance.skinIndex)
+        {
+            continue;
+        }
+
+        const Mesh &mesh = seq.frames[instance.meshIndex];
+        const Skin &skin = skins[instance.skinIndex.value()];
+        if (!mesh.layout().vertexGroupsEnabled())
+        {
+            continue;
+        }
+        for (uint32_t vertexIndex = 0; vertexIndex < mesh.uniquePositionCount(); ++vertexIndex)
+        {
+            for (const VertexGroupEntry &influence : mesh.getVertexGroups(vertexIndex))
+            {
+                if (influence.groupIndex >= skin.joints().size())
+                {
+                    throw std::runtime_error("GltfLoader: mesh influence references a joint outside its skin palette");
+                }
+            }
+        }
+    }
+
+    return {std::move(seq), std::move(materialHandles), std::move(skins), std::move(meshInstances)};
 }
 
 } // namespace lr
