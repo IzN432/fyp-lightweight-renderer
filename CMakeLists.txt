@@ -91,6 +91,7 @@ add_library(lr_core STATIC
     src/core/passes/imgui/ImguiPass.cpp
 
     src/core/scene/Mesh.cpp
+    src/core/scene/MeshComponent.cpp
     src/core/scene/AreaLightVisual.cpp
     src/core/scene/Scene.cpp
     src/core/scene/SceneManager.cpp
