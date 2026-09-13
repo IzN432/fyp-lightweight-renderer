@@ -365,6 +365,17 @@ template <typename T> T readVec(const AccessorView &view, size_t index)
     return result;
 }
 
+float readAnimationTime(const AccessorView &view, size_t index)
+{
+    if (view.type != TINYGLTF_TYPE_SCALAR || view.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT || view.normalized)
+    {
+        throw std::runtime_error("GltfLoader: animation input must be a non-normalized FLOAT SCALAR");
+    }
+    float result = 0.0f;
+    std::memcpy(&result, view.data + index * view.stride, sizeof(float));
+    return result;
+}
+
 uint32_t readIndex(const AccessorView &view, size_t i)
 {
     const unsigned char *data = view.data + i * view.stride;
@@ -493,6 +504,133 @@ std::vector<SkinLoadData> extractSkins(const tinygltf::Model &model)
     }
 
     return skins;
+}
+
+AnimationInterpolationLoad extractAnimationInterpolation(const std::string &interpolation)
+{
+    if (interpolation == "LINEAR") return AnimationInterpolationLoad::Linear;
+    if (interpolation == "STEP") return AnimationInterpolationLoad::Step;
+    if (interpolation == "CUBICSPLINE") return AnimationInterpolationLoad::CubicSpline;
+    throw std::runtime_error("GltfLoader: unsupported animation interpolation '" + interpolation + "'");
+}
+
+glm::vec4 readAnimationValue(const AccessorView &view, size_t index, AnimationPathLoad path)
+{
+    if (view.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT || view.normalized)
+    {
+        throw std::runtime_error("GltfLoader: animation output must use non-normalized FLOAT values");
+    }
+    if (path == AnimationPathLoad::Rotation)
+    {
+        if (view.type != TINYGLTF_TYPE_VEC4)
+        {
+            throw std::runtime_error("GltfLoader: rotation animation output must be VEC4");
+        }
+        return readVec<glm::vec4>(view, index);
+    }
+    if (view.type != TINYGLTF_TYPE_VEC3)
+    {
+        throw std::runtime_error("GltfLoader: translation and scale animation output must be VEC3");
+    }
+    return glm::vec4(readVec<glm::vec3>(view, index), 0.0f);
+}
+
+std::vector<AnimationLoadData> extractAnimations(const tinygltf::Model &model)
+{
+    std::vector<AnimationLoadData> animations;
+    animations.reserve(model.animations.size());
+    for (size_t animationIndex = 0; animationIndex < model.animations.size(); ++animationIndex)
+    {
+        const tinygltf::Animation &sourceAnimation = model.animations[animationIndex];
+        AnimationLoadData animation;
+        animation.name = sourceAnimation.name.empty() ? "Animation " + std::to_string(animationIndex)
+                                                       : sourceAnimation.name;
+        animation.channels.reserve(sourceAnimation.channels.size());
+
+        for (const tinygltf::AnimationChannel &sourceChannel : sourceAnimation.channels)
+        {
+            if (sourceChannel.target_node < 0)
+            {
+                continue;
+            }
+            if (sourceChannel.target_node >= static_cast<int>(model.nodes.size()))
+            {
+                throw std::runtime_error("GltfLoader: animation channel targets an invalid node");
+            }
+            if (sourceChannel.sampler < 0 ||
+                sourceChannel.sampler >= static_cast<int>(sourceAnimation.samplers.size()))
+            {
+                throw std::runtime_error("GltfLoader: animation channel references an invalid sampler");
+            }
+
+            AnimationPathLoad path;
+            if (sourceChannel.target_path == "translation") path = AnimationPathLoad::Translation;
+            else if (sourceChannel.target_path == "rotation") path = AnimationPathLoad::Rotation;
+            else if (sourceChannel.target_path == "scale") path = AnimationPathLoad::Scale;
+            else if (sourceChannel.target_path == "weights") continue;
+            else
+            {
+                throw std::runtime_error("GltfLoader: unsupported animation target path '" +
+                                         sourceChannel.target_path + "'");
+            }
+
+            const tinygltf::AnimationSampler &sourceSampler = sourceAnimation.samplers[sourceChannel.sampler];
+            if (sourceSampler.input < 0 || sourceSampler.input >= static_cast<int>(model.accessors.size()) ||
+                sourceSampler.output < 0 || sourceSampler.output >= static_cast<int>(model.accessors.size()))
+            {
+                throw std::runtime_error("GltfLoader: animation sampler references an invalid accessor");
+            }
+            const tinygltf::Accessor &inputAccessor = model.accessors[sourceSampler.input];
+            const tinygltf::Accessor &outputAccessor = model.accessors[sourceSampler.output];
+            if (inputAccessor.sparse.isSparse || outputAccessor.sparse.isSparse)
+            {
+                throw std::runtime_error("GltfLoader: sparse animation accessors are not supported");
+            }
+
+            const AccessorView input = getAccessorView(model, sourceSampler.input);
+            const AccessorView output = getAccessorView(model, sourceSampler.output);
+            const AnimationInterpolationLoad interpolation =
+                extractAnimationInterpolation(sourceSampler.interpolation);
+            const size_t outputElementsPerKey = interpolation == AnimationInterpolationLoad::CubicSpline ? 3 : 1;
+            if (output.count != input.count * outputElementsPerKey)
+            {
+                throw std::runtime_error("GltfLoader: animation input and output counts do not match");
+            }
+
+            AnimationChannelLoadData channel{
+                .nodeIndex = static_cast<uint32_t>(sourceChannel.target_node),
+                .path = path,
+                .interpolation = interpolation,
+            };
+            channel.keyframes.reserve(input.count);
+            float previousTime = -1.0f;
+            for (size_t keyIndex = 0; keyIndex < input.count; ++keyIndex)
+            {
+                const float seconds = readAnimationTime(input, keyIndex);
+                if (!std::isfinite(seconds) || seconds < 0.0f || seconds <= previousTime)
+                {
+                    throw std::runtime_error("GltfLoader: animation keyframe times must be finite and increasing");
+                }
+                previousTime = seconds;
+
+                AnimationKeyframeLoadData keyframe{.seconds = seconds};
+                if (outputElementsPerKey == 3)
+                {
+                    keyframe.incomingTangent = readAnimationValue(output, keyIndex * 3, path);
+                    keyframe.value = readAnimationValue(output, keyIndex * 3 + 1, path);
+                    keyframe.outgoingTangent = readAnimationValue(output, keyIndex * 3 + 2, path);
+                }
+                else
+                {
+                    keyframe.value = readAnimationValue(output, keyIndex, path);
+                }
+                channel.keyframes.push_back(keyframe);
+            }
+            animation.channels.push_back(std::move(channel));
+        }
+        animations.push_back(std::move(animation));
+    }
+    return animations;
 }
 
 std::vector<MeshNode> extractSceneNodes(
@@ -979,6 +1117,7 @@ MeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialStore
     std::vector<SkinLoadData> skins  = extractSkins(model);
     std::vector<MeshNode> nodes      = extractSceneNodes(model, sourceParents);
     std::vector<uint32_t> sceneRoots = extractSceneRoots(model, sourceParents);
+    std::vector<AnimationLoadData> animations = extractAnimations(model);
 
     for (const MeshNode &node : nodes)
     {
@@ -1006,7 +1145,7 @@ MeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialStore
     }
 
     return {std::move(seq), std::move(materialHandles), std::move(skins), std::move(nodes),
-            std::move(sceneRoots)};
+            std::move(sceneRoots), std::move(animations)};
 }
 
 } // namespace lr

@@ -228,7 +228,8 @@ if(BUILD_TESTING)
     add_executable(gltf_skin_loader_tests
         tests/linear_blend_skinning/GltfSkinLoaderTests.cpp
     )
-    target_link_libraries(gltf_skin_loader_tests PRIVATE lr_core lr_linear_blend_skinning_feature)
+    target_link_libraries(gltf_skin_loader_tests PRIVATE lr_core lr_linear_blend_skinning_feature
+        lr_animation_feature)
     target_compile_definitions(gltf_skin_loader_tests PRIVATE
         LR_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/"
         LR_SAMPLE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/samples/models/"

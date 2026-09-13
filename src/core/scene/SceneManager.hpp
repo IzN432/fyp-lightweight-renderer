@@ -146,6 +146,9 @@ public:
     // the packed joint palettes. Called every frame for the initial implementation.
     void updateSkins();
 
+    // Advances every AnimatorComponent before skin palettes are evaluated.
+    void updateAnimations(float deltaSeconds);
+
     const std::string &cameraBufferName() const { return m_cameraUploader.bufferName(); }
 
     const SkinUploadResult &skinUploadResult() const { return m_skinUploadResult; }

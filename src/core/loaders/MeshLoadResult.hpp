@@ -39,6 +39,42 @@ struct SkinLoadData
     std::vector<SkinJointLoadData> joints;
 };
 
+enum class AnimationPathLoad
+{
+    Translation,
+    Rotation,
+    Scale
+};
+
+enum class AnimationInterpolationLoad
+{
+    Linear,
+    Step,
+    CubicSpline
+};
+
+struct AnimationKeyframeLoadData
+{
+    float     seconds = 0.0f;
+    glm::vec4 value{0.0f};
+    glm::vec4 incomingTangent{0.0f};
+    glm::vec4 outgoingTangent{0.0f};
+};
+
+struct AnimationChannelLoadData
+{
+    uint32_t                          nodeIndex = 0;
+    AnimationPathLoad                 path = AnimationPathLoad::Translation;
+    AnimationInterpolationLoad        interpolation = AnimationInterpolationLoad::Linear;
+    std::vector<AnimationKeyframeLoadData> keyframes;
+};
+
+struct AnimationLoadData
+{
+    std::string                           name;
+    std::vector<AnimationChannelLoadData> channels;
+};
+
 // Common output of scene-capable mesh loaders. Formats without hierarchy or
 // skinning still produce the same shape: a single root node and no skins.
 struct MeshLoadResult
@@ -48,6 +84,7 @@ struct MeshLoadResult
     std::vector<SkinLoadData>   skins;
     std::vector<MeshNode>       nodes;
     std::vector<uint32_t>       sceneRoots;
+    std::vector<AnimationLoadData> animations;
 };
 
 } // namespace lr

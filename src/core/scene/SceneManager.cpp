@@ -4,6 +4,7 @@
 #include "Light.hpp"
 #include "MeshComponent.hpp"
 #include "TransformComponent.hpp"
+#include "features/animation/AnimatorComponent.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 
 #include "core/app/Viewer.hpp"
@@ -93,6 +94,10 @@ void SceneManager::registerCallbacks(Viewer &viewer)
 
     viewer.onUpdate([this](float dt, VkExtent2D extent) {
         m_selectionManager->updateCallback(dt, extent);
+    });
+
+    viewer.onUpdate([this](float dt, VkExtent2D) {
+        updateAnimations(dt);
     });
 
     viewer.onLateUpdate([this](float dt, VkExtent2D extent) {
@@ -263,6 +268,17 @@ void SceneManager::setEditorMode(EditorMode mode)
     for (const auto &callback : m_editorModeChangedCallbacks)
     {
         callback(mode);
+    }
+}
+
+void SceneManager::updateAnimations(float deltaSeconds)
+{
+    for (const auto &object : m_scene->sceneObjects())
+    {
+        if (object->hasComponent<AnimatorComponent>())
+        {
+            object->getComponent<AnimatorComponent>().update(deltaSeconds);
+        }
     }
 }
 

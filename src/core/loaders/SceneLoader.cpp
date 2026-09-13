@@ -2,6 +2,7 @@
 
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/TransformComponent.hpp"
+#include "features/animation/AnimatorComponent.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 
 #include <algorithm>
@@ -140,6 +141,81 @@ SceneLoadResult SceneLoader::load(const std::filesystem::path &path, Scene &scen
         {
             scene.setParent(result.nodeObjects[nodeIndex].value(), importRoot.id());
         }
+    }
+
+    std::vector<AnimationClip> clips;
+    clips.reserve(loaded.animations.size());
+    for (const AnimationLoadData &loadedAnimation : loaded.animations)
+    {
+        std::vector<AnimationChannel> channels;
+        channels.reserve(loadedAnimation.channels.size());
+        for (const AnimationChannelLoadData &loadedChannel : loadedAnimation.channels)
+        {
+            if (loadedChannel.nodeIndex >= result.nodeObjects.size() ||
+                !result.nodeObjects[loadedChannel.nodeIndex])
+            {
+                continue;
+            }
+
+            AnimationInterpolation interpolation = AnimationInterpolation::Linear;
+            if (loadedChannel.interpolation == AnimationInterpolationLoad::Step)
+            {
+                interpolation = AnimationInterpolation::Step;
+            }
+            else if (loadedChannel.interpolation == AnimationInterpolationLoad::CubicSpline)
+            {
+                interpolation = AnimationInterpolation::CubicSpline;
+            }
+
+            const SceneObjectId target = result.nodeObjects[loadedChannel.nodeIndex].value();
+            if (loadedChannel.path == AnimationPathLoad::Rotation)
+            {
+                RotationTrack track(target, interpolation);
+                for (const AnimationKeyframeLoadData &keyframe : loadedChannel.keyframes)
+                {
+                    const auto quaternion = [](const glm::vec4 &xyzw) {
+                        return glm::quat(xyzw.w, xyzw.x, xyzw.y, xyzw.z);
+                    };
+                    track.setKeyframe({.seconds = keyframe.seconds,
+                                       .value = quaternion(keyframe.value),
+                                       .incomingTangent = quaternion(keyframe.incomingTangent),
+                                       .outgoingTangent = quaternion(keyframe.outgoingTangent)});
+                }
+                channels.emplace_back(std::move(track));
+            }
+            else if (loadedChannel.path == AnimationPathLoad::Translation)
+            {
+                TranslationTrack track(target, interpolation);
+                for (const AnimationKeyframeLoadData &keyframe : loadedChannel.keyframes)
+                {
+                    track.setKeyframe({.seconds = keyframe.seconds,
+                                       .value = glm::vec3(keyframe.value),
+                                       .incomingTangent = glm::vec3(keyframe.incomingTangent),
+                                       .outgoingTangent = glm::vec3(keyframe.outgoingTangent)});
+                }
+                channels.emplace_back(std::move(track));
+            }
+            else
+            {
+                ScaleTrack track(target, interpolation);
+                for (const AnimationKeyframeLoadData &keyframe : loadedChannel.keyframes)
+                {
+                    track.setKeyframe({.seconds = keyframe.seconds,
+                                       .value = glm::vec3(keyframe.value),
+                                       .incomingTangent = glm::vec3(keyframe.incomingTangent),
+                                       .outgoingTangent = glm::vec3(keyframe.outgoingTangent)});
+                }
+                channels.emplace_back(std::move(track));
+            }
+        }
+        if (!channels.empty())
+        {
+            clips.emplace_back(loadedAnimation.name, std::move(channels));
+        }
+    }
+    if (!clips.empty())
+    {
+        importRoot.addComponent<AnimatorComponent>(std::move(clips));
     }
 
     for (uint32_t nodeIndex = 0; nodeIndex < loaded.nodes.size(); ++nodeIndex)

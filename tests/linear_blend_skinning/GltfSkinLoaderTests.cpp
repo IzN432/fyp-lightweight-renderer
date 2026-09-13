@@ -1,6 +1,7 @@
 #include "core/loaders/GltfLoader.hpp"
 #include "core/loaders/SceneLoader.hpp"
 #include "core/scene/MeshComponent.hpp"
+#include "features/animation/AnimatorComponent.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 
 #include <glm/gtc/epsilon.hpp>
@@ -41,6 +42,8 @@ int main()
     assert(bird.nodes[51].meshIndex.value() == 0);
     assert(bird.nodes[51].skinIndex.value() == 0);
     assert(bird.nodes[51].parent.value() == 6);
+    assert(!bird.animations.empty());
+    assert(!bird.animations.front().channels.empty());
 
     lr::Scene         scene;
     lr::MeshStore     meshStore;
@@ -52,6 +55,9 @@ int main()
     assert(scene.getSceneObject(imported.nodeObjects[0].value()).parent().value() == imported.rootObject);
     lr::SceneObject &birdMeshObject = scene.getSceneObject(imported.nodeObjects[51].value());
     assert(birdMeshObject.hasComponent<lr::SkinComponent>());
+    lr::SceneObject &birdImportRoot = scene.getSceneObject(imported.rootObject);
+    assert(birdImportRoot.hasComponent<lr::AnimatorComponent>());
+    assert(birdImportRoot.getComponent<lr::AnimatorComponent>().clips().size() == bird.animations.size());
 
     const lr::Mesh &birdMesh = birdMeshObject.getComponent<lr::MeshComponent>().mesh();
     const auto      influenceOffsets = birdMesh.rawGroupOffsets();
