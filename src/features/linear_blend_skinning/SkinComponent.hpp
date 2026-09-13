@@ -15,6 +15,20 @@ public:
 
     const Skin &skin() const { return m_skin; }
 
+    void setNodeTransform(SkeletonNodeIndex index, Transform transform)
+    {
+        m_skin.setNodeTransform(index, std::move(transform));
+        markDirty();
+    }
+
+    void resetPose()
+    {
+        m_skin.resetPose();
+        markDirty();
+    }
+
+    void evaluate(const glm::mat4 &meshWorldMatrix) { m_skin.evaluate(meshWorldMatrix); }
+
 private:
     Skin m_skin;
 };

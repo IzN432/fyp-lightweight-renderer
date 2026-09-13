@@ -38,6 +38,24 @@ int main()
     skin.setNodeTransform(1, posedTransform);
     assert(skin.node(1).localTransform.position().x == 5.0f);
 
+    skin.evaluate(glm::mat4(1.0f));
+    assert(glm::all(glm::epsilonEqual(glm::vec3(skin.nodeWorldMatrices()[1][3]),
+                                     glm::vec3(6.0f, 2.0f, 3.0f), 0.0001f)));
+    assert(glm::all(glm::epsilonEqual(glm::vec3(skin.jointMatrices()[0][3]),
+                                     glm::vec3(6.0f, 2.0f, 3.0f), 0.0001f)));
+
+    skin.resetPose();
+    skin.evaluate(glm::mat4(1.0f));
+    assert(glm::all(glm::epsilonEqual(glm::vec3(skin.nodeWorldMatrices()[1][3]),
+                                     glm::vec3(1.0f, 6.0f, 3.0f), 0.0001f)));
+
+    lr::SkeletonNode childBeforeParent = child;
+    childBeforeParent.parent = 1;
+    lr::Skin outOfOrder({childBeforeParent, root}, {{.node = 0}});
+    outOfOrder.evaluate(glm::mat4(1.0f));
+    assert(glm::all(glm::epsilonEqual(glm::vec3(outOfOrder.nodeWorldMatrices()[0][3]),
+                                     glm::vec3(1.0f, 6.0f, 3.0f), 0.0001f)));
+
     bool invalidJointRejected = false;
     try
     {
