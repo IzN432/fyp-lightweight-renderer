@@ -60,8 +60,6 @@ public:
     void setMainMeshObject(SceneObject &object) { m_mainMeshObject = &object; }
     SceneObject &mainMeshObject() { return *m_mainMeshObject; }
 
-    const std::vector<Skin> &skins() const { return m_skins; }
-
     // The camera whose Camera/TransformComponent state drives the camera UBO. Must be set before
     // initialize().
     void setDefaultCamera(SceneObject &camera) { m_defaultCamera = &camera; }
@@ -215,9 +213,6 @@ private:
     // swapchain extent.
     float                      m_aspect = 1600.0f / 900.0f;
     std::vector<SceneObject *> m_lightVisualObjects;
-    // Retains imported skin data until joints reference scene-object IDs and
-    // skins receive their final scene representation.
-    std::vector<Skin>     m_skins;
     AreaLightVisualConfig m_areaLightVisualConfig;
 
     // Cached once in uploadMeshes(), reused by updateMainMeshPositions()/updateLightVisuals() so

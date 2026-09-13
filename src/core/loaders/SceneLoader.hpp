@@ -2,9 +2,9 @@
 
 #include "GltfLoader.hpp"
 #include "ObjLoader.hpp"
+#include "core/scene/Scene.hpp"
 #include "core/scene/MeshStore.hpp"
 #include "core/scene/SceneObject.hpp"
-#include "features/linear_blend_skinning/Skin.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -12,8 +12,6 @@
 
 namespace lr
 {
-
-class SceneManager;
 
 struct SceneLoaderConfig
 {
@@ -27,8 +25,6 @@ struct SceneLoadResult
     // Parallel to MeshLoadResult::nodes. Nodes outside the selected source
     // scene are not instantiated and therefore have no SceneObjectId.
     std::vector<std::optional<SceneObjectId>> nodeObjects;
-    std::vector<MeshHandle>                   meshHandles;
-    std::vector<Skin>                         skins;
     std::optional<SceneObjectId>              firstMeshObject;
 };
 
@@ -37,7 +33,8 @@ struct SceneLoadResult
 class SceneLoader
 {
 public:
-    static SceneLoadResult load(const std::filesystem::path &path, SceneManager &sceneManager,
+    static SceneLoadResult load(const std::filesystem::path &path, Scene &scene, MeshStore &meshStore,
+                                MaterialStore &materialStore,
                                 const SceneLoaderConfig &config = {});
 };
 

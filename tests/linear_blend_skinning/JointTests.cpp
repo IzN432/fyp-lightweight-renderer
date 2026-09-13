@@ -1,3 +1,5 @@
+#include "core/scene/Scene.hpp"
+#include "core/scene/TransformComponent.hpp"
 #include "features/linear_blend_skinning/Joint.hpp"
 #include "features/linear_blend_skinning/Skin.hpp"
 
@@ -7,91 +9,49 @@
 #include <cassert>
 #include <stdexcept>
 #include <type_traits>
-#include <vector>
 
 int main()
 {
-    static_assert(std::is_same_v<decltype(lr::SkeletonNode::localTransform), lr::Transform>);
-    static_assert(std::is_same_v<decltype(lr::Joint::node), lr::SkeletonNodeIndex>);
+    static_assert(std::is_same_v<decltype(lr::Joint::sceneObject), lr::SceneObjectId>);
 
-    lr::SkeletonNode root;
-    root.localTransform.setPosition(glm::vec3(1.0f, 2.0f, 3.0f));
+    lr::Scene        scene;
+    lr::SceneObject &root = scene.createSceneObject();
+    root.addComponent<lr::TransformComponent>().setPosition(glm::vec3(1.0f, 2.0f, 3.0f));
 
-    lr::SkeletonNode child;
-    child.parent = 0;
-    child.localTransform.setPosition(glm::vec3(0.0f, 4.0f, 0.0f));
+    lr::SceneObject &jointObject = scene.createSceneObject();
+    jointObject.addComponent<lr::TransformComponent>().setPosition(glm::vec3(0.0f, 4.0f, 0.0f));
+    scene.setParent(jointObject.id(), root.id());
 
-    const glm::mat4 rootWorld  = root.localTransform.localMatrix();
-    const glm::mat4 childWorld = child.localTransform.worldMatrix(rootWorld);
-
-    assert(glm::all(glm::epsilonEqual(glm::vec3(childWorld[3]), glm::vec3(1.0f, 6.0f, 3.0f), 0.0001f)));
-
-    const lr::Joint joint{.node = 1, .inverseBindMatrix = glm::mat4(1.0f)};
-    assert(joint.node == 1);
-
-    lr::Skin skin({root, child}, {joint});
-    assert(skin.nodes().size() == 2);
+    const lr::Joint joint{.sceneObject = jointObject.id(), .inverseBindMatrix = glm::mat4(1.0f)};
+    lr::Skin        skin(scene, {joint});
     assert(skin.joints().size() == 1);
-
-    lr::Transform posedTransform;
-    posedTransform.setPosition(glm::vec3(5.0f, 0.0f, 0.0f));
-    skin.setNodeTransform(1, posedTransform);
-    assert(skin.node(1).localTransform.position().x == 5.0f);
+    assert(skin.joints()[0].sceneObject == jointObject.id());
 
     skin.evaluate(glm::mat4(1.0f));
-    assert(glm::all(glm::epsilonEqual(glm::vec3(skin.nodeWorldMatrices()[1][3]),
-                                     glm::vec3(6.0f, 2.0f, 3.0f), 0.0001f)));
+    assert(glm::all(glm::epsilonEqual(glm::vec3(skin.jointMatrices()[0][3]),
+                                     glm::vec3(1.0f, 6.0f, 3.0f), 0.0001f)));
+
+    // Posing happens on the scene object's local transform; Skin only reads
+    // the resulting world matrix when rebuilding the palette.
+    jointObject.getComponent<lr::TransformComponent>().setPosition(glm::vec3(5.0f, 0.0f, 0.0f));
+    skin.evaluate(glm::mat4(1.0f));
     assert(glm::all(glm::epsilonEqual(glm::vec3(skin.jointMatrices()[0][3]),
                                      glm::vec3(6.0f, 2.0f, 3.0f), 0.0001f)));
 
-    skin.resetPose();
-    skin.evaluate(glm::mat4(1.0f));
-    assert(glm::all(glm::epsilonEqual(glm::vec3(skin.nodeWorldMatrices()[1][3]),
-                                     glm::vec3(1.0f, 6.0f, 3.0f), 0.0001f)));
-
-    lr::SkeletonNode childBeforeParent = child;
-    childBeforeParent.parent = 1;
-    lr::Skin outOfOrder({childBeforeParent, root}, {{.node = 0}});
-    outOfOrder.evaluate(glm::mat4(1.0f));
-    assert(glm::all(glm::epsilonEqual(glm::vec3(outOfOrder.nodeWorldMatrices()[0][3]),
-                                     glm::vec3(1.0f, 6.0f, 3.0f), 0.0001f)));
+    // Joint matrices are expressed in mesh-local space.
+    const glm::mat4 meshWorld = glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    skin.evaluate(meshWorld);
+    assert(glm::all(glm::epsilonEqual(glm::vec3(skin.jointMatrices()[0][3]),
+                                     glm::vec3(5.0f, 2.0f, 3.0f), 0.0001f)));
 
     bool invalidJointRejected = false;
     try
     {
-        lr::Skin invalid({root}, {{.node = 1}});
+        lr::Skin invalid(scene, {{.sceneObject = 1000}});
     }
     catch (const std::invalid_argument &)
     {
         invalidJointRejected = true;
     }
     assert(invalidJointRejected);
-
-    bool invalidParentRejected = false;
-    try
-    {
-        lr::SkeletonNode invalidParent;
-        invalidParent.parent = 1;
-        lr::Skin invalid({invalidParent}, {});
-    }
-    catch (const std::invalid_argument &)
-    {
-        invalidParentRejected = true;
-    }
-    assert(invalidParentRejected);
-
-    bool cycleRejected = false;
-    try
-    {
-        lr::SkeletonNode first;
-        first.parent = 1;
-        lr::SkeletonNode second;
-        second.parent = 0;
-        lr::Skin invalid({first, second}, {});
-    }
-    catch (const std::invalid_argument &)
-    {
-        cycleRejected = true;
-    }
-    assert(cycleRejected);
 }

@@ -425,62 +425,35 @@ std::vector<std::optional<uint32_t>> buildNodeParents(const tinygltf::Model &mod
             parent = parentIndex;
         }
     }
+
+    for (uint32_t nodeIndex = 0; nodeIndex < parents.size(); ++nodeIndex)
+    {
+        auto   ancestor = parents[nodeIndex];
+        size_t remaining = parents.size();
+        while (ancestor)
+        {
+            if (remaining-- == 0)
+            {
+                throw std::runtime_error("GltfLoader: node hierarchy contains a cycle");
+            }
+            ancestor = parents[ancestor.value()];
+        }
+    }
     return parents;
 }
 
-std::vector<Skin> extractSkins(const tinygltf::Model &model,
-                               const std::vector<std::optional<uint32_t>> &gltfNodeParents)
+std::vector<SkinLoadData> extractSkins(const tinygltf::Model &model)
 {
-    std::vector<Skin> skins;
+    std::vector<SkinLoadData> skins;
     skins.reserve(model.skins.size());
 
     for (const tinygltf::Skin &sourceSkin : model.skins)
     {
-        std::vector<bool> included(model.nodes.size(), false);
         for (int sourceJointIndex : sourceSkin.joints)
         {
             if (sourceJointIndex < 0 || sourceJointIndex >= static_cast<int>(model.nodes.size()))
             {
                 throw std::runtime_error("GltfLoader: skin references an invalid joint node");
-            }
-
-            uint32_t current = static_cast<uint32_t>(sourceJointIndex);
-            size_t   remaining = model.nodes.size();
-            while (true)
-            {
-                included[current] = true;
-                if (!gltfNodeParents[current])
-                {
-                    break;
-                }
-                if (remaining-- == 0)
-                {
-                    throw std::runtime_error("GltfLoader: node hierarchy contains a cycle");
-                }
-                current = gltfNodeParents[current].value();
-            }
-        }
-
-        std::vector<std::optional<SkeletonNodeIndex>> sourceToLocal(model.nodes.size());
-        std::vector<SkeletonNode>                     nodes;
-        for (uint32_t sourceNodeIndex = 0; sourceNodeIndex < model.nodes.size(); ++sourceNodeIndex)
-        {
-            if (included[sourceNodeIndex])
-            {
-                sourceToLocal[sourceNodeIndex] = static_cast<SkeletonNodeIndex>(nodes.size());
-                nodes.push_back({.name = model.nodes[sourceNodeIndex].name,
-                                 .sourceNodeIndex = sourceNodeIndex,
-                                 .parent = std::nullopt,
-                                 .localTransform = extractNodeTransform(model.nodes[sourceNodeIndex])});
-            }
-        }
-
-        for (SkeletonNode &node : nodes)
-        {
-            const auto sourceParent = gltfNodeParents[node.sourceNodeIndex];
-            if (sourceParent)
-            {
-                node.parent = sourceToLocal[sourceParent.value()].value();
             }
         }
 
@@ -508,16 +481,15 @@ std::vector<Skin> extractSkins(const tinygltf::Model &model,
             }
         }
 
-        std::vector<Joint> joints;
+        std::vector<SkinJointLoadData> joints;
         joints.reserve(sourceSkin.joints.size());
         for (size_t jointIndex = 0; jointIndex < sourceSkin.joints.size(); ++jointIndex)
         {
-            const uint32_t sourceNodeIndex = static_cast<uint32_t>(sourceSkin.joints[jointIndex]);
-            joints.push_back({.node = sourceToLocal[sourceNodeIndex].value(),
+            joints.push_back({.nodeIndex = static_cast<uint32_t>(sourceSkin.joints[jointIndex]),
                               .inverseBindMatrix = inverseBindMatrices[jointIndex]});
         }
 
-        skins.emplace_back(std::move(nodes), std::move(joints));
+        skins.push_back({.joints = std::move(joints)});
     }
 
     return skins;
@@ -1004,7 +976,7 @@ MeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialStore
     }
 
     const std::vector<std::optional<uint32_t>> sourceParents = buildNodeParents(model);
-    std::vector<Skin>     skins      = extractSkins(model, sourceParents);
+    std::vector<SkinLoadData> skins  = extractSkins(model);
     std::vector<MeshNode> nodes      = extractSceneNodes(model, sourceParents);
     std::vector<uint32_t> sceneRoots = extractSceneRoots(model, sourceParents);
 
@@ -1016,7 +988,7 @@ MeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialStore
         }
 
         const Mesh &mesh = seq.frames[node.meshIndex.value()];
-        const Skin &skin = skins[node.skinIndex.value()];
+        const SkinLoadData &skin = skins[node.skinIndex.value()];
         if (!mesh.layout().vertexGroupsEnabled())
         {
             continue;
@@ -1025,7 +997,7 @@ MeshLoadResult GltfLoader::load(const std::filesystem::path &path, MaterialStore
         {
             for (const VertexGroupEntry &influence : mesh.getVertexGroups(vertexIndex))
             {
-                if (influence.groupIndex >= skin.joints().size())
+                if (influence.groupIndex >= skin.joints.size())
                 {
                     throw std::runtime_error("GltfLoader: mesh influence references a joint outside its skin palette");
                 }

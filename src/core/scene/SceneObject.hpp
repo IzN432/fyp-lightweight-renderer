@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Component.hpp"
+#include "SceneObjectId.hpp"
 
 #include <glm/glm.hpp>
 
@@ -16,8 +17,6 @@
 
 namespace lr
 {
-
-using SceneObjectId = uint32_t;
 
 class Scene;
 
@@ -72,9 +71,15 @@ public:
 
     void onGUI()
     {
-        int id = 0;
+        int  id = 0;
+        bool first = true;
         for (auto &[type, component] : components)
         {
+            if (!first)
+            {
+                ImGui::Separator();
+            }
+            first = false;
             ImGui::PushID(id++);
             component->onGUI();
             ImGui::PopID();

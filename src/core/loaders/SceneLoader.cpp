@@ -1,8 +1,8 @@
 #include "core/loaders/SceneLoader.hpp"
 
 #include "core/scene/MeshComponent.hpp"
-#include "core/scene/SceneManager.hpp"
 #include "core/scene/TransformComponent.hpp"
+#include "features/linear_blend_skinning/SkinComponent.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -33,26 +33,27 @@ MeshLoadResult loadFile(const std::filesystem::path &path, MaterialStore &materi
 
 } // namespace
 
-SceneLoadResult SceneLoader::load(const std::filesystem::path &path, SceneManager &sceneManager,
+SceneLoadResult SceneLoader::load(const std::filesystem::path &path, Scene &scene, MeshStore &meshStore,
+                                  MaterialStore &materialStore,
                                   const SceneLoaderConfig &config)
 {
-    MeshLoadResult loaded = loadFile(path, sceneManager.materialStore(), config);
+    MeshLoadResult loaded = loadFile(path, materialStore, config);
     if (loaded.sequence.empty())
     {
         throw std::runtime_error("SceneLoader: file contains no meshes: '" + path.string() + "'");
     }
 
     SceneLoadResult result;
-    Scene           &scene = sceneManager.scene();
     SceneObject     &importRoot = scene.createSceneObject();
     importRoot.name = path.stem().string();
     importRoot.addComponent<TransformComponent>();
     result.rootObject = importRoot.id();
     result.nodeObjects.resize(loaded.nodes.size());
-    result.meshHandles.reserve(loaded.sequence.frames.size());
+    std::vector<MeshHandle> meshHandles;
+    meshHandles.reserve(loaded.sequence.frames.size());
     for (Mesh &mesh : loaded.sequence.frames)
     {
-        result.meshHandles.push_back(sceneManager.meshStore().add(std::move(mesh)));
+        meshHandles.push_back(meshStore.add(std::move(mesh)));
     }
 
     std::vector<bool> selected(loaded.nodes.size(), false);
@@ -71,6 +72,35 @@ SceneLoadResult SceneLoader::load(const std::filesystem::path &path, SceneManage
         }
         selected[nodeIndex] = true;
         pending.insert(pending.end(), loaded.nodes[nodeIndex].children.begin(), loaded.nodes[nodeIndex].children.end());
+    }
+
+    // A skin may reference joints outside the selected scene roots. Import the
+    // complete ancestor chain for every joint used by a selected mesh node so
+    // SceneObject::worldMatrix() has all required transforms.
+    for (uint32_t nodeIndex = 0; nodeIndex < loaded.nodes.size(); ++nodeIndex)
+    {
+        const auto skinIndex = loaded.nodes[nodeIndex].skinIndex;
+        if (!selected[nodeIndex] || !skinIndex)
+        {
+            continue;
+        }
+        if (skinIndex.value() >= loaded.skins.size())
+        {
+            throw std::runtime_error("SceneLoader: node skin index is out of range");
+        }
+        for (const SkinJointLoadData &joint : loaded.skins[skinIndex.value()].joints)
+        {
+            if (joint.nodeIndex >= loaded.nodes.size())
+            {
+                throw std::runtime_error("SceneLoader: skin joint node index is out of range");
+            }
+            std::optional<uint32_t> current = joint.nodeIndex;
+            while (current && !selected[current.value()])
+            {
+                selected[current.value()] = true;
+                current = loaded.nodes[current.value()].parent;
+            }
+        }
     }
 
     for (uint32_t nodeIndex = 0; nodeIndex < loaded.nodes.size(); ++nodeIndex)
@@ -99,11 +129,16 @@ SceneLoadResult SceneLoader::load(const std::filesystem::path &path, SceneManage
         }
     }
 
-    for (uint32_t sourceRoot : loaded.sceneRoots)
+    for (uint32_t nodeIndex = 0; nodeIndex < loaded.nodes.size(); ++nodeIndex)
     {
-        if (sourceRoot < result.nodeObjects.size() && result.nodeObjects[sourceRoot])
+        if (!result.nodeObjects[nodeIndex])
         {
-            scene.setParent(result.nodeObjects[sourceRoot].value(), importRoot.id());
+            continue;
+        }
+        const auto parent = loaded.nodes[nodeIndex].parent;
+        if (!parent || !result.nodeObjects[parent.value()])
+        {
+            scene.setParent(result.nodeObjects[nodeIndex].value(), importRoot.id());
         }
     }
 
@@ -114,20 +149,34 @@ SceneLoadResult SceneLoader::load(const std::filesystem::path &path, SceneManage
             continue;
         }
         const uint32_t meshIndex = loaded.nodes[nodeIndex].meshIndex.value();
-        if (meshIndex >= result.meshHandles.size())
+        if (meshIndex >= meshHandles.size())
         {
             throw std::runtime_error("SceneLoader: node mesh index is out of range");
         }
         SceneObject &object = scene.getSceneObject(result.nodeObjects[nodeIndex].value());
-        object.addComponent<MeshComponent>(result.meshHandles[meshIndex], sceneManager.meshStore(),
-                                           loaded.materialHandles, sceneManager.materialStore());
+        object.addComponent<MeshComponent>(meshHandles[meshIndex], meshStore, loaded.materialHandles, materialStore);
+        if (loaded.nodes[nodeIndex].skinIndex)
+        {
+            const SkinLoadData &loadedSkin = loaded.skins[loaded.nodes[nodeIndex].skinIndex.value()];
+            std::vector<Joint>  joints;
+            joints.reserve(loadedSkin.joints.size());
+            for (const SkinJointLoadData &joint : loadedSkin.joints)
+            {
+                if (!result.nodeObjects[joint.nodeIndex])
+                {
+                    throw std::runtime_error("SceneLoader: skin joint was not imported into the scene");
+                }
+                joints.push_back({.sceneObject = result.nodeObjects[joint.nodeIndex].value(),
+                                  .inverseBindMatrix = joint.inverseBindMatrix});
+            }
+            auto &skinComponent = object.addComponent<SkinComponent>(Skin(scene, std::move(joints)));
+            skinComponent.evaluate();
+        }
         if (!result.firstMeshObject)
         {
             result.firstMeshObject = object.id();
         }
     }
-
-    result.skins = std::move(loaded.skins);
     return result;
 }
 

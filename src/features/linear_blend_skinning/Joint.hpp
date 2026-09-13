@@ -1,6 +1,6 @@
 #pragma once
 
-#include "features/linear_blend_skinning/SkeletonNode.hpp"
+#include "core/scene/SceneObjectId.hpp"
 
 #include <glm/glm.hpp>
 
@@ -12,11 +12,11 @@ namespace lr
 using JointIndex = uint32_t;
 
 // One entry in a skin's joint palette. Vertex influence indices address joints
-// in palette order. The animated transform belongs to the referenced node.
+// in palette order. The transform belongs to the referenced scene object.
 struct Joint
 {
-    SkeletonNodeIndex node = 0;
-    glm::mat4         inverseBindMatrix{1.0f};
+    SceneObjectId sceneObject = 0;
+    glm::mat4     inverseBindMatrix{1.0f};
 };
 
 } // namespace lr

@@ -3,7 +3,8 @@
 #include "MaterialStore.hpp"
 #include "MeshSequence.hpp"
 #include "core/scene/Transform.hpp"
-#include "features/linear_blend_skinning/Skin.hpp"
+
+#include <glm/glm.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -25,13 +26,26 @@ struct MeshNode
     std::optional<uint32_t> skinIndex;
 };
 
+// Loader-space joint reference. SceneLoader resolves nodeIndex to a stable
+// SceneObjectId before constructing the runtime Skin.
+struct SkinJointLoadData
+{
+    uint32_t  nodeIndex = 0;
+    glm::mat4 inverseBindMatrix{1.0f};
+};
+
+struct SkinLoadData
+{
+    std::vector<SkinJointLoadData> joints;
+};
+
 // Common output of scene-capable mesh loaders. Formats without hierarchy or
 // skinning still produce the same shape: a single root node and no skins.
 struct MeshLoadResult
 {
     MeshSequence                sequence;
     std::vector<MaterialHandle> materialHandles;
-    std::vector<Skin>           skins;
+    std::vector<SkinLoadData>   skins;
     std::vector<MeshNode>       nodes;
     std::vector<uint32_t>       sceneRoots;
 };

@@ -7,32 +7,27 @@
 namespace lr
 {
 
+class Scene;
+class SceneObject;
+
 class Skin
 {
 public:
-    Skin(std::vector<SkeletonNode> nodes, std::vector<Joint> joints);
+    Skin(Scene &scene, std::vector<Joint> joints);
 
-    const std::vector<SkeletonNode> &nodes() const { return m_nodes; }
-    const std::vector<Joint>        &joints() const { return m_joints; }
+    const std::vector<Joint> &joints() const { return m_joints; }
+    const SceneObject        &jointObject(JointIndex index) const;
 
-    const SkeletonNode &node(SkeletonNodeIndex index) const;
-    void                setNodeTransform(SkeletonNodeIndex index, Transform transform);
-    void                resetPose();
-    void                evaluate(const glm::mat4 &meshWorldMatrix);
+    void evaluate(const glm::mat4 &meshWorldMatrix);
 
-    const std::vector<glm::mat4> &nodeWorldMatrices() const { return m_nodeWorldMatrices; }
     const std::vector<glm::mat4> &jointMatrices() const { return m_jointMatrices; }
 
 private:
     void validate() const;
-    void buildEvaluationOrder();
 
-    std::vector<SkeletonNode>      m_nodes;
-    std::vector<Joint>             m_joints;
-    std::vector<Transform>         m_defaultLocalTransforms;
-    std::vector<SkeletonNodeIndex> m_evaluationOrder;
-    std::vector<glm::mat4>         m_nodeWorldMatrices;
-    std::vector<glm::mat4>         m_jointMatrices;
+    Scene                  *m_scene;
+    std::vector<Joint>      m_joints;
+    std::vector<glm::mat4> m_jointMatrices;
 };
 
 } // namespace lr

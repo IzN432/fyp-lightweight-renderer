@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/scene/Component.hpp"
+#include "core/scene/SceneObject.hpp"
 #include "features/linear_blend_skinning/Skin.hpp"
 
 #include <utility>
@@ -13,21 +14,47 @@ class SkinComponent : public Component
 public:
     explicit SkinComponent(Skin skin) : Component("SkinComponent"), m_skin(std::move(skin)) {}
 
+    Skin       &skin() { return m_skin; }
     const Skin &skin() const { return m_skin; }
 
-    void setNodeTransform(SkeletonNodeIndex index, Transform transform)
+    void evaluate()
     {
-        m_skin.setNodeTransform(index, std::move(transform));
+        m_skin.evaluate(getOwningObject().worldMatrix());
         markDirty();
     }
 
-    void resetPose()
+    void onGUIImpl() override
     {
-        m_skin.resetPose();
-        markDirty();
-    }
+        ImGui::Text("Joint count: %zu", m_skin.joints().size());
+        ImGui::TextDisabled("Vertex joint indices address this palette order.");
 
-    void evaluate(const glm::mat4 &meshWorldMatrix) { m_skin.evaluate(meshWorldMatrix); }
+        if (!ImGui::TreeNode("Joint Palette"))
+        {
+            return;
+        }
+
+        for (JointIndex jointIndex = 0; jointIndex < m_skin.joints().size(); ++jointIndex)
+        {
+            const Joint       &joint = m_skin.joints()[jointIndex];
+            const SceneObject &object = m_skin.jointObject(jointIndex);
+            const std::string  name = object.name.empty() ? "Unnamed Scene Object" : object.name;
+            const bool open = ImGui::TreeNodeEx(reinterpret_cast<void *>(static_cast<uintptr_t>(jointIndex) + 1),
+                                                ImGuiTreeNodeFlags_SpanAvailWidth, "[%u] %s (ID %u)", jointIndex,
+                                                name.c_str(), joint.sceneObject);
+            if (open)
+            {
+                ImGui::TextDisabled("Inverse bind matrix");
+                for (int row = 0; row < 4; ++row)
+                {
+                    ImGui::Text("% .3f  % .3f  % .3f  % .3f", joint.inverseBindMatrix[0][row],
+                                joint.inverseBindMatrix[1][row], joint.inverseBindMatrix[2][row],
+                                joint.inverseBindMatrix[3][row]);
+                }
+                ImGui::TreePop();
+            }
+        }
+        ImGui::TreePop();
+    }
 
 private:
     Skin m_skin;

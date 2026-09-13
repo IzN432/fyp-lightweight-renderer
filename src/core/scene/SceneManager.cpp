@@ -7,7 +7,6 @@
 
 #include "core/app/Viewer.hpp"
 
-#include <iterator>
 #include <stdexcept>
 
 namespace lr
@@ -32,15 +31,13 @@ SceneObject &SceneManager::load(const std::filesystem::path &path, const SceneLo
     {
         throw std::runtime_error("SceneManager::load: scene must be set first");
     }
-    SceneLoadResult imported = SceneLoader::load(path, *this, config);
+    SceneLoadResult imported = SceneLoader::load(path, *m_scene, m_meshStore, m_materialStore, config);
     if (!imported.firstMeshObject)
     {
         throw std::runtime_error("SceneManager::load: imported scene does not instantiate a mesh");
     }
 
     m_mainMeshObject = &m_scene->getSceneObject(imported.firstMeshObject.value());
-    m_skins.insert(m_skins.end(), std::make_move_iterator(imported.skins.begin()),
-                   std::make_move_iterator(imported.skins.end()));
     return m_scene->getSceneObject(imported.rootObject);
 }
 
