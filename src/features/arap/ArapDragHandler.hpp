@@ -21,7 +21,7 @@ class ArapDragHandler : public VertexDragHandler
 {
 public:
     ArapDragHandler(ArapSolver &solver, VertexManager &vertexManager, SelectionManager &selectionManager,
-                    VertexRoleId handleRole, CommandManager &commandManager, size_t liveSolveVertexThreshold = 5000)
+                    VertexRoleId handleRole, CommandManager &commandManager, size_t liveSolveVertexThreshold = 50000)
         : m_solver(solver), m_vertexManager(vertexManager), m_selectionManager(selectionManager),
           m_handleRole(handleRole), m_commandManager(commandManager),
           m_liveSolveVertexThreshold(liveSolveVertexThreshold)
