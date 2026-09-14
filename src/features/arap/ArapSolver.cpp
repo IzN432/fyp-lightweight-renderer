@@ -1,5 +1,7 @@
 #include "ArapSolver.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <set>
 
 namespace lr
@@ -8,10 +10,15 @@ namespace lr
 bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &anchorIndices,
                             const std::vector<uint32_t> &handleIndices)
 {
-    m_precomputed = false;
+    const auto precomputeStart = std::chrono::steady_clock::now();
+    m_precomputed  = false;
+    m_stats        = {};
+    m_totalSolveMs = 0.0;
 
     const auto        &positions   = mesh.positions();
     const Eigen::Index vertexCount = static_cast<Eigen::Index>(positions.size());
+    m_stats.vertexCount            = positions.size();
+    m_stats.triangleCount          = mesh.faces().size();
 
     Eigen::MatrixXd V(vertexCount, 3);
     for (Eigen::Index i = 0; i < vertexCount; ++i)
@@ -33,8 +40,12 @@ bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &ancho
     // giving arap_precomputation a stable, sorted boundary-index list.
     std::set<uint32_t> constrained(anchorIndices.begin(), anchorIndices.end());
     constrained.insert(handleIndices.begin(), handleIndices.end());
+    m_stats.constraintCount = constrained.size();
     if (constrained.empty())
     {
+        m_stats.precomputeMs = std::chrono::duration<double, std::milli>(
+                                   std::chrono::steady_clock::now() - precomputeStart)
+                                   .count();
         return false;
     }
 
@@ -45,7 +56,14 @@ bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &ancho
         b(i++) = static_cast<int>(idx);
     }
 
-    const bool ok = igl::arap_precomputation(V, F, 3, b, m_data);
+    const auto solverStart = std::chrono::steady_clock::now();
+    const bool ok          = igl::arap_precomputation(V, F, 3, b, m_data);
+    m_stats.solverPrecomputeMs = std::chrono::duration<double, std::milli>(
+                                     std::chrono::steady_clock::now() - solverStart)
+                                     .count();
+    m_stats.precomputeMs = std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - precomputeStart)
+                               .count();
     if (!ok)
     {
         return false;
@@ -54,6 +72,9 @@ bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &ancho
     m_restPositions = std::move(V);
     m_b             = std::move(b);
     m_precomputed   = true;
+    m_stats.precomputeMs = std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - precomputeStart)
+                               .count();
     return true;
 }
 
@@ -87,7 +108,25 @@ std::vector<glm::vec3> ArapSolver::solve(const std::unordered_map<uint32_t, glm:
     }
 
     m_data.max_iter = iterations;
+    const auto solveStart = std::chrono::steady_clock::now();
     igl::arap_solve(bc, m_data, U);
+    const double solveMs = std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - solveStart)
+                               .count();
+    m_stats.lastSolveMs = solveMs;
+    m_stats.lastIterations = iterations;
+    ++m_stats.solveCount;
+    m_totalSolveMs += solveMs;
+    m_stats.averageSolveMs = m_totalSolveMs / static_cast<double>(m_stats.solveCount);
+    if (m_stats.solveCount == 1)
+    {
+        m_stats.minSolveMs = solveMs;
+        m_stats.maxSolveMs = solveMs;
+    } else
+    {
+        m_stats.minSolveMs = std::min(m_stats.minSolveMs, solveMs);
+        m_stats.maxSolveMs = std::max(m_stats.maxSolveMs, solveMs);
+    }
 
     std::vector<glm::vec3> result(warmStart.size());
     for (Eigen::Index i = 0; i < vertexCount; ++i)
@@ -95,6 +134,12 @@ std::vector<glm::vec3> ArapSolver::solve(const std::unordered_map<uint32_t, glm:
         result[i] = glm::vec3(static_cast<float>(U(i, 0)), static_cast<float>(U(i, 1)), static_cast<float>(U(i, 2)));
     }
     return result;
+}
+
+void ArapSolver::recordInteraction(double elapsedMs, bool release)
+{
+    m_stats.lastInteractionMs = elapsedMs;
+    m_stats.lastWasRelease    = release;
 }
 
 } // namespace lr

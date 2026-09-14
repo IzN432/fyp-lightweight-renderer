@@ -13,6 +13,24 @@
 namespace lr
 {
 
+struct ArapPerformanceStats
+{
+    double precomputeMs       = 0.0; // Entire precompute(), including mesh/Eigen conversion.
+    double solverPrecomputeMs = 0.0; // igl::arap_precomputation() only.
+    double lastSolveMs        = 0.0; // igl::arap_solve() only.
+    double averageSolveMs     = 0.0;
+    double minSolveMs         = 0.0;
+    double maxSolveMs         = 0.0;
+    double lastInteractionMs  = 0.0; // Drag/release handler, including mesh update callbacks.
+
+    uint64_t solveCount      = 0;
+    size_t   vertexCount     = 0;
+    size_t   triangleCount   = 0;
+    size_t   constraintCount = 0;
+    int      lastIterations  = 0;
+    bool     lastWasRelease  = false;
+};
+
 // Thin wrapper around libigl's ARAP precompute/solve. Pure numerics — plain vertex index lists in,
 // no dependency on SelectionManager, VertexManager, gizmos, or undo.
 class ArapSolver
@@ -25,6 +43,8 @@ public:
 
     bool isPrecomputed() const { return m_precomputed; }
     void invalidate() { m_precomputed = false; }
+    const ArapPerformanceStats &performanceStats() const { return m_stats; }
+    void recordInteraction(double elapsedMs, bool release);
 
     // handleTargets: absolute target position for every handle vertex this call (b-indices not
     // present are assumed to be anchors, held fixed at their precompute-time rest position).
@@ -39,7 +59,9 @@ private:
     igl::ARAPData   m_data;
     Eigen::MatrixXd m_restPositions; // V at precompute time — anchor bc targets are read from here
     Eigen::VectorXi m_b;             // sorted anchor+handle indices, as passed to arap_precomputation
-    bool            m_precomputed = false;
+    bool                 m_precomputed = false;
+    ArapPerformanceStats m_stats;
+    double               m_totalSolveMs = 0.0;
 };
 
 } // namespace lr

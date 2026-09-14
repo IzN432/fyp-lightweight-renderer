@@ -2,6 +2,7 @@
 
 #include "ArapDeformCommand.hpp"
 
+#include <chrono>
 #include <memory>
 #include <unordered_map>
 
@@ -19,6 +20,7 @@ void ArapDragHandler::beginDrag() { m_beforeDrag = m_vertexManager.getPositions(
 
 void ArapDragHandler::translate(const glm::vec3 &frameDelta)
 {
+    const auto interactionStart = std::chrono::steady_clock::now();
     const auto &positions     = m_vertexManager.getPositions();
     const auto &handleIndices = indices();
 
@@ -56,10 +58,15 @@ void ArapDragHandler::translate(const glm::vec3 &frameDelta)
         }
         m_vertexManager.setPositions(handleIndicesVec, newHandlePositions);
     }
+
+    m_solver.recordInteraction(
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - interactionStart).count(),
+        false);
 }
 
 void ArapDragHandler::endDrag(const glm::vec3 &totalDelta)
 {
+    const auto interactionStart = std::chrono::steady_clock::now();
     const auto &positions     = m_vertexManager.getPositions();
     const auto &handleIndices = indices();
 
@@ -97,6 +104,10 @@ void ArapDragHandler::endDrag(const glm::vec3 &totalDelta)
         m_commandManager.appendCommandWithoutExecuting(
             std::make_unique<ArapDeformCommand>(m_vertexManager, std::move(diffs)));
     }
+
+    m_solver.recordInteraction(
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - interactionStart).count(),
+        true);
 }
 
 } // namespace lr

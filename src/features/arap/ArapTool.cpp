@@ -124,6 +124,24 @@ void ArapTool::onGui(const glm::mat4 &viewProj, VkExtent2D extent, const glm::ve
         ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
                            "Solve failed - every free vertex must be able to reach an anchor or handle");
     }
+
+    const ArapPerformanceStats &stats = m_solver.performanceStats();
+    ImGui::SeparatorText("Performance");
+    ImGui::TextUnformatted("Solver: libigl / Eigen");
+    ImGui::Text("Mesh: %zu vertices, %zu triangles", stats.vertexCount, stats.triangleCount);
+    ImGui::Text("Constraints: %zu", stats.constraintCount);
+    ImGui::Text("Precompute: %.3f ms (libigl: %.3f ms)", stats.precomputeMs, stats.solverPrecomputeMs);
+    if (stats.solveCount > 0)
+    {
+        ImGui::Text("Last solve: %.3f ms (%d iteration%s)", stats.lastSolveMs, stats.lastIterations,
+                    stats.lastIterations == 1 ? "" : "s");
+        ImGui::Text("Estimated per iteration: %.3f ms", stats.lastSolveMs / stats.lastIterations);
+        ImGui::Text("Solve avg/min/max: %.3f / %.3f / %.3f ms", stats.averageSolveMs, stats.minSolveMs,
+                    stats.maxSolveMs);
+        ImGui::Text("Solve samples: %llu", static_cast<unsigned long long>(stats.solveCount));
+        ImGui::Text("Last %s update: %.3f ms", stats.lastWasRelease ? "release" : "drag",
+                    stats.lastInteractionMs);
+    }
     ImGui::End();
 }
 
