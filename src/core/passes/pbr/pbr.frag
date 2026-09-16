@@ -92,6 +92,11 @@ void main()
     float metallic = texture(gbufferRoughnessMetallic, inUV).g;
     float depth = texture(gbufferDepth, inUV).r;
 
+    if (depth >= 1.0) {
+        outColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+    
     vec3 position = depthToViewPosition(depth, inUV, cameraUbo.invProj);
 
     vec3 color = vec3(0.0);
