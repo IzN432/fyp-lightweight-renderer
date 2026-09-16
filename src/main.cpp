@@ -135,7 +135,7 @@ try
     }
 
     // MESH
-    const fs::path meshPath = lr::paths::assetDir / "samples/models/bird_orange.glb";
+    const fs::path meshPath = lr::paths::assetDir / "samples/models/lion_head_4k.glb";
 
     sceneManager.load(meshPath, {.gltf = config});
 
@@ -402,13 +402,9 @@ try
         const bool nowEditing = sceneManager.editorMode() != lr::EditorMode::Edit;
         sceneManager.setEditorMode(nowEditing ? lr::EditorMode::Edit : lr::EditorMode::View);
 
-        // ARAP mode is conceptually nested inside Edit mode — leaving Edit is a hard reset for
-        // everything nested under it, so it can't outlive the mode it depends on (e.g. a gizmo
-        // left showing/interactive after Tab-ing out of Edit).
-        if (!nowEditing)
-        {
-            arapTool.setModeActive(false);
-        }
+        // ARAP mode deliberately outlives Edit mode now — a solved handle set should stay
+        // draggable in View mode. Anchor/handle (re)classification still requires a selection,
+        // which only Edit mode's box-select can produce, so the solve can't go stale outside Edit.
     });
 
     viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
@@ -619,13 +615,12 @@ try
         // would otherwise appear over the very selection the anchor/handle popup is asking about —
         // suppress it until Solve actually swaps the handler.
         const bool suppressedByArapMode = arapTool.isModeActive() && (&activeHandler == &defaultHandler);
-        // Edit mode is the top-level switch everything gizmo-related is nested under (ARAP mode
-        // included — see the Tab handler above, which forces it off on leaving Edit) — a handler's
-        // index list can still be non-empty outside Edit (roles/selection aren't cleared just by
-        // toggling modes), so this can't be inferred from driven.empty() alone.
-        const bool editingAllowed = sceneManager.editorMode() == lr::EditorMode::Edit;
-
-        if (!editingAllowed || driven.empty() || suppressedByArapMode)
+        // Deliberately not gated on Edit mode: an ARAP-solved handle set should stay draggable in
+        // View mode too (see the Tab handler above — ARAP mode now outlives Edit). This still can't
+        // leak the plain translate gizmo into View mode, since the default handler's indices are the
+        // current selection, which SceneManager clears on leaving Edit — so driven.empty() already
+        // covers that case on its own.
+        if (driven.empty() || suppressedByArapMode)
         {
             for (int id : translateGizmoIds)
             {

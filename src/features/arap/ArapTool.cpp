@@ -33,6 +33,15 @@ void ArapTool::setModeActive(bool active)
     if (!active)
     {
         resetToDefaultHandler();
+    } else if (m_solver.isPrecomputed())
+    {
+        // Reactivating (e.g. Tab back into Edit, then 'A') after a Tab-out only ever detached the
+        // gizmos from the solver via resetToDefaultHandler() above — the precomputed matrix itself
+        // is untouched, so restore the wiring immediately instead of forcing a redundant re-Solve.
+        for (DragHandlerGizmo *gizmo : m_gizmos)
+        {
+            gizmo->setDragHandler(m_arapHandler);
+        }
     }
 }
 
