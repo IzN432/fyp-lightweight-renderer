@@ -10,6 +10,7 @@
 #include "core/passes/pbr/PbrPass.hpp"
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
 #include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
+#include "core/passes/overlaylines/OverlayLinesPass.hpp"
 #include "core/passes/overlaypoints/OverlayPointsPass.hpp"
 #include "core/framegraph/ImageReadback.hpp"
 
@@ -33,6 +34,8 @@
 
 #include "features/arap/ArapTool.hpp"
 #include "features/laplace_beltrami/LaplaceBeltramiTool.hpp"
+#include "features/rigid_body/ColliderComponent.hpp"
+#include "features/rigid_body/ColliderVisual.hpp"
 
 #include <ImGuiFileDialog.h>
 #include <imgui.h>
@@ -170,6 +173,53 @@ try
     lr::SceneObject *meshObject = &sceneManager.mainMeshObject();
     auto &meshComponent = meshObject->getComponent<lr::MeshComponent>();
 
+    // Seed the demo object with a local-space box collider fitted to its mesh. Collision
+    // detection will consume the same component later; for now this also makes the collider
+    // inspector and visualization immediately available in the sample application.
+    if (!meshComponent.mesh().positions().empty())
+    {
+        glm::vec3 boundsMin = meshComponent.mesh().positions().front();
+        glm::vec3 boundsMax = boundsMin;
+        for (const glm::vec3 &position : meshComponent.mesh().positions())
+        {
+            boundsMin = glm::min(boundsMin, position);
+            boundsMax = glm::max(boundsMax, position);
+        }
+
+        lr::Collider collider;
+        collider.shape         = lr::BoxCollider{glm::max((boundsMax - boundsMin) * 0.5f, glm::vec3(0.001f))};
+        collider.localPosition = (boundsMin + boundsMax) * 0.5f;
+        meshObject->addComponent<lr::ColliderComponent>(std::move(collider));
+
+        // TEST OBJECT — a free-floating sphere collider hovering above the lion, for exercising
+        // collision detection against the mesh's box collider once that lands.
+        constexpr float kTestSphereRadius = 0.3f;
+        lr::SceneObject &testSphereObject = scene.createSceneObject();
+        testSphereObject.name             = "Test Sphere";
+        testSphereObject.addComponent<lr::TransformComponent>(
+            glm::vec3((boundsMin.x + boundsMax.x) * 0.5f, boundsMax.y + kTestSphereRadius * 4.0f,
+                     (boundsMin.z + boundsMax.z) * 0.5f));
+
+        lr::Collider testSphereCollider;
+        testSphereCollider.shape = lr::SphereCollider{kTestSphereRadius};
+        testSphereObject.addComponent<lr::ColliderComponent>(std::move(testSphereCollider));
+
+        // TEST OBJECT — a static ground plane collider below the lion, for exercising collision
+        // detection against the mesh's box collider once that lands.
+        lr::SceneObject &testPlaneObject = scene.createSceneObject();
+        testPlaneObject.name             = "Test Ground Plane";
+        testPlaneObject.addComponent<lr::TransformComponent>(
+            glm::vec3((boundsMin.x + boundsMax.x) * 0.5f, boundsMin.y, (boundsMin.z + boundsMax.z) * 0.5f));
+
+        lr::Collider testPlaneCollider;
+        const glm::vec3 extents = boundsMax - boundsMin;
+        testPlaneCollider.shape = lr::PlaneCollider{
+            .offset      = 0.0f,
+            .halfExtents = glm::vec2(std::max(extents.x, extents.z), std::max(extents.x, extents.z)),
+        };
+        testPlaneObject.addComponent<lr::ColliderComponent>(std::move(testPlaneCollider));
+    }
+
     // -------------------------------------------------------------------------
     // Resource uploads
     // -------------------------------------------------------------------------
@@ -270,6 +320,12 @@ try
     overlayGeometryPass.uploadResources(viewer.resources());
     overlayGeometryPass.build(viewer.frameGraph());
     overlayGeometryPass.setInstances({});
+
+    lr::OverlayLinesPass overlayLinesPass({
+        .cameraBufferResourceName = sceneManager.cameraBufferName(),
+    }, viewer.resources());
+    overlayLinesPass.build(viewer.frameGraph());
+    overlayLinesPass.setLines({});
 
     lr::GpuMeshLayout pointsMeshLayout(meshComponent.mesh().layout());
     pointsMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
@@ -648,6 +704,7 @@ try
         }
 
         overlayGeometryPass.setInstances(gizmoManager.getVisibleGizmoInstances());
+        overlayLinesPass.setLines(lr::buildColliderOverlayLines(scene));
     });
 
     // Registers SceneManager's own onUpdate (aspect tracking) and onLateUpdate (flushDirty —

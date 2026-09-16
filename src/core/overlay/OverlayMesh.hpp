@@ -43,19 +43,19 @@ public:
 
     static const OverlayMesh &cube()
     {
-        static OverlayMesh mesh = OverlayMesh::create(primitives::cube);
+        static OverlayMesh mesh = OverlayMesh::create(primitives::cube.surface);
         return mesh;
     }
 
     static const OverlayMesh &sphere()
     {
-        static OverlayMesh mesh = OverlayMesh::create(primitives::makeSphere());
+        static OverlayMesh mesh = OverlayMesh::create(primitives::sphere.surface);
         return mesh;
     }
 
     static const OverlayMesh &arrow()
     {
-        static OverlayMesh mesh = OverlayMesh::create(primitives::makeArrow());
+        static OverlayMesh mesh = OverlayMesh::create(primitives::arrow.surface);
         return mesh;
     }
 

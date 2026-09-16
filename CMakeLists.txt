@@ -84,6 +84,8 @@ add_library(lr_core STATIC
     src/core/passes/geometry/GeometryPass.cpp
     src/core/passes/heatmap/HeatmapPass.cpp
     src/core/passes/overlaygeometry/OverlayGeometryPass.cpp
+    src/core/passes/overlaylines/OverlayLine.cpp
+    src/core/passes/overlaylines/OverlayLinesPass.cpp
     src/core/passes/overlaypoints/OverlayPointsPass.cpp
 
     src/core/passes/ibl/IblPass.cpp
@@ -171,6 +173,8 @@ add_shaders(lr_core
     src/core/passes/overlaypoints/overlay_points.frag
     src/core/passes/heatmap/heatmap.vert
     src/core/passes/heatmap/heatmap.frag
+    src/core/passes/overlaylines/overlay_lines.vert
+    src/core/passes/overlaylines/overlay_lines.frag
 
 )
 
@@ -207,10 +211,17 @@ add_library(lr_animation_feature STATIC
 target_include_directories(lr_animation_feature PUBLIC src)
 target_link_libraries(lr_animation_feature PUBLIC lr_core glm::glm)
 
+add_library(lr_rigid_body_feature STATIC
+    src/features/rigid_body/ColliderComponent.cpp
+    src/features/rigid_body/ColliderVisual.cpp
+)
+target_include_directories(lr_rigid_body_feature PUBLIC src)
+target_link_libraries(lr_rigid_body_feature PUBLIC lr_core glm::glm)
+
 # Application executable
 add_executable(renderer src/main.cpp)
 target_link_libraries(renderer PRIVATE lr_core lr_arap_feature lr_laplace_beltrami_feature
-    lr_linear_blend_skinning_feature lr_animation_feature imguiFileDialog)
+    lr_linear_blend_skinning_feature lr_animation_feature lr_rigid_body_feature imguiFileDialog)
 
 if(BUILD_TESTING)
     add_executable(scene_hierarchy_tests
@@ -241,6 +252,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(animation_tests PRIVATE lr_animation_feature)
     add_test(NAME animation.model COMMAND animation_tests)
+
+    add_executable(rigid_body_collider_tests
+        tests/rigid_body/ColliderTests.cpp
+    )
+    target_link_libraries(rigid_body_collider_tests PRIVATE lr_rigid_body_feature)
+    add_test(NAME rigid_body.collider COMMAND rigid_body_collider_tests)
 
     add_executable(framegraph_model_tests
         tests/framegraph/GraphModelTests.cpp
