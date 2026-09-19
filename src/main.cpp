@@ -36,6 +36,8 @@
 #include "features/laplace_beltrami/LaplaceBeltramiTool.hpp"
 #include "features/rigid_body/ColliderComponent.hpp"
 #include "features/rigid_body/ColliderVisual.hpp"
+#include "features/rigid_body/PhysicsWorld.hpp"
+#include "features/rigid_body/RigidBodyComponent.hpp"
 
 #include <ImGuiFileDialog.h>
 #include <imgui.h>
@@ -190,6 +192,7 @@ try
         collider.shape         = lr::BoxCollider{glm::max((boundsMax - boundsMin) * 0.5f, glm::vec3(0.001f))};
         collider.localPosition = (boundsMin + boundsMax) * 0.5f;
         meshObject->addComponent<lr::ColliderComponent>(std::move(collider));
+        meshObject->addComponent<lr::RigidBodyComponent>();
 
         // TEST OBJECT — a free-floating sphere collider hovering above the lion, for exercising
         // collision detection against the mesh's box collider once that lands.
@@ -203,6 +206,7 @@ try
         lr::Collider testSphereCollider;
         testSphereCollider.shape = lr::SphereCollider{kTestSphereRadius};
         testSphereObject.addComponent<lr::ColliderComponent>(std::move(testSphereCollider));
+        testSphereObject.addComponent<lr::RigidBodyComponent>();
 
         // TEST OBJECT — a static ground plane collider below the lion, for exercising collision
         // detection against the mesh's box collider once that lands.
@@ -218,7 +222,10 @@ try
             .halfExtents = glm::vec2(std::max(extents.x, extents.z), std::max(extents.x, extents.z)),
         };
         testPlaneObject.addComponent<lr::ColliderComponent>(std::move(testPlaneCollider));
+        testPlaneObject.addComponent<lr::RigidBodyComponent>(1.0f, lr::RigidBodyType::Static);
     }
+
+    lr::PhysicsWorld physicsWorld(scene);
 
     // -------------------------------------------------------------------------
     // Resource uploads
@@ -500,6 +507,7 @@ try
     viewer.onGui([&]() {
         const ImGuiViewport *viewport = ImGui::GetMainViewport();
         const ImVec2 panelSize(viewport->WorkSize.x * 0.24f, viewport->WorkSize.y * 0.32f);
+        const ImVec2 topLeft(viewport->WorkPos.x, viewport->WorkPos.y);
         const ImVec2 topRight(viewport->WorkPos.x + viewport->WorkSize.x - panelSize.x,
                               viewport->WorkPos.y);
         const ImVec2 bottomLeft(viewport->WorkPos.x,
@@ -508,6 +516,12 @@ try
                                  viewport->WorkPos.y + viewport->WorkSize.y - panelSize.y);
 
         laplaceBeltramiTool.onGui();
+
+        ImGui::SetNextWindowPos(topLeft, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
+        ImGui::Begin("Physics");
+        physicsWorld.onGUI();
+        ImGui::End();
 
         ImGui::SetNextWindowPos(bottomLeft, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
@@ -625,6 +639,10 @@ try
     });
 
     lr::SphericalCameraController cameraController(*camera, viewer.input());
+    viewer.onUpdate([&](float dt, VkExtent2D) {
+        physicsWorld.update(dt);
+    });
+
     viewer.onUpdate([&cameraController](float dt, VkExtent2D extent) {
         cameraController.update(dt);
     });

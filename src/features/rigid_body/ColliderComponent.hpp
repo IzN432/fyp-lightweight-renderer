@@ -21,6 +21,11 @@ public:
     const Collider &collider() const { return m_collider; }
 
     bool visible() const { return m_visible; }
+    void setVisible(bool visible)
+    {
+        m_visible = visible;
+        markDirty();
+    }
     const glm::vec3 &visualizationColor() const { return m_visualizationColor; }
     float visualizationOpacity() const { return m_visualizationOpacity; }
     float occludedOpacity() const { return m_occludedOpacity; }

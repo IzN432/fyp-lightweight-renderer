@@ -69,8 +69,10 @@ void ColliderComponent::onGUIImpl()
         m_collider.localRotation = glm::quat(glm::radians(localEulerDegrees));
     }
 
-    ImGui::SliderFloat("Restitution", &m_collider.restitution, 0.0f, 1.0f);
-    ImGui::SliderFloat("Friction", &m_collider.friction, 0.0f, 1.0f);
+    ImGui::Text("Physics Material");
+    ImGui::SliderFloat("Restitution", &m_collider.material.restitution, 0.0f, 1.0f);
+    ImGui::SliderFloat("Static Friction", &m_collider.material.staticFriction, 0.0f, 2.0f);
+    ImGui::SliderFloat("Dynamic Friction", &m_collider.material.dynamicFriction, 0.0f, 2.0f);
 
     ImGui::Text("Visualization");
     ImGui::Checkbox("Show Collider", &m_visible);

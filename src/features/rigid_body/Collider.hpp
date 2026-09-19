@@ -1,5 +1,7 @@
 #pragma once
 
+#include "features/rigid_body/PhysicsMaterial.hpp"
+
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -36,8 +38,7 @@ struct Collider
     glm::vec3 localPosition{0.0f};
     glm::quat localRotation{1.0f, 0.0f, 0.0f, 0.0f};
 
-    float restitution = 0.5f;
-    float friction    = 0.5f;
+    PhysicsMaterial material;
 };
 
 } // namespace lr

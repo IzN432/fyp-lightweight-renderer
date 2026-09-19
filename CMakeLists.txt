@@ -214,6 +214,8 @@ target_link_libraries(lr_animation_feature PUBLIC lr_core glm::glm)
 add_library(lr_rigid_body_feature STATIC
     src/features/rigid_body/ColliderComponent.cpp
     src/features/rigid_body/ColliderVisual.cpp
+    src/features/rigid_body/PhysicsWorld.cpp
+    src/features/rigid_body/RigidBodyComponent.cpp
 )
 target_include_directories(lr_rigid_body_feature PUBLIC src)
 target_link_libraries(lr_rigid_body_feature PUBLIC lr_core glm::glm)
