@@ -243,18 +243,59 @@ try
             const glm::vec3 boxCenter  = glm::vec3(center.x, (floorY + ceilingY) * 0.5f, center.z);
 
             // Each entry: world-space center, right axis, up axis (their cross product is the
-            // wall's inward-facing normal — see AreaLightVisual.cpp for the same winding
-            // convention), and the material color.
-            struct WallSpec
+            // quad's facing normal — see AreaLightVisual.cpp for the same winding convention),
+            // and the material color. Shared by the room walls (inward-facing) and the pedestal
+            // cube below (outward-facing) — same quad-building code either way.
+            struct QuadSpec
             {
-                const char *name;
+                std::string name;
                 glm::vec3   center;
                 glm::vec3   right;
                 glm::vec3   up;
                 glm::vec3   normal;
                 glm::vec3   color;
             };
-            const std::vector<WallSpec> walls = {
+
+            const auto buildQuadObject = [&](const QuadSpec &quad) {
+                lr::Material material;
+                material.name                                 = quad.name;
+                material.parameters[config.baseDiffuseName]   = lr::MaterialParam::ColorRGBA{glm::vec4(quad.color, 1.0f)};
+                material.parameters[config.baseEmissiveName]  = lr::MaterialParam::ColorRGB{glm::vec3(0.0f)};
+                material.parameters[config.baseRoughnessName] = lr::MaterialParam::NormalizedFloat{1.0f};
+                material.parameters[config.baseMetallicName]  = lr::MaterialParam::NormalizedFloat{0.0f};
+                const lr::MaterialHandle handle = sceneManager.materialStore().acquire(std::move(material));
+
+                std::vector<glm::vec3> positions = {
+                    quad.center - quad.right - quad.up,
+                    quad.center + quad.right - quad.up,
+                    quad.center + quad.right + quad.up,
+                    quad.center - quad.right + quad.up,
+                };
+                std::vector<uint32_t>   positionIndices = {0, 1, 2, 3};
+                std::vector<glm::uvec3> faces           = {{0, 1, 2}, {0, 2, 3}};
+
+                lr::Mesh quadMesh;
+                quadMesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
+                quadMesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, std::vector<glm::vec3>(4, quad.normal));
+                quadMesh.setPerVertexArray<glm::vec4>(
+                    config.tangentAttributeName,
+                    std::vector<glm::vec4>(4, glm::vec4(glm::normalize(quad.right), 1.0f)));
+                const std::vector<glm::vec2> uvs = {{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
+                quadMesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
+                quadMesh.setFaceGroups({handle, handle});
+
+                const lr::MeshHandle meshHandle = sceneManager.meshStore().add(std::move(quadMesh));
+
+                lr::SceneObject &quadObject = scene.createSceneObject();
+                quadObject.name             = quad.name;
+                quadObject.addComponent<lr::TransformComponent>();
+                quadObject.addComponent<lr::MeshComponent>(meshHandle, sceneManager.meshStore(),
+                                                            std::vector<lr::MaterialHandle>{handle},
+                                                            sceneManager.materialStore());
+                sceneManager.addMeshObject(quadObject);
+            };
+
+            const std::vector<QuadSpec> walls = {
                 {"Cornell Floor", {boxCenter.x, floorY, boxCenter.z}, {0, 0, halfZ}, {halfX, 0, 0}, {0, 1, 0},
                  glm::vec3(0.73f)},
                 {"Cornell Ceiling", {boxCenter.x, ceilingY, boxCenter.z}, {halfX, 0, 0}, {0, 0, halfZ}, {0, -1, 0},
@@ -266,45 +307,48 @@ try
                 {"Cornell Right Wall", {center.x + halfX, boxCenter.y, boxCenter.z}, {0, 0, halfZ}, {0, halfY, 0},
                  {-1, 0, 0}, glm::vec3(0.05f, 0.6f, 0.05f)},
             };
-
-            for (const WallSpec &wall : walls)
+            for (const QuadSpec &wall : walls)
             {
-                lr::Material material;
-                material.name                                 = wall.name;
-                material.parameters[config.baseDiffuseName]   = lr::MaterialParam::ColorRGBA{glm::vec4(wall.color, 1.0f)};
-                material.parameters[config.baseEmissiveName]  = lr::MaterialParam::ColorRGB{glm::vec3(0.0f)};
-                material.parameters[config.baseRoughnessName] = lr::MaterialParam::NormalizedFloat{1.0f};
-                material.parameters[config.baseMetallicName]  = lr::MaterialParam::NormalizedFloat{0.0f};
-                const lr::MaterialHandle handle = sceneManager.materialStore().acquire(std::move(material));
+                buildQuadObject(wall);
+            }
 
-                std::vector<glm::vec3> positions = {
-                    wall.center - wall.right - wall.up,
-                    wall.center + wall.right - wall.up,
-                    wall.center + wall.right + wall.up,
-                    wall.center - wall.right + wall.up,
+            // PEDESTAL CUBE — a clean, sharp-edged procedural cube standing in for the lion's own
+            // sculpted base (which has a faceted/beveled edge — a diagnostic for the HBAO dotted-
+            // edge artifact: if a hand-built, single-flat-face-per-side cube shows the same dots
+            // along its edges, the artifact isn't specific to the lion's faceted geometry after
+            // all). The lion is lifted so its own (unmodified) base now sits on top of this cube
+            // rather than on the Cornell floor directly.
+            {
+                const float     pedestalHalf   = std::max(std::max(extents.x, extents.z) * 0.55f, 0.001f);
+                const float     pedestalHeight = std::max(extents.y, 0.001f) * 0.35f;
+                const glm::vec3 pedestalCenter(center.x, floorY + pedestalHeight * 0.5f, center.z);
+                const float     px = pedestalHalf;
+                const float     py = pedestalHeight * 0.5f;
+                const float     pz = pedestalHalf;
+
+                const std::vector<QuadSpec> pedestalFaces = {
+                    {"Pedestal Top", pedestalCenter + glm::vec3(0, py, 0), {0, 0, pz}, {px, 0, 0}, {0, 1, 0},
+                     glm::vec3(0.73f)},
+                    {"Pedestal Bottom", pedestalCenter - glm::vec3(0, py, 0), {px, 0, 0}, {0, 0, pz}, {0, -1, 0},
+                     glm::vec3(0.73f)},
+                    {"Pedestal Front", pedestalCenter + glm::vec3(0, 0, pz), {px, 0, 0}, {0, py, 0}, {0, 0, 1},
+                     glm::vec3(0.73f)},
+                    {"Pedestal Back", pedestalCenter - glm::vec3(0, 0, pz), {0, py, 0}, {px, 0, 0}, {0, 0, -1},
+                     glm::vec3(0.73f)},
+                    {"Pedestal Right", pedestalCenter + glm::vec3(px, 0, 0), {0, py, 0}, {0, 0, pz}, {1, 0, 0},
+                     glm::vec3(0.73f)},
+                    {"Pedestal Left", pedestalCenter - glm::vec3(px, 0, 0), {0, 0, pz}, {0, py, 0}, {-1, 0, 0},
+                     glm::vec3(0.73f)},
                 };
-                std::vector<uint32_t>   positionIndices = {0, 1, 2, 3};
-                std::vector<glm::uvec3> faces           = {{0, 1, 2}, {0, 2, 3}};
+                for (const QuadSpec &face : pedestalFaces)
+                {
+                    buildQuadObject(face);
+                }
 
-                lr::Mesh wallMesh;
-                wallMesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
-                wallMesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, std::vector<glm::vec3>(4, wall.normal));
-                wallMesh.setPerVertexArray<glm::vec4>(
-                    config.tangentAttributeName,
-                    std::vector<glm::vec4>(4, glm::vec4(glm::normalize(wall.right), 1.0f)));
-                const std::vector<glm::vec2> uvs = {{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
-                wallMesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
-                wallMesh.setFaceGroups({handle, handle});
-
-                const lr::MeshHandle meshHandle = sceneManager.meshStore().add(std::move(wallMesh));
-
-                lr::SceneObject &wallObject = scene.createSceneObject();
-                wallObject.name             = wall.name;
-                wallObject.addComponent<lr::TransformComponent>();
-                wallObject.addComponent<lr::MeshComponent>(meshHandle, sceneManager.meshStore(),
-                                                            std::vector<lr::MaterialHandle>{handle},
-                                                            sceneManager.materialStore());
-                sceneManager.addMeshObject(wallObject);
+                // Lift the lion so its own (local-space, unchanged) bottom lands on the pedestal's
+                // top face instead of the Cornell floor.
+                lr::TransformComponent &meshTransform = meshObject->getComponent<lr::TransformComponent>();
+                meshTransform.setPosition(meshTransform.transform().position() + glm::vec3(0.0f, pedestalHeight, 0.0f));
             }
         }
     }
@@ -722,6 +766,24 @@ try
             ImGuiFileDialog::Instance()->Close();
         }
 
+        ImGui::End();
+
+        ImGui::Begin("HBAO");
+        {
+            lr::AmbientOcclusionPass::Config &aoConfig = aoPass.config();
+            bool                              aoDirty  = false;
+            aoDirty |= ImGui::SliderFloat("Sphere Radius", &aoConfig.sphereRadius, 0.0005f, 0.2f, "%.4f",
+                                          ImGuiSliderFlags_Logarithmic);
+            aoDirty |= ImGui::SliderInt("Num Steps", &aoConfig.numSteps, 1, 128);
+            aoDirty |= ImGui::SliderInt("Num Directions", &aoConfig.numDirs, 1, 128);
+            aoDirty |= ImGui::SliderFloat("Tan Angle Bias", &aoConfig.tanAngleBias, 0.0f, 1.0f);
+            aoDirty |= ImGui::SliderFloat("AO Scalar", &aoConfig.aoScalar, 0.0f, 5.0f);
+            ImGui::TextDisabled("AO Scalar isn't read by hbao.comp yet — has no visible effect.");
+            if (aoDirty)
+            {
+                aoPass.updateParams(viewer.resources());
+            }
+        }
         ImGui::End();
 
         ImGui::SetNextWindowPos(topRight, ImGuiCond_FirstUseEver);

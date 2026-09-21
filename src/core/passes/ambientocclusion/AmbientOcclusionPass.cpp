@@ -4,10 +4,7 @@
 
 #include <glm/glm.hpp>
 
-#include <cmath>
-#include <random>
 #include <string>
-#include <vector>
 
 namespace lr
 {
@@ -28,6 +25,18 @@ constexpr uint32_t kGroupSize = 16;
 
 uint32_t dispatchSize(uint32_t pixels) { return (pixels + kGroupSize - 1) / kGroupSize; }
 
+AOParamUBO buildParams(const AmbientOcclusionPass::Config &cfg)
+{
+    const float r = cfg.sphereRadius;
+    return AOParamUBO{
+        .sphereRadius = glm::vec4(r, r * r, 1.0f / r, 0.0f),
+        .numSteps     = cfg.numSteps,
+        .numDirs      = cfg.numDirs,
+        .tanAngleBias = cfg.tanAngleBias,
+        .aoScalar     = cfg.aoScalar,
+    };
+}
+
 } // namespace
 
 AmbientOcclusionPass::AmbientOcclusionPass(Config cfg) : m_cfg(std::move(cfg)) {}
@@ -40,27 +49,21 @@ void AmbientOcclusionPass::uploadResources(ResourceRegistry &resources) const
     resources.registerImage("hbao_ao", VK_FORMAT_R32_SFLOAT, storageAndSampled);
     resources.registerImage("hbao_raw", VK_FORMAT_R32_SFLOAT, storageAndSampled);
 
-    // 4x4 tile of random directions, tiled over the screen — seeded for reproducibility
-    constexpr uint32_t                    kNoiseSize = 4;
-    std::vector<glm::vec4>                dirs(kNoiseSize * kNoiseSize);
-    std::mt19937                          rng(42);
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    for (glm::vec4 &dir : dirs)
-    {
-        const float angle = dist(rng) * 2.0f * 3.14159265f;
-        dir               = glm::vec4(std::cos(angle), std::sin(angle), 0.0f, 1.0f); // z reserved for jitter
-    }
-    resources.uploadImage("hbao_directions", dirs.data(), kNoiseSize, kNoiseSize, VK_FORMAT_R32G32B32A32_SFLOAT);
+    // Per-pixel rotation and step jitter are now a procedural hash of pos computed directly in
+    // hbao.comp — no direction texture to seed here (see its doc comment for why: a small repeating
+    // tile produces a visible periodic pattern that an edge-preserving blur can't remove).
 
-    const float      r = m_cfg.sphereRadius;
-    const AOParamUBO params{
-        .sphereRadius = glm::vec4(r, r * r, 1.0f / r, 0.0f),
-        .numSteps     = m_cfg.numSteps,
-        .numDirs      = m_cfg.numDirs,
-        .tanAngleBias = m_cfg.tanAngleBias,
-        .aoScalar     = m_cfg.aoScalar,
-    };
-    resources.uploadBuffer("hbao_params", &params, sizeof(params), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    // Dynamic (not uploadBuffer's static GPU_ONLY) so updateParams() can push edits from a GUI
+    // every frame without needing a destroy/recreate.
+    resources.registerDynamicBuffer("hbao_params", sizeof(AOParamUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    const AOParamUBO params = buildParams(m_cfg);
+    resources.updateBuffer("hbao_params", &params, sizeof(params));
+}
+
+void AmbientOcclusionPass::updateParams(ResourceRegistry &resources) const
+{
+    const AOParamUBO params = buildParams(m_cfg);
+    resources.updateBuffer("hbao_params", &params, sizeof(params));
 }
 
 void AmbientOcclusionPass::build(FrameGraph &fg) const
@@ -76,9 +79,8 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_COMPUTE_BIT)
         .sampledDepth(1, fg.image("gbufferDepth"), VK_SHADER_STAGE_COMPUTE_BIT)
         .sampledImage(2, fg.image("gbufferNormal"), VK_SHADER_STAGE_COMPUTE_BIT)
-        .sampledImage(3, fg.image("hbao_directions"), VK_SHADER_STAGE_COMPUTE_BIT)
-        .uniformBuffer(4, fg.buffer("hbao_params"), VK_SHADER_STAGE_COMPUTE_BIT)
-        .storageImageWrite(5, raw, VK_SHADER_STAGE_COMPUTE_BIT)
+        .uniformBuffer(3, fg.buffer("hbao_params"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageImageWrite(4, raw, VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([raw](PassContext &ctx) {
             const VkExtent2D extent = ctx.extent(raw);
             ctx.cmd().dispatch(dispatchSize(extent.width), dispatchSize(extent.height), 1);

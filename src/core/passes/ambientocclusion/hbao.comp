@@ -18,9 +18,8 @@ layout(set = 0, binding = 0) uniform CameraUbo {
 
 layout(set = 0, binding = 1) uniform sampler2D depthTex;   // full-res G-buffer depth
 layout(set = 0, binding = 2) uniform sampler2D normalTex;  // full-res G-buffer normal
-layout(set = 0, binding = 3) uniform sampler2D directionTex;
 
-layout(set = 0, binding = 4) uniform AOParam {
+layout(set = 0, binding = 3) uniform AOParam {
     vec4  sphereRadius; // r, r^2, 1/r, 0
     int   numSteps;
     int   numDirs;
@@ -28,7 +27,20 @@ layout(set = 0, binding = 4) uniform AOParam {
     float aoScalar;
 } aoInfo;
 
-layout(set = 0, binding = 5, r32f) uniform writeonly image2D aoOut;
+layout(set = 0, binding = 4, r32f) uniform writeonly image2D aoOut;
+
+// Cheap per-pixel hash (Dave Hoskins' hash12) — used instead of a small repeating noise texture
+// for the per-pixel rotation/jitter below. A tiled texture (we previously used a 4x4 tile) only
+// has as many distinct values as the tile has texels, so it produces a visible periodic pattern
+// wherever the underlying AO signal varies sharply (e.g. along a silhouette edge) that an
+// edge-preserving blur can't remove, since it deliberately doesn't blend across that same edge.
+// This gives every pixel its own value with no repeating period at all.
+float hash12(vec2 p)
+{
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
 
 void main()
 {
@@ -47,7 +59,10 @@ void main()
     vec2 texel  = 1.0 / vec2(size);
     vec3 P      = depthToViewPosition(depth, (vec2(pos) + 0.5) * texel, cam.invProj);
     vec3 N      = unpackViewNormal(texelFetch(normalTex, pos, 0).rg);
-    float nz    = max(N.z, 1e-3);
+    float nz = N.z;
+
+    if (abs(nz) < 1e-3)
+        nz = (nz < 0.0 ? -1e-3 : 1e-3);
 
     // View-space sphere radius projected to pixels. proj[1][1] is negated (Y flip), hence abs.
     float radiusPx = aoInfo.sphereRadius.x * abs(cam.proj[1][1]) / -P.z * 0.5 * float(size.y);
@@ -57,8 +72,11 @@ void main()
     // the camera that the whole sample radius is sub-pixel anyway.
     float stepPx = max(radiusPx / float(aoInfo.numSteps), 1.0);
 
-    // This pixel's random rotation from the 4x4 tile (cos, sin).
-    vec2 noise = texelFetch(directionTex, pos & 3, 0).rg;
+    // This pixel's random rotation (cos, sin) and step-distance jitter, from independent hashes
+    // (different seed offsets) so they aren't correlated with each other.
+    float noiseAngle = hash12(vec2(pos)) * 2.0 * PI;
+    vec2  noise       = vec2(cos(noiseAngle), sin(noiseAngle));
+    float jitter       = hash12(vec2(pos) + vec2(19.19, 7.29));
 
     float occlusion = 0.0;
     for (int i = 0; i < aoInfo.numDirs; i++)
@@ -91,7 +109,7 @@ void main()
         float wao    = 0.0;
         for (int s = 1; s <= aoInfo.numSteps; s++)
         {
-            vec2  samplePx = vec2(pos) + 0.5 + dir * (stepPx * float(s));
+            vec2  samplePx = vec2(pos) + 0.5 + dir * (stepPx * (float(s) + jitter));
             ivec2 samplePos = ivec2(floor(samplePx));
             if (samplePos.x < 0 || samplePos.y < 0 || samplePos.x >= size.x || samplePos.y >= size.y)
                 break;
@@ -103,6 +121,11 @@ void main()
             vec3 S = depthToViewPosition(sampleDepth, (vec2(samplePos) + 0.5) * texel, cam.invProj);
             vec3  V     = S - P;
             float VdotV = dot(V, V);
+            if (VdotV >= aoInfo.sphereRadius.y) // r^2
+                continue;
+            if (VdotV < 1e-8) // avoid NaN from V.z / length(V)
+                continue;
+
             float sinH  = V.z * inversesqrt(VdotV);
 
             if (sinH > maxSin)
