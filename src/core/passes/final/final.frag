@@ -24,6 +24,8 @@ layout(set = 0, binding = 6) uniform sampler2D overlayPoints;
 
 layout(set = 0, binding = 7) uniform sampler2D heatmap;
 
+layout(set = 0, binding = 8) uniform sampler2D hbaoAo;
+
 layout(location = 0) out vec4 outColor;
 
 void main()
@@ -55,4 +57,5 @@ void main()
 
     vec4 pointsSample = texture(overlayPoints, inUV);
     outColor = vec4(mix(baseColor, pointsSample.rgb, pointsSample.a), 1.0);
+    outColor = vec4(vec3(texture(hbaoAo, inUV).r), 1.0);
 }
