@@ -88,8 +88,19 @@ void main()
                 continue;
 
             vec3 S = depthToViewPosition(sampleDepth, (vec2(samplePos) + 0.5) * texel, cam.invProj);
-            vec3 V = S - P;
-            maxSin = max(maxSin, V.z / length(V));
+            vec3  V     = S - P;
+            float VdotV = dot(V, V);
+            float sinH  = V.z * inversesqrt(VdotV);
+
+            // Distance falloff: pulls a sample's contribution back toward the tangent plane (i.e.
+            // "no occlusion") as it gets farther from P, reaching zero at the sphere radius. Without
+            // this, a sample that happens to fall within the pixel-space step radius but is actually
+            // far away in view space (e.g. background behind a silhouette edge) counts as a full-
+            // strength occluder, which is what produced the outline/halo artifact around the model.
+
+            // This is W(r) = 1 - r^2 where r = ||S - P|| / R
+            float falloff = clamp(1.0 - VdotV / aoInfo.sphereRadius.y, 0.0, 1.0);
+            maxSin        = max(maxSin, mix(sinT, sinH, falloff));
         }
 
         occlusion += maxSin - sinT;
