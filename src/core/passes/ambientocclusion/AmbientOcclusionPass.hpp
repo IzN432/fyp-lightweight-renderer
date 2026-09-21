@@ -26,8 +26,8 @@ public:
     // Call once before build().
     void uploadResources(ResourceRegistry &resources) const;
 
-    // Add the HBAO compute pass to the frame graph.
-    // Reads "gbufferDepth" and "gbufferNormal"; writes "hbao_ao".
+    // Add the HBAO compute pass plus its X/Y cross bilateral blur to the frame graph.
+    // Reads "gbufferDepth" and "gbufferNormal"; writes "hbao_ao" (final, blurred).
     void build(FrameGraph &fg) const;
 
 private:
