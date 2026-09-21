@@ -73,7 +73,14 @@ void main()
         // plane's elevation along it.
         vec2  dirView = vec2(dir.x, -dir.y);
         float tz      = -(N.x * dirView.x + N.y * dirView.y) / nz;
-        float sinT    = tz / length(vec3(dirView, tz));
+
+        // tz is tan(elevation angle) of the tangent plane (since dirView is unit length, sinT below
+        // reduces to sin(atan(tz))) — so the angle bias is added here, in tangent space, not to sinT
+        // itself (sin isn't linear in angle, so sinT + sin(bias) != sin(angle + bias)). This raises
+        // the "no occlusion" baseline slightly, guarding against self-occlusion noise from a nearly
+        // flat surface without weakening real occluders (sinH below is left unbiased).
+        tz += aoInfo.tanAngleBias;
+        float sinT = tz / length(vec3(dirView, tz));
 
         float maxSin = sinT;
         for (int s = 1; s <= aoInfo.numSteps; s++)
