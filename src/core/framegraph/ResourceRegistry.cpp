@@ -614,6 +614,43 @@ void ResourceRegistry::reuploadBuffer(const std::string &name, const void *data,
     m_pendingUploads.push_back(upload);
 }
 
+void ResourceRegistry::replaceUploadedBuffer(const std::string &name, const void *data, VkDeviceSize size,
+                                             VkBufferUsageFlags usage)
+{
+    auto it = m_buffers.find(name);
+    if (it == m_buffers.end())
+    {
+        throw std::runtime_error("ResourceRegistry: replaceUploadedBuffer '" + name + "' not found");
+    }
+    if (it->second.memoryUsage != VMA_MEMORY_USAGE_GPU_ONLY)
+    {
+        throw std::runtime_error("ResourceRegistry: replaceUploadedBuffer '" + name +
+                                 "' is not a static buffer created via uploadBuffer()");
+    }
+
+    m_allocator.destroy(it->second.buffer);
+
+    BufferEntry entry{};
+    entry.size        = size;
+    entry.usage        = usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    entry.memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY;
+    entry.buffer      = m_allocator.createBuffer(size, entry.usage, VMA_MEMORY_USAGE_GPU_ONLY);
+    it->second        = std::move(entry);
+    setDebugName(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(it->second.buffer.buffer), name);
+
+    AllocatedBuffer staging =
+        m_allocator.createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    std::memcpy(staging.info.pMappedData, data, size);
+
+    PendingUpload upload{};
+    upload.staging      = staging;
+    upload.type         = PendingUpload::Type::Buffer;
+    upload.resourceName = name;
+    m_pendingUploads.push_back(upload);
+
+    spdlog::debug("ResourceRegistry: replaced buffer '{}' ({} bytes)", name, size);
+}
+
 // ---------------------------------------------------------------------------
 // Upload flush
 // ---------------------------------------------------------------------------

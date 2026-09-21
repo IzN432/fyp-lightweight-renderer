@@ -84,7 +84,7 @@ void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
             return;
         }
         m_selectTool->selectVertices(m_highlightedVertices, m_selectedVertices,
-                                     toWorldSpace(m_vertices, m_meshTransform));
+                                     toWorldSpace(*m_vertices, *m_meshTransform));
         if (m_selectionChangedCallback)
         {
             m_selectionChangedCallback();
@@ -96,13 +96,37 @@ void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
             return;
         }
         m_selectTool->highlightVertices(m_highlightedVertices, m_selectedVertices,
-                                        toWorldSpace(m_vertices, m_meshTransform));
+                                        toWorldSpace(*m_vertices, *m_meshTransform));
         rebuildColors();
         if (m_colorsChangedCallback)
         {
             m_colorsChangedCallback();
         }
     });
+}
+
+void SelectionManager::rebind(const std::vector<glm::vec3> &vertices, const TransformComponent &meshTransform)
+{
+    m_vertices      = &vertices;
+    m_meshTransform = &meshTransform;
+
+    m_selectedVertices.clear();
+    m_highlightedVertices.clear();
+    m_colors.assign(vertices.size(), kDefaultColor);
+    m_roles.assign(vertices.size(), kNoRole);
+
+    if (m_selectionChangedCallback)
+    {
+        m_selectionChangedCallback();
+    }
+    if (m_colorsChangedCallback)
+    {
+        m_colorsChangedCallback();
+    }
+    if (m_roleChangedCallback)
+    {
+        m_roleChangedCallback();
+    }
 }
 
 void SelectionManager::rebuildColors()

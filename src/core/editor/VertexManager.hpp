@@ -14,9 +14,15 @@ namespace lr
 class VertexManager
 {
 public:
-    explicit VertexManager(Mesh &mesh) : m_mesh(mesh) {}
+    explicit VertexManager(Mesh &mesh) : m_mesh(&mesh) {}
 
-    const std::vector<glm::vec3> &getPositions() const { return m_mesh.positions(); }
+    // Repoints this VertexManager at a different mesh (e.g. the Scene Hierarchy selection changed
+    // to a different mesh object) — callers holding a VertexManager& (drag handlers, ArapTool) see
+    // the new mesh immediately, no reconstruction needed. Does not fire the update callback itself;
+    // the caller is expected to have already repacked/re-uploaded the new mesh's GPU buffers.
+    void rebind(Mesh &mesh) { m_mesh = &mesh; }
+
+    const std::vector<glm::vec3> &getPositions() const { return m_mesh->positions(); }
 
     void updatePosition(uint32_t index, const glm::vec3 &newPosition);
     void translateSelectedVertices(const std::unordered_set<uint32_t> &indices, const glm::vec3 &translation);
@@ -31,7 +37,7 @@ public:
     void registerUpdateCallback(std::function<void()> callback) { m_updateCallbacks.push_back(std::move(callback)); }
 
 private:
-    Mesh &m_mesh;
+    Mesh *m_mesh;
     std::vector<std::function<void()>> m_updateCallbacks;
 
     void notifyUpdateCallbacks();

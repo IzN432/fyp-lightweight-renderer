@@ -31,6 +31,13 @@ public:
     void setModeActive(bool active);
     bool isModeActive() const { return m_modeActive; }
 
+    // Repoints this ArapTool at a different mesh (e.g. the Scene Hierarchy selection changed).
+    // Invalidates any precomputed solve (it was factored for the old mesh's topology/vertex
+    // domain) and forces ARAP mode off, detaching the gizmos back to the default handler — the
+    // caller's SelectionManager/VertexManager are expected to have already been rebound to the
+    // same mesh (see SelectionManager::rebind/VertexManager::rebind).
+    void rebind(const Mesh &mesh);
+
     // Called once per frame from the host's ImGui callback. Draws the anchor/handle popup (only
     // while a selection exists) and the Solve button. selectionWorldCentroid is only meaningful
     // while a selection exists — the caller computes it the same way it already does for gizmo
@@ -45,7 +52,7 @@ private:
     SelectionManager               &m_selectionManager;
     VertexManager                  &m_vertexManager;
     CommandManager                 &m_commandManager;
-    const Mesh                     &m_mesh;
+    const Mesh                     *m_mesh;
     VertexDragHandler              &m_defaultHandler;
     std::vector<DragHandlerGizmo *> m_gizmos;
 

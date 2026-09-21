@@ -57,5 +57,5 @@ void main()
 
     vec4 pointsSample = texture(overlayPoints, inUV);
     outColor = vec4(mix(baseColor, pointsSample.rgb, pointsSample.a), 1.0);
-    outColor = vec4(vec3(texture(hbaoAo, inUV).r), 1.0);
+    // outColor = vec4(vec3(1.0 - texture(hbaoAo, inUV).r), 1.0);
 }

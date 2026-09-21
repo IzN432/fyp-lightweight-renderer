@@ -33,6 +33,19 @@ public:
 
     void setEnabled(bool e) { m_enabled = e; }
 
+    // Repoints the pass at a different mesh's points buffer contents — the buffer resource itself
+    // (pointsBufferResourceName) is reused in place (see ResourceRegistry::replaceUploadedBuffer),
+    // so only the per-mesh draw bookkeeping needs updating here. Config always describes exactly
+    // one mesh (see the single-entry vectors above), so this replaces them wholesale rather than
+    // appending.
+    void setPointsSource(VertexBufferUploadResult uploadResult, uint32_t vertexCount,
+                         const TransformComponent &meshTransform)
+    {
+        m_cfg.pointsBufferUploadResult = std::move(uploadResult);
+        m_cfg.vertexCounts             = {vertexCount};
+        m_cfg.meshTransform            = &meshTransform;
+    }
+
 private:
     Config       m_cfg;
     mutable bool m_enabled = true;

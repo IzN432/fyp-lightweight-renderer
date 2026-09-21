@@ -17,7 +17,7 @@ constexpr glm::vec3 kHandleColor{1.0f, 0.6f, 0.1f};
 ArapTool::ArapTool(SelectionManager &selectionManager, VertexManager &vertexManager, CommandManager &commandManager,
                        const Mesh &mesh, VertexDragHandler &defaultHandler, std::vector<DragHandlerGizmo *> gizmos)
     : m_selectionManager(selectionManager), m_vertexManager(vertexManager), m_commandManager(commandManager),
-      m_mesh(mesh), m_defaultHandler(defaultHandler), m_gizmos(std::move(gizmos)),
+      m_mesh(&mesh), m_defaultHandler(defaultHandler), m_gizmos(std::move(gizmos)),
       m_anchorRole(selectionManager.registerRole(kAnchorColor)),
       m_handleRole(selectionManager.registerRole(kHandleColor)),
       m_arapHandler(m_solver, vertexManager, selectionManager, m_handleRole, commandManager)
@@ -45,6 +45,14 @@ void ArapTool::setModeActive(bool active)
     }
 }
 
+void ArapTool::rebind(const Mesh &mesh)
+{
+    m_mesh = &mesh;
+    m_solver.invalidate();
+    m_lastSolveFailed = false;
+    setModeActive(false);
+}
+
 void ArapTool::onRoleChanged()
 {
     m_solver.invalidate();
@@ -64,7 +72,7 @@ void ArapTool::onSolveClicked()
     const auto anchors = m_selectionManager.getIndicesWithRole(m_anchorRole);
     const auto handles = m_selectionManager.getIndicesWithRole(m_handleRole);
 
-    m_lastSolveFailed = !m_solver.precompute(m_mesh, anchors, handles);
+    m_lastSolveFailed = !m_solver.precompute(*m_mesh, anchors, handles);
     if (!m_lastSolveFailed)
     {
         for (DragHandlerGizmo *gizmo : m_gizmos)

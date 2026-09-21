@@ -112,6 +112,14 @@ public:
     // The copy is folded into the next flushUploads() call (i.e. the next frame's execute).
     void reuploadBuffer(const std::string &name, const void *data, VkDeviceSize size);
 
+    // Destroys and reallocates a static buffer previously created via uploadBuffer(), sized for
+    // `size` (unlike reuploadBuffer(), which requires the new data to fit the original allocation),
+    // then queues a staging upload into it. Preserves the registry name, so existing fg.buffer(name)
+    // bindings keep resolving. Mirrors replaceUploadedImage() — the caller must ensure the GPU is no
+    // longer using the old buffer (see its doc comment).
+    void replaceUploadedBuffer(const std::string &name, const void *data, VkDeviceSize size,
+                               VkBufferUsageFlags usage);
+
     AllocatedBuffer       *getBuffer(const std::string &name);
     const AllocatedBuffer *getBuffer(const std::string &name) const;
     bool                   hasBuffer(const std::string &name) const;

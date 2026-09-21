@@ -175,13 +175,17 @@ try
     lr::SceneObject *meshObject = &sceneManager.mainMeshObject();
     auto &meshComponent = meshObject->getComponent<lr::MeshComponent>();
 
+    // Also read by the AmbientOcclusionPass config below, to size sphereRadius off the model.
+    glm::vec3 boundsMin(0.0f);
+    glm::vec3 boundsMax(0.0f);
+
     // Seed the demo object with a local-space box collider fitted to its mesh. Collision
     // detection will consume the same component later; for now this also makes the collider
     // inspector and visualization immediately available in the sample application.
     if (!meshComponent.mesh().positions().empty())
     {
-        glm::vec3 boundsMin = meshComponent.mesh().positions().front();
-        glm::vec3 boundsMax = boundsMin;
+        boundsMin = meshComponent.mesh().positions().front();
+        boundsMax = boundsMin;
         for (const glm::vec3 &position : meshComponent.mesh().positions())
         {
             boundsMin = glm::min(boundsMin, position);
@@ -223,6 +227,86 @@ try
         };
         testPlaneObject.addComponent<lr::ColliderComponent>(std::move(testPlaneCollider));
         testPlaneObject.addComponent<lr::RigidBodyComponent>(1.0f, lr::RigidBodyType::Static);
+
+        // CORNELL BOX — floor, ceiling, back, left (red) and right (green) walls built from
+        // scratch and sized around the lion's bounds. The floor sits exactly at boundsMin.y, so
+        // the lion's bottom (already there) touches the box floor with no extra transform. The
+        // front is left open so the camera can see inside.
+        {
+            const glm::vec3 center     = (boundsMin + boundsMax) * 0.5f;
+            const glm::vec3 extents    = boundsMax - boundsMin;
+            const float     halfX      = std::max(extents.x, 0.001f) * 1.5f;
+            const float     halfZ      = std::max(extents.z, 0.001f) * 1.5f;
+            const float     floorY     = boundsMin.y;
+            const float     ceilingY   = boundsMin.y + std::max(extents.y, 0.001f) * 2.5f;
+            const float     halfY      = (ceilingY - floorY) * 0.5f;
+            const glm::vec3 boxCenter  = glm::vec3(center.x, (floorY + ceilingY) * 0.5f, center.z);
+
+            // Each entry: world-space center, right axis, up axis (their cross product is the
+            // wall's inward-facing normal — see AreaLightVisual.cpp for the same winding
+            // convention), and the material color.
+            struct WallSpec
+            {
+                const char *name;
+                glm::vec3   center;
+                glm::vec3   right;
+                glm::vec3   up;
+                glm::vec3   normal;
+                glm::vec3   color;
+            };
+            const std::vector<WallSpec> walls = {
+                {"Cornell Floor", {boxCenter.x, floorY, boxCenter.z}, {0, 0, halfZ}, {halfX, 0, 0}, {0, 1, 0},
+                 glm::vec3(0.73f)},
+                {"Cornell Ceiling", {boxCenter.x, ceilingY, boxCenter.z}, {halfX, 0, 0}, {0, 0, halfZ}, {0, -1, 0},
+                 glm::vec3(0.73f)},
+                {"Cornell Back Wall", {boxCenter.x, boxCenter.y, center.z - halfZ}, {halfX, 0, 0}, {0, halfY, 0},
+                 {0, 0, 1}, glm::vec3(0.73f)},
+                {"Cornell Left Wall", {center.x - halfX, boxCenter.y, boxCenter.z}, {0, halfY, 0}, {0, 0, halfZ},
+                 {1, 0, 0}, glm::vec3(0.75f, 0.05f, 0.05f)},
+                {"Cornell Right Wall", {center.x + halfX, boxCenter.y, boxCenter.z}, {0, 0, halfZ}, {0, halfY, 0},
+                 {-1, 0, 0}, glm::vec3(0.05f, 0.6f, 0.05f)},
+            };
+
+            for (const WallSpec &wall : walls)
+            {
+                lr::Material material;
+                material.name                                 = wall.name;
+                material.parameters[config.baseDiffuseName]   = lr::MaterialParam::ColorRGBA{glm::vec4(wall.color, 1.0f)};
+                material.parameters[config.baseEmissiveName]  = lr::MaterialParam::ColorRGB{glm::vec3(0.0f)};
+                material.parameters[config.baseRoughnessName] = lr::MaterialParam::NormalizedFloat{1.0f};
+                material.parameters[config.baseMetallicName]  = lr::MaterialParam::NormalizedFloat{0.0f};
+                const lr::MaterialHandle handle = sceneManager.materialStore().acquire(std::move(material));
+
+                std::vector<glm::vec3> positions = {
+                    wall.center - wall.right - wall.up,
+                    wall.center + wall.right - wall.up,
+                    wall.center + wall.right + wall.up,
+                    wall.center - wall.right + wall.up,
+                };
+                std::vector<uint32_t>   positionIndices = {0, 1, 2, 3};
+                std::vector<glm::uvec3> faces           = {{0, 1, 2}, {0, 2, 3}};
+
+                lr::Mesh wallMesh;
+                wallMesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
+                wallMesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, std::vector<glm::vec3>(4, wall.normal));
+                wallMesh.setPerVertexArray<glm::vec4>(
+                    config.tangentAttributeName,
+                    std::vector<glm::vec4>(4, glm::vec4(glm::normalize(wall.right), 1.0f)));
+                const std::vector<glm::vec2> uvs = {{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
+                wallMesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
+                wallMesh.setFaceGroups({handle, handle});
+
+                const lr::MeshHandle meshHandle = sceneManager.meshStore().add(std::move(wallMesh));
+
+                lr::SceneObject &wallObject = scene.createSceneObject();
+                wallObject.name             = wall.name;
+                wallObject.addComponent<lr::TransformComponent>();
+                wallObject.addComponent<lr::MeshComponent>(meshHandle, sceneManager.meshStore(),
+                                                            std::vector<lr::MaterialHandle>{handle},
+                                                            sceneManager.materialStore());
+                sceneManager.addMeshObject(wallObject);
+            }
+        }
     }
 
     lr::PhysicsWorld physicsWorld(scene);
@@ -306,8 +390,13 @@ try
 
     heatmapPass.build(viewer.frameGraph(), heatmapMeshLayout);
 
+    // sphereRadius is 2% of the lion's largest local-space extent (see boundsMin/boundsMax above).
+    const glm::vec3 lionExtents        = boundsMax - boundsMin;
+    const float     lionLargestExtent  = std::max({lionExtents.x, lionExtents.y, lionExtents.z});
+
     lr::AmbientOcclusionPass aoPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
+        .sphereRadius             = lionLargestExtent * 0.02f,
     });
     aoPass.uploadResources(viewer.resources());
     aoPass.build(viewer.frameGraph());
@@ -432,6 +521,42 @@ try
     lr::LaplaceBeltramiTool laplaceBeltramiTool(meshComponent.mesh().positions(), positionTriangles, sceneManager,
                                                 vertexManager);
 
+    // Ties vertex editing (SelectionManager, VertexManager, ArapTool, the vertex-picking points
+    // overlay) to whatever's selected in the Scene Hierarchy, rather than being fixed to the main
+    // mesh. Heatmap/Analysis mode and LaplaceBeltramiTool deliberately stay out of this — they keep
+    // reflecting the main mesh regardless of what's being edited (see
+    // SceneManager::setEditedMeshObject's doc comment). One side effect worth knowing: dragging a
+    // vertex on a non-main-mesh object still fires LaplaceBeltramiTool's VertexManager update
+    // callback (it can't tell which mesh moved), so it may recompute against its own unrelated
+    // snapshot — harmless, just wasted work.
+    scene.registerSelectionChangedCallback([&](lr::SceneObjectId id) {
+        lr::SceneObject &object = scene.getSceneObject(id);
+        if (!lr::SceneManager::isEditable(object))
+        {
+            if (sceneManager.editorMode() == lr::EditorMode::Edit)
+            {
+                sceneManager.setEditorMode(lr::EditorMode::View);
+            }
+            return;
+        }
+        if (sceneManager.editedMeshObject() == &object)
+        {
+            return;
+        }
+
+        // setEditedMeshObject() replaces the points-picking buffer in place (see
+        // ResourceRegistry::replaceUploadedBuffer) — matches the wait-then-replace pattern the
+        // HDRI reload path already uses for the same reason (in-flight frames may still read it).
+        viewer.context().waitIdle();
+        sceneManager.setEditedMeshObject(object);
+
+        lr::Mesh &mesh = object.getComponent<lr::MeshComponent>().mesh();
+        vertexManager.rebind(mesh);
+        arapTool.rebind(mesh);
+        overlayPointsPass.setPointsSource(sceneManager.mainMeshPoints(), mesh.uniquePositionCount(),
+                                          object.getComponent<lr::TransformComponent>());
+    });
+
     // Single combined LMB handler: gizmos get first refusal on a click (so
     // dragging an arrow doesn't simultaneously start a box-select), and
     // selection only sees the event if no gizmo consumed it.
@@ -463,6 +588,16 @@ try
         }
 
         const bool nowEditing = sceneManager.editorMode() != lr::EditorMode::Edit;
+        if (nowEditing)
+        {
+            // Entering Edit mode requires a mesh object to actually be selected — otherwise
+            // there's nothing for the vertex-picking overlay/gizmos to operate on.
+            const auto selected = scene.selectedObject();
+            if (!selected || !lr::SceneManager::isEditable(scene.getSceneObject(selected.value())))
+            {
+                return;
+            }
+        }
         sceneManager.setEditorMode(nowEditing ? lr::EditorMode::Edit : lr::EditorMode::View);
 
         // ARAP mode deliberately outlives Edit mode now — a solved handle set should stay

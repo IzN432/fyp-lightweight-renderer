@@ -80,6 +80,13 @@ public:
     // Re-pack and push new data into a buffer previously uploaded with uploadUniqueVertexBuffer().
     void updateUniqueVertexBuffer(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config);
 
+    // Like uploadUniqueVertexBuffer(), but for a buffer that already exists (see
+    // ResourceRegistry::replaceUploadedBuffer()) — the new mesh list's total vertex count may
+    // differ from what's currently allocated (e.g. the Scene Hierarchy selection switched to a
+    // mesh with a different vertex count), unlike updateUniqueVertexBuffer()'s fixed-size repack.
+    VertexBufferUploadResult replaceUniqueVertexBuffer(const std::vector<const Mesh *> &meshes,
+                                                        const VertexBufferUploadConfig  &config);
+
     IndexBufferUploadResult uploadIndexBuffer(const std::vector<const Mesh *> &meshes,
                                               const IndexBufferUploadConfig   &config);
 

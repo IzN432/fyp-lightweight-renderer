@@ -87,6 +87,10 @@ void Scene::drawHierarchyNode(SceneObject &object)
     if (ImGui::IsItemClicked())
     {
         m_selectedObject = object.id();
+        for (const auto &callback : m_selectionChangedCallbacks)
+        {
+            callback(object.id());
+        }
     }
 
     if (open)

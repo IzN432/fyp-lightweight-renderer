@@ -21,10 +21,19 @@ public:
     // meshTransform is the TransformComponent GeometryPass applies to `vertices` at render time — hit-testing
     // needs to work in the same world space the mesh is actually drawn in, not raw local space.
     SelectionManager(const std::vector<glm::vec3> &vertices, const TransformComponent &meshTransform, InputHandler &input)
-        : m_colors(vertices.size(), kDefaultColor), m_roles(vertices.size(), kNoRole), m_vertices(vertices),
-          m_meshTransform(meshTransform), m_input(input)
+        : m_colors(vertices.size(), kDefaultColor), m_roles(vertices.size(), kNoRole), m_vertices(&vertices),
+          m_meshTransform(&meshTransform), m_input(input)
     {}
     ~SelectionManager() = default;
+
+    // Repoints this SelectionManager at a different mesh's vertices/transform (e.g. the Scene
+    // Hierarchy selection changed) — callers holding a SelectionManager& (drag handlers, ArapTool,
+    // BoxSelectionTool) see the new mesh immediately. Resets selection, highlight, and per-vertex
+    // role classification to the unclassified state, since indices only ever meant something in the
+    // previous mesh's vertex domain; role *definitions* (ids/colors registered via registerRole())
+    // are unaffected. Fires the selection/colors/role-changed callbacks so dependents (GPU color
+    // upload, ArapTool's onRoleChanged) resync.
+    void rebind(const std::vector<glm::vec3> &vertices, const TransformComponent &meshTransform);
 
     void setSelectTool(std::unique_ptr<SelectionTool> tool);
 
@@ -98,8 +107,8 @@ private:
     std::vector<VertexRoleId>                   m_roles;
     std::unordered_map<VertexRoleId, glm::vec3> m_roleColors;
     VertexRoleId                                m_nextRoleId = kNoRole + 1;
-    const std::vector<glm::vec3>               &m_vertices;
-    const TransformComponent                   &m_meshTransform;
+    const std::vector<glm::vec3>                *m_vertices;
+    const TransformComponent                    *m_meshTransform;
     InputHandler                               &m_input;
     bool                                        m_mouseClickedThisFrame  = false;
     bool                                        m_mouseReleasedThisFrame = false;

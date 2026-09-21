@@ -19,6 +19,11 @@ namespace
 // A light whose current type isn't AreaLight draws as a degenerate, zero-emissive quad rather
 // than std::get-ing a variant that isn't AreaLight.
 const AreaLight kHiddenAreaLightVisual{{glm::vec3(0.0f), 0.0f}, glm::vec2(0.0f)};
+
+// Matches SelectionManager's private kDefaultColor — seeded onto a mesh's "color" per-unique-vertex
+// attribute the first time it becomes the edited mesh object, if it doesn't already have one (e.g.
+// procedural geometry authored without editing in mind). SelectionManager overwrites it from here.
+const glm::vec3 kDefaultVertexColor{1.0f, 0.0f, 1.0f};
 } // namespace
 
 SceneManager::SceneManager(ResourceRegistry &registry, uint32_t materialCapacity,
@@ -78,6 +83,7 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
     m_selectionManager->registerColorsChangedCallback([this]() {
         updateMainMeshHighlightColors();
     });
+    m_editedMeshObject = m_mainMeshObject;
 
     // The camera buffer is registered by CameraUploader's constructor, but this is what actually
     // populates it, so do it once now rather than waiting for flushDirty()'s first pass. Ongoing
@@ -146,6 +152,15 @@ void SceneManager::gatherGeometry(const std::vector<std::string> &vertexAttribut
                        ? &m_mainMeshObject->getComponent<SkinComponent>().skin()
                        : nullptr};
 
+    for (SceneObject *extraObject : m_extraMeshObjects)
+    {
+        m_geometryMeshes.push_back(&extraObject->getComponent<MeshComponent>().mesh());
+        m_meshTransforms.push_back(&extraObject->getComponent<TransformComponent>());
+        m_meshSkins.push_back(extraObject->hasComponent<SkinComponent>()
+                                   ? &extraObject->getComponent<SkinComponent>().skin()
+                                   : nullptr);
+    }
+
     for (SceneObject *lightVisualObject : m_lightVisualObjects)
     {
         m_geometryMeshes.push_back(&lightVisualObject->getComponent<MeshComponent>().mesh());
@@ -208,13 +223,52 @@ void SceneManager::updateMainMeshPositions()
 {
     m_meshUploader.updateVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
     updateMainMeshPointsBuffer();
-    updateMainMeshHeatmapBuffer();
+    // Heatmap/Analysis mode stays scoped to mainMeshObject() regardless of what's currently being
+    // edited (see setEditedMeshObject()'s doc comment) — skip the repack entirely when they differ,
+    // since a drag on some other mesh can't have touched the main mesh's positions.
+    if (m_editedMeshObject == m_mainMeshObject)
+    {
+        updateMainMeshHeatmapBuffer();
+    }
 }
 
 void SceneManager::updateMainMeshPointsBuffer()
 {
-    const auto &mainMesh = m_mainMeshObject->getComponent<MeshComponent>().mesh();
-    m_meshUploader.updateUniqueVertexBuffer({&mainMesh}, m_mainMeshPointsUploadConfig);
+    const auto &editedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
+    m_meshUploader.updateUniqueVertexBuffer({&editedMesh}, m_mainMeshPointsUploadConfig);
+}
+
+bool SceneManager::isEditable(const SceneObject &object)
+{
+    return object.hasComponent<MeshComponent>() && object.hasComponent<TransformComponent>();
+}
+
+void SceneManager::setEditedMeshObject(SceneObject &object)
+{
+    if (!isEditable(object))
+    {
+        throw std::runtime_error(
+            "SceneManager::setEditedMeshObject: object must have a MeshComponent and TransformComponent");
+    }
+    if (m_editedMeshObject == &object)
+    {
+        return;
+    }
+    m_editedMeshObject = &object;
+
+    Mesh &mesh = object.getComponent<MeshComponent>().mesh();
+
+    // Procedural geometry may never have been authored with editing in mind — seed a default
+    // "color" attribute the first time it's asked to become editable, rather than requiring every
+    // mesh builder to remember to do this up front.
+    if (!mesh.layout().findPerUniqueVertexAttr("color"))
+    {
+        std::vector<glm::vec3> defaultColors(mesh.uniquePositionCount(), kDefaultVertexColor);
+        mesh.setPerUniqueVertexArray<glm::vec3>("color", defaultColors);
+    }
+
+    m_selectionManager->rebind(mesh.positions(), object.getComponent<TransformComponent>());
+    m_mainMeshPoints = m_meshUploader.replaceUniqueVertexBuffer({&mesh}, m_mainMeshPointsUploadConfig);
 }
 
 Mesh &SceneManager::syncMainMeshCornerHeatmapColors()
@@ -245,9 +299,11 @@ void SceneManager::setMainMeshHeatmapColors(std::span<const glm::vec3> colors)
 void SceneManager::updateMainMeshHighlightColors()
 {
     // SelectionManager owns the coloring itself (persistent buffer, tool-customizable highlight
-    // color) — this just pushes its result to the Mesh + GPU.
-    auto &mainMesh = m_mainMeshObject->getComponent<MeshComponent>().mesh();
-    mainMesh.setPerUniqueVertexArray("color", std::span<const glm::vec3>(m_selectionManager->getColors()));
+    // color) — this just pushes its result to the currently edited Mesh + GPU (see
+    // setEditedMeshObject(); SelectionManager::rebind() keeps its color buffer sized to whichever
+    // mesh that currently is).
+    auto &editedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
+    editedMesh.setPerUniqueVertexArray("color", std::span<const glm::vec3>(m_selectionManager->getColors()));
     updateMainMeshPointsBuffer();
 }
 

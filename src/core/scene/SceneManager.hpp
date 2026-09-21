@@ -62,6 +62,37 @@ public:
     void setMainMeshObject(SceneObject &object) { m_mainMeshObject = &object; }
     SceneObject &mainMeshObject() { return *m_mainMeshObject; }
 
+    // Registers additional static renderable geometry alongside the main mesh — e.g. procedural
+    // level geometry. `object` must already have a TransformComponent and MeshComponent (see
+    // AreaLightVisual.cpp for the pattern: build a Mesh, acquire a MaterialHandle, setFaceGroups,
+    // then addComponent<MeshComponent>()). Its TransformComponent is applied as its model matrix at
+    // draw time, same as the main mesh. Must be called before initialize()/uploadMeshes() — there is
+    // currently no per-frame update path for these objects (unlike the main mesh or light visuals),
+    // so edits made after the initial upload won't reach the GPU.
+    void addMeshObject(SceneObject &object) { m_extraMeshObjects.push_back(&object); }
+
+    // The object currently targeted by vertex editing (SelectionManager, the vertex-picking
+    // overlay's points buffer). Decoupled from mainMeshObject() so any mesh-bearing SceneObject —
+    // procedural geometry included — can be edited; the caller (main.cpp) drives this from Scene
+    // Hierarchy selection. Defaults to mainMeshObject() once initialize() has run; null before then.
+    SceneObject *editedMeshObject() { return m_editedMeshObject; }
+
+    // True if `object` has what setEditedMeshObject() requires (a MeshComponent + TransformComponent).
+    static bool isEditable(const SceneObject &object);
+
+    // Repoints vertex editing at `object` (see editedMeshObject()) — rebinds the SelectionManager
+    // and replaces the vertex-picking overlay's points buffer for the new mesh's vertex count,
+    // which may differ arbitrarily from the previous mesh's. Resets selection, highlighting, and
+    // per-vertex role classification (SelectionManager::rebind's doc comment). The caller is still
+    // responsible for rebinding anything it owns directly against the old mesh (VertexManager,
+    // ArapTool — see their rebind()) and for ensuring the GPU is done with the previous points
+    // buffer first (see ResourceRegistry::replaceUploadedBuffer's doc comment) — e.g.
+    // viewer.context().waitIdle() before calling this, the way the HDRI-reload path does.
+    // Does not touch heatmap/Analysis-mode state, which stays scoped to mainMeshObject() (see
+    // HeatmapPass / LaplaceBeltramiTool in main.cpp) — out of scope for this pass. Throws if
+    // `object` isn't isEditable(). No-op if `object` is already the edited mesh object.
+    void setEditedMeshObject(SceneObject &object);
+
     // The camera whose Camera/TransformComponent state drives the camera UBO. Must be set before
     // initialize().
     void setDefaultCamera(SceneObject &camera) { m_defaultCamera = &camera; }
@@ -232,6 +263,8 @@ private:
 
     SceneObject *m_mainMeshObject = nullptr;
     SceneObject *m_defaultCamera  = nullptr;
+    std::vector<SceneObject *> m_extraMeshObjects;
+    SceneObject *m_editedMeshObject = nullptr;
     // Matches Viewer::Config's default window size until setAspect() is called with the real
     // swapchain extent.
     float                      m_aspect = 1600.0f / 900.0f;
