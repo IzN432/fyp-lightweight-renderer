@@ -82,7 +82,13 @@ void main()
         tz += aoInfo.tanAngleBias;
         float sinT = tz / length(vec3(dirView, tz));
 
+        // Running horizon accumulation (Bavoil et al.) — maxSin tracks the raw (unweighted) highest
+        // angle found so far, walking samples near to far. Each time a sample raises that horizon,
+        // only the newly revealed slice (sinH - maxSin) is added, weighted by *that sample's own*
+        // falloff — unlike weighting a single final max, this can't let a nearby, high-falloff
+        // sample outrank a farther sample that has the true highest angle but a smaller weight.
         float maxSin = sinT;
+        float wao    = 0.0;
         for (int s = 1; s <= aoInfo.numSteps; s++)
         {
             vec2  samplePx = vec2(pos) + 0.5 + dir * (stepPx * float(s));
@@ -99,18 +105,21 @@ void main()
             float VdotV = dot(V, V);
             float sinH  = V.z * inversesqrt(VdotV);
 
-            // Distance falloff: pulls a sample's contribution back toward the tangent plane (i.e.
-            // "no occlusion") as it gets farther from P, reaching zero at the sphere radius. Without
-            // this, a sample that happens to fall within the pixel-space step radius but is actually
-            // far away in view space (e.g. background behind a silhouette edge) counts as a full-
-            // strength occluder, which is what produced the outline/halo artifact around the model.
-
-            // This is W(r) = 1 - r^2 where r = ||S - P|| / R
-            float falloff = clamp(1.0 - VdotV / aoInfo.sphereRadius.y, 0.0, 1.0);
-            maxSin        = max(maxSin, mix(sinT, sinH, falloff));
+            if (sinH > maxSin)
+            {
+                // Distance falloff: W(r) = 1 - r^2 where r = ||S - P|| / R. Discounts a sample's
+                // contribution as it gets farther from P, reaching zero at the sphere radius — without
+                // this, a sample that happens to fall within the pixel-space step radius but is
+                // actually far away in view space (e.g. background behind a silhouette edge) would
+                // count as a full-strength occluder, which is what produced the outline/halo artifact
+                // around the model.
+                float falloff = clamp(1.0 - VdotV / aoInfo.sphereRadius.y, 0.0, 1.0);
+                wao += falloff * (sinH - maxSin);
+                maxSin = sinH;
+            }
         }
 
-        occlusion += maxSin - sinT;
+        occlusion += wao;
     }
 
     imageStore(aoOut, pos, vec4(occlusion / float(aoInfo.numDirs), 0.0, 0.0, 0.0));
