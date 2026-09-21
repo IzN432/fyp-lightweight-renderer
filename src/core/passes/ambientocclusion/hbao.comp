@@ -51,7 +51,11 @@ void main()
 
     // View-space sphere radius projected to pixels. proj[1][1] is negated (Y flip), hence abs.
     float radiusPx = aoInfo.sphereRadius.x * abs(cam.proj[1][1]) / -P.z * 0.5 * float(size.y);
-    float stepPx   = radiusPx / float(aoInfo.numSteps);
+    // Clamped to at least 1px per step — below that, consecutive steps floor() onto the same texel,
+    // making V a zero vector (S == P) and V.z / length(V) a NaN that corrupts max() for the rest of
+    // the direction. This only trades away some radius precision once a surface is far enough from
+    // the camera that the whole sample radius is sub-pixel anyway.
+    float stepPx = max(radiusPx / float(aoInfo.numSteps), 1.0);
 
     // This pixel's random rotation from the 4x4 tile (cos, sin).
     vec2 noise = texelFetch(directionTex, pos & 3, 0).rg;
