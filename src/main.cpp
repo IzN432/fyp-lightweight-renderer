@@ -778,7 +778,6 @@ try
             aoDirty |= ImGui::SliderInt("Num Directions", &aoConfig.numDirs, 1, 128);
             aoDirty |= ImGui::SliderFloat("Tan Angle Bias", &aoConfig.tanAngleBias, 0.0f, 1.0f);
             aoDirty |= ImGui::SliderFloat("AO Scalar", &aoConfig.aoScalar, 0.0f, 5.0f);
-            ImGui::TextDisabled("AO Scalar isn't read by hbao.comp yet — has no visible effect.");
             if (aoDirty)
             {
                 aoPass.updateParams(viewer.resources());

@@ -278,7 +278,9 @@ vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, fl
     vec2 envBRDF = texture(brdfLut, vec2(N_dot_V, roughness)).rg;
     vec3 Specular = prefilteredColor * (F * envBRDF.x + envBRDF.y);
 
-    return (Diffuse + Specular) * light.color * light.intensity * ao;
+    // ao is an occlusion amount (0 = fully lit, 1 = fully occluded — see hbao.comp), so the
+    // visibility multiplier applied to ambient light is its complement.
+    return (Diffuse + Specular) * light.color * light.intensity * (1.0 - ao);
 }
 
 float DistributionGGX(float N_dot_H, float roughness)

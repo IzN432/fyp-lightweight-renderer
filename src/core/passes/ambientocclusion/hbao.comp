@@ -17,7 +17,6 @@ layout(set = 0, binding = 0) uniform CameraUbo {
 } cam;
 
 layout(set = 0, binding = 1) uniform sampler2D depthTex;   // full-res G-buffer depth
-layout(set = 0, binding = 2) uniform sampler2D normalTex;  // full-res G-buffer normal
 
 layout(set = 0, binding = 3) uniform AOParam {
     vec4  sphereRadius; // r, r^2, 1/r, 0
@@ -42,6 +41,20 @@ float hash12(vec2 p)
     return fract((p3.x + p3.y) * p3.z);
 }
 
+float tangentToSin(float tangent)
+{
+    return tangent * inversesqrt(tangent * tangent + 1.0);
+}
+
+// Choose the shorter one-sided depth derivative. At depth discontinuities this avoids using the
+// foreground-to-background vector as the receiver's tangent, following the reference HBAO method.
+vec3 minDiff(vec3 P, vec3 positive, vec3 negative)
+{
+    vec3 forward  = positive - P;
+    vec3 backward = P - negative;
+    return dot(forward, forward) < dot(backward, backward) ? forward : backward;
+}
+
 void main()
 {
     ivec2 pos  = ivec2(gl_GlobalInvocationID.xy);
@@ -58,11 +71,20 @@ void main()
 
     vec2 texel  = 1.0 / vec2(size);
     vec3 P      = depthToViewPosition(depth, (vec2(pos) + 0.5) * texel, cam.invProj);
-    vec3 N      = unpackViewNormal(texelFetch(normalTex, pos, 0).rg);
-    float nz = N.z;
 
-    if (abs(nz) < 1e-3)
-        nz = (nz < 0.0 ? -1e-3 : 1e-3);
+    // Reconstruct the local receiver tangent basis from depth, rather than deriving a tangent
+    // angle from the normal. This is the formulation used by the reference NVIDIA-style HBAO:
+    // it follows the actually visible surface and naturally includes perspective projection.
+    ivec2 rightPos = min(pos + ivec2(1, 0), size - 1);
+    ivec2 leftPos  = max(pos - ivec2(1, 0), ivec2(0));
+    ivec2 downPos  = min(pos + ivec2(0, 1), size - 1);
+    ivec2 upPos    = max(pos - ivec2(0, 1), ivec2(0));
+    vec3 Pr = depthToViewPosition(texelFetch(depthTex, rightPos, 0).r, (vec2(rightPos) + 0.5) * texel, cam.invProj);
+    vec3 Pl = depthToViewPosition(texelFetch(depthTex, leftPos, 0).r, (vec2(leftPos) + 0.5) * texel, cam.invProj);
+    vec3 Pd = depthToViewPosition(texelFetch(depthTex, downPos, 0).r, (vec2(downPos) + 0.5) * texel, cam.invProj);
+    vec3 Pu = depthToViewPosition(texelFetch(depthTex, upPos, 0).r, (vec2(upPos) + 0.5) * texel, cam.invProj);
+    vec3 dPdx = minDiff(P, Pr, Pl);
+    vec3 dPdy = minDiff(P, Pd, Pu);
 
     // View-space sphere radius projected to pixels. proj[1][1] is negated (Y flip), hence abs.
     float radiusPx = aoInfo.sphereRadius.x * abs(cam.proj[1][1]) / -P.z * 0.5 * float(size.y);
@@ -87,25 +109,17 @@ void main()
         vec2  dir   = vec2(base.x * noise.x - base.y * noise.y,
                            base.x * noise.y + base.y * noise.x); // pixel space, +y is down the screen
 
-        // Same direction in view space (proj Y flip: pixel +y is view -y), and the tangent
-        // plane's elevation along it.
-        vec2  dirView = vec2(dir.x, -dir.y);
-        float tz      = -(N.x * dirView.x + N.y * dirView.y) / nz;
+        // Starting horizon: elevation tangent of the receiver itself along this screen-space ray.
+        vec3 tangentVector = dir.x * dPdx + dir.y * dPdy;
+        float tangentXYLength = length(tangentVector.xy);
+        if (tangentXYLength < 1e-8)
+            continue;
+        float maxTan = tangentVector.z / tangentXYLength + aoInfo.tanAngleBias;
+        float maxSin = tangentToSin(maxTan);
 
-        // tz is tan(elevation angle) of the tangent plane (since dirView is unit length, sinT below
-        // reduces to sin(atan(tz))) — so the angle bias is added here, in tangent space, not to sinT
-        // itself (sin isn't linear in angle, so sinT + sin(bias) != sin(angle + bias)). This raises
-        // the "no occlusion" baseline slightly, guarding against self-occlusion noise from a nearly
-        // flat surface without weakening real occluders (sinH below is left unbiased).
-        tz += aoInfo.tanAngleBias;
-        float sinT = tz / length(vec3(dirView, tz));
-
-        // Running horizon accumulation (Bavoil et al.) — maxSin tracks the raw (unweighted) highest
-        // angle found so far, walking samples near to far. Each time a sample raises that horizon,
-        // only the newly revealed slice (sinH - maxSin) is added, weighted by *that sample's own*
-        // falloff — unlike weighting a single final max, this can't let a nearby, high-falloff
-        // sample outrank a farther sample that has the true highest angle but a smaller weight.
-        float maxSin = sinT;
+        // Running horizon accumulation (Bavoil et al.). maxTan determines whether a sample raises
+        // the horizon; maxSin stores the same angle in the projected form used by the AO integral.
+        // Each newly revealed slice is weighted by that sample's own distance falloff.
         float wao    = 0.0;
         for (int s = 1; s <= aoInfo.numSteps; s++)
         {
@@ -126,10 +140,14 @@ void main()
             if (VdotV < 1e-8) // avoid NaN from V.z / length(V)
                 continue;
 
-            float sinH  = V.z * inversesqrt(VdotV);
+            float horizontalLength = length(V.xy);
+            if (horizontalLength < 1e-8)
+                continue;
+            float sampleTan = V.z / horizontalLength;
 
-            if (sinH > maxSin)
+            if (sampleTan > maxTan)
             {
+                float sampleSin = tangentToSin(sampleTan);
                 // Distance falloff: W(r) = 1 - r^2 where r = ||S - P|| / R. Discounts a sample's
                 // contribution as it gets farther from P, reaching zero at the sphere radius — without
                 // this, a sample that happens to fall within the pixel-space step radius but is
@@ -137,13 +155,15 @@ void main()
                 // count as a full-strength occluder, which is what produced the outline/halo artifact
                 // around the model.
                 float falloff = clamp(1.0 - VdotV / aoInfo.sphereRadius.y, 0.0, 1.0);
-                wao += falloff * (sinH - maxSin);
-                maxSin = sinH;
+                wao += falloff * (sampleSin - maxSin);
+                maxTan = sampleTan;
+                maxSin = sampleSin;
             }
         }
 
         occlusion += wao;
     }
 
-    imageStore(aoOut, pos, vec4(occlusion / float(aoInfo.numDirs), 0.0, 0.0, 0.0));
+    float ao = clamp((occlusion / float(aoInfo.numDirs)) * aoInfo.aoScalar, 0.0, 1.0);
+    imageStore(aoOut, pos, vec4(ao, 0.0, 0.0, 0.0));
 }

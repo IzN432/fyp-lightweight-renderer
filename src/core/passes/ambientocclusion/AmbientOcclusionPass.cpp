@@ -78,7 +78,6 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
         .computeShader((paths::shaderDir / "hbao.comp.spv").string())
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_COMPUTE_BIT)
         .sampledDepth(1, fg.image("gbufferDepth"), VK_SHADER_STAGE_COMPUTE_BIT)
-        .sampledImage(2, fg.image("gbufferNormal"), VK_SHADER_STAGE_COMPUTE_BIT)
         .uniformBuffer(3, fg.buffer("hbao_params"), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageImageWrite(4, raw, VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([raw](PassContext &ctx) {

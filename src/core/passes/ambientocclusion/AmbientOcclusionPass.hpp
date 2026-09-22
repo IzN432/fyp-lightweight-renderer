@@ -36,7 +36,7 @@ public:
     void updateParams(ResourceRegistry &resources) const;
 
     // Add the HBAO compute pass plus its bilateral blur to the frame graph.
-    // Reads "gbufferDepth" and "gbufferNormal"; writes "hbao_ao" (final, blurred).
+    // Reads "gbufferDepth"; writes "hbao_ao" (final, blurred).
     void build(FrameGraph &fg) const;
 
 private:

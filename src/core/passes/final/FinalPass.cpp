@@ -22,7 +22,6 @@ void FinalPass::build(FrameGraph &fg) const
         .sampledImage(5, fg.image("overlay"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(6, fg.image("overlayPoints"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(7, fg.image("heatmap"), VK_SHADER_STAGE_FRAGMENT_BIT)
-        .sampledImage(8, fg.image("hbao_ao"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .colorAttachment(fg.image("swapchain"), m_cfg.swapchainFormat)
         .execute([](PassContext &ctx) {
             ctx.cmd().draw(3);
