@@ -267,8 +267,8 @@ void SceneManager::setEditedMeshObject(SceneObject &object)
         mesh.setPerUniqueVertexArray<glm::vec3>("color", defaultColors);
     }
 
-    m_selectionManager->rebind(mesh.positions(), object.getComponent<TransformComponent>());
     m_mainMeshPoints = m_meshUploader.replaceUniqueVertexBuffer({&mesh}, m_mainMeshPointsUploadConfig);
+    m_selectionManager->rebind(mesh.positions(), object.getComponent<TransformComponent>());
 }
 
 Mesh &SceneManager::syncMainMeshCornerHeatmapColors()
