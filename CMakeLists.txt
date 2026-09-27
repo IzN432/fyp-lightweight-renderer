@@ -41,6 +41,7 @@ find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(mikktspace CONFIG REQUIRED)
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h" REQUIRED)
 find_package(libigl CONFIG REQUIRED)
+find_package(ReactPhysics3D REQUIRED)
 
 # MSVC flags
 add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/EHsc>)
@@ -218,7 +219,7 @@ add_library(lr_rigid_body_feature STATIC
     src/features/rigid_body/RigidBodyComponent.cpp
 )
 target_include_directories(lr_rigid_body_feature PUBLIC src)
-target_link_libraries(lr_rigid_body_feature PUBLIC lr_core glm::glm)
+target_link_libraries(lr_rigid_body_feature PUBLIC lr_core glm::glm ReactPhysics3D::ReactPhysics3D)
 
 # Application executable
 add_executable(renderer src/main.cpp)

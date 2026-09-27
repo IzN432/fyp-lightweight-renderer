@@ -29,8 +29,7 @@ int main()
 
     assert(std::holds_alternative<lr::SphereCollider>(component.collider().shape));
     assert(component.collider().material.restitution == 0.5f);
-    assert(component.collider().material.staticFriction == 0.5f);
-    assert(component.collider().material.dynamicFriction == 0.3f);
+    assert(component.collider().material.friction == 0.3f);
 
     const auto sphereLines = lr::buildColliderOverlayLines(scene);
     assert(sphereLines.size() == 128); // Two 64-segment great circles.
@@ -51,6 +50,13 @@ int main()
                                      glm::vec3(1.0f, 3.0f, 1.0f), 0.0001f)));
     assert(glm::all(glm::epsilonEqual(planeLines.front().end,
                                      glm::vec3(5.0f, 3.0f, 1.0f), 0.0001f)));
+
+    component.addCollider(lr::Collider{
+        .shape = lr::SphereCollider{0.5f},
+        .localPosition = glm::vec3(0.0f, 2.0f, 0.0f),
+    });
+    assert(component.colliders().size() == 2);
+    assert(buildColliderOverlayLines(scene).size() == 132); // Plane plus two sphere great circles.
 
     lr::RigidBodyComponent body(2.0f);
     assert(body.isDynamic());
@@ -79,12 +85,16 @@ int main()
     auto &fallingObject = physicsScene.createSceneObject();
     auto &fallingTransform = fallingObject.addComponent<lr::TransformComponent>();
     auto &fallingBody = fallingObject.addComponent<lr::RigidBodyComponent>(2.0f);
+    fallingObject.addComponent<lr::ColliderComponent>(
+        lr::Collider{.shape = lr::SphereCollider{0.5f}});
     fallingBody.setLinearDrag(0.0f);
     fallingBody.setAngularDrag(0.0f);
 
     auto &staticObject = physicsScene.createSceneObject();
     auto &staticTransform = staticObject.addComponent<lr::TransformComponent>(glm::vec3(0.0f, 5.0f, 0.0f));
     staticObject.addComponent<lr::RigidBodyComponent>(1.0f, lr::RigidBodyType::Static);
+    staticObject.addComponent<lr::ColliderComponent>(
+        lr::Collider{.shape = lr::BoxCollider{glm::vec3(0.5f)}});
 
     lr::PhysicsWorld physicsWorld(physicsScene, {
         .gravity          = glm::vec3(0.0f, -10.0f, 0.0f),
@@ -130,4 +140,35 @@ int main()
     assert(physicsWorld.paused());
     assert(fallingTransform.transform().position() == glm::vec3(0.0f));
     assert(fallingBody.linearVelocity() == glm::vec3(0.0f));
+
+    // ReactPhysics3D owns collision detection and response: a sphere settles on the finite
+    // plane (represented internally by a thin static box) instead of falling through it.
+    lr::Scene collisionScene;
+    auto &sphereObject = collisionScene.createSceneObject();
+    auto &sphereTransform = sphereObject.addComponent<lr::TransformComponent>(glm::vec3(0.0f, 2.0f, 0.0f));
+    sphereObject.addComponent<lr::RigidBodyComponent>(1.0f).setLinearDrag(0.0f);
+    auto &sphereColliders = sphereObject.addComponent<lr::ColliderComponent>(lr::Collider{
+        .shape = lr::SphereCollider{0.5f},
+        .localPosition = glm::vec3(20.0f, 0.0f, 0.0f),
+    });
+    sphereColliders.addCollider(lr::Collider{.shape = lr::SphereCollider{0.5f}});
+
+    auto &groundObject = collisionScene.createSceneObject();
+    groundObject.addComponent<lr::TransformComponent>();
+    groundObject.addComponent<lr::RigidBodyComponent>(1.0f, lr::RigidBodyType::Static);
+    groundObject.addComponent<lr::ColliderComponent>(lr::Collider{
+        .shape = lr::PlaneCollider{.offset = 0.0f, .halfExtents = glm::vec2(5.0f)},
+    });
+
+    lr::PhysicsWorld collisionWorld(collisionScene, {
+        .gravity = glm::vec3(0.0f, -9.81f, 0.0f),
+        .fixedDeltaTime = 1.0f / 60.0f,
+        .startPaused = false,
+    });
+    for (int i = 0; i < 180; ++i)
+    {
+        collisionWorld.simulateOneStep();
+    }
+    assert(sphereTransform.transform().position().y > 0.45f);
+    assert(sphereTransform.transform().position().y < 0.60f);
 }

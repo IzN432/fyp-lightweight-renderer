@@ -9,6 +9,7 @@
         "tinyobjloader",
         "vulkan-memory-allocator",
         "mikktspace",
-        "libigl"
+        "libigl",
+        "reactphysics3d"
     ]
 }

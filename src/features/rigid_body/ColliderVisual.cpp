@@ -32,32 +32,28 @@ glm::mat4 colliderLocalMatrix(const Collider &collider)
 void appendColliderLines(OverlayLineBuilder &builder, const SceneObject &object,
                          const ColliderComponent &component)
 {
-    const Collider &collider = component.collider();
-    const glm::mat4 base      = object.worldMatrix() * colliderLocalMatrix(collider);
     const OverlayLineStyle style = lineStyle(component);
-
-    std::visit(
-        [&](const auto &shape) {
-            using Shape = std::decay_t<decltype(shape)>;
-            if constexpr (std::is_same_v<Shape, SphereCollider>)
-            {
-                const glm::mat4 model = glm::scale(base, glm::vec3(shape.radius));
-                builder.addPrimitive(primitives::sphere.outline, model, style);
-            }
-            else if constexpr (std::is_same_v<Shape, BoxCollider>)
-            {
-                const glm::mat4 model = glm::scale(base, shape.halfExtents * 2.0f);
-                builder.addPrimitive(primitives::cube.outline, model, style);
-            }
-            else
-            {
-                glm::mat4 model = glm::translate(base, glm::vec3(0.0f, shape.offset, 0.0f));
-                const glm::vec2 size = shape.halfExtents * 2.0f;
-                model = glm::scale(model, glm::vec3(size.x, 1.0f, size.y));
-                builder.addPrimitive(primitives::plane.outline, model, style);
-            }
-        },
-        collider.shape);
+    for (const Collider &collider : component.colliders())
+    {
+        const glm::mat4 base = object.worldMatrix() * colliderLocalMatrix(collider);
+        std::visit(
+            [&](const auto &shape) {
+                using Shape = std::decay_t<decltype(shape)>;
+                if constexpr (std::is_same_v<Shape, SphereCollider>)
+                    builder.addPrimitive(primitives::sphere.outline,
+                                         glm::scale(base, glm::vec3(shape.radius)), style);
+                else if constexpr (std::is_same_v<Shape, BoxCollider>)
+                    builder.addPrimitive(primitives::cube.outline,
+                                         glm::scale(base, shape.halfExtents * 2.0f), style);
+                else
+                {
+                    glm::mat4 model = glm::translate(base, glm::vec3(0.0f, shape.offset, 0.0f));
+                    const glm::vec2 size = shape.halfExtents * 2.0f;
+                    builder.addPrimitive(primitives::plane.outline,
+                                         glm::scale(model, glm::vec3(size.x, 1.0f, size.y)), style);
+                }
+            }, collider.shape);
+    }
 }
 
 } // namespace

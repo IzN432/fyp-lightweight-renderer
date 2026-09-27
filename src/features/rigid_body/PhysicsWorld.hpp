@@ -6,6 +6,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace lr
@@ -27,6 +28,10 @@ public:
 
     explicit PhysicsWorld(Scene &scene);
     PhysicsWorld(Scene &scene, Config config);
+    ~PhysicsWorld();
+
+    PhysicsWorld(const PhysicsWorld &) = delete;
+    PhysicsWorld &operator=(const PhysicsWorld &) = delete;
 
     // Called once per rendered frame. Executes zero or more fixed simulation steps.
     void update(float frameDeltaTime);
@@ -61,6 +66,9 @@ private:
     };
 
     void simulateStep(float deltaTime);
+    void rebuildBackend();
+
+    struct Impl;
 
     Scene                    *m_scene;
     glm::vec3                 m_gravity;
@@ -79,6 +87,7 @@ private:
     float                     m_smoothedStepsPerSecond       = 0.0f;
 
     std::vector<InitialBodyState> m_initialStates;
+    std::unique_ptr<Impl>         m_impl;
 };
 
 } // namespace lr

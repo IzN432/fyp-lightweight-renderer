@@ -5,13 +5,22 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <type_traits>
 #include <variant>
 
 namespace lr
 {
 
+enum class ColliderShapeType
+{
+    Sphere,
+    Plane,
+    Box,
+};
+
 struct SphereCollider
 {
+    static constexpr ColliderShapeType type = ColliderShapeType::Sphere;
     float radius = 0.5f;
 };
 
@@ -19,16 +28,34 @@ struct SphereCollider
 // owning Collider's localRotation. halfExtents span the local X/Z tangent axes of that plane.
 struct PlaneCollider
 {
+    static constexpr ColliderShapeType type = ColliderShapeType::Plane;
     float     offset = 0.0f;
     glm::vec2 halfExtents{5.0f, 5.0f};
 };
 
 struct BoxCollider
 {
+    static constexpr ColliderShapeType type = ColliderShapeType::Box;
     glm::vec3 halfExtents{0.5f};
 };
 
 using ColliderShape = std::variant<SphereCollider, PlaneCollider, BoxCollider>;
+
+inline ColliderShapeType colliderShapeType(const ColliderShape &shape)
+{
+    return std::visit([](const auto &value) { return std::decay_t<decltype(value)>::type; }, shape);
+}
+
+inline ColliderShape makeColliderShape(ColliderShapeType type)
+{
+    switch (type)
+    {
+        case ColliderShapeType::Sphere: return SphereCollider{};
+        case ColliderShapeType::Plane: return PlaneCollider{};
+        case ColliderShapeType::Box: return BoxCollider{};
+    }
+    return SphereCollider{};
+}
 
 struct Collider
 {

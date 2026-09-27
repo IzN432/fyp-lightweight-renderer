@@ -7,9 +7,8 @@ namespace lr
 // collider allows different parts of one rigid body to use different materials.
 struct PhysicsMaterial
 {
-    float restitution     = 0.5f;
-    float staticFriction  = 0.5f;
-    float dynamicFriction = 0.3f;
+    float restitution = 0.5f;
+    float friction    = 0.3f;
 };
 
 } // namespace lr
