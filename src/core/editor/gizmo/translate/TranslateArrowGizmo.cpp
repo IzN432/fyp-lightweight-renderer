@@ -59,7 +59,7 @@ constexpr std::array<glm::vec3, 3> kAxisVectors = {{
 } // namespace
 
 TranslateArrowGizmo::TranslateArrowGizmo(TranslateArrowGizmoAxis axis, const SceneObject &camera,
-                                         const InputHandler &input, VertexDragHandler &handler)
+                                         const InputHandler &input, TranslateDragHandler &handler)
     : Gizmo(kAxisInstances[static_cast<size_t>(axis)]), m_camera(camera), m_input(input), m_dragHandler(&handler),
       m_axis(kAxisVectors[static_cast<size_t>(axis)])
 {}

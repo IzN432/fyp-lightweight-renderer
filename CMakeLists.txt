@@ -120,8 +120,10 @@ add_library(lr_core STATIC
 
     src/core/editor/VertexManager.cpp
     src/core/editor/DefaultVertexDragHandler.cpp
+    src/core/editor/SceneObjectDragHandler.cpp
 
     src/core/editor/command/TranslatePointsCommand.cpp
+    src/core/editor/command/TranslateSceneObjectCommand.cpp
     src/core/editor/command/CommandManager.cpp
 
     src/core/editor/selection/BoxSelectionTool.cpp

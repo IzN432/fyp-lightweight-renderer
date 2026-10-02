@@ -22,9 +22,10 @@
 #include "core/scene/SceneObject.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
 #include "core/editor/gizmo/GizmoManager.hpp"
-#include "core/editor/gizmo/DragHandlerGizmo.hpp"
+#include "core/editor/gizmo/TranslateDragHandlerGizmo.hpp"
 #include "core/editor/gizmo/translate/TranslateArrowGizmo.hpp"
 #include "core/editor/gizmo/translate/TranslateBoxGizmo.hpp"
+#include "core/editor/SceneObjectDragHandler.hpp"
 #include "core/editor/selection/BoxSelectionTool.hpp"
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/VertexManager.hpp"
@@ -517,6 +518,7 @@ try
     // What the translate gizmos drive by default (plain vertex-drag editing). ArapTool swaps
     // this out for an ARAP-solve handler on the same gizmo instances once a precompute succeeds.
     lr::DefaultVertexDragHandler defaultHandler(vertexManager, selectionManager, commandManager);
+    lr::SceneObjectDragHandler   sceneObjectHandler(commandManager);
 
     lr::GizmoManager gizmoManager(overlayGeometryPass, viewer.input());
 
@@ -528,7 +530,7 @@ try
                                                                  viewer.input(), defaultHandler);
     auto boxGizmo    = std::make_unique<lr::TranslateBoxGizmo>(*camera, viewer.input(), defaultHandler);
 
-    // Raw pointers kept for ArapTool (needs a generic DragHandlerGizmo list) and the gizmo-
+    // Raw pointers kept for ArapTool (needs a generic TranslateDragHandlerGizmo list) and the gizmo-
     // positioning loop below (reads whichever handler is currently wired) — ownership moves to
     // gizmoManager via addGizmo() just below.
     lr::TranslateArrowGizmo *arrowX      = arrowXGizmo.get();
@@ -547,7 +549,8 @@ try
         gizmoManager.hideGizmo(id);
     }
 
-    const std::vector<lr::DragHandlerGizmo *> dragHandlerGizmos = {arrowX, arrowY, arrowZ, boxGizmoPtr};
+    const std::vector<lr::TranslateDragHandlerGizmo *> dragHandlerGizmos = {arrowX, arrowY, arrowZ, boxGizmoPtr};
+    lr::TranslateDragHandler *objectTranslateReturnHandler = &defaultHandler;
 
     lr::ArapTool arapTool(selectionManager, vertexManager, commandManager, meshComponent.mesh(), defaultHandler,
                           dragHandlerGizmos);
@@ -575,6 +578,7 @@ try
     // snapshot — harmless, just wasted work.
     scene.registerSelectionChangedCallback([&](lr::SceneObjectId id) {
         lr::SceneObject &object = scene.getSceneObject(id);
+        sceneObjectHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
         if (!lr::SceneManager::isEditable(object))
         {
             if (sceneManager.editorMode() == lr::EditorMode::Edit)
@@ -877,10 +881,32 @@ try
         const auto &selected = selectionManager.getSelectedIndices();
         arapTool.onGui(viewProj, extent, selected.empty() ? glm::vec3(0.0f) : worldCentroidOf(selected));
 
+        const bool objectTranslateActive = sceneManager.editorMode() == lr::EditorMode::View &&
+                                           sceneObjectHandler.target() != nullptr;
+        if (objectTranslateActive)
+        {
+            if (&arrowX->dragHandler() != &sceneObjectHandler)
+            {
+                objectTranslateReturnHandler = &arrowX->dragHandler();
+            }
+            for (lr::TranslateDragHandlerGizmo *gizmo : dragHandlerGizmos)
+            {
+                gizmo->setDragHandler(sceneObjectHandler);
+            }
+        } else if (&arrowX->dragHandler() == &sceneObjectHandler)
+        {
+            for (lr::TranslateDragHandlerGizmo *gizmo : dragHandlerGizmos)
+            {
+                gizmo->setDragHandler(*objectTranslateReturnHandler);
+            }
+        }
+
         // All 4 gizmos always share the same handler (ArapTool swaps them together), so any one
         // of them tells us which is currently active.
-        const lr::VertexDragHandler &activeHandler = arrowX->dragHandler();
-        const auto                  &driven        = activeHandler.indices();
+        const lr::TranslateDragHandler &activeHandler = arrowX->dragHandler();
+        const auto &driven = objectTranslateActive
+                                 ? selectionManager.getSelectedIndices()
+                                 : static_cast<const lr::VertexDragHandler &>(activeHandler).indices();
         // While ARAP mode is active but no precompute has succeeded yet, the default drag gizmo
         // would otherwise appear over the very selection the anchor/handle popup is asking about —
         // suppress it until Solve actually swaps the handler.
@@ -890,7 +916,7 @@ try
         // leak the plain translate gizmo into View mode, since the default handler's indices are the
         // current selection, which SceneManager clears on leaving Edit — so driven.empty() already
         // covers that case on its own.
-        if (driven.empty() || suppressedByArapMode)
+        if ((!objectTranslateActive && driven.empty()) || suppressedByArapMode)
         {
             for (int id : translateGizmoIds)
             {
@@ -898,7 +924,9 @@ try
             }
         } else
         {
-            const glm::vec3 centroid = worldCentroidOf(driven);
+            const glm::vec3 centroid = objectTranslateActive
+                                           ? glm::vec3(sceneObjectHandler.target()->worldMatrix()[3])
+                                           : worldCentroidOf(driven);
 
             // Keep the gizmo a constant size on screen (~1/9 screen height) regardless of camera distance.
             const glm::vec3 camPos = camera->getComponent<lr::TransformComponent>().transform().position();

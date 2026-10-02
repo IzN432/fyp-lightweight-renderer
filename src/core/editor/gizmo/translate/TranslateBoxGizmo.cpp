@@ -22,7 +22,7 @@ OverlayInstance boxInstance = {
 
 } // namespace
 
-TranslateBoxGizmo::TranslateBoxGizmo(const SceneObject &camera, const InputHandler &input, VertexDragHandler &handler)
+TranslateBoxGizmo::TranslateBoxGizmo(const SceneObject &camera, const InputHandler &input, TranslateDragHandler &handler)
     : Gizmo(boxInstance), m_camera(camera), m_input(input), m_dragHandler(&handler)
 {}
 
