@@ -26,6 +26,7 @@
 #include "core/editor/SceneObjectDragHandler.hpp"
 #include "core/editor/SceneObjectRotationHandler.hpp"
 #include "core/editor/SceneObjectScaleHandler.hpp"
+#include "core/editor/SceneObjectTransformController.hpp"
 #include "core/editor/selection/BoxSelectionTool.hpp"
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/VertexManager.hpp"
@@ -532,14 +533,9 @@ try
     lr::ScaleGizmo           scaleGizmo(sceneObjectScaleHandler);
     lr::TranslateDragHandler *objectTranslateReturnHandler = &defaultHandler;
 
-    enum class ObjectTransformTool
-    {
-        None,
-        Translate,
-        Rotate,
-        Scale,
-    };
-    ObjectTransformTool objectTransformTool       = ObjectTransformTool::None;
+    lr::SceneObjectTransformController transformController(
+        sceneObjectHandler, sceneObjectRotationHandler, sceneObjectScaleHandler);
+    lr::EditorContext editorContext{transformController};
     bool                objectTransformWindowOpen = false;
 
     lr::ArapTool arapTool(selectionManager, vertexManager, commandManager, meshComponent.mesh(), defaultHandler,
@@ -553,11 +549,8 @@ try
     // rebound together so every editing/analysis operation addresses the same object.
     scene.registerSelectionChangedCallback([&](lr::SceneObjectId id) {
         lr::SceneObject &object = scene.getSceneObject(id);
-        objectTransformTool       = ObjectTransformTool::None;
         objectTransformWindowOpen = true;
-        sceneObjectHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
-        sceneObjectRotationHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
-        sceneObjectScaleHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
+        transformController.setSelectedTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
         if (!lr::SceneManager::isEditable(object))
         {
             if (sceneManager.editorMode() == lr::EditorMode::Edit)
@@ -589,15 +582,12 @@ try
 
     scene.registerObjectsDestroyedCallback([&](std::span<const lr::SceneObjectId> ids) {
         viewer.context().waitIdle();
-        if (sceneObjectHandler.target() &&
-            std::ranges::find(ids, sceneObjectHandler.target()->id()) != ids.end())
+        if (transformController.target() &&
+            std::ranges::find(ids, transformController.target()->id()) != ids.end())
         {
-            sceneObjectHandler.setTarget(nullptr);
-            sceneObjectRotationHandler.setTarget(nullptr);
-            sceneObjectScaleHandler.setTarget(nullptr);
-            objectTransformTool       = ObjectTransformTool::None;
             objectTransformWindowOpen = false;
         }
+        transformController.onObjectsDestroyed(ids);
 
         lr::SceneObject *replacement = sceneManager.removeSceneObjects(ids);
         sceneManager.uploadLights();
@@ -871,7 +861,7 @@ try
         ImGui::SetNextWindowPos(bottomRight, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
         ImGui::Begin("Inspector");
-        scene.onInspectorGUI();
+        scene.onInspectorGUI(editorContext);
         ImGui::End();
 
         if (objectTransformWindowOpen && scene.selectedObject())
@@ -882,21 +872,21 @@ try
             ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_Appearing);
             if (ImGui::Begin("Transform Gizmo", &objectTransformWindowOpen, ImGuiWindowFlags_AlwaysAutoResize))
             {
-                const bool canTransform = sceneObjectHandler.target() != nullptr;
-                ImGui::BeginDisabled(!canTransform);
-                if (ImGui::RadioButton("Translate", objectTransformTool == ObjectTransformTool::Translate))
+                const bool canTransform = transformController.target() != nullptr;
+                ImGui::BeginDisabled(!canTransform || transformController.hasTemporaryEdit());
+                if (ImGui::RadioButton("Translate", transformController.tool() == lr::TransformTool::Translate))
                 {
-                    objectTransformTool = ObjectTransformTool::Translate;
+                    transformController.setTool(lr::TransformTool::Translate);
                 }
                 ImGui::SameLine();
-                if (ImGui::RadioButton("Rotate", objectTransformTool == ObjectTransformTool::Rotate))
+                if (ImGui::RadioButton("Rotate", transformController.tool() == lr::TransformTool::Rotate))
                 {
-                    objectTransformTool = ObjectTransformTool::Rotate;
+                    transformController.setTool(lr::TransformTool::Rotate);
                 }
                 ImGui::SameLine();
-                if (ImGui::RadioButton("Scale", objectTransformTool == ObjectTransformTool::Scale))
+                if (ImGui::RadioButton("Scale", transformController.tool() == lr::TransformTool::Scale))
                 {
-                    objectTransformTool = ObjectTransformTool::Scale;
+                    transformController.setTool(lr::TransformTool::Scale);
                 }
                 ImGui::EndDisabled();
             }
@@ -980,13 +970,13 @@ try
         const auto &selected = selectionManager.getSelectedIndices();
         arapTool.onGui(viewProj, extent, selected.empty() ? glm::vec3(0.0f) : worldCentroidOf(selected));
 
-        const bool objectTranslateActive = objectTransformTool == ObjectTransformTool::Translate &&
+        const bool objectTranslateActive = transformController.tool() == lr::TransformTool::Translate &&
                                            sceneManager.editorMode() == lr::EditorMode::View &&
                                            sceneObjectHandler.target() != nullptr;
-        const bool objectRotateActive = objectTransformTool == ObjectTransformTool::Rotate &&
+        const bool objectRotateActive = transformController.tool() == lr::TransformTool::Rotate &&
                                         sceneManager.editorMode() == lr::EditorMode::View &&
                                         sceneObjectRotationHandler.target() != nullptr;
-        const bool objectScaleActive = objectTransformTool == ObjectTransformTool::Scale &&
+        const bool objectScaleActive = transformController.tool() == lr::TransformTool::Scale &&
                                        sceneManager.editorMode() == lr::EditorMode::View &&
                                        sceneObjectScaleHandler.target() != nullptr;
         if (objectTranslateActive)

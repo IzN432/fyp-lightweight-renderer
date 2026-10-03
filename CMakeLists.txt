@@ -124,6 +124,7 @@ add_library(lr_core STATIC
     src/core/editor/SceneObjectDragHandler.cpp
     src/core/editor/SceneObjectRotationHandler.cpp
     src/core/editor/SceneObjectScaleHandler.cpp
+    src/core/editor/SceneObjectTransformController.cpp
 
     src/core/editor/command/TranslatePointsCommand.cpp
     src/core/editor/command/TranslateSceneObjectCommand.cpp

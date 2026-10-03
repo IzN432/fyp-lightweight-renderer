@@ -71,7 +71,7 @@ public:
 
     template <typename T> bool hasComponent() const { return components.contains(std::type_index(typeid(T))); };
 
-    void onGUI()
+    void onGUI(EditorContext &context)
     {
         int  id = 0;
         bool first = true;
@@ -83,7 +83,7 @@ public:
             }
             first = false;
             ImGui::PushID(id++);
-            component->onGUI();
+            component->onGUI(context);
             ImGui::PopID();
         }
     }

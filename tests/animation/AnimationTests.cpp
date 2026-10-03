@@ -65,6 +65,18 @@ int main()
     assert(!animator.isPlaying());
     assert(near(animator.playbackSeconds(), 2.0f));
 
+    assert(animator.beginKeyframeEdit(0, 1));
+    targetTransform.setPosition(glm::vec3(9.0f, 0.0f, 0.0f));
+    animator.cancelKeyframeEdit();
+    assert(near(targetTransform.transform().position().x, 4.0f));
+    assert(near(std::get<lr::TranslationTrack>(animator.clips()[0].tracks()[0]).sample(2.0f)->x, 4.0f));
+
+    assert(animator.beginKeyframeEdit(0, 1));
+    targetTransform.setPosition(glm::vec3(7.0f, 0.0f, 0.0f));
+    animator.applyKeyframeEdit();
+    assert(!animator.keyframeEdit());
+    assert(near(std::get<lr::TranslationTrack>(animator.clips()[0].tracks()[0]).sample(2.0f)->x, 7.0f));
+
     bool rejectedInvalidTime = false;
     try
     {

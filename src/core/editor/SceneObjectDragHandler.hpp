@@ -17,6 +17,7 @@ public:
 
     void setTarget(SceneObject *target) { m_target = target; }
     SceneObject *target() const { return m_target; }
+    void setRecordCommands(bool record) { m_recordCommands = record; }
 
     void beginDrag() override;
     void translate(const glm::vec3 &frameDelta) override;
@@ -28,6 +29,7 @@ private:
     CommandManager                    &m_commandManager;
     SceneObject                       *m_target = nullptr;
     glm::vec3                          m_accumulatedLocalDelta{0.0f};
+    bool                               m_recordCommands = true;
 };
 
 } // namespace lr

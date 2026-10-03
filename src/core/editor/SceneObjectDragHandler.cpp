@@ -41,7 +41,7 @@ void SceneObjectDragHandler::translate(const glm::vec3 &frameDelta)
 
 void SceneObjectDragHandler::endDrag(const glm::vec3 &)
 {
-    if (!m_target || !m_target->hasComponent<TransformComponent>() ||
+    if (!m_recordCommands || !m_target || !m_target->hasComponent<TransformComponent>() ||
         glm::dot(m_accumulatedLocalDelta, m_accumulatedLocalDelta) == 0.0f)
     {
         return;

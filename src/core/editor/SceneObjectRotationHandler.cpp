@@ -20,7 +20,7 @@ void SceneObjectRotationHandler::beginDrag()
 
 void SceneObjectRotationHandler::rotateToWorld(const glm::mat4 &worldMatrix)
 {
-    if (!m_target || !m_target->hasComponent<TransformComponent>())
+    if (!m_recordCommands || !m_target || !m_target->hasComponent<TransformComponent>())
     {
         return;
     }

@@ -19,6 +19,7 @@ public:
 
     void setTarget(SceneObject *target) { m_target = target; }
     SceneObject *target() const { return m_target; }
+    void setRecordCommands(bool record) { m_recordCommands = record; }
 
     void beginDrag() override;
     void scaleToWorld(const glm::mat4 &worldMatrix) override;
@@ -28,6 +29,7 @@ private:
     CommandManager &m_commandManager;
     SceneObject    *m_target = nullptr;
     glm::vec3       m_beforeScale{1.0f};
+    bool            m_recordCommands = true;
 };
 
 } // namespace lr

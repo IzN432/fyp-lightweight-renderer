@@ -18,7 +18,7 @@ public:
     Scene() = default;
 
     void onHierarchyGUI();
-    void onInspectorGUI();
+    void onInspectorGUI(EditorContext &context);
 
     SceneObject &createSceneObject();
 

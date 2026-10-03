@@ -5,14 +5,27 @@
 
 #include <cstddef>
 #include <optional>
+#include <variant>
 #include <vector>
 
 namespace lr
 {
 
+class TransformEditService;
+
 class AnimatorComponent : public Component
 {
 public:
+    struct KeyframeEdit
+    {
+        size_t                  clipIndex;
+        size_t                  trackIndex;
+        size_t                  keyframeIndex;
+        SceneObjectId           target;
+        AnimationTargetProperty property;
+        float                   seconds;
+    };
+
     explicit AnimatorComponent(std::vector<AnimationClip> clips = {});
 
     std::vector<AnimationClip> &clips() { return m_clips; }
@@ -23,6 +36,11 @@ public:
     void stop();
     void seek(float seconds);
     void update(float deltaSeconds);
+
+    const std::optional<KeyframeEdit> &keyframeEdit() const { return m_keyframeEdit; }
+    bool beginKeyframeEdit(size_t trackIndex, size_t keyframeIndex);
+    void applyKeyframeEdit();
+    void cancelKeyframeEdit();
 
     bool isPlaying() const { return m_playing; }
     float playbackSeconds() const { return m_playbackSeconds; }
@@ -46,6 +64,8 @@ private:
     size_t                     m_selectedTrack = 0;
     bool                       m_loop = true;
     bool                       m_playing = false;
+    std::optional<KeyframeEdit> m_keyframeEdit;
+    TransformEditService      *m_transformEditService = nullptr;
 };
 
 } // namespace lr

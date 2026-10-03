@@ -126,6 +126,7 @@ AnimationTrackResult animationTrack(const char *label, float *progress, std::spa
     const ImU32 borderColor     = ImGui::GetColorU32(
         ImGui::IsItemHovered() ? ImVec4(0.48f, 0.50f, 0.54f, 1.0f) : ImVec4(0.31f, 0.32f, 0.35f, 1.0f));
     const ImU32 keyframeColor = ImGui::GetColorU32(ImVec4(1.0f, 0.72f, 0.12f, 1.0f));
+    const ImU32 selectedKeyframeColor = ImGui::GetColorU32(ImVec4(1.0f, 0.92f, 0.38f, 1.0f));
     const ImU32 playheadColor = ImGui::GetColorU32(ImVec4(0.20f, 0.52f, 0.95f, 1.0f));
 
     const float playheadX = itemMin.x + (displayedProgress - visibleMin) / visibleSpan * width;
@@ -152,7 +153,9 @@ AnimationTrackResult animationTrack(const char *label, float *progress, std::spa
             continue;
         }
         const float keyframeX = itemMin.x + (normalizedKeyframe - visibleMin) / visibleSpan * width;
-        drawList->AddCircleFilled(ImVec2(keyframeX, trackCenterY), keyframeRadius, keyframeColor);
+        const bool selected = std::abs(normalizedKeyframe - displayedProgress) <= 1e-4f;
+        drawList->AddCircleFilled(ImVec2(keyframeX, trackCenterY), selected ? keyframeRadius + 2.0f : keyframeRadius,
+                                  selected ? selectedKeyframeColor : keyframeColor);
     }
 
     if (displayedProgress >= visibleMin && displayedProgress <= visibleMax)
