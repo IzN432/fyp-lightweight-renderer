@@ -236,6 +236,56 @@ add_executable(renderer src/main.cpp)
 target_link_libraries(renderer PRIVATE lr_core lr_arap_feature lr_laplace_beltrami_feature
     lr_linear_blend_skinning_feature lr_animation_feature lr_rigid_body_feature imguiFileDialog)
 
+# Python module — `lr` package assembled in build/python/lr (run scripts with PYTHONPATH=build/python).
+# Needs a Python interpreter with nanobind installed (pip install nanobind); skipped otherwise.
+option(LR_BUILD_PYTHON "Build the lr Python module" ON)
+if(LR_BUILD_PYTHON)
+    find_package(Python 3.9 COMPONENTS Interpreter Development.Module)
+    if(Python_FOUND)
+        execute_process(
+            COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+            OUTPUT_VARIABLE nanobind_ROOT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+    find_package(nanobind CONFIG QUIET)
+    if(NOT nanobind_FOUND)
+        message(WARNING "LR_BUILD_PYTHON: Python or nanobind not found — skipping the lr Python module")
+    else()
+        set(LR_PYTHON_PACKAGE_DIR "${CMAKE_BINARY_DIR}/python/lr")
+        nanobind_add_module(_lr src/python/LrModule.cpp)
+        target_link_libraries(_lr PRIVATE lr_core)
+        # $<0:> keeps multi-config generators from appending a per-config subdirectory.
+        set_target_properties(_lr PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${LR_PYTHON_PACKAGE_DIR}$<0:>"
+            RUNTIME_OUTPUT_DIRECTORY "${LR_PYTHON_PACKAGE_DIR}$<0:>")
+
+        # Python only searches the extension's own directory for its DLL dependencies. The
+        # interpreter's own DLL is already loaded by whichever Python imports the module.
+        add_custom_command(TARGET _lr POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<LIST:FILTER,$<TARGET_RUNTIME_DLLS:_lr>,EXCLUDE,python[0-9]+\\.dll$>" "${LR_PYTHON_PACKAGE_DIR}"
+            COMMAND_EXPAND_LISTS)
+
+        file(GLOB LR_PYTHON_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/python/lr/*.py")
+        add_custom_target(lr_python ALL
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${LR_PYTHON_SOURCES} "${LR_PYTHON_PACKAGE_DIR}"
+            DEPENDS _lr
+            COMMENT "Assembling the lr Python package")
+
+        if(BUILD_TESTING)
+            # Both open short-lived windows, so they need a GPU and a display.
+            add_test(NAME python.bindings
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_bindings.py")
+            add_test(NAME python.spinning_torus
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/spinning_torus.py"
+                    --frames 120)
+            set_tests_properties(python.bindings python.spinning_torus PROPERTIES
+                ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
+                # nanobind prints leak reports to stderr without failing the process.
+                FAIL_REGULAR_EXPRESSION "nanobind: leaked|\\[error\\]")
+        endif()
+    endif()
+endif()
+
 if(BUILD_TESTING)
     add_executable(scene_hierarchy_tests
         tests/scene/SceneHierarchyTests.cpp

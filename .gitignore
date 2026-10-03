@@ -1,3 +1,12 @@
 build
 docs/doxygen
 imgui.ini
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+.eggs/

@@ -48,6 +48,7 @@ public:
     InputHandler        &input() { return m_input; }
     const VulkanContext &context() const { return *m_ctx; }
     Allocator           &allocator() { return *m_allocator; }
+    VkFormat             swapchainFormat() const { return m_swapchain->getFormat(); }
 
     // -----------------------------------------------------------------------
     // Callbacks — set before run()
@@ -77,7 +78,11 @@ public:
     // Explicitly append the terminal ImGui compositing pass. Call this after
     // declaring all application passes and before run().
     void addImguiPass();
+    bool hasImguiPass() const { return m_imguiPassAdded; }
     void run();
+
+    // Ends run() after the current frame finishes.
+    void requestClose() { m_window->requestClose(); }
 
     // True once at least one frame has been fully executed since the last
     // swapchain rebuild. Use to guard GPU readbacks that assume images are

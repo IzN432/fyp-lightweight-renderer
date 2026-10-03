@@ -46,6 +46,7 @@ public:
     Window &operator=(Window &&)      = delete;
 
     bool shouldClose() const;
+    void requestClose();
     void pollEvents();
 
     int  getWidth() const { return m_width; }

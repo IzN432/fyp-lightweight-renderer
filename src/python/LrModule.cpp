@@ -1,0 +1,655 @@
+// Python bindings for the frame graph: Viewer, ResourceRegistry, FrameGraph, PassBuilder,
+// PassContext and CommandBuffer, plus runtime GLSL compilation. Built as `lr._lr` and re-exported
+// by the pure-Python `lr` package (python/lr/__init__.py).
+
+#include "core/Paths.hpp"
+#include "core/app/Viewer.hpp"
+#include "core/framegraph/FrameGraph.hpp"
+#include "core/framegraph/PassBuilder.hpp"
+#include "core/framegraph/PassContext.hpp"
+#include "core/framegraph/ResourceRegistry.hpp"
+#include "core/vulkan/CommandBuffer.hpp"
+#include "core/vulkan/ShaderCompiler.hpp"
+
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+#include <nanobind/stl/array.h>
+#include <nanobind/stl/filesystem.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/string_view.h>
+#include <nanobind/stl/vector.h>
+
+#include <algorithm>
+#include <cstring>
+#include <memory>
+#include <optional>
+#include <unordered_map>
+
+namespace nb = nanobind;
+using namespace nb::literals;
+namespace fs = std::filesystem;
+
+namespace
+{
+
+using lr::BufferHandle;
+using lr::CommandBuffer;
+using lr::ExtentSpec;
+using lr::FrameGraph;
+using lr::ImageHandle;
+using lr::PassBuilder;
+using lr::PassContext;
+using lr::PassHandle;
+using lr::PassType;
+using lr::ResourceRegistry;
+using lr::ShaderStage;
+using lr::Viewer;
+
+// Any C-contiguous host array (numpy array, bytes, bytearray, memoryview...). Non-contiguous numpy
+// arrays are copied to a contiguous one by nanobind before the call.
+using HostArray = nb::ndarray<nb::ro, nb::c_contig, nb::device::cpu>;
+
+// Python callbacks run inside the C++ frame loop, so an exception unwinding through it would abandon
+// a half-recorded command buffer. Instead the first one is stashed here, the window is asked to close
+// so run() returns after the current frame, and run() re-raises it (with its traceback).
+struct CallbackErrorTrap
+{
+    Viewer                         *running = nullptr;
+    std::optional<nb::python_error> error;
+
+    template <typename F> void guard(F &&callback)
+    {
+        if (!running)
+        {
+            callback();
+            return;
+        }
+        try
+        {
+            callback();
+        } catch (nb::python_error &e)
+        {
+            if (!error)
+            {
+                error.emplace(std::move(e));
+            }
+            running->requestClose();
+        }
+    }
+
+    void rethrowPending()
+    {
+        if (error)
+        {
+            nb::python_error pending = std::move(*error);
+            error.reset();
+            throw pending;
+        }
+    }
+};
+
+CallbackErrorTrap g_callbackErrors;
+
+// Python callables handed to C++ (frame callbacks, pass execute callbacks) usually close over the
+// Viewer itself — a reference cycle through C++ that Python's GC can't see, which would keep the
+// Viewer (and its Vulkan device) alive until process exit. The C++ closures own their callable
+// through a shared slot; this registry only tracks the slots weakly, so it never outlives the
+// interpreter itself, and releaseAll() breaks every cycle at once.
+struct CallbackSlots
+{
+    std::vector<std::weak_ptr<nb::object>> slots;
+
+    std::shared_ptr<nb::object> hold(nb::callable callback)
+    {
+        auto slot = std::make_shared<nb::object>(std::move(callback));
+        slots.push_back(slot);
+        return slot;
+    }
+
+    void releaseAll()
+    {
+        for (const std::weak_ptr<nb::object> &weak : slots)
+        {
+            if (const std::shared_ptr<nb::object> slot = weak.lock())
+            {
+                *slot = nb::object();
+            }
+        }
+        slots.clear();
+    }
+};
+
+CallbackSlots g_callbackSlots;
+
+nb::tuple toTuple(VkExtent2D extent) { return nb::make_tuple(extent.width, extent.height); }
+
+nb::bytes spirvToBytes(const std::vector<uint32_t> &spirv)
+{
+    return nb::bytes(reinterpret_cast<const char *>(spirv.data()), spirv.size() * sizeof(uint32_t));
+}
+
+std::vector<uint32_t> bytesToSpirv(const nb::bytes &bytes)
+{
+    if (bytes.size() % sizeof(uint32_t) != 0)
+    {
+        throw std::invalid_argument("SPIR-V byte length must be a multiple of 4");
+    }
+    std::vector<uint32_t> words(bytes.size() / sizeof(uint32_t));
+    std::memcpy(words.data(), bytes.c_str(), bytes.size());
+    return words;
+}
+
+bool isSpirvFile(const fs::path &path) { return path.extension() == ".spv"; }
+
+// Bytes per texel for the formats upload_image accepts.
+uint32_t texelSize(VkFormat format)
+{
+    static const std::unordered_map<VkFormat, uint32_t> sizes = {
+        {VK_FORMAT_R8_UNORM, 1},
+        {VK_FORMAT_R8G8B8A8_UNORM, 4},
+        {VK_FORMAT_R8G8B8A8_SRGB, 4},
+        {VK_FORMAT_B8G8R8A8_UNORM, 4},
+        {VK_FORMAT_B8G8R8A8_SRGB, 4},
+        {VK_FORMAT_R16_SFLOAT, 2},
+        {VK_FORMAT_R16G16B16A16_SFLOAT, 8},
+        {VK_FORMAT_R32_SFLOAT, 4},
+        {VK_FORMAT_R32G32_SFLOAT, 8},
+        {VK_FORMAT_R32G32B32A32_SFLOAT, 16},
+        {VK_FORMAT_R32_UINT, 4},
+    };
+    const auto it = sizes.find(format);
+    if (it == sizes.end())
+    {
+        throw std::invalid_argument("upload_image: format not supported for uploads");
+    }
+    return it->second;
+}
+
+VkClearValue colorClear(const std::array<float, 4> &rgba)
+{
+    VkClearValue value{};
+    std::copy(rgba.begin(), rgba.end(), value.color.float32);
+    return value;
+}
+
+void bindEnums(nb::module_ &m)
+{
+    nb::enum_<VkFormat>(m, "Format")
+        .value("UNDEFINED", VK_FORMAT_UNDEFINED)
+        .value("R8_UNORM", VK_FORMAT_R8_UNORM)
+        .value("R8G8B8A8_UNORM", VK_FORMAT_R8G8B8A8_UNORM)
+        .value("R8G8B8A8_SRGB", VK_FORMAT_R8G8B8A8_SRGB)
+        .value("B8G8R8A8_UNORM", VK_FORMAT_B8G8R8A8_UNORM)
+        .value("B8G8R8A8_SRGB", VK_FORMAT_B8G8R8A8_SRGB)
+        .value("R16_SFLOAT", VK_FORMAT_R16_SFLOAT)
+        .value("R16G16B16A16_SFLOAT", VK_FORMAT_R16G16B16A16_SFLOAT)
+        .value("R32_SFLOAT", VK_FORMAT_R32_SFLOAT)
+        .value("R32G32_SFLOAT", VK_FORMAT_R32G32_SFLOAT)
+        .value("R32G32B32_SFLOAT", VK_FORMAT_R32G32B32_SFLOAT)
+        .value("R32G32B32A32_SFLOAT", VK_FORMAT_R32G32B32A32_SFLOAT)
+        .value("R32_UINT", VK_FORMAT_R32_UINT)
+        .value("D32_SFLOAT", VK_FORMAT_D32_SFLOAT);
+
+    nb::enum_<VkBufferUsageFlagBits>(m, "BufferUsage", nb::is_flag(), nb::is_arithmetic())
+        .value("TRANSFER_SRC", VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
+        .value("TRANSFER_DST", VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+        .value("UNIFORM", VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+        .value("STORAGE", VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        .value("INDEX", VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
+        .value("VERTEX", VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+        .value("INDIRECT", VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
+
+    nb::enum_<VkImageUsageFlagBits>(m, "ImageUsage", nb::is_flag(), nb::is_arithmetic())
+        .value("TRANSFER_SRC", VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+        .value("TRANSFER_DST", VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+        .value("SAMPLED", VK_IMAGE_USAGE_SAMPLED_BIT)
+        .value("STORAGE", VK_IMAGE_USAGE_STORAGE_BIT)
+        .value("COLOR_ATTACHMENT", VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+        .value("DEPTH_STENCIL_ATTACHMENT", VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+
+    nb::enum_<VkShaderStageFlagBits>(m, "Stage", nb::is_flag(), nb::is_arithmetic())
+        .value("VERTEX", VK_SHADER_STAGE_VERTEX_BIT)
+        .value("FRAGMENT", VK_SHADER_STAGE_FRAGMENT_BIT)
+        .value("COMPUTE", VK_SHADER_STAGE_COMPUTE_BIT)
+        .value("ALL_GRAPHICS", VK_SHADER_STAGE_ALL_GRAPHICS);
+
+    nb::enum_<VkPrimitiveTopology>(m, "Topology")
+        .value("POINT_LIST", VK_PRIMITIVE_TOPOLOGY_POINT_LIST)
+        .value("LINE_LIST", VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
+        .value("LINE_STRIP", VK_PRIMITIVE_TOPOLOGY_LINE_STRIP)
+        .value("TRIANGLE_LIST", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+        .value("TRIANGLE_STRIP", VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP);
+
+    nb::enum_<VkAttachmentLoadOp>(m, "LoadOp")
+        .value("LOAD", VK_ATTACHMENT_LOAD_OP_LOAD)
+        .value("CLEAR", VK_ATTACHMENT_LOAD_OP_CLEAR)
+        .value("DONT_CARE", VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+
+    nb::enum_<PassType>(m, "PassType")
+        .value("GEOMETRY", PassType::Geometry)
+        .value("FULLSCREEN", PassType::Fullscreen)
+        .value("COMPUTE", PassType::Compute)
+        .value("CUSTOM", PassType::Custom);
+
+    nb::enum_<ShaderStage>(m, "ShaderStage")
+        .value("VERTEX", ShaderStage::Vertex)
+        .value("FRAGMENT", ShaderStage::Fragment)
+        .value("COMPUTE", ShaderStage::Compute);
+}
+
+void bindValueTypes(nb::module_ &m)
+{
+    nb::class_<ImageHandle>(m, "ImageHandle")
+        .def("__bool__",
+             [](ImageHandle h) {
+                 return static_cast<bool>(h);
+             })
+        .def("__eq__", [](ImageHandle a, ImageHandle b) {
+            return a == b;
+        });
+    nb::class_<BufferHandle>(m, "BufferHandle")
+        .def("__bool__",
+             [](BufferHandle h) {
+                 return static_cast<bool>(h);
+             })
+        .def("__eq__", [](BufferHandle a, BufferHandle b) {
+            return a == b;
+        });
+    nb::class_<PassHandle>(m, "PassHandle")
+        .def("__bool__",
+             [](PassHandle h) {
+                 return static_cast<bool>(h);
+             })
+        .def("__eq__", [](PassHandle a, PassHandle b) {
+            return a == b;
+        });
+
+    nb::class_<ExtentSpec>(m, "Extent", "How big a frame-graph image is: fixed, or tracking the swapchain.")
+        .def_static("swapchain", &ExtentSpec::swapchain, "Same size as the swapchain (the default).")
+        .def_static("absolute", &ExtentSpec::absolute, "width"_a, "height"_a, "A fixed size in pixels.")
+        .def_static(
+            "relative",
+            [](uint32_t numerator, uint32_t denominator) {
+                return ExtentSpec::relative(numerator, denominator);
+            },
+            "numerator"_a, "denominator"_a, "A fraction of the swapchain size, e.g. relative(1, 2) for half-res.");
+
+    nb::class_<VkVertexInputBindingDescription>(m, "VertexBinding")
+        .def(
+            "__init__",
+            [](VkVertexInputBindingDescription *self, uint32_t binding, uint32_t stride, bool perInstance) {
+                new (self) VkVertexInputBindingDescription{
+                    .binding   = binding,
+                    .stride    = stride,
+                    .inputRate = perInstance ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX,
+                };
+            },
+            "binding"_a, "stride"_a, "per_instance"_a = false)
+        .def_rw("binding", &VkVertexInputBindingDescription::binding)
+        .def_rw("stride", &VkVertexInputBindingDescription::stride);
+
+    nb::class_<VkVertexInputAttributeDescription>(m, "VertexAttribute")
+        .def(
+            "__init__",
+            [](VkVertexInputAttributeDescription *self, uint32_t location, VkFormat format, uint32_t offset,
+               uint32_t binding) {
+                new (self) VkVertexInputAttributeDescription{
+                    .location = location,
+                    .binding  = binding,
+                    .format   = format,
+                    .offset   = offset,
+                };
+            },
+            "location"_a, "format"_a, "offset"_a = 0, "binding"_a = 0)
+        .def_rw("location", &VkVertexInputAttributeDescription::location)
+        .def_rw("binding", &VkVertexInputAttributeDescription::binding)
+        .def_rw("format", &VkVertexInputAttributeDescription::format)
+        .def_rw("offset", &VkVertexInputAttributeDescription::offset);
+}
+
+void bindResources(nb::module_ &m)
+{
+    nb::class_<ResourceRegistry>(m, "ResourceRegistry",
+                                 "Named GPU buffers and images. Passes refer to them by name via "
+                                 "FrameGraph.buffer()/image().")
+        .def(
+            "upload_buffer",
+            [](ResourceRegistry &r, const std::string &name, HostArray data, VkBufferUsageFlags usage) {
+                r.uploadBuffer(name, data.data(), data.nbytes(), usage);
+            },
+            "name"_a, "data"_a, "usage"_a,
+            "Create a GPU-only buffer sized to `data` and upload it before the next frame.")
+        .def(
+            "reupload_buffer",
+            [](ResourceRegistry &r, const std::string &name, HostArray data) {
+                r.reuploadBuffer(name, data.data(), data.nbytes());
+            },
+            "name"_a, "data"_a, "Overwrite an uploaded buffer; `data` must fit its original size.")
+        .def("register_static_buffer", &ResourceRegistry::registerStaticBuffer, "name"_a, "size"_a, "usage"_a,
+             "Create an uninitialised GPU-only buffer (e.g. compute scratch).")
+        .def("register_dynamic_buffer", &ResourceRegistry::registerDynamicBuffer, "name"_a, "size"_a, "usage"_a,
+             "Create a CPU-writable buffer for per-frame data such as uniforms; fill it with update_buffer().")
+        .def(
+            "update_buffer",
+            [](ResourceRegistry &r, const std::string &name, HostArray data) {
+                r.updateBuffer(name, data.data(), data.nbytes());
+            },
+            "name"_a, "data"_a, "Write `data` into a dynamic buffer (call from an on_update callback).")
+        .def(
+            "register_image",
+            [](ResourceRegistry &r, const std::string &name, VkFormat format, VkImageUsageFlags usage,
+               ExtentSpec extent) {
+                r.registerImage(name, format, usage, extent);
+            },
+            "name"_a, "format"_a, "usage"_a, "extent"_a = ExtentSpec::swapchain(),
+            "Create a transient image, reallocated when the window resizes. Images used as attachments "
+            "are created automatically; register them only to choose usage or extent up front.")
+        .def(
+            "upload_image",
+            [](ResourceRegistry &r, const std::string &name, HostArray data, VkFormat format, bool generateMipmaps) {
+                if (data.ndim() < 2)
+                {
+                    throw std::invalid_argument("upload_image: expected an array shaped (height, width[, channels])");
+                }
+                const auto height = static_cast<uint32_t>(data.shape(0));
+                const auto width  = static_cast<uint32_t>(data.shape(1));
+                if (data.nbytes() != static_cast<size_t>(width) * height * texelSize(format))
+                {
+                    throw std::invalid_argument("upload_image: array byte size doesn't match "
+                                                "height * width * bytes-per-texel of the format");
+                }
+                r.uploadImage(name, data.data(), width, height, format, generateMipmaps);
+            },
+            "name"_a, "data"_a, "format"_a, "generate_mipmaps"_a = false,
+            "Create a sampled image from an array shaped (height, width[, channels]).")
+        .def("has_buffer", &ResourceRegistry::hasBuffer, "name"_a)
+        .def("has_image", &ResourceRegistry::hasImage, "name"_a)
+        .def_prop_ro(
+            "extent",
+            [](const ResourceRegistry &r) {
+                return toTuple(r.getExtent());
+            },
+            "Current swapchain-sized extent as (width, height).");
+}
+
+void bindPasses(nb::module_ &m)
+{
+    nb::class_<CommandBuffer>(m, "CommandBuffer")
+        .def("draw", &CommandBuffer::draw, "vertex_count"_a, "instance_count"_a = 1, "first_vertex"_a = 0,
+             "first_instance"_a = 0)
+        .def("draw_indexed", &CommandBuffer::drawIndexed, "index_count"_a, "instance_count"_a = 1, "first_index"_a = 0,
+             "vertex_offset"_a = 0, "first_instance"_a = 0)
+        .def("dispatch", &CommandBuffer::dispatch, "x"_a, "y"_a, "z"_a = 1)
+        .def("set_viewport", &CommandBuffer::setViewport, "x"_a, "y"_a, "width"_a, "height"_a, "min_depth"_a = 0.0f,
+             "max_depth"_a = 1.0f)
+        .def("set_scissor", &CommandBuffer::setScissor, "x"_a, "y"_a, "width"_a, "height"_a);
+
+    nb::class_<PassContext>(m, "PassContext",
+                            "Handed to a pass's execute callback. Only valid during that call — don't keep it.")
+        .def_prop_ro("cmd", &PassContext::cmd, nb::rv_policy::reference_internal)
+        .def_prop_ro("rendering_extent",
+                     [](const PassContext &ctx) {
+                         return toTuple(ctx.renderingExtent());
+                     })
+        .def(
+            "extent",
+            [](const PassContext &ctx, ImageHandle image) {
+                return toTuple(ctx.extent(image));
+            },
+            "image"_a)
+        .def(
+            "push_constants",
+            [](PassContext &ctx, VkShaderStageFlags stages, HostArray data, uint32_t offset) {
+                ctx.cmd().pushConstants(ctx.pipelineLayout(), stages, data.data(), static_cast<uint32_t>(data.nbytes()),
+                                        offset);
+            },
+            "stages"_a, "data"_a, "offset"_a = 0,
+            "Push `data` (e.g. a float32 numpy array) into the pass's push-constant block.");
+
+    const auto ref = nb::rv_policy::reference;
+
+    nb::class_<PassBuilder>(m, "PassBuilder", "Declares one pass. Every method returns the builder for chaining.")
+        .def_prop_ro("handle", &PassBuilder::handle)
+        .def("type", &PassBuilder::type, "type"_a, ref)
+        // Shaders: bytes are SPIR-V; a path ending in .spv is loaded as SPIR-V; any other path is GLSL,
+        // compiled now (so syntax errors raise ShaderCompileError here, at the declaring line).
+        .def(
+            "vert_shader",
+            [](PassBuilder &b, nb::bytes spirv) -> PassBuilder & {
+                return b.vertShader(bytesToSpirv(spirv));
+            },
+            "spirv"_a, ref)
+        .def(
+            "vert_shader",
+            [](PassBuilder &b, const fs::path &path) -> PassBuilder & {
+                return isSpirvFile(path) ? b.vertShader(path.string())
+                                         : b.vertShader(lr::compileGlslFile(path, ShaderStage::Vertex));
+            },
+            "path"_a, ref)
+        .def(
+            "frag_shader",
+            [](PassBuilder &b, nb::bytes spirv) -> PassBuilder & {
+                return b.fragShader(bytesToSpirv(spirv));
+            },
+            "spirv"_a, ref)
+        .def(
+            "frag_shader",
+            [](PassBuilder &b, const fs::path &path) -> PassBuilder & {
+                return isSpirvFile(path) ? b.fragShader(path.string())
+                                         : b.fragShader(lr::compileGlslFile(path, ShaderStage::Fragment));
+            },
+            "path"_a, ref)
+        .def(
+            "compute_shader",
+            [](PassBuilder &b, nb::bytes spirv) -> PassBuilder & {
+                return b.computeShader(bytesToSpirv(spirv));
+            },
+            "spirv"_a, ref)
+        .def(
+            "compute_shader",
+            [](PassBuilder &b, const fs::path &path) -> PassBuilder & {
+                return isSpirvFile(path) ? b.computeShader(path.string())
+                                         : b.computeShader(lr::compileGlslFile(path, ShaderStage::Compute));
+            },
+            "path"_a, ref)
+        .def("push_constant_size", &PassBuilder::pushConstantSize, "size"_a, "stages"_a, ref)
+        .def("topology", &PassBuilder::topology, "topology"_a, ref)
+        .def(
+            "vertex_layout",
+            [](PassBuilder &b, std::vector<VkVertexInputBindingDescription> bindings,
+               std::vector<VkVertexInputAttributeDescription> attributes) -> PassBuilder & {
+                return b.vertexLayout(std::move(bindings), std::move(attributes));
+            },
+            "bindings"_a, "attributes"_a, ref)
+        .def("sampled_image", &PassBuilder::sampledImage, "binding"_a, "image"_a, "stages"_a, ref)
+        .def("sampled_depth", &PassBuilder::sampledDepth, "binding"_a, "image"_a, "stages"_a, ref)
+        .def(
+            "storage_image_read",
+            [](PassBuilder &b, uint32_t binding, ImageHandle image, VkShaderStageFlags stages) -> PassBuilder & {
+                return b.storageImageRead(binding, image, stages);
+            },
+            "binding"_a, "image"_a, "stages"_a, ref)
+        .def(
+            "storage_image_write",
+            [](PassBuilder &b, uint32_t binding, ImageHandle image, VkShaderStageFlags stages) -> PassBuilder & {
+                return b.storageImageWrite(binding, image, stages);
+            },
+            "binding"_a, "image"_a, "stages"_a, ref)
+        .def(
+            "storage_image_read_write",
+            [](PassBuilder &b, uint32_t binding, ImageHandle image, VkShaderStageFlags stages) -> PassBuilder & {
+                return b.storageImageReadWrite(binding, image, stages);
+            },
+            "binding"_a, "image"_a, "stages"_a, ref)
+        .def("uniform_buffer", &PassBuilder::uniformBuffer, "binding"_a, "buffer"_a, "stages"_a, ref)
+        .def("storage_buffer_read", &PassBuilder::storageBufferRead, "binding"_a, "buffer"_a, "stages"_a, ref)
+        .def("storage_buffer_write", &PassBuilder::storageBufferWrite, "binding"_a, "buffer"_a, "stages"_a, ref)
+        .def("storage_buffer_read_write", &PassBuilder::storageBufferReadWrite, "binding"_a, "buffer"_a, "stages"_a,
+             ref)
+        .def("vertex_buffer", &PassBuilder::vertexBuffer, "binding"_a, "buffer"_a, ref)
+        .def("index_buffer", &PassBuilder::indexBuffer, "buffer"_a, ref)
+        .def(
+            "color_attachment",
+            [](PassBuilder &b, ImageHandle image, VkFormat format, VkAttachmentLoadOp loadOp,
+               std::array<float, 4> clearColor, ExtentSpec extent) -> PassBuilder & {
+                return b.colorAttachment(image, format, loadOp, colorClear(clearColor), extent);
+            },
+            "image"_a, "format"_a, "load_op"_a = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            "clear_color"_a = std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}, "extent"_a = ExtentSpec::swapchain(), ref)
+        .def(
+            "depth_attachment",
+            [](PassBuilder &b, ImageHandle image, VkFormat format, VkAttachmentLoadOp loadOp, float clearDepth,
+               ExtentSpec extent) -> PassBuilder & {
+                VkClearValue clear{};
+                clear.depthStencil = {clearDepth, 0};
+                return b.depthAttachment(image, format, loadOp, clear, extent);
+            },
+            "image"_a, "format"_a = VK_FORMAT_D32_SFLOAT, "load_op"_a = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            "clear_depth"_a = 1.0f, "extent"_a = ExtentSpec::swapchain(), ref)
+        .def(
+            "depends_on",
+            [](PassBuilder &b, PassHandle dep) -> PassBuilder & {
+                return b.dependsOn(dep);
+            },
+            "dependency"_a, ref)
+        .def(
+            "depends_on",
+            [](PassBuilder &b, std::vector<PassHandle> deps) -> PassBuilder & {
+                return b.dependsOn(std::move(deps));
+            },
+            "dependencies"_a, ref)
+        .def(
+            "execute",
+            [](PassBuilder &b, nb::callable callback) -> PassBuilder & {
+                return b.execute([slot = g_callbackSlots.hold(std::move(callback))](PassContext &ctx) {
+                    if (*slot)
+                    {
+                        g_callbackErrors.guard([&] {
+                            (*slot)(nb::cast(&ctx, nb::rv_policy::reference));
+                        });
+                    }
+                });
+            },
+            "callback"_a, "Record this pass's commands: callback(ctx: PassContext), called every frame.", ref);
+
+    nb::class_<FrameGraph>(m, "FrameGraph")
+        .def("add_pass", &FrameGraph::addPass, "name"_a, nb::keep_alive<0, 1>(),
+             "Start declaring a pass; passes run in dependency order, derived from the resources they use.")
+        .def("image", &FrameGraph::image, "name"_a, "Handle for a named image (\"swapchain\" is the window).")
+        .def("buffer", &FrameGraph::buffer, "name"_a, "Handle for a named buffer.")
+        .def("compile", &FrameGraph::compile, "Rebuild pipelines and barriers after changing passes while running.")
+        .def("debug_dump", &FrameGraph::debugDump);
+}
+
+void bindViewer(nb::module_ &m)
+{
+    nb::class_<Viewer>(m, "Viewer", "Window + Vulkan device + frame graph. Declare passes, then call run().")
+        .def(
+            "__init__",
+            [](Viewer *self, const std::string &title, int width, int height, bool validation) {
+                new (self) Viewer(Viewer::Config{
+                    .title            = title,
+                    .width            = width,
+                    .height           = height,
+                    .enableValidation = validation,
+                });
+            },
+            "title"_a = "lr", "width"_a = 1600, "height"_a = 900, "validation"_a = true)
+        .def_prop_ro("frame_graph", &Viewer::frameGraph, nb::rv_policy::reference_internal)
+        .def_prop_ro("resources", &Viewer::resources, nb::rv_policy::reference_internal)
+        .def_prop_ro("swapchain_format", &Viewer::swapchainFormat)
+        .def(
+            "on_update",
+            [](Viewer &v, nb::callable callback) {
+                v.onUpdate([slot = g_callbackSlots.hold(std::move(callback))](float dt, VkExtent2D extent) {
+                    if (*slot)
+                    {
+                        g_callbackErrors.guard([&] {
+                            (*slot)(dt, toTuple(extent));
+                        });
+                    }
+                });
+            },
+            "callback"_a, "callback(dt: float, extent: (width, height)), called every frame before rendering.")
+        .def(
+            "on_late_update",
+            [](Viewer &v, nb::callable callback) {
+                v.onLateUpdate([slot = g_callbackSlots.hold(std::move(callback))](float dt, VkExtent2D extent) {
+                    if (*slot)
+                    {
+                        g_callbackErrors.guard([&] {
+                            (*slot)(dt, toTuple(extent));
+                        });
+                    }
+                });
+            },
+            "callback"_a, "Like on_update, but after every on_update callback has run.")
+        .def(
+            "run",
+            [](Viewer &v) {
+                // The ImGui pass composites onto the swapchain, so it must come after every user pass.
+                if (!v.hasImguiPass())
+                {
+                    v.addImguiPass();
+                }
+                g_callbackErrors.running = &v;
+                try
+                {
+                    v.run();
+                } catch (...)
+                {
+                    g_callbackErrors.running = nullptr;
+                    g_callbackErrors.error.reset();
+                    g_callbackSlots.releaseAll();
+                    throw;
+                }
+                g_callbackErrors.running = nullptr;
+                // The window is closed, so no callback can fire again.
+                g_callbackSlots.releaseAll();
+                g_callbackErrors.rethrowPending();
+            },
+            "Compile the frame graph and run until the window closes. An exception raised in any callback "
+            "closes the window and is re-raised here. A Viewer runs once: its callbacks are released on return.")
+        .def("close", &Viewer::requestClose, "Ask run() to return after the current frame.");
+}
+
+} // namespace
+
+NB_MODULE(_lr, m)
+{
+    m.doc() = "Python frontend for the lightweight renderer's frame graph.";
+
+    nb::exception<lr::ShaderCompileError>(m, "ShaderCompileError");
+
+    bindEnums(m);
+    bindValueTypes(m);
+    bindResources(m);
+    bindPasses(m);
+    bindViewer(m);
+
+    m.def(
+        "compile_glsl",
+        [](const fs::path &path, std::optional<ShaderStage> stage, const std::vector<fs::path> &includeDirs) {
+            return spirvToBytes(lr::compileGlslFile(path, stage, includeDirs));
+        },
+        "path"_a, "stage"_a = nb::none(), "include_dirs"_a = std::vector<fs::path>{},
+        "Compile a GLSL file to SPIR-V bytes. Stage is inferred from .vert/.frag/.comp unless given.");
+    m.def(
+        "compile_glsl_source",
+        [](const std::string &source, ShaderStage stage, const std::string &name,
+           const std::vector<fs::path> &includeDirs) {
+            return spirvToBytes(lr::compileGlslSource(source, stage, name, includeDirs));
+        },
+        "source"_a, "stage"_a, "name"_a = "<source>", "include_dirs"_a = std::vector<fs::path>{},
+        "Compile GLSL source text to SPIR-V bytes.");
+
+    m.attr("SHADER_DIR") = lr::paths::shaderDir;
+    m.attr("ASSET_DIR")  = lr::paths::assetDir;
+
+    // Covers scripts that never reach run() (or exit mid-way): drop the callbacks while the
+    // interpreter can still destroy the Viewers they keep alive.
+    nb::module_::import_("atexit").attr("register")(nb::cpp_function([] {
+        g_callbackSlots.releaseAll();
+    }));
+}
