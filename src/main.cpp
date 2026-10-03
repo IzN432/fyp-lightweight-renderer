@@ -9,6 +9,7 @@
 #include "core/passes/ibl/IblPass.hpp"
 #include "core/passes/pbr/PbrPass.hpp"
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
+#include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
 #include "core/passes/overlaylines/OverlayLinesPass.hpp"
 #include "core/passes/overlaypoints/OverlayPointsPass.hpp"
 
@@ -457,6 +458,16 @@ try
     });
     pbrPass.uploadResources(viewer.resources());
     pbrPass.build(viewer.frameGraph());
+
+    // Keep the geometry overlay stage alive even when it has no instances. Besides remaining
+    // available for future editor visuals (for example, bones), it owns the per-frame clear of
+    // the shared overlay color/depth targets before later overlay passes append to them.
+    lr::OverlayGeometryPass overlayGeometryPass({
+        .cameraBufferResourceName = sceneManager.cameraBufferName(),
+    });
+    overlayGeometryPass.uploadResources(viewer.resources());
+    overlayGeometryPass.build(viewer.frameGraph());
+    overlayGeometryPass.setInstances({});
 
     lr::OverlayLinesPass overlayLinesPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
