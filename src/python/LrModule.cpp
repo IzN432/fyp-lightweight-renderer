@@ -226,6 +226,37 @@ void bindEnums(nb::module_ &m)
         .value("CLEAR", VK_ATTACHMENT_LOAD_OP_CLEAR)
         .value("DONT_CARE", VK_ATTACHMENT_LOAD_OP_DONT_CARE);
 
+    nb::enum_<lr::BlendMode>(m, "BlendMode")
+        .value("OPAQUE", lr::BlendMode::Opaque)
+        .value("ALPHA", lr::BlendMode::Alpha)
+        .value("PREMULTIPLIED_ALPHA", lr::BlendMode::PremultipliedAlpha)
+        .value("ADDITIVE", lr::BlendMode::Additive);
+
+    nb::enum_<VkPolygonMode>(m, "PolygonMode")
+        .value("FILL", VK_POLYGON_MODE_FILL)
+        .value("LINE", VK_POLYGON_MODE_LINE)
+        .value("POINT", VK_POLYGON_MODE_POINT);
+
+    nb::enum_<VkCullModeFlagBits>(m, "CullMode", nb::is_flag(), nb::is_arithmetic())
+        .value("NONE", VK_CULL_MODE_NONE)
+        .value("FRONT", VK_CULL_MODE_FRONT_BIT)
+        .value("BACK", VK_CULL_MODE_BACK_BIT)
+        .value("FRONT_AND_BACK", VK_CULL_MODE_FRONT_AND_BACK);
+
+    nb::enum_<VkFrontFace>(m, "FrontFace")
+        .value("COUNTER_CLOCKWISE", VK_FRONT_FACE_COUNTER_CLOCKWISE)
+        .value("CLOCKWISE", VK_FRONT_FACE_CLOCKWISE);
+
+    nb::enum_<VkCompareOp>(m, "CompareOp")
+        .value("NEVER", VK_COMPARE_OP_NEVER)
+        .value("LESS", VK_COMPARE_OP_LESS)
+        .value("EQUAL", VK_COMPARE_OP_EQUAL)
+        .value("LESS_OR_EQUAL", VK_COMPARE_OP_LESS_OR_EQUAL)
+        .value("GREATER", VK_COMPARE_OP_GREATER)
+        .value("NOT_EQUAL", VK_COMPARE_OP_NOT_EQUAL)
+        .value("GREATER_OR_EQUAL", VK_COMPARE_OP_GREATER_OR_EQUAL)
+        .value("ALWAYS", VK_COMPARE_OP_ALWAYS);
+
     nb::enum_<PassType>(m, "PassType")
         .value("GEOMETRY", PassType::Geometry)
         .value("FULLSCREEN", PassType::Fullscreen)
@@ -462,6 +493,16 @@ void bindPasses(nb::module_ &m)
                 return b.vertexLayout(std::move(bindings), std::move(attributes));
             },
             "bindings"_a, "attributes"_a, ref)
+        .def("blend", &PassBuilder::blend, "mode"_a, ref,
+             "Blend mode for all color attachments. Blending reads them, so this pass also runs after "
+             "whatever wrote them earlier (use load_op=LOAD to blend over that content).")
+        .def("polygon_mode", &PassBuilder::polygonMode, "mode"_a, ref, "FILL (default), LINE (wireframe) or POINT.")
+        .def("cull", &PassBuilder::cull, "mode"_a, "front_face"_a = VK_FRONT_FACE_COUNTER_CLOCKWISE, ref,
+             "Default: BACK for geometry passes, NONE for fullscreen ones.")
+        .def("depth", &PassBuilder::depth, "test"_a, "write"_a, "compare"_a = VK_COMPARE_OP_LESS, ref,
+             "Default: test and write on (compare LESS) exactly when the pass has a depth attachment.")
+        .def("depth_bias", &PassBuilder::depthBias, "constant"_a, "slope"_a = 0.0f, ref,
+             "Offset rasterized depth, e.g. negative values to draw a wireframe over its own solid surface.")
         .def("sampled_image", &PassBuilder::sampledImage, "binding"_a, "image"_a, "stages"_a, ref)
         .def("sampled_depth", &PassBuilder::sampledDepth, "binding"_a, "image"_a, "stages"_a, ref)
         .def(

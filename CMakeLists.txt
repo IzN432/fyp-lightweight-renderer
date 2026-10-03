@@ -278,7 +278,10 @@ if(LR_BUILD_PYTHON)
             add_test(NAME python.spinning_torus
                 COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/spinning_torus.py"
                     --frames 120)
-            set_tests_properties(python.bindings python.spinning_torus PROPERTIES
+            add_test(NAME python.pipeline_state
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/pipeline_state.py"
+                    --frames 120)
+            set_tests_properties(python.bindings python.spinning_torus python.pipeline_state PROPERTIES
                 ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
                 # nanobind prints leak reports to stderr without failing the process.
                 FAIL_REGULAR_EXPRESSION "nanobind: leaked|\\[error\\]")

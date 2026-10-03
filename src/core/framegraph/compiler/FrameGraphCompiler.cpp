@@ -262,7 +262,20 @@ void FrameGraphCompiler::buildPipelines(CompiledFrameGraph &graph) const
             }
         }
 
+        const GraphicsState &state = pass.graphics;
+        if ((state.depthTest.value_or(false) || state.depthWrite.value_or(false)) && depthFormat == VK_FORMAT_UNDEFINED)
+        {
+            throw std::runtime_error("FrameGraph: pass '" + pass.name +
+                                     "' enables depth test/write but has no depth attachment");
+        }
+        if (state.polygonMode != VK_POLYGON_MODE_FILL && !m_ctx.supportsWireframe())
+        {
+            throw std::runtime_error("FrameGraph: pass '" + pass.name +
+                                     "' uses a line/point polygon mode, but this device lacks fillModeNonSolid");
+        }
+
         GraphicsPipeline::Config config{};
+        config.state                   = state;
         config.vertShader              = pass.vertShader;
         config.fragShader              = pass.fragShader;
         config.vertexBindings          = pass.vertexBindings;

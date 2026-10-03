@@ -83,6 +83,46 @@ PassBuilder &PassBuilder::vertexLayout(std::vector<VkVertexInputBindingDescripti
     return *this;
 }
 
+PassBuilder &PassBuilder::blend(BlendMode mode)
+{
+    desc().graphics.blend = mode;
+    if (mode != BlendMode::Opaque)
+    {
+        for (ImageUse &use : desc().imageUses)
+        {
+            if (use.usage == ImageUsage::ColorAttachment)
+            {
+                use.access = AccessMode::ReadWrite;
+            }
+        }
+    }
+    return *this;
+}
+PassBuilder &PassBuilder::polygonMode(VkPolygonMode mode)
+{
+    desc().graphics.polygonMode = mode;
+    return *this;
+}
+PassBuilder &PassBuilder::cull(VkCullModeFlags mode, VkFrontFace frontFace)
+{
+    desc().graphics.cullMode  = mode;
+    desc().graphics.frontFace = frontFace;
+    return *this;
+}
+PassBuilder &PassBuilder::depth(bool test, bool write, VkCompareOp compare)
+{
+    desc().graphics.depthTest    = test;
+    desc().graphics.depthWrite   = write;
+    desc().graphics.depthCompare = compare;
+    return *this;
+}
+PassBuilder &PassBuilder::depthBias(float constant, float slope)
+{
+    desc().graphics.depthBiasConstant = constant;
+    desc().graphics.depthBiasSlope    = slope;
+    return *this;
+}
+
 PassBuilder &PassBuilder::sampledImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages)
 {
     requireShaderStages(stages, "sampled image");
@@ -199,7 +239,9 @@ PassBuilder &PassBuilder::colorAttachment(ImageHandle image, VkFormat format, Vk
     desc().imageUses.push_back(
         {.image      = image,
          .usage      = ImageUsage::ColorAttachment,
-         .access     = loadOp == VK_ATTACHMENT_LOAD_OP_LOAD ? AccessMode::ReadWrite : AccessMode::Write,
+         .access     = loadOp == VK_ATTACHMENT_LOAD_OP_LOAD || desc().graphics.blend != BlendMode::Opaque
+                           ? AccessMode::ReadWrite
+                           : AccessMode::Write,
          .format     = format,
          .extent     = extent,
          .loadOp     = loadOp,

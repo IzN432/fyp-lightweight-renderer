@@ -8,6 +8,7 @@
 
 #include <functional>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -45,6 +46,31 @@ enum class BufferUsage
     Storage,
     Vertex,
     Index
+};
+
+// Applied to every color attachment of a pass.
+enum class BlendMode
+{
+    Opaque,             // no blending
+    Alpha,              // src * a + dst * (1 - a)
+    PremultipliedAlpha, // src + dst * (1 - a)
+    Additive,           // src + dst
+};
+
+// Fixed-function state for Geometry/Fullscreen passes. Unset values keep the defaults the engine's
+// own passes rely on: back-face culling for Geometry passes (none for Fullscreen), and depth test +
+// write exactly when the pass has a depth attachment.
+struct GraphicsState
+{
+    BlendMode                      blend       = BlendMode::Opaque;
+    VkPolygonMode                  polygonMode = VK_POLYGON_MODE_FILL;
+    std::optional<VkCullModeFlags> cullMode;
+    VkFrontFace                    frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    std::optional<bool>            depthTest;
+    std::optional<bool>            depthWrite;
+    VkCompareOp                    depthCompare      = VK_COMPARE_OP_LESS;
+    float                          depthBiasConstant = 0.0f;
+    float                          depthBiasSlope    = 0.0f;
 };
 
 inline constexpr uint32_t noDescriptorBinding = std::numeric_limits<uint32_t>::max();
@@ -106,6 +132,7 @@ struct PassDesc
     VkPrimitiveTopology                            topology           = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     std::vector<VkVertexInputBindingDescription>   vertexBindings;
     std::vector<VkVertexInputAttributeDescription> vertexAttributes;
+    GraphicsState                                  graphics;
 
     std::vector<ImageUse>              imageUses;
     std::vector<BufferUse>             bufferUses;

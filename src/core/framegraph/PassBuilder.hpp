@@ -30,6 +30,14 @@ public:
     PassBuilder &vertexLayout(std::vector<VkVertexInputBindingDescription>   bindings,
                               std::vector<VkVertexInputAttributeDescription> attributes);
 
+    // Fixed-function state (Geometry/Fullscreen passes) — see GraphicsState for the defaults.
+    // Blending reads the attachments, so it also orders this pass after their earlier writers.
+    PassBuilder &blend(BlendMode mode);
+    PassBuilder &polygonMode(VkPolygonMode mode);
+    PassBuilder &cull(VkCullModeFlags mode, VkFrontFace frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    PassBuilder &depth(bool test, bool write, VkCompareOp compare = VK_COMPARE_OP_LESS);
+    PassBuilder &depthBias(float constant, float slope = 0.0f);
+
     PassBuilder &sampledImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages);
     PassBuilder &sampledDepth(uint32_t binding, ImageHandle image, VkShaderStageFlags stages);
     PassBuilder &sampledImageArray(uint32_t binding, ImageHandle images, uint32_t count, VkShaderStageFlags stages);

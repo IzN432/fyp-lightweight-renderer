@@ -38,7 +38,7 @@ existing pass's behaviour.
 `core/vulkan/ShaderLoader.hpp`; `PassDesc` / `PassBuilder` / `GraphicsPipeline` / `ComputePipeline` /
 `FrameGraphCompiler` carry `ShaderCode`; `CommandBuffer::pushConstants(void*)`; `glslang` in `vcpkg.json`.
 
-## Step 1b — minimal Python module ✅
+## Step 1b — minimal Python module ☑️ (committed a9900d7)
 
 **Goal:** a nanobind module `lr` exposing `Viewer`, `ResourceRegistry`, `FrameGraph`, `PassBuilder`,
 `PassContext`, `CommandBuffer`, curated Vulkan enums, and numpy-backed uploads.
@@ -94,11 +94,62 @@ SceneManager buffers, which aren't bound yet, so a port wouldn't show anything t
 `tests/python/test_bindings.py`; `Viewer::{swapchainFormat, hasImguiPass, requestClose}` and
 `Window::requestClose`; Python block in `CMakeLists.txt` (`LR_BUILD_PYTHON`, default ON).
 
-## Step 2 — pipeline state on `PassBuilder` ⬜
+## Step 2 — pipeline state on `PassBuilder` ✅
 
 **Goal:** blend, cull, depth test/write/compare and polygon mode configurable per pass (from C++ and Python).
 
-**Demo:** a Python script draws overlapping alpha-blended quads and a wireframe mesh over a solid one.
+**Demo:**
+```
+PYTHONPATH=build/python python examples/python/pipeline_state.py
+```
+A slowly turning torus drawn by three passes into the window
+([examples/python/pipeline_state.py](examples/python/pipeline_state.py)):
+- **"solid"** uses the default state (back-face culling, depth test + write).
+- **"wire"** draws the same mesh as a clean wireframe on top: `polygon_mode(LINE)`,
+  `depth(test=True, write=False, compare=LESS_OR_EQUAL)`, and `depth_bias(-1, -1)` so the lines
+  don't z-fight with their own surface.
+- **"glass"** draws three overlapping alpha-blended quads: `blend(ALPHA)`, `cull(NONE)`, and
+  `depth(test=True, write=False)`. The torus hides them where it's in front, and they tint it where
+  they're in front.
+
+**Result (2026-10-04):**
+- `ctest -C Debug` — 11/11 pass. New: `python.pipeline_state` (120 frames, fails on any `[error]` or leak),
+  `framegraph.topology` "blending reads color attachments", and two cases in `python.bindings`
+  (`test_pipeline_state_runs`, and `test_invalid_pipeline_state_raises_at_compile`, which checks the error
+  names the pass).
+- Screenshot confirmed all three effects. There were no validation errors or warnings, which matters
+  most for blending: the new barrier read access passes validation.
+- `renderer.exe` is unchanged (same single pre-existing `inTangent` warning); with no state set, every
+  default resolves to the old hard-coded values.
+
+**API:**
+- **C++:** `PassBuilder::blend(BlendMode)`, `polygonMode(VkPolygonMode)`,
+  `cull(VkCullModeFlags, VkFrontFace = CCW)`, `depth(test, write, VkCompareOp = LESS)` and
+  `depthBias(constant, slope = 0)`. They're stored in `PassDesc::graphics` (`GraphicsState`).
+- **Python:** the same in snake_case, plus enums `BlendMode` (`OPAQUE`/`ALPHA`/`PREMULTIPLIED_ALPHA`/
+  `ADDITIVE`), `PolygonMode`, `CullMode` (flag), `FrontFace` and `CompareOp`.
+
+**Behaviour:**
+- **Defaults:** anything left unset keeps the old behaviour: `BACK` culling for geometry passes,
+  `NONE` for fullscreen ones, and depth test + write exactly when there's a depth attachment.
+- **Blending and ordering:** any mode other than `OPAQUE` marks the pass's colour attachments
+  read-write, regardless of call order and even with `load_op=CLEAR`. This makes the barrier include
+  `COLOR_ATTACHMENT_READ` and orders the pass after the attachment's earlier writer.
+- **Compile-time checks:** `compile()` / `run()` raise, naming the pass, if depth test or write is
+  enabled without a depth attachment, or if `LINE`/`POINT` mode is requested on a device without
+  `fillModeNonSolid`.
+- **Device feature:** `fillModeNonSolid` is now enabled whenever the device supports it, and exposed as
+  `VulkanContext::supportsWireframe()`.
+
+**Not done (deliberately):**
+- Blend mode is per pass, not per attachment.
+- No custom blend factors.
+- No line width (that would need the `wideLines` feature).
+
+**Files:** `GraphicsState`/`BlendMode` in `PassDefinition.hpp`; `PassBuilder`, `GraphicsPipeline`,
+`FrameGraphCompiler` and `VulkanContext` changes; `examples/python/{pipeline_state.py, meshes.py}` and
+`shaders/{solid.frag, wire.frag, glass.vert, glass.frag}`. `spinning_torus.py` now imports its mesh from
+`meshes.py`.
 
 ## Step 3 — shader reflection and Python-friendly errors ⬜
 

@@ -24,6 +24,7 @@ public:
         std::vector<VkVertexInputAttributeDescription> vertexAttributes; // empty for Fullscreen passes
         PassType                                       passType = PassType::Fullscreen;
         VkPrimitiveTopology                            topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        GraphicsState                                  state;
         std::vector<VkFormat>                          colorAttachmentFormats;
         VkFormat                                       depthAttachmentFormat = VK_FORMAT_UNDEFINED;
         VkPipelineLayout                               layout = VK_NULL_HANDLE; // set by DescriptorAllocator

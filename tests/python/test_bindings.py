@@ -22,8 +22,9 @@ void main() { outColor = pc.color; }
 """
 
 
-def make_viewer(on_execute=None):
-    """A viewer with one fullscreen pass (SPIR-V supplied as bytes) drawing to the swapchain."""
+def make_viewer(on_execute=None, configure=None):
+    """A viewer with one fullscreen pass (SPIR-V supplied as bytes) drawing to the swapchain.
+    `configure(builder)` can add extra state to that pass."""
     viewer = lr.Viewer(title="lr binding test", width=320, height=240)
     fg = viewer.frame_graph
     tint = np.array([0.2, 0.4, 0.6, 1.0], dtype=np.float32)
@@ -34,7 +35,7 @@ def make_viewer(on_execute=None):
         ctx.push_constants(lr.Stage.FRAGMENT, tint)
         ctx.cmd.draw(3)
 
-    (
+    builder = (
         fg.add_pass("tint")
         .type(lr.PassType.FULLSCREEN)
         .vert_shader(lr.compile_glsl_source(CLEAR_VERT, lr.ShaderStage.VERTEX, "clear.vert"))
@@ -43,6 +44,8 @@ def make_viewer(on_execute=None):
         .color_attachment(fg.image("swapchain"), viewer.swapchain_format)
         .execute(execute)
     )
+    if configure:
+        configure(builder)
     return viewer
 
 
@@ -123,6 +126,27 @@ def test_resource_errors_raise_immediately():
         raise AssertionError("expected ValueError for a mismatched image upload")
 
 
+def test_pipeline_state_runs():
+    def configure(builder):
+        builder.blend(lr.BlendMode.ADDITIVE).cull(lr.CullMode.NONE)
+
+    viewer = make_viewer(configure=configure)
+    frames = []
+    viewer.on_update(lambda dt, extent: (frames.append(dt), len(frames) >= 5 and viewer.close()))
+    viewer.run()
+    assert len(frames) == 5
+
+
+def test_invalid_pipeline_state_raises_at_compile():
+    viewer = make_viewer(configure=lambda builder: builder.depth(test=True, write=True))
+    try:
+        viewer.run()
+    except RuntimeError as e:
+        assert "'tint'" in str(e) and "no depth attachment" in str(e), str(e)
+    else:
+        raise AssertionError("expected RuntimeError for depth state without a depth attachment")
+
+
 def main():
     tests = [
         test_compile_errors_raise_with_location,
@@ -130,6 +154,8 @@ def main():
         test_update_callback_exception_is_reraised,
         test_execute_callback_exception_is_reraised,
         test_resource_errors_raise_immediately,
+        test_pipeline_state_runs,
+        test_invalid_pipeline_state_raises_at_compile,
     ]
     for test in tests:
         test()

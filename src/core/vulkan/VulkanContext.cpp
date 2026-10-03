@@ -461,6 +461,12 @@ void VulkanContext::createDevice()
     features2.features.samplerAnisotropy = VK_TRUE;
     features2.features.geometryShader    = VK_TRUE;
 
+    // Wireframe (VK_POLYGON_MODE_LINE) passes need fillModeNonSolid; enable it only where supported.
+    VkPhysicalDeviceFeatures supported{};
+    vkGetPhysicalDeviceFeatures(m_physicalDevice, &supported);
+    m_fillModeNonSolid                  = supported.fillModeNonSolid == VK_TRUE;
+    features2.features.fillModeNonSolid = supported.fillModeNonSolid;
+
     VkDeviceCreateInfo ci{};
     ci.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     ci.pNext                   = &features2;

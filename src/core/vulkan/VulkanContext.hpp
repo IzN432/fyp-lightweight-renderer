@@ -66,6 +66,8 @@ public:
     const VkPhysicalDeviceProperties2      &getDeviceProperties() const { return m_deviceProperties2; }
     const VkPhysicalDeviceMemoryProperties &getMemoryProperties() const { return m_memProperties; }
     uint32_t                                getApiVersion() const { return m_apiVersion; }
+    // Optional features — enabled when the device supports them.
+    bool supportsWireframe() const { return m_fillModeNonSolid; }
 
     // Sync
     void waitIdle() const;
@@ -102,6 +104,7 @@ private:
     VkQueue m_transferQueue        = VK_NULL_HANDLE;
     int     m_transferQueueFamily  = -1;
     bool    m_hasDedicatedTransfer = false;
+    bool    m_fillModeNonSolid     = false;
 
     VkPhysicalDeviceMemoryProperties   m_memProperties{};
     VkPhysicalDeviceProperties2        m_deviceProperties2{};

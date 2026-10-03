@@ -260,6 +260,33 @@ void sameLayoutAttachmentHazard()
             "LOAD should synchronize the prior write to attachment read/write access");
 }
 
+void blendingReadsColorAttachments()
+{
+    // blend() may come before or after colorAttachment(); either way the attachment is read, even with CLEAR.
+    for (const bool blendFirst : {true, false})
+    {
+        lr::FrameGraphDefinition definition;
+        const auto               image = definition.image("color");
+        builder(definition, definition.addPass("opaque")).colorAttachment(image, VK_FORMAT_R16G16B16A16_SFLOAT);
+        auto blended = builder(definition, definition.addPass("blended"));
+        if (blendFirst)
+        {
+            blended.blend(lr::BlendMode::Alpha).colorAttachment(image, VK_FORMAT_R16G16B16A16_SFLOAT);
+        } else
+        {
+            blended.colorAttachment(image, VK_FORMAT_R16G16B16A16_SFLOAT).blend(lr::BlendMode::Alpha);
+        }
+
+        const auto order = sort(definition);
+        require(order == std::vector<size_t>({0, 1}), "a blended pass should run after the attachment's writer");
+        const auto plan = lr::framegraph::planVulkanBarriers(definition.passes(), definition.resources(), order);
+        require(plan.beforePass[1].size() == 1 &&
+                    (plan.beforePass[1][0].destination.access & VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT) != 0,
+                std::string("blending should synchronize to attachment read access (blend ") +
+                    (blendFirst ? "before" : "after") + " colorAttachment)");
+    }
+}
+
 void backbufferContractPlansPresentationTransitions()
 {
     lr::FrameGraphDefinition definition;
@@ -430,6 +457,7 @@ int main()
         {"definition snapshots", definitionSnapshotsPreserveHandleIdentityAndCallbacks},
         {"whole-resource barriers", barriersRemainWholeResource},
         {"same-layout attachment hazard", sameLayoutAttachmentHazard},
+        {"blending reads color attachments", blendingReadsColorAttachments},
         {"backbuffer presentation contract", backbufferContractPlansPresentationTransitions},
         {"external binding ownership", externalBindingsEnforceHandleOwnership},
         {"read-only image coalescing", readOnlyImageAccessesCoalesce},

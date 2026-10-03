@@ -60,12 +60,18 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext &ctx, const Config &confi
     viewportState.viewportCount = 1;
     viewportState.scissorCount  = 1;
 
+    const GraphicsState &state = config.state;
+
     VkPipelineRasterizationStateCreateInfo rasterization{};
     rasterization.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterization.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterization.cullMode    = (config.passType == PassType::Fullscreen) ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
-    rasterization.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterization.lineWidth   = 1.0f;
+    rasterization.polygonMode = state.polygonMode;
+    rasterization.cullMode =
+        state.cullMode.value_or(config.passType == PassType::Fullscreen ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
+    rasterization.frontFace               = state.frontFace;
+    rasterization.lineWidth               = 1.0f;
+    rasterization.depthBiasEnable         = state.depthBiasConstant != 0.0f || state.depthBiasSlope != 0.0f;
+    rasterization.depthBiasConstantFactor = state.depthBiasConstant;
+    rasterization.depthBiasSlopeFactor    = state.depthBiasSlope;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -74,17 +80,42 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext &ctx, const Config &confi
     bool                                  hasDepth = (config.depthAttachmentFormat != VK_FORMAT_UNDEFINED);
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable  = hasDepth ? VK_TRUE : VK_FALSE;
-    depthStencil.depthWriteEnable = hasDepth ? VK_TRUE : VK_FALSE;
-    depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS;
+    depthStencil.depthTestEnable  = state.depthTest.value_or(hasDepth) ? VK_TRUE : VK_FALSE;
+    depthStencil.depthWriteEnable = state.depthWrite.value_or(hasDepth) ? VK_TRUE : VK_FALSE;
+    depthStencil.depthCompareOp   = state.depthCompare;
 
-    // One blend attachment per color output — no blending by default
+    // One blend attachment per color output, all using the pass's blend mode.
     std::vector<VkPipelineColorBlendAttachmentState> blendAttachments(config.colorAttachmentFormats.size());
     for (auto &blend : blendAttachments)
     {
         blend.colorWriteMask =
             VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        blend.blendEnable = VK_FALSE;
+        blend.blendEnable  = state.blend == BlendMode::Opaque ? VK_FALSE : VK_TRUE;
+        blend.colorBlendOp = VK_BLEND_OP_ADD;
+        blend.alphaBlendOp = VK_BLEND_OP_ADD;
+        switch (state.blend)
+        {
+            case BlendMode::Opaque:
+                break;
+            case BlendMode::Alpha:
+                blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+                blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                break;
+            case BlendMode::PremultipliedAlpha:
+                blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+                blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                break;
+            case BlendMode::Additive:
+                blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+                blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+                blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                break;
+        }
     }
 
     VkPipelineColorBlendStateCreateInfo colorBlend{};
