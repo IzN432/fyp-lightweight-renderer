@@ -2,6 +2,8 @@
 
 #include "core/app/ImGuiWidgets.hpp"
 #include "core/editor/EditorContext.hpp"
+#include "core/editor/command/Command.hpp"
+#include "core/editor/command/CommandManager.hpp"
 #include "core/scene/Scene.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "core/scene/TransformComponent.hpp"
@@ -18,6 +20,43 @@
 
 namespace lr
 {
+
+namespace
+{
+
+class UpdateKeyframeCommand final : public Command
+{
+public:
+    UpdateKeyframeCommand(AnimatorComponent &animator, size_t clipIndex, size_t trackIndex,
+                          AnimationChannel before, AnimationChannel after, float playbackSeconds)
+        : m_animator(animator), m_clipIndex(clipIndex), m_trackIndex(trackIndex),
+          m_before(std::move(before)), m_after(std::move(after)), m_playbackSeconds(playbackSeconds)
+    {}
+
+    void execute() override { apply(m_after); }
+    void undo() override { apply(m_before); }
+
+private:
+    void apply(const AnimationChannel &channel)
+    {
+        if (m_clipIndex >= m_animator.clips().size() ||
+            m_trackIndex >= m_animator.clips()[m_clipIndex].tracks().size())
+        {
+            return;
+        }
+        m_animator.clips()[m_clipIndex].tracks()[m_trackIndex] = channel;
+        m_animator.seek(m_playbackSeconds);
+    }
+
+    AnimatorComponent &m_animator;
+    size_t              m_clipIndex;
+    size_t              m_trackIndex;
+    AnimationChannel    m_before;
+    AnimationChannel    m_after;
+    float               m_playbackSeconds;
+};
+
+} // namespace
 
 AnimatorComponent::AnimatorComponent(std::vector<AnimationClip> clips)
     : Component("AnimatorComponent"), m_clips(std::move(clips))
@@ -92,7 +131,7 @@ bool AnimatorComponent::addKeyframe(size_t trackIndex, float seconds)
 
 bool AnimatorComponent::beginKeyframeEdit(size_t trackIndex, size_t keyframeIndex)
 {
-    if (!m_activeClip || trackIndex >= m_clips[*m_activeClip].tracks().size())
+    if (!m_activeClip || m_keyframeEdit || trackIndex >= m_clips[*m_activeClip].tracks().size())
     {
         return false;
     }
@@ -117,6 +156,8 @@ bool AnimatorComponent::beginKeyframeEdit(size_t trackIndex, size_t keyframeInde
                                       std::decay_t<decltype(track)>::property(), seconds};
         if (editorContext())
         {
+            m_commandManager = &editorContext()->commands;
+            m_commandManager->beginTemporaryHistory();
             TransformTool tool = TransformTool::Scale;
             if constexpr (std::is_same_v<std::decay_t<decltype(track)>, TranslationTrack>)
             {
@@ -142,9 +183,12 @@ void AnimatorComponent::applyKeyframeEdit()
     }
 
     const KeyframeEdit edit = *m_keyframeEdit;
+    std::optional<AnimationChannel> before;
+    std::optional<AnimationChannel> after;
     if (edit.clipIndex < m_clips.size() && edit.trackIndex < m_clips[edit.clipIndex].tracks().size())
     {
         AnimationChannel &channel = m_clips[edit.clipIndex].tracks()[edit.trackIndex];
+        before = channel;
         Scene &scene = getOwningObject().scene();
         if (scene.contains(edit.target))
         {
@@ -171,6 +215,7 @@ void AnimatorComponent::applyKeyframeEdit()
                 }
                 track.setKeyframe(std::move(keyframe));
             }, channel);
+            after = channel;
         }
     }
     m_keyframeEdit.reset();
@@ -179,6 +224,16 @@ void AnimatorComponent::applyKeyframeEdit()
         m_transformEditService->endTransformEdit();
         m_transformEditService = nullptr;
     }
+    if (m_commandManager && before && after)
+    {
+        m_commandManager->replaceTemporaryHistory(std::make_unique<UpdateKeyframeCommand>(
+            *this, edit.clipIndex, edit.trackIndex, std::move(*before), std::move(*after), edit.seconds));
+    }
+    else if (m_commandManager && m_commandManager->hasTemporaryHistory())
+    {
+        m_commandManager->cancelTemporaryHistory();
+    }
+    m_commandManager = nullptr;
     markDirty();
 }
 
@@ -195,6 +250,11 @@ void AnimatorComponent::cancelKeyframeEdit()
         m_transformEditService->endTransformEdit();
         m_transformEditService = nullptr;
     }
+    if (m_commandManager && m_commandManager->hasTemporaryHistory())
+    {
+        m_commandManager->cancelTemporaryHistory();
+    }
+    m_commandManager = nullptr;
     seek(seconds);
 }
 

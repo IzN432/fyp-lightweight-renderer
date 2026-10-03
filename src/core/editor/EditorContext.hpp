@@ -6,6 +6,7 @@ namespace lr
 {
 
 class SceneObject;
+class CommandManager;
 
 enum class TransformTool
 {
@@ -27,6 +28,7 @@ public:
 struct EditorContext
 {
     TransformEditService &transformEdits;
+    CommandManager       &commands;
 };
 
 } // namespace lr

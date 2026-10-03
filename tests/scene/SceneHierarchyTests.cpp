@@ -1,5 +1,7 @@
 #include "core/editor/SceneObjectRotationHandler.hpp"
 #include "core/editor/SceneObjectScaleHandler.hpp"
+#include "core/editor/command/Command.hpp"
+#include "core/editor/command/CommandManager.hpp"
 #include "core/loaders/MaterialStore.hpp"
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/MeshStore.hpp"
@@ -11,11 +13,48 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <cassert>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
+namespace
+{
+
+class SetValueCommand final : public lr::Command
+{
+public:
+    SetValueCommand(int &value, int after) : m_value(value), m_before(value), m_after(after) {}
+    SetValueCommand(int &value, int before, int after) : m_value(value), m_before(before), m_after(after) {}
+    void execute() override { m_value = m_after; }
+    void undo() override { m_value = m_before; }
+
+private:
+    int &m_value;
+    int  m_before;
+    int  m_after;
+};
+
+} // namespace
+
 int main()
 {
+    int commandValue = 0;
+    lr::CommandManager scopedCommands;
+    scopedCommands.executeCommand(std::make_unique<SetValueCommand>(commandValue, 1));
+    scopedCommands.beginTemporaryHistory();
+    scopedCommands.executeCommand(std::make_unique<SetValueCommand>(commandValue, 2));
+    scopedCommands.cancelTemporaryHistory();
+    assert(commandValue == 1);
+
+    scopedCommands.beginTemporaryHistory();
+    scopedCommands.executeCommand(std::make_unique<SetValueCommand>(commandValue, 3));
+    scopedCommands.replaceTemporaryHistory(std::make_unique<SetValueCommand>(commandValue, 1, 4));
+    assert(commandValue == 4);
+    scopedCommands.undo();
+    assert(commandValue == 1);
+    scopedCommands.redo();
+    assert(commandValue == 4);
+
     lr::Scene scene;
     auto     &root = scene.createSceneObject();
     auto     &child = scene.createSceneObject();

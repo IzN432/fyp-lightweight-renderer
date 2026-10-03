@@ -58,7 +58,6 @@ void SceneObjectTransformController::beginTransformEdit(SceneObject &target, Tra
     m_temporaryTarget = &target;
     m_tool            = tool;
     m_cancelTemporaryEdit = std::move(cancel);
-    setRecordCommands(false);
     applyTarget(&target);
 }
 
@@ -67,7 +66,6 @@ void SceneObjectTransformController::endTransformEdit()
     m_temporaryTarget = nullptr;
     m_tool            = TransformTool::None;
     m_cancelTemporaryEdit = {};
-    setRecordCommands(true);
     applyTarget(m_selectedTarget);
 }
 
@@ -90,7 +88,6 @@ void SceneObjectTransformController::onObjectsDestroyed(std::span<const SceneObj
         else
         {
             m_temporaryTarget = nullptr;
-            setRecordCommands(true);
         }
     }
     applyTarget(target());

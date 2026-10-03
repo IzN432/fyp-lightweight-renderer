@@ -12,6 +12,7 @@ namespace lr
 {
 
 class TransformEditService;
+class CommandManager;
 
 class AnimatorComponent : public Component
 {
@@ -67,6 +68,7 @@ private:
     bool                       m_playing = false;
     std::optional<KeyframeEdit> m_keyframeEdit;
     TransformEditService      *m_transformEditService = nullptr;
+    CommandManager            *m_commandManager = nullptr;
 };
 
 } // namespace lr

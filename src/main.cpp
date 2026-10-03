@@ -535,7 +535,7 @@ try
 
     lr::SceneObjectTransformController transformController(
         sceneObjectHandler, sceneObjectRotationHandler, sceneObjectScaleHandler);
-    lr::EditorContext editorContext{transformController};
+    lr::EditorContext editorContext{transformController, commandManager};
     bool                objectTransformWindowOpen = false;
 
     lr::ArapTool arapTool(selectionManager, vertexManager, commandManager, meshComponent.mesh(), defaultHandler,
