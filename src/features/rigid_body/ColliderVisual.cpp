@@ -63,6 +63,10 @@ std::vector<OverlayLine> buildColliderOverlayLines(const Scene &scene)
     OverlayLineBuilder builder;
     for (const auto &object : scene.sceneObjects())
     {
+        if (!scene.contains(object->id()))
+        {
+            continue;
+        }
         if (!object->hasComponent<ColliderComponent>())
         {
             continue;

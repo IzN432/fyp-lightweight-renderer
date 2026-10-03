@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <span>
 #include <vector>
 
 #include "SceneObject.hpp"
@@ -65,6 +66,7 @@ public:
     // draw time. Must be called before initialize()/uploadMeshes().
     // so edits made after the initial upload won't reach the GPU.
     void addMeshObject(SceneObject &object);
+    SceneObject *removeSceneObjects(std::span<const SceneObjectId> ids);
 
     // The object currently targeted by vertex editing (SelectionManager, the vertex-picking
     // overlay's points buffer and heatmap analysis). The caller drives this from Scene Hierarchy
@@ -207,6 +209,7 @@ public:
     const IndexBufferUploadPerMeshResult &selectedMeshIndexRange() const;
     const IndexBufferUploadResult        &indexBuffer() const { return m_indexBuffer; }
     const std::vector<const TransformComponent *> &meshTransforms() const { return m_meshTransforms; }
+    const std::vector<SceneObject *> &geometryObjects() const { return m_geometryObjects; }
 
     const MaterialUploadResult &materialUploadResult() const { return m_materialUploadResult; }
 
@@ -266,6 +269,7 @@ private:
     std::vector<const Mesh *>      m_geometryMeshes;
     std::vector<const TransformComponent *> m_meshTransforms;
     std::vector<Skin *>            m_meshSkins;
+    std::vector<SceneObject *>      m_geometryObjects;
     VertexBufferUploadConfig       m_meshPositionUploadConfig;
     VertexBufferUploadConfig       m_meshAttributeUploadConfig;
     GpuMaterialLayout              m_materialLayout;

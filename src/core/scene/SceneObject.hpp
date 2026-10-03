@@ -31,6 +31,7 @@ class SceneObject
     SceneObjectId                                             m_id;
     std::optional<SceneObjectId>                              m_parent;
     std::vector<SceneObjectId>                                m_children;
+    bool                                                       m_alive = true;
 
 public:
     std::string name;

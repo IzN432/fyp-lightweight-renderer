@@ -120,11 +120,18 @@ PhysicsWorld::PhysicsWorld(Scene &scene, Config config)
 
 PhysicsWorld::~PhysicsWorld() = default;
 
+void PhysicsWorld::onSceneChanged()
+{
+    captureInitialState();
+    rebuildBackend();
+}
+
 void PhysicsWorld::rebuildBackend()
 {
     m_impl = std::make_unique<Impl>(m_gravity);
     for (const auto &objectPtr : m_scene->sceneObjects())
     {
+        if (!m_scene->contains(objectPtr->id())) continue;
         SceneObject &object = *objectPtr;
         if (!object.hasComponent<RigidBodyComponent>() || !object.hasComponent<ColliderComponent>() ||
             !object.hasComponent<TransformComponent>()) continue;
@@ -181,6 +188,7 @@ void PhysicsWorld::captureInitialState()
     m_initialStates.clear();
     for (const auto &object : m_scene->sceneObjects())
     {
+        if (!m_scene->contains(object->id())) continue;
         if (!object->hasComponent<RigidBodyComponent>() || !object->hasComponent<TransformComponent>()) continue;
         const Transform &transform = object->getComponent<TransformComponent>().transform();
         const RigidBodyComponent &body = object->getComponent<RigidBodyComponent>();

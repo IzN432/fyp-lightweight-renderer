@@ -3,6 +3,7 @@
 #include "core/framegraph/FrameGraph.hpp"
 #include "core/scene/Mesh.hpp"
 #include "core/scene/TransformComponent.hpp"
+#include "core/scene/SceneObject.hpp"
 #include "core/upload/MeshUploader.hpp"
 #include "core/upload/SkinUploader.hpp"
 
@@ -28,6 +29,7 @@ public:
         // are already baked into world space (e.g. AreaLightVisual's quads) and should be drawn
         // with an identity model matrix rather than double-transformed.
         std::vector<const TransformComponent *> meshTransforms;
+        std::vector<SceneObject *>              meshObjects;
         std::vector<SkinDrawInfo>              skinDrawInfos;
         std::string                    indexBufferResourceName;
         std::string                    faceGroupBufferResourceName;

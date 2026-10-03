@@ -62,6 +62,30 @@ void SceneManager::addMeshObject(SceneObject &object)
     }
 }
 
+SceneObject *SceneManager::removeSceneObjects(std::span<const SceneObjectId> ids)
+{
+    const auto removed = [&](const SceneObject *object) {
+        return object && std::ranges::find(ids, object->id()) != ids.end();
+    };
+    std::erase_if(m_meshObjects, removed);
+    std::erase_if(m_lightVisualObjects, removed);
+
+    if (removed(m_editedMeshObject))
+    {
+        SceneObject *replacement = m_meshObjects.empty() ? nullptr : m_meshObjects.front();
+        m_editedMeshObject = nullptr;
+        if (replacement && m_selectionManager)
+        {
+            setEditedMeshObject(*replacement);
+        }
+        else
+        {
+            m_editedMeshObject = replacement;
+        }
+    }
+    return m_editedMeshObject;
+}
+
 void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualConfig,
                               const GpuMaterialLayout        &materialLayout,
                               const std::vector<std::string> &vertexAttributeNames, InputHandler &input)
@@ -130,6 +154,7 @@ void SceneManager::createLightVisuals(const AreaLightVisualConfig &config)
     m_lightVisualObjects.clear();
     for (const auto &object : m_scene->sceneObjects())
     {
+        if (!m_scene->contains(object->id())) continue;
         if (object->hasComponent<Light>())
         {
             m_lightVisualObjects.push_back(object.get());
@@ -158,8 +183,10 @@ void SceneManager::gatherGeometry(const std::vector<std::string> &vertexAttribut
     m_geometryMeshes.clear();
     m_meshTransforms.clear();
     m_meshSkins.clear();
+    m_geometryObjects.clear();
     for (SceneObject *object : m_meshObjects)
     {
+        m_geometryObjects.push_back(object);
         m_geometryMeshes.push_back(&object->getComponent<MeshComponent>().mesh());
         m_meshTransforms.push_back(&object->getComponent<TransformComponent>());
         m_meshSkins.push_back(object->hasComponent<SkinComponent>()
@@ -169,6 +196,7 @@ void SceneManager::gatherGeometry(const std::vector<std::string> &vertexAttribut
 
     for (SceneObject *lightVisualObject : m_lightVisualObjects)
     {
+        m_geometryObjects.push_back(lightVisualObject);
         m_geometryMeshes.push_back(&lightVisualObject->getComponent<MeshComponent>().mesh());
         // Light visuals bake their TransformComponent into vertex positions directly (see
         // AreaLightVisual.hpp), so they'd be double-transformed by also applying their TransformComponent
@@ -218,6 +246,7 @@ void SceneManager::uploadLights()
     std::vector<SceneObject *> lights;
     for (const auto &object : m_scene->sceneObjects())
     {
+        if (!m_scene->contains(object->id())) continue;
         if (object->hasComponent<Light>())
         {
             lights.push_back(object.get());
@@ -308,6 +337,10 @@ void SceneManager::setSelectedMeshHeatmapColors(std::span<const glm::vec3> color
 
 void SceneManager::updateSelectedMeshHighlightColors()
 {
+    if (!m_editedMeshObject)
+    {
+        return;
+    }
     // SelectionManager owns the coloring itself (persistent buffer, tool-customizable highlight
     // color) — this just pushes its result to the currently edited Mesh + GPU (see
     // setEditedMeshObject(); SelectionManager::rebind() keeps its color buffer sized to whichever
@@ -352,6 +385,7 @@ void SceneManager::updateAnimations(float deltaSeconds)
 {
     for (const auto &object : m_scene->sceneObjects())
     {
+        if (!m_scene->contains(object->id())) continue;
         if (object->hasComponent<AnimatorComponent>())
         {
             object->getComponent<AnimatorComponent>().update(deltaSeconds);
@@ -375,10 +409,15 @@ void SceneManager::updateSkins()
 {
     for (size_t i = 0; i < m_meshSkins.size(); ++i)
     {
-        if (!m_meshSkins[i])
+        if (!m_meshSkins[i] || !m_scene->contains(m_geometryObjects[i]->id()))
         {
             continue;
         }
+
+        const bool missingJoint = std::ranges::any_of(m_meshSkins[i]->joints(), [&](const Joint &joint) {
+            return !m_scene->contains(joint.sceneObject);
+        });
+        if (missingJoint) continue;
 
         const TransformComponent *transform = m_meshTransforms[i];
         m_meshSkins[i]->evaluate(transform ? transform->worldMatrix() : glm::mat4(1.0f));

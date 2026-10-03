@@ -20,6 +20,8 @@ public:
 
     explicit PbrPass(Config cfg);
 
+    void setNumLights(uint32_t numLights) { m_cfg.numLights = numLights; }
+
     // Upload the LTC lookup tables used for area light shading (ltc1, ltc2).
     // Call once before build().
     void uploadResources(ResourceRegistry &resources) const;

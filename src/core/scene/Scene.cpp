@@ -17,7 +17,7 @@ SceneObject &Scene::createSceneObject()
 
 SceneObject &Scene::getSceneObject(SceneObjectId id)
 {
-    if (id >= m_sceneObjects.size())
+    if (!contains(id))
     {
         throw std::out_of_range("Scene object ID is out of range");
     }
@@ -26,11 +26,82 @@ SceneObject &Scene::getSceneObject(SceneObjectId id)
 
 const SceneObject &Scene::getSceneObject(SceneObjectId id) const
 {
-    if (id >= m_sceneObjects.size())
+    if (!contains(id))
     {
         throw std::out_of_range("Scene object ID is out of range");
     }
     return *m_sceneObjects[id];
+}
+
+bool Scene::contains(SceneObjectId id) const
+{
+    return id < m_sceneObjects.size() && m_sceneObjects[id] && m_sceneObjects[id]->m_alive;
+}
+
+bool Scene::canDestroySceneObject(SceneObjectId id) const
+{
+    if (!contains(id))
+    {
+        return false;
+    }
+
+    std::vector<SceneObjectId> pending{id};
+    while (!pending.empty())
+    {
+        const SceneObjectId current = pending.back();
+        pending.pop_back();
+        if (m_protectedObjects.contains(current))
+        {
+            return false;
+        }
+        const auto &children = m_sceneObjects[current]->m_children;
+        pending.insert(pending.end(), children.begin(), children.end());
+    }
+    return true;
+}
+
+void Scene::destroySceneObject(SceneObjectId id)
+{
+    if (!contains(id))
+    {
+        throw std::out_of_range("Scene object ID is not alive");
+    }
+
+    std::vector<SceneObjectId> destroyed;
+    std::vector<SceneObjectId> pending{id};
+    while (!pending.empty())
+    {
+        const SceneObjectId current = pending.back();
+        pending.pop_back();
+        if (m_protectedObjects.contains(current))
+        {
+            throw std::invalid_argument("A protected scene object cannot be deleted");
+        }
+        destroyed.push_back(current);
+        const auto &children = m_sceneObjects[current]->m_children;
+        pending.insert(pending.end(), children.begin(), children.end());
+    }
+
+    SceneObject &root = *m_sceneObjects[id];
+    if (root.m_parent && contains(*root.m_parent))
+    {
+        std::erase(m_sceneObjects[*root.m_parent]->m_children, id);
+    }
+    for (SceneObjectId destroyedId : destroyed)
+    {
+        SceneObject &object = *m_sceneObjects[destroyedId];
+        object.m_parent.reset();
+        object.m_children.clear();
+        object.m_alive = false;
+    }
+    if (m_selectedObject && std::ranges::find(destroyed, *m_selectedObject) != destroyed.end())
+    {
+        m_selectedObject.reset();
+    }
+    for (const auto &callback : m_objectsDestroyedCallbacks)
+    {
+        callback(destroyed);
+    }
 }
 
 void Scene::setParent(SceneObjectId childId, std::optional<SceneObjectId> parentId)
@@ -68,7 +139,7 @@ void Scene::setParent(SceneObjectId childId, std::optional<SceneObjectId> parent
     }
 }
 
-void Scene::drawHierarchyNode(SceneObject &object)
+void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &deleteRequested)
 {
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
                                ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -93,11 +164,22 @@ void Scene::drawHierarchyNode(SceneObject &object)
         }
     }
 
+    if (ImGui::BeginPopupContextItem())
+    {
+        ImGui::BeginDisabled(!canDestroySceneObject(object.id()));
+        if (ImGui::MenuItem("Delete"))
+        {
+            deleteRequested = object.id();
+        }
+        ImGui::EndDisabled();
+        ImGui::EndPopup();
+    }
+
     if (open)
     {
         for (SceneObjectId childId : object.children())
         {
-            drawHierarchyNode(getSceneObject(childId));
+            drawHierarchyNode(getSceneObject(childId), deleteRequested);
         }
         ImGui::TreePop();
     }
@@ -105,12 +187,18 @@ void Scene::drawHierarchyNode(SceneObject &object)
 
 void Scene::onHierarchyGUI()
 {
+    std::optional<SceneObjectId> deleteRequested;
     for (auto &object : m_sceneObjects)
     {
-        if (!object->parent())
+        if (object->m_alive && !object->parent())
         {
-            drawHierarchyNode(*object);
+            drawHierarchyNode(*object, deleteRequested);
         }
+    }
+
+    if (deleteRequested)
+    {
+        destroySceneObject(*deleteRequested);
     }
 }
 

@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <stdexcept>
+#include <vector>
 
 int main()
 {
@@ -39,9 +40,42 @@ int main()
     }
     assert(cycleRejected);
 
-    scene.setParent(grandchild.id(), std::nullopt);
-    assert(!grandchild.parent());
-    assert(child.children().empty());
+    std::vector<lr::SceneObjectId> destroyed;
+    scene.registerObjectsDestroyedCallback([&](std::span<const lr::SceneObjectId> ids) {
+        destroyed.assign(ids.begin(), ids.end());
+    });
+
+    scene.destroySceneObject(child.id());
+    assert(!scene.contains(child.id()));
+    assert(!scene.contains(grandchild.id()));
+    assert(root.children().empty());
+    assert(destroyed.size() == 2);
+
+    bool deletedLookupRejected = false;
+    try
+    {
+        scene.getSceneObject(child.id());
+    }
+    catch (const std::out_of_range &)
+    {
+        deletedLookupRejected = true;
+    }
+    assert(deletedLookupRejected);
+
+    auto &protectedObject = scene.createSceneObject();
+    scene.protectSceneObject(protectedObject.id());
+    assert(!scene.canDestroySceneObject(protectedObject.id()));
+    bool protectedDeleteRejected = false;
+    try
+    {
+        scene.destroySceneObject(protectedObject.id());
+    }
+    catch (const std::invalid_argument &)
+    {
+        protectedDeleteRejected = true;
+    }
+    assert(protectedDeleteRejected);
+    assert(scene.contains(protectedObject.id()));
 
     lr::Mesh mesh;
     mesh.setTopology({glm::vec3(0.0f)}, {0}, {});

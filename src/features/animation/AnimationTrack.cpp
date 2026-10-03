@@ -123,6 +123,10 @@ std::optional<T> AnimationTrack<T, Property>::sample(float seconds) const
 template <typename T, AnimationTargetProperty Property>
 void AnimationTrack<T, Property>::apply(Scene &scene, float seconds) const
 {
+    if (!scene.contains(m_target))
+    {
+        return;
+    }
     const std::optional<T> value = sample(seconds);
     if (!value)
     {

@@ -1,6 +1,7 @@
 #include "GeometryPass.hpp"
 
 #include "core/Paths.hpp"
+#include "core/scene/Scene.hpp"
 
 namespace lr
 {
@@ -60,6 +61,10 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         .execute([&](PassContext &ctx) {
             for (size_t i = 0; i < m_cfg.vertexBufferUploadResult.singleMeshResults.size(); ++i)
             {
+                if (!m_cfg.meshObjects[i]->scene().contains(m_cfg.meshObjects[i]->id()))
+                {
+                    continue;
+                }
                 const auto &singleMesh      = m_cfg.vertexBufferUploadResult.singleMeshResults[i];
                 const auto &singleMeshIndex = m_cfg.indexBufferUploadResult.singleMeshResults[i];
 

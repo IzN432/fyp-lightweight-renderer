@@ -38,6 +38,7 @@ public:
     void simulateOneStep();
 
     void captureInitialState();
+    void onSceneChanged();
     void reset();
 
     bool  paused() const { return m_paused; }

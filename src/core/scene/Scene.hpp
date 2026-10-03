@@ -5,6 +5,8 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
+#include <unordered_set>
 #include <vector>
 
 namespace lr
@@ -19,6 +21,15 @@ public:
     void onInspectorGUI();
 
     SceneObject &createSceneObject();
+
+    // Retires an object and its complete subtree. IDs and object addresses are never reused, so
+    // editor commands that still mention an old object cannot become references to a different
+    // object. Destruction callbacks run after retirement so observers see the new scene state.
+    void destroySceneObject(SceneObjectId id);
+    bool contains(SceneObjectId id) const;
+    bool canDestroySceneObject(SceneObjectId id) const;
+
+    void protectSceneObject(SceneObjectId id) { m_protectedObjects.insert(id); }
 
     SceneObject       &getSceneObject(SceneObjectId id);
     const SceneObject &getSceneObject(SceneObjectId id) const;
@@ -39,12 +50,19 @@ public:
         m_selectionChangedCallbacks.push_back(std::move(callback));
     }
 
+    void registerObjectsDestroyedCallback(std::function<void(std::span<const SceneObjectId>)> callback)
+    {
+        m_objectsDestroyedCallbacks.push_back(std::move(callback));
+    }
+
 private:
-    void drawHierarchyNode(SceneObject &object);
+    void drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &deleteRequested);
 
     std::vector<std::unique_ptr<SceneObject>> m_sceneObjects;
     std::optional<SceneObjectId>               m_selectedObject;
     std::vector<std::function<void(SceneObjectId)>> m_selectionChangedCallbacks;
+    std::vector<std::function<void(std::span<const SceneObjectId>)>> m_objectsDestroyedCallbacks;
+    std::unordered_set<SceneObjectId> m_protectedObjects;
 };
 
 } // namespace lr

@@ -127,6 +127,7 @@ try
     camera->addComponent<lr::TransformComponent>();
     camera->name = "Main Camera";
     sceneManager.setDefaultCamera(*camera);
+    scene.protectSceneObject(camera->id());
 
     // LIGHT
     {
@@ -380,6 +381,7 @@ try
          .vertexBufferUploadResult    = sceneManager.meshPositions(),
          .indexBufferUploadResult     = sceneManager.indexBuffer(),
          .meshTransforms              = sceneManager.meshTransforms(),
+         .meshObjects                 = sceneManager.geometryObjects(),
          .skinDrawInfos               = sceneManager.skinUploadResult().drawInfos,
          .indexBufferResourceName     = sceneManager.meshIndexBufferName(),
          .faceGroupBufferResourceName = sceneManager.meshFaceGroupBufferName(),
@@ -581,6 +583,35 @@ try
                                           object.getComponent<lr::TransformComponent>());
     });
 
+    scene.registerObjectsDestroyedCallback([&](std::span<const lr::SceneObjectId> ids) {
+        viewer.context().waitIdle();
+        if (sceneObjectHandler.target() &&
+            std::ranges::find(ids, sceneObjectHandler.target()->id()) != ids.end())
+        {
+            sceneObjectHandler.setTarget(nullptr);
+        }
+
+        lr::SceneObject *replacement = sceneManager.removeSceneObjects(ids);
+        sceneManager.uploadLights();
+        pbrPass.setNumLights(sceneManager.numLights());
+        physicsWorld.onSceneChanged();
+        if (!replacement)
+        {
+            sceneManager.setEditorMode(lr::EditorMode::View);
+            return;
+        }
+
+        meshObject = replacement;
+        lr::Mesh &mesh = replacement->getComponent<lr::MeshComponent>().mesh();
+        vertexManager.rebind(mesh);
+        arapTool.rebind(mesh);
+        laplaceBeltramiTool.rebind(mesh);
+        heatmapPass.setMeshSource(sceneManager.selectedMeshHeatmap(), sceneManager.selectedMeshIndexRange(),
+                                  replacement->getComponent<lr::TransformComponent>());
+        overlayPointsPass.setPointsSource(sceneManager.selectedMeshPoints(), mesh.uniquePositionCount(),
+                                          replacement->getComponent<lr::TransformComponent>());
+    });
+
     // Single combined LMB handler: gizmos get first refusal on a click (so
     // dragging an arrow doesn't simultaneously start a box-select), and
     // selection only sees the event if no gizmo consumed it.
@@ -640,6 +671,19 @@ try
         }
 
         commandManager.undo();
+    });
+
+    viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
+        if (key != GLFW_KEY_DELETE || action != GLFW_PRESS || ImGui::GetIO().WantCaptureKeyboard)
+        {
+            return;
+        }
+
+        const auto selected = scene.selectedObject();
+        if (selected && scene.canDestroySceneObject(*selected))
+        {
+            scene.destroySceneObject(*selected);
+        }
     });
 
     viewer.input().onKeyPress([&](int key, int action, bool shift, bool ctrl, bool alt) {
