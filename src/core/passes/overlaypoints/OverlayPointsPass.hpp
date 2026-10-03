@@ -16,7 +16,7 @@ public:
     struct Config
     {
         std::string cameraBufferResourceName;
-        // Interleaved deduped position + color buffer (see SceneManager::mainMeshPointsBufferName).
+        // Interleaved deduped position + color buffer for the selected mesh.
         std::string              pointsBufferResourceName;
         VertexBufferUploadResult pointsBufferUploadResult;
         std::vector<uint32_t>    vertexCounts;

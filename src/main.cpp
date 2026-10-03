@@ -146,8 +146,8 @@ try
     sceneManager.load(meshPath, {.gltf = config});
 
     // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets its own MeshComponent
-    // (a quad), separate from the main mesh's MeshComponent. The quad still draws through the
-    // same GeometryPass as the main mesh (see AreaLightVisual.hpp for why the visual needs to be real
+    // (a quad), separate from scene geometry. The quad still draws through the
+    // same GeometryPass (see AreaLightVisual.hpp for why the visual needs to be real
     // geometry rather than an overlay); its material lives in a MaterialStore slot acquired up front,
     // so switching a light's type at runtime (see Light::onGUIImpl) just rewrites that slot in place —
     // see SceneManager::updateLightVisuals.
@@ -161,19 +161,7 @@ try
         .baseMetallicName     = config.baseMetallicName,
     };
 
-    {
-        // Seeds the main mesh's selection-highlight colors — one per unique/deduped position, the
-        // same space VertexManager/SelectionManager and the points-picking overlay operate in.
-        // SceneManager::uploadMeshes() reads this back to build the initial GPU color buffer, so it
-        // must be set before sceneManager.initialize() runs.
-        lr::Mesh              &mesh = sceneManager.mainMeshObject().getComponent<lr::MeshComponent>().mesh();
-        std::vector<glm::vec3> colors(mesh.uniquePositionCount(), glm::vec3(1.0f, 0.0f, 1.0f));
-        mesh.setPerUniqueVertexArray("color", std::span<const glm::vec3>(colors));
-        std::vector<glm::vec3> heatmapColors(mesh.uniquePositionCount(), glm::vec3(0.0f));
-        mesh.setPerUniqueVertexArray("heatmapColors", std::span<const glm::vec3>(heatmapColors));
-    }
-
-    lr::SceneObject *meshObject = &sceneManager.mainMeshObject();
+    lr::SceneObject *meshObject = &sceneManager.selectedMeshObject();
     auto &meshComponent = meshObject->getComponent<lr::MeshComponent>();
 
     // Also read by the AmbientOcclusionPass config below, to size sphereRadius off the model.
@@ -373,7 +361,7 @@ try
         .addTexture(config.emissiveTextureName, VK_FORMAT_R8G8B8A8_SRGB);
 
     // Builds light visuals, uploads the initial lights/mesh/material/camera buffers, and wires the
-    // change listeners that keep the camera UBO and main mesh's materials SSBO in sync afterward —
+    // change listeners that keep the camera UBO and materials SSBO in sync afterward —
     // see SceneManager::initialize().
     sceneManager.initialize(areaLightVisualConfig, gpuMaterialLayout,
                             {config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName},
@@ -387,14 +375,14 @@ try
 
     lr::GeometryPass  geometryPass({
          .cameraBufferResourceName    = sceneManager.cameraBufferName(),
-         .vertexBufferResourceNames   = {{0, sceneManager.mainMeshPositionBufferName()},
-                                         {1, sceneManager.mainMeshVertexBufferName()}},
+         .vertexBufferResourceNames   = {{0, sceneManager.meshPositionBufferName()},
+                                         {1, sceneManager.meshVertexBufferName()}},
          .vertexBufferUploadResult    = sceneManager.meshPositions(),
          .indexBufferUploadResult     = sceneManager.indexBuffer(),
          .meshTransforms              = sceneManager.meshTransforms(),
          .skinDrawInfos               = sceneManager.skinUploadResult().drawInfos,
-         .indexBufferResourceName     = sceneManager.mainMeshIndexBufferName(),
-         .faceGroupBufferResourceName = sceneManager.mainMeshFaceGroupBufferName(),
+         .indexBufferResourceName     = sceneManager.meshIndexBufferName(),
+         .faceGroupBufferResourceName = sceneManager.meshFaceGroupBufferName(),
          .diffuseTextureArrayResourceName =
             sceneManager.materialUploadResult().textureNameMap.at(config.diffuseTextureName),
          .normalTextureArrayResourceName =
@@ -422,9 +410,9 @@ try
 
     lr::HeatmapPass heatmapPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
-        .vertexBufferResourceName = sceneManager.mainMeshHeatmapBufferName(),
-        .indexBufferResourceName  = sceneManager.mainMeshIndexBufferName(),
-        .vertexBufferUploadResult = sceneManager.mainMeshHeatmap(),
+        .vertexBufferResourceName = sceneManager.selectedMeshHeatmapBufferName(),
+        .indexBufferResourceName  = sceneManager.meshIndexBufferName(),
+        .vertexBufferUploadResult = sceneManager.selectedMeshHeatmap(),
         .indexBufferUploadResult  = sceneManager.indexBuffer(),
         .meshTransform            = &meshObject->getComponent<lr::TransformComponent>(),
     });
@@ -474,8 +462,8 @@ try
 
     lr::OverlayPointsPass overlayPointsPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
-        .pointsBufferResourceName = sceneManager.mainMeshPointsBufferName(),
-        .pointsBufferUploadResult = sceneManager.mainMeshPoints(),
+        .pointsBufferResourceName = sceneManager.selectedMeshPointsBufferName(),
+        .pointsBufferUploadResult = sceneManager.selectedMeshPoints(),
         .vertexCounts             = {meshComponent.mesh().uniquePositionCount()},
         .meshTransform            = &meshObject->getComponent<lr::TransformComponent>(),
     });
@@ -504,12 +492,12 @@ try
 
     lr::VertexManager vertexManager(meshComponent.mesh());
     vertexManager.registerUpdateCallback([&]() {
-        sceneManager.updateMainMeshPositions();
+        sceneManager.updateSelectedMeshPositions();
     });
 
     lr::CommandManager commandManager;
 
-    // SceneManager owns the SelectionManager (constructed off the main mesh in initialize(), see
+    // SceneManager owns the SelectionManager (constructed for the initial selected mesh, see
     // SceneManager::selectionManager()) since it needs to wire selection-highlight changes straight
     // to the GPU color buffer; this is just a local alias to keep the call sites below unchanged.
     lr::SelectionManager &selectionManager = sceneManager.selectionManager();
@@ -555,27 +543,12 @@ try
     lr::ArapTool arapTool(selectionManager, vertexManager, commandManager, meshComponent.mesh(), defaultHandler,
                           dragHandlerGizmos);
 
-    // Geometry-processing triangles index unique positions directly. This conversion removes the
-    // render-vertex/UV-seam representation before data crosses into the Laplace-Beltrami module.
-    std::vector<glm::uvec3> positionTriangles;
-    positionTriangles.reserve(meshComponent.mesh().faces().size());
-    for (const glm::uvec3 &face : meshComponent.mesh().faces())
-    {
-        positionTriangles.push_back({meshComponent.mesh().positionIndices()[face.x],
-                                     meshComponent.mesh().positionIndices()[face.y],
-                                     meshComponent.mesh().positionIndices()[face.z]});
-    }
-    lr::LaplaceBeltramiTool laplaceBeltramiTool(meshComponent.mesh().positions(), positionTriangles, sceneManager,
-                                                vertexManager);
+    lr::LaplaceBeltramiTool laplaceBeltramiTool(meshComponent.mesh(), sceneManager, vertexManager);
 
     // Ties vertex editing (SelectionManager, VertexManager, ArapTool, the vertex-picking points
-    // overlay) to whatever's selected in the Scene Hierarchy, rather than being fixed to the main
-    // mesh. Heatmap/Analysis mode and LaplaceBeltramiTool deliberately stay out of this — they keep
-    // reflecting the main mesh regardless of what's being edited (see
-    // SceneManager::setEditedMeshObject's doc comment). One side effect worth knowing: dragging a
-    // vertex on a non-main-mesh object still fires LaplaceBeltramiTool's VertexManager update
-    // callback (it can't tell which mesh moved), so it may recompute against its own unrelated
-    // snapshot — harmless, just wasted work.
+    // overlay) to whatever's selected in the Scene Hierarchy. ARAP, Laplace-Beltrami analysis,
+    // picking, and both selected-mesh GPU overlays are all
+    // rebound together so every editing/analysis operation addresses the same object.
     scene.registerSelectionChangedCallback([&](lr::SceneObjectId id) {
         lr::SceneObject &object = scene.getSceneObject(id);
         sceneObjectHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
@@ -601,7 +574,10 @@ try
         lr::Mesh &mesh = object.getComponent<lr::MeshComponent>().mesh();
         vertexManager.rebind(mesh);
         arapTool.rebind(mesh);
-        overlayPointsPass.setPointsSource(sceneManager.mainMeshPoints(), mesh.uniquePositionCount(),
+        laplaceBeltramiTool.rebind(mesh);
+        heatmapPass.setMeshSource(sceneManager.selectedMeshHeatmap(), sceneManager.selectedMeshIndexRange(),
+                                  object.getComponent<lr::TransformComponent>());
+        overlayPointsPass.setPointsSource(sceneManager.selectedMeshPoints(), mesh.uniquePositionCount(),
                                           object.getComponent<lr::TransformComponent>());
     });
 

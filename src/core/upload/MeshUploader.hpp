@@ -69,6 +69,10 @@ public:
     // Re-pack and push new vertex data into a buffer previously uploaded with dynamic=true.
     void updateVertexBuffer(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config);
 
+    // Replaces an existing vertex buffer when the new mesh can have a different vertex count.
+    VertexBufferUploadResult replaceVertexBuffer(const std::vector<const Mesh *> &meshes,
+                                                 const VertexBufferUploadConfig  &config);
+
     // Packs each mesh's unique/deduped positions (mesh.positions() verbatim, not expanded through
     // positionIndices) together with named per-unique-vertex attributes (see
     // MeshLayout::addPerUniqueVertexAttr) into one interleaved buffer — the deduped-position-space

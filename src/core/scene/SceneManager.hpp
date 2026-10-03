@@ -30,7 +30,7 @@ namespace lr
 
 class Viewer;
 
-// The editor's current interpretation of the main mesh. View displays the posed/skinned surface;
+// The editor's current interpretation of the selected mesh. View displays the posed/skinned surface;
 // Edit and Analysis operate on the unskinned rest mesh so tools and derived values agree with the
 // geometry they address.
 enum class EditorMode
@@ -56,26 +56,21 @@ public:
     // stores. Returns an identity-transform container for the imported asset.
     SceneObject &load(const std::filesystem::path &path, const SceneLoaderConfig &config = {});
 
-    // The scene's single non-light-visual mesh — its TransformComponent is applied via the model matrix at
-    // draw time (unlike light visuals, which bake their TransformComponent into vertex positions directly).
-    // Must be set before initialize().
-    void setMainMeshObject(SceneObject &object) { m_mainMeshObject = &object; }
-    SceneObject &mainMeshObject() { return *m_mainMeshObject; }
-
-    // Registers additional static renderable geometry alongside the main mesh — e.g. procedural
+    // Registers renderable scene geometry. The first registered object becomes the initial selected
+    // mesh; load() registers the first imported mesh automatically.
+    // Registers additional static renderable geometry — e.g. procedural
     // level geometry. `object` must already have a TransformComponent and MeshComponent (see
     // AreaLightVisual.cpp for the pattern: build a Mesh, acquire a MaterialHandle, setFaceGroups,
     // then addComponent<MeshComponent>()). Its TransformComponent is applied as its model matrix at
-    // draw time, same as the main mesh. Must be called before initialize()/uploadMeshes() — there is
-    // currently no per-frame update path for these objects (unlike the main mesh or light visuals),
+    // draw time. Must be called before initialize()/uploadMeshes().
     // so edits made after the initial upload won't reach the GPU.
-    void addMeshObject(SceneObject &object) { m_extraMeshObjects.push_back(&object); }
+    void addMeshObject(SceneObject &object);
 
     // The object currently targeted by vertex editing (SelectionManager, the vertex-picking
-    // overlay's points buffer). Decoupled from mainMeshObject() so any mesh-bearing SceneObject —
-    // procedural geometry included — can be edited; the caller (main.cpp) drives this from Scene
-    // Hierarchy selection. Defaults to mainMeshObject() once initialize() has run; null before then.
+    // overlay's points buffer and heatmap analysis). The caller drives this from Scene Hierarchy
+    // selection. Defaults to the first registered mesh.
     SceneObject *editedMeshObject() { return m_editedMeshObject; }
+    SceneObject &selectedMeshObject() { return *m_editedMeshObject; }
 
     // True if `object` has what setEditedMeshObject() requires (a MeshComponent + TransformComponent).
     static bool isEditable(const SceneObject &object);
@@ -88,9 +83,8 @@ public:
     // ArapTool — see their rebind()) and for ensuring the GPU is done with the previous points
     // buffer first (see ResourceRegistry::replaceUploadedBuffer's doc comment) — e.g.
     // viewer.context().waitIdle() before calling this, the way the HDRI-reload path does.
-    // Does not touch heatmap/Analysis-mode state, which stays scoped to mainMeshObject() (see
-    // HeatmapPass / LaplaceBeltramiTool in main.cpp) — out of scope for this pass. Throws if
-    // `object` isn't isEditable(). No-op if `object` is already the edited mesh object.
+    // Also replaces the selected heatmap buffer. Throws if `object` isn't isEditable(). No-op if
+    // `object` is already selected.
     void setEditedMeshObject(SceneObject &object);
 
     // The camera whose Camera/TransformComponent state drives the camera UBO. Must be set before
@@ -103,10 +97,8 @@ public:
 
     // Performs all one-time scene setup that would otherwise have to be manually sequenced by the
     // caller: builds light visuals, uploads the initial lights/mesh/material/camera buffers, and
-    // constructs the SelectionManager that operates on the main mesh (see selectionManager()) —
-    // input is needed for that. Requires setScene(), setMainMeshObject() and setDefaultCamera() to
-    // have been called first. load() selects the imported scene's first mesh
-    // automatically; setMainMeshObject() remains available for procedural scenes.
+    // constructs the SelectionManager that operates on the initially selected mesh. Requires a
+    // scene, at least one registered mesh, and a default camera.
     void initialize(const AreaLightVisualConfig &areaLightVisualConfig, const GpuMaterialLayout &materialLayout,
                     const std::vector<std::string> &vertexAttributeNames, InputHandler &input);
 
@@ -116,9 +108,9 @@ public:
     // know what SceneManager wires up each frame.
     void registerCallbacks(Viewer &viewer);
 
-    // Selection over the main mesh's deduped-position space — constructed by initialize(), so only
+    // Selection over the selected mesh's deduped-position space — constructed by initialize(), so only
     // valid to call after it. Highlight changes are wired internally to push the highlighted-vertex
-    // colors to the GPU (see updateMainMeshPointsBuffer()); the caller still owns wiring up a SelectionTool
+    // colors to the GPU; the caller still owns wiring up a SelectionTool
     // (setSelectTool), the mouse click handoff with gizmos, and reading getSelectedIndices()/
     // getHighlightedIndices() for its own UI (translate gizmo placement, etc.).
     SelectionManager &selectionManager() { return *m_selectionManager; }
@@ -131,7 +123,7 @@ public:
     void setEditorMode(EditorMode mode);
     void registerEditorModeChangedCallback(std::function<void(EditorMode)> callback);
 
-    // Polls the camera, light visual, and main mesh components for the dirty flag their setters/
+    // Polls the camera, light visual, and rendered mesh components for the dirty flag their setters/
     // onGUIImpl set via Component::markDirty(), re-uploads whatever's dirty (at most once per
     // resource, however many times it changed this frame), and clears the flags. Call once per
     // frame, after every other update callback has had a chance to mutate the scene — see
@@ -144,22 +136,22 @@ public:
     // without going through the full initialize() sequence.
     void createLightVisuals(const AreaLightVisualConfig &config);
 
-    // Packs the main mesh + every light visual into the shared vertex/index/facegroup buffers and
+    // Packs all registered geometry + every light visual into shared vertex/index/facegroup buffers and
     // uploads them, plus the initial materials SSBO/texture arrays snapshot.
     void uploadMeshes(const GpuMaterialLayout &materialLayout, const std::vector<std::string> &vertexAttributeNames);
 
     void uploadLights();
 
     // Repacks the GBuffer position buffer plus the deduped position+color buffer (see
-    // updateMainMeshPointsBuffer()) — for edits that only move vertices (vertex-drag editing).
-    void updateMainMeshPositions();
+    // selected points buffer — for edits that only move vertices (vertex-drag editing).
+    void updateSelectedMeshPositions();
 
     // Replaces the analysis colors used by HeatmapPass without touching the selection-highlight
     // colors used by the points overlay. Colors are indexed by mesh.positions().
-    void setMainMeshHeatmapColors(std::span<const glm::vec3> colors);
+    void setSelectedMeshHeatmapColors(std::span<const glm::vec3> colors);
 
     // Re-uploads the materials SSBO from the MaterialStore's current contents — called by
-    // flushDirty() when the main mesh's MeshComponent is dirty (e.g. a Scene Hierarchy slider edit,
+    // flushDirty() when a rendered MeshComponent is dirty (e.g. a Scene Hierarchy slider edit,
     // see MeshComponent::onGUIImpl), so the edit reaches the GPU.
     void updateMaterials();
 
@@ -194,26 +186,25 @@ public:
     const std::string &skinPositionIndicesBufferName() const { return m_skinUploader.positionIndicesBufferName(); }
     const std::string &skinJointMatricesBufferName() const { return m_skinUploader.jointMatricesBufferName(); }
 
-    const std::string &mainMeshPositionBufferName() const { return m_mainMeshPositionBufferName; }
-    // Interleaved unique/deduped position + color buffer — see m_mainMeshPointsBufferName. Distinct
-    // from mainMeshPositionBufferName(), which is duped per UV-seam corner for GeometryPass.
-    const std::string &mainMeshPointsBufferName() const { return m_mainMeshPointsBufferName; }
-    const std::string &mainMeshVertexBufferName() const { return m_mainMeshVertexBufferName; }
-    const std::string &mainMeshIndexBufferName() const { return m_mainMeshIndexBufferName; }
-    const std::string &mainMeshFaceGroupBufferName() const { return m_mainMeshFaceGroupBufferName; }
-    // Interleaved position + color buffer, duped per UV-seam corner like mainMeshVertexBufferName()
-    // (unlike mainMeshPointsBufferName(), which is deduped) — for HeatmapPass, which needs the
+    const std::string &meshPositionBufferName() const { return m_meshPositionBufferName; }
+    const std::string &selectedMeshPointsBufferName() const { return m_selectedMeshPointsBufferName; }
+    const std::string &meshVertexBufferName() const { return m_meshVertexBufferName; }
+    const std::string &meshIndexBufferName() const { return m_meshIndexBufferName; }
+    const std::string &meshFaceGroupBufferName() const { return m_meshFaceGroupBufferName; }
+    // Interleaved position + color buffer, duped per UV-seam corner (unlike the selected points
+    // buffer, which is deduped) — for HeatmapPass, which needs the
     // color Gouraud-interpolated across the same triangles GeometryPass draws, so it must share
-    // GeometryPass's corner-indexed topology (see mainMeshIndexBufferName()) rather than the
+    // GeometryPass's corner-indexed topology rather than the
     // deduped-position space the points overlay uses.
-    const std::string &mainMeshHeatmapBufferName() const { return m_mainMeshHeatmapBufferName; }
+    const std::string &selectedMeshHeatmapBufferName() const { return m_selectedMeshHeatmapBufferName; }
 
     const VertexBufferUploadResult &meshPositions() const { return m_meshPositions; }
-    // Main mesh's unique/deduped position+color buffer — see mainMeshPointsBufferName().
-    const VertexBufferUploadResult &mainMeshPoints() const { return m_mainMeshPoints; }
-    // Main mesh's corner-domain position+color buffer — see mainMeshHeatmapBufferName(). Only
+    // Selected mesh's unique/deduped position+color buffer.
+    const VertexBufferUploadResult &selectedMeshPoints() const { return m_selectedMeshPoints; }
+    // Selected mesh's corner-domain position+color buffer. Only
     // ever holds one mesh (singleMeshResults[0]), unlike meshPositions()/indexBuffer().
-    const VertexBufferUploadResult       &mainMeshHeatmap() const { return m_mainMeshHeatmap; }
+    const VertexBufferUploadResult &selectedMeshHeatmap() const { return m_selectedMeshHeatmap; }
+    const IndexBufferUploadPerMeshResult &selectedMeshIndexRange() const;
     const IndexBufferUploadResult        &indexBuffer() const { return m_indexBuffer; }
     const std::vector<const TransformComponent *> &meshTransforms() const { return m_meshTransforms; }
 
@@ -225,26 +216,26 @@ public:
 private:
     void gatherGeometry(const std::vector<std::string> &vertexAttributeNames);
 
-    // Rebuilds the main mesh's "color" per-unique-vertex attribute from the SelectionManager's
+    // Rebuilds the selected mesh's "color" per-unique-vertex attribute from the SelectionManager's
     // current highlighted indices and pushes it to the GPU. Wired as m_selectionManager's
     // highlight-changed callback in initialize().
-    void updateMainMeshHighlightColors();
+    void updateSelectedMeshHighlightColors();
 
-    // Repacks and re-uploads the deduped position+color buffer (m_mainMeshPointsBufferName) from
-    // the main mesh's current positions/"color" attribute. Shared by updateMainMeshPositions() (a
-    // vertex moved) and updateMainMeshHighlightColors() (a color changed) since both fields live in
+    // Repacks and re-uploads the deduped position+color buffer from the selected mesh's current
+    // positions/"color" attribute. Shared by position and highlight changes since both fields live in
     // the same interleaved buffer.
-    void updateMainMeshPointsBuffer();
+    void updateSelectedMeshPointsBuffer();
 
-    // Expands the main mesh's per-unique-vertex "heatmapColors" attribute to the corner domain
+    // Expands the selected mesh's per-unique-vertex "heatmapColors" attribute to the corner domain
     // (via positionIndices) and registers the matching per-vertex attribute on the same Mesh, ready
-    // for packing into m_mainMeshHeatmapBufferName. Returns the mutable mesh reference so callers
+    // for packing into the selected heatmap buffer. Returns the mutable mesh reference so callers
     // can pack/upload it (initial upload vs. re-upload need different MeshUploader calls).
-    Mesh &syncMainMeshCornerHeatmapColors();
+    Mesh &syncSelectedMeshCornerHeatmapColors();
 
-    // Repacks and re-uploads m_mainMeshHeatmapBufferName. Called when positions or independently
+    // Repacks and re-uploads the selected heatmap buffer. Called when positions or independently
     // stored analysis colors change.
-    void updateMainMeshHeatmapBuffer();
+    void updateSelectedMeshHeatmapBuffer();
+    void ensureSelectedMeshAttributes(Mesh &mesh);
 
     Scene            *m_scene = nullptr;
     ResourceRegistry &m_registry;
@@ -261,9 +252,8 @@ private:
     MaterialStore    m_materialStore;
     MeshStore        m_meshStore;
 
-    SceneObject *m_mainMeshObject = nullptr;
     SceneObject *m_defaultCamera  = nullptr;
-    std::vector<SceneObject *> m_extraMeshObjects;
+    std::vector<SceneObject *> m_meshObjects;
     SceneObject *m_editedMeshObject = nullptr;
     // Matches Viewer::Config's default window size until setAspect() is called with the real
     // swapchain extent.
@@ -271,7 +261,7 @@ private:
     std::vector<SceneObject *> m_lightVisualObjects;
     AreaLightVisualConfig m_areaLightVisualConfig;
 
-    // Cached once in uploadMeshes(), reused by updateMainMeshPositions()/updateLightVisuals() so
+    // Cached once in uploadMeshes(), reused by position/light-visual updates so
     // every repack targets the same combined mesh list / buffer configs.
     std::vector<const Mesh *>      m_geometryMeshes;
     std::vector<const TransformComponent *> m_meshTransforms;
@@ -280,28 +270,28 @@ private:
     VertexBufferUploadConfig       m_meshAttributeUploadConfig;
     GpuMaterialLayout              m_materialLayout;
 
-    const std::string m_mainMeshPositionBufferName  = "meshPositionBuffer";
-    const std::string m_mainMeshPointsBufferName    = "meshPointsBuffer";
-    const std::string m_mainMeshVertexBufferName    = "meshVertexBuffer";
-    const std::string m_mainMeshIndexBufferName     = "meshIndexBuffer";
-    const std::string m_mainMeshFaceGroupBufferName = "meshFaceGroupBuffer";
-    const std::string m_mainMeshHeatmapBufferName   = "meshHeatmapBuffer";
+    const std::string m_meshPositionBufferName         = "meshPositionBuffer";
+    const std::string m_selectedMeshPointsBufferName   = "meshPointsBuffer";
+    const std::string m_meshVertexBufferName           = "meshVertexBuffer";
+    const std::string m_meshIndexBufferName            = "meshIndexBuffer";
+    const std::string m_meshFaceGroupBufferName        = "meshFaceGroupBuffer";
+    const std::string m_selectedMeshHeatmapBufferName  = "meshHeatmapBuffer";
 
     // Config for the deduped position+color buffer above — same shape as m_meshPositionUploadConfig/
-    // m_meshAttributeUploadConfig, cached so updateMainMeshPositions()/updateMainMeshHighlightColors()
+    // m_meshAttributeUploadConfig, cached so position/highlight updates
     // both repack it identically.
-    VertexBufferUploadConfig m_mainMeshPointsUploadConfig = {
-        .vertexBufferName = m_mainMeshPointsBufferName, .vertexAttributeNames = {"color"}, .includePosition = true};
+    VertexBufferUploadConfig m_selectedMeshPointsUploadConfig = {
+        .vertexBufferName = m_selectedMeshPointsBufferName, .vertexAttributeNames = {"color"}, .includePosition = true};
 
     // Config for the corner-domain position+heatmapColors buffer.
-    VertexBufferUploadConfig m_mainMeshHeatmapUploadConfig = {
-        .vertexBufferName = m_mainMeshHeatmapBufferName,
+    VertexBufferUploadConfig m_selectedMeshHeatmapUploadConfig = {
+        .vertexBufferName = m_selectedMeshHeatmapBufferName,
         .vertexAttributeNames = {"heatmapColors"},
         .includePosition = true};
 
     VertexBufferUploadResult m_meshPositions;
-    VertexBufferUploadResult m_mainMeshPoints;
-    VertexBufferUploadResult m_mainMeshHeatmap;
+    VertexBufferUploadResult m_selectedMeshPoints;
+    VertexBufferUploadResult m_selectedMeshHeatmap;
     IndexBufferUploadResult  m_indexBuffer;
     MaterialUploadResult     m_materialUploadResult;
     SkinUploadResult         m_skinUploadResult;

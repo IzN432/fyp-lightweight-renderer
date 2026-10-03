@@ -10,7 +10,7 @@
 namespace lr
 {
 
-// Rasterises the main mesh with its per-vertex "heatmapColors" attribute (see SceneManager's
+// Rasterises the selected mesh with its per-vertex "heatmapColors" attribute (see SceneManager's
 // heatmap buffer) Gouraud-interpolated across the surface, into its own color+depth target —
 // a debug/analysis view showing scalar-derived colors written per vertex. FinalPass blends
 // the result on top of the lit scene when enabled. Disabled by default; toggled at runtime
@@ -22,9 +22,9 @@ public:
     {
         std::string cameraBufferResourceName;
         std::string
-            vertexBufferResourceName; // position + color, corner domain (see SceneManager::mainMeshHeatmapBufferName)
+            vertexBufferResourceName; // selected mesh position + color, in the corner domain
         std::string
-            indexBufferResourceName; // shared mesh index buffer — only singleMeshResults[0] (the main mesh) is drawn
+            indexBufferResourceName; // shared scene index buffer
 
         VertexBufferUploadResult vertexBufferUploadResult;
         IndexBufferUploadResult  indexBufferUploadResult;
@@ -41,8 +41,12 @@ public:
     void setEnabled(bool e) { m_enabled = e; }
     bool isEnabled() const { return m_enabled; }
 
+    void setMeshSource(VertexBufferUploadResult vertexUpload, IndexBufferUploadPerMeshResult indexRange,
+                       const TransformComponent &transform);
+
 private:
     Config       m_cfg;
+    IndexBufferUploadPerMeshResult m_indexRange;
     mutable bool m_enabled = false;
 };
 

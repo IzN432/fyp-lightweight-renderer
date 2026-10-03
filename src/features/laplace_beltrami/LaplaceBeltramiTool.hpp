@@ -16,8 +16,9 @@ class VertexManager;
 class LaplaceBeltramiTool
 {
 public:
-    LaplaceBeltramiTool(std::span<const glm::vec3> positions, std::span<const glm::uvec3> triangles,
-                        SceneManager &sceneManager, VertexManager &vertexManager);
+    LaplaceBeltramiTool(const Mesh &mesh, SceneManager &sceneManager, VertexManager &vertexManager);
+
+    void rebind(const Mesh &mesh);
 
     void onGui();
 
@@ -26,7 +27,7 @@ private:
     void invalidate();
 
     std::span<const glm::vec3>  m_positions;
-    std::span<const glm::uvec3> m_triangles;
+    std::vector<glm::uvec3>     m_triangles;
     SceneManager &m_sceneManager;
 
     bool m_hasResult = false;

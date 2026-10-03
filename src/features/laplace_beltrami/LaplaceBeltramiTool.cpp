@@ -9,20 +9,33 @@
 namespace lr
 {
 
-LaplaceBeltramiTool::LaplaceBeltramiTool(std::span<const glm::vec3> positions,
-                                         std::span<const glm::uvec3> triangles, SceneManager &sceneManager,
-                                         VertexManager &vertexManager)
-    : m_positions(positions), m_triangles(triangles), m_sceneManager(sceneManager)
+LaplaceBeltramiTool::LaplaceBeltramiTool(const Mesh &mesh, SceneManager &sceneManager, VertexManager &vertexManager)
+    : m_sceneManager(sceneManager)
 {
+    rebind(mesh);
     vertexManager.registerUpdateCallback([this]() {
         invalidate();
     });
 }
 
+void LaplaceBeltramiTool::rebind(const Mesh &mesh)
+{
+    m_positions = mesh.positions();
+    m_triangles.clear();
+    m_triangles.reserve(mesh.faces().size());
+    for (const glm::uvec3 &face : mesh.faces())
+    {
+        m_triangles.push_back({mesh.positionIndices()[face.x], mesh.positionIndices()[face.y],
+                               mesh.positionIndices()[face.z]});
+    }
+    m_hasResult = false;
+    m_isStale   = false;
+}
+
 void LaplaceBeltramiTool::calculate()
 {
     const auto magnitudes = LaplaceBeltramiOperator::calculateMagnitude(m_positions, m_triangles);
-    m_sceneManager.setMainMeshHeatmapColors(makeHeatmapColors(magnitudes));
+    m_sceneManager.setSelectedMeshHeatmapColors(makeHeatmapColors(magnitudes));
     m_hasResult = true;
     m_isStale   = false;
 }

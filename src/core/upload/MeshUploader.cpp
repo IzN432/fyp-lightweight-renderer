@@ -237,6 +237,24 @@ void MeshUploader::updateVertexBuffer(const std::vector<const Mesh *> &meshes, c
                               static_cast<VkDeviceSize>(packed.vertexAttributeBuffer.size()));
 }
 
+VertexBufferUploadResult MeshUploader::replaceVertexBuffer(const std::vector<const Mesh *> &meshes,
+                                                            const VertexBufferUploadConfig  &config)
+{
+    VertexBufferUploadResult result;
+    const auto packed = packVertexAttributes(meshes, config);
+    m_registry.replaceUploadedBuffer(config.vertexBufferName, packed.vertexAttributeBuffer.data(),
+                                     static_cast<VkDeviceSize>(packed.vertexAttributeBuffer.size()),
+                                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+
+    uint32_t vertexOffset = 0;
+    for (const auto &mesh : meshes)
+    {
+        result.singleMeshResults.push_back({.vertexOffset = vertexOffset});
+        vertexOffset += mesh->vertexCount();
+    }
+    return result;
+}
+
 VertexBufferUploadResult MeshUploader::uploadUniqueVertexBuffer(const std::vector<const Mesh *> &meshes,
                                                                 const VertexBufferUploadConfig  &config)
 {
