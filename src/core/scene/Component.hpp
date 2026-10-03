@@ -6,6 +6,8 @@
 namespace lr
 {
 
+struct EditorContext;
+
 class Component
 {
 private:
@@ -18,19 +20,23 @@ private:
     // themselves dirty instead of eagerly triggering a re-upload, so N edits to the same
     // component within a frame collapse into a single upload at flush time.
     bool m_dirty = false;
+    EditorContext *m_editorContext = nullptr;
 
 protected:
     const SceneObject &getOwningObject() const { return *m_owningObject; }
     void               markDirty() { m_dirty = true; }
+    EditorContext     *editorContext() const { return m_editorContext; }
 
 public:
     Component(std::string name = "") : m_name(std::move(name)) {}
     virtual ~Component() = default;
 
-    void onGUI()
+    void onGUI(EditorContext &context)
     {
+        m_editorContext = &context;
         ImGui::Text("Component: %s", m_name.c_str());
-        return onGUIImpl();
+        onGUIImpl();
+        m_editorContext = nullptr;
     }
 
     virtual void onGUIImpl() {}

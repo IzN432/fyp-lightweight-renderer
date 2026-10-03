@@ -7,6 +7,7 @@
 
 #include <spdlog/spdlog.h>
 #include <imgui.h>
+#include <ImGuizmo.h>
 #include <spdlog/spdlog.h>
 #include <imgui_impl_glfw.h>
 #include <spdlog/spdlog.h>
@@ -66,6 +67,7 @@ void ImguiPass::beginFrame()
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+    ImGuizmo::BeginFrame();
 }
 
 void ImguiPass::render(CommandBuffer &cmd, VkImageView targetView, VkExtent2D extent)

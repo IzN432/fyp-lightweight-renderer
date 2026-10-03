@@ -1,8 +1,12 @@
 #include "features/animation/AnimatorComponent.hpp"
 
 #include "core/app/ImGuiWidgets.hpp"
+#include "core/editor/EditorContext.hpp"
+#include "core/editor/command/Command.hpp"
+#include "core/editor/command/CommandManager.hpp"
 #include "core/scene/Scene.hpp"
 #include "core/scene/SceneObject.hpp"
+#include "core/scene/TransformComponent.hpp"
 
 #include <imgui.h>
 
@@ -17,6 +21,43 @@
 namespace lr
 {
 
+namespace
+{
+
+class UpdateAnimationTrackCommand final : public Command
+{
+public:
+    UpdateAnimationTrackCommand(AnimatorComponent &animator, size_t clipIndex, size_t trackIndex,
+                                AnimationChannel before, AnimationChannel after, float playbackSeconds)
+        : m_animator(animator), m_clipIndex(clipIndex), m_trackIndex(trackIndex),
+          m_before(std::move(before)), m_after(std::move(after)), m_playbackSeconds(playbackSeconds)
+    {}
+
+    void execute() override { apply(m_after); }
+    void undo() override { apply(m_before); }
+
+private:
+    void apply(const AnimationChannel &channel)
+    {
+        if (m_clipIndex >= m_animator.clips().size() ||
+            m_trackIndex >= m_animator.clips()[m_clipIndex].tracks().size())
+        {
+            return;
+        }
+        m_animator.clips()[m_clipIndex].tracks()[m_trackIndex] = channel;
+        m_animator.seek(m_playbackSeconds);
+    }
+
+    AnimatorComponent &m_animator;
+    size_t              m_clipIndex;
+    size_t              m_trackIndex;
+    AnimationChannel    m_before;
+    AnimationChannel    m_after;
+    float               m_playbackSeconds;
+};
+
+} // namespace
+
 AnimatorComponent::AnimatorComponent(std::vector<AnimationClip> clips)
     : Component("AnimatorComponent"), m_clips(std::move(clips))
 {}
@@ -27,6 +68,7 @@ void AnimatorComponent::play(size_t clipIndex)
     {
         throw std::out_of_range("AnimatorComponent clip index is out of range");
     }
+    cancelKeyframeEdit();
     m_activeClip = clipIndex;
     m_selectedTrack = 0;
     m_playbackSeconds = 0.0f;
@@ -36,10 +78,220 @@ void AnimatorComponent::play(size_t clipIndex)
 
 void AnimatorComponent::stop()
 {
+    cancelKeyframeEdit();
     m_playing = false;
     m_activeClip.reset();
     m_playbackSeconds = 0.0f;
     markDirty();
+}
+
+bool AnimatorComponent::addKeyframe(size_t trackIndex, float seconds)
+{
+    if (!m_activeClip || m_keyframeEdit || !std::isfinite(seconds) || seconds < 0.0f ||
+        trackIndex >= m_clips[*m_activeClip].tracks().size())
+    {
+        return false;
+    }
+
+    AnimationChannel &channel = m_clips[*m_activeClip].tracks()[trackIndex];
+    const bool added = std::visit([&](auto &track) {
+        Scene &scene = getOwningObject().scene();
+        if (!scene.contains(track.target()) ||
+            !scene.getSceneObject(track.target()).hasComponent<TransformComponent>())
+        {
+            return false;
+        }
+
+        const Transform &transform =
+            scene.getSceneObject(track.target()).getComponent<TransformComponent>().transform();
+        using Track = std::decay_t<decltype(track)>;
+        if constexpr (std::is_same_v<Track, TranslationTrack>)
+        {
+            track.setKeyframe(seconds, transform.position());
+        }
+        else if constexpr (std::is_same_v<Track, RotationTrack>)
+        {
+            track.setKeyframe(seconds, transform.rotation());
+        }
+        else
+        {
+            track.setKeyframe(seconds, transform.scale());
+        }
+        return true;
+    }, channel);
+
+    if (added)
+    {
+        pause();
+        seek(seconds);
+        markDirty();
+    }
+    return added;
+}
+
+bool AnimatorComponent::deleteKeyframe(size_t trackIndex, size_t keyframeIndex)
+{
+    if (!m_activeClip || m_keyframeEdit || trackIndex >= m_clips[*m_activeClip].tracks().size())
+    {
+        return false;
+    }
+
+    AnimationChannel before = m_clips[*m_activeClip].tracks()[trackIndex];
+    AnimationChannel after = before;
+    const bool removed = std::visit([&](auto &track) {
+        if (keyframeIndex >= track.keyframes().size())
+        {
+            return false;
+        }
+        return track.removeKeyframe(track.keyframes()[keyframeIndex].seconds);
+    }, after);
+    if (!removed)
+    {
+        return false;
+    }
+
+    pause();
+    if (editorContext())
+    {
+        editorContext()->commands.executeCommand(std::make_unique<UpdateAnimationTrackCommand>(
+            *this, *m_activeClip, trackIndex, std::move(before), std::move(after), m_playbackSeconds));
+    }
+    else
+    {
+        m_clips[*m_activeClip].tracks()[trackIndex] = std::move(after);
+        seek(m_playbackSeconds);
+    }
+    markDirty();
+    return true;
+}
+
+bool AnimatorComponent::beginKeyframeEdit(size_t trackIndex, size_t keyframeIndex)
+{
+    if (!m_activeClip || m_keyframeEdit || trackIndex >= m_clips[*m_activeClip].tracks().size())
+    {
+        return false;
+    }
+
+    AnimationChannel &channel = m_clips[*m_activeClip].tracks()[trackIndex];
+    return std::visit([&](auto &track) {
+        if (keyframeIndex >= track.keyframes().size())
+        {
+            return false;
+        }
+        Scene &scene = getOwningObject().scene();
+        if (!scene.contains(track.target()) ||
+            !scene.getSceneObject(track.target()).hasComponent<TransformComponent>())
+        {
+            return false;
+        }
+
+        pause();
+        const float seconds = track.keyframes()[keyframeIndex].seconds;
+        seek(seconds);
+        m_keyframeEdit = KeyframeEdit{*m_activeClip, trackIndex, keyframeIndex, track.target(),
+                                      std::decay_t<decltype(track)>::property(), seconds};
+        if (editorContext())
+        {
+            m_commandManager = &editorContext()->commands;
+            m_commandManager->beginTemporaryHistory();
+            TransformTool tool = TransformTool::Scale;
+            if constexpr (std::is_same_v<std::decay_t<decltype(track)>, TranslationTrack>)
+            {
+                tool = TransformTool::Translate;
+            }
+            else if constexpr (std::is_same_v<std::decay_t<decltype(track)>, RotationTrack>)
+            {
+                tool = TransformTool::Rotate;
+            }
+            m_transformEditService = &editorContext()->transformEdits;
+            m_transformEditService->beginTransformEdit(scene.getSceneObject(track.target()), tool,
+                                                       [this]() { cancelKeyframeEdit(); });
+        }
+        return true;
+    }, channel);
+}
+
+void AnimatorComponent::applyKeyframeEdit()
+{
+    if (!m_keyframeEdit)
+    {
+        return;
+    }
+
+    const KeyframeEdit edit = *m_keyframeEdit;
+    std::optional<AnimationChannel> before;
+    std::optional<AnimationChannel> after;
+    if (edit.clipIndex < m_clips.size() && edit.trackIndex < m_clips[edit.clipIndex].tracks().size())
+    {
+        AnimationChannel &channel = m_clips[edit.clipIndex].tracks()[edit.trackIndex];
+        before = channel;
+        Scene &scene = getOwningObject().scene();
+        if (scene.contains(edit.target))
+        {
+            const Transform &transform =
+                scene.getSceneObject(edit.target).getComponent<TransformComponent>().transform();
+            std::visit([&](auto &track) {
+                if (edit.keyframeIndex >= track.keyframes().size())
+                {
+                    return;
+                }
+                auto keyframe = track.keyframes()[edit.keyframeIndex];
+                using Track = std::decay_t<decltype(track)>;
+                if constexpr (std::is_same_v<Track, TranslationTrack>)
+                {
+                    keyframe.value = transform.position();
+                }
+                else if constexpr (std::is_same_v<Track, RotationTrack>)
+                {
+                    keyframe.value = transform.rotation();
+                }
+                else
+                {
+                    keyframe.value = transform.scale();
+                }
+                track.setKeyframe(std::move(keyframe));
+            }, channel);
+            after = channel;
+        }
+    }
+    m_keyframeEdit.reset();
+    if (m_transformEditService)
+    {
+        m_transformEditService->endTransformEdit();
+        m_transformEditService = nullptr;
+    }
+    if (m_commandManager && before && after)
+    {
+        m_commandManager->replaceTemporaryHistory(std::make_unique<UpdateAnimationTrackCommand>(
+            *this, edit.clipIndex, edit.trackIndex, std::move(*before), std::move(*after), edit.seconds));
+    }
+    else if (m_commandManager && m_commandManager->hasTemporaryHistory())
+    {
+        m_commandManager->cancelTemporaryHistory();
+    }
+    m_commandManager = nullptr;
+    markDirty();
+}
+
+void AnimatorComponent::cancelKeyframeEdit()
+{
+    if (!m_keyframeEdit)
+    {
+        return;
+    }
+    const float seconds = m_keyframeEdit->seconds;
+    m_keyframeEdit.reset();
+    if (m_transformEditService)
+    {
+        m_transformEditService->endTransformEdit();
+        m_transformEditService = nullptr;
+    }
+    if (m_commandManager && m_commandManager->hasTemporaryHistory())
+    {
+        m_commandManager->cancelTemporaryHistory();
+    }
+    m_commandManager = nullptr;
+    seek(seconds);
 }
 
 void AnimatorComponent::seek(float seconds)
@@ -189,6 +441,7 @@ void AnimatorComponent::onGUIImpl()
 
             m_selectedTrack = std::min(m_selectedTrack, clip.tracks().size() - 1);
             const std::string selectedLabel = trackLabel(clip.tracks()[m_selectedTrack]);
+            ImGui::BeginDisabled(m_keyframeEdit.has_value());
             if (ImGui::BeginCombo("Track", selectedLabel.c_str()))
             {
                 for (size_t trackIndex = 0; trackIndex < clip.tracks().size(); ++trackIndex)
@@ -208,8 +461,12 @@ void AnimatorComponent::onGUIImpl()
                 }
                 ImGui::EndCombo();
             }
+            ImGui::EndDisabled();
 
             const AnimationChannel &selectedChannel = clip.tracks()[m_selectedTrack];
+            enum class PendingKeyframeAction { None, Add, Edit, Delete, Apply, Cancel };
+            PendingKeyframeAction pendingAction = PendingKeyframeAction::None;
+            std::optional<size_t> pendingKeyframeIndex;
             std::visit([&](const auto &track) {
                     std::vector<float> keyframes;
                     keyframes.reserve(track.keyframes().size());
@@ -223,10 +480,137 @@ void AnimatorComponent::onGUIImpl()
                         ImVec2(ImGui::GetContentRegionAvail().x, 36.0f));
                     if (trackResult.progressChanged)
                     {
+                        cancelKeyframeEdit();
                         pause();
                         seek(progress * duration);
                     }
+
+                    std::optional<size_t> keyframeAtPlayhead;
+                    for (size_t keyframeIndex = 0; keyframeIndex < track.keyframes().size(); ++keyframeIndex)
+                    {
+                        if (std::abs(track.keyframes()[keyframeIndex].seconds - m_playbackSeconds) <= 1e-4f)
+                        {
+                            keyframeAtPlayhead = keyframeIndex;
+                            break;
+                        }
+                    }
+
+                    const bool editingThisTrack = m_keyframeEdit &&
+                        m_keyframeEdit->clipIndex == *m_activeClip &&
+                        m_keyframeEdit->trackIndex == m_selectedTrack;
+
+                    Scene &scene = getOwningObject().scene();
+                    if (scene.contains(track.target()) &&
+                        scene.getSceneObject(track.target()).hasComponent<TransformComponent>())
+                    {
+                        TransformComponent &transform =
+                            scene.getSceneObject(track.target()).getComponent<TransformComponent>();
+                        using Track = std::decay_t<decltype(track)>;
+                        glm::vec3 value;
+                        const char *valueLabel;
+                        if constexpr (std::is_same_v<Track, TranslationTrack>)
+                        {
+                            value      = transform.transform().position();
+                            valueLabel = "Position";
+                        }
+                        else if constexpr (std::is_same_v<Track, RotationTrack>)
+                        {
+                            value      = transform.transform().eulerDegrees();
+                            valueLabel = "Rotation (degrees)";
+                        }
+                        else
+                        {
+                            value      = transform.transform().scale();
+                            valueLabel = "Scale";
+                        }
+
+                        ImGui::BeginDisabled(!editingThisTrack);
+                        if (ImGui::InputFloat3(valueLabel, &value.x, "%.6f"))
+                        {
+                            if constexpr (std::is_same_v<Track, TranslationTrack>)
+                            {
+                                transform.setPosition(value);
+                            }
+                            else if constexpr (std::is_same_v<Track, RotationTrack>)
+                            {
+                                transform.setEulerDegrees(value);
+                            }
+                            else
+                            {
+                                transform.setScale(value);
+                            }
+                        }
+                        ImGui::EndDisabled();
+                    }
+                    else
+                    {
+                        ImGui::TextDisabled("Animated transform is unavailable");
+                    }
+
+                    if (editingThisTrack)
+                    {
+                        ImGui::Text("Editing keyframe at %.3f s", m_keyframeEdit->seconds);
+                        if (ImGui::Button("Apply"))
+                        {
+                            pendingAction = PendingKeyframeAction::Apply;
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+                        {
+                            pendingAction = PendingKeyframeAction::Cancel;
+                        }
+                    }
+                    else
+                    {
+                        ImGui::BeginDisabled(keyframeAtPlayhead.has_value() || m_keyframeEdit.has_value());
+                        if (ImGui::Button("Add Keyframe"))
+                        {
+                            pendingAction = PendingKeyframeAction::Add;
+                        }
+                        ImGui::EndDisabled();
+                        ImGui::SameLine();
+                        ImGui::BeginDisabled(!keyframeAtPlayhead.has_value() || m_keyframeEdit.has_value());
+                        if (ImGui::Button("Edit Keyframe"))
+                        {
+                            pendingAction = PendingKeyframeAction::Edit;
+                            pendingKeyframeIndex = keyframeAtPlayhead;
+                        }
+                        ImGui::EndDisabled();
+                        ImGui::SameLine();
+                        ImGui::BeginDisabled(!keyframeAtPlayhead.has_value() || m_keyframeEdit.has_value());
+                        if (ImGui::Button("Delete Keyframe"))
+                        {
+                            pendingAction = PendingKeyframeAction::Delete;
+                            pendingKeyframeIndex = keyframeAtPlayhead;
+                        }
+                        ImGui::EndDisabled();
+                        if (!keyframeAtPlayhead)
+                        {
+                            ImGui::SameLine();
+                            ImGui::TextDisabled("Captures the current transform");
+                        }
+                    }
                 }, selectedChannel);
+            switch (pendingAction)
+            {
+            case PendingKeyframeAction::Add:
+                addKeyframe(m_selectedTrack, m_playbackSeconds);
+                break;
+            case PendingKeyframeAction::Edit:
+                beginKeyframeEdit(m_selectedTrack, *pendingKeyframeIndex);
+                break;
+            case PendingKeyframeAction::Delete:
+                deleteKeyframe(m_selectedTrack, *pendingKeyframeIndex);
+                break;
+            case PendingKeyframeAction::Apply:
+                applyKeyframeEdit();
+                break;
+            case PendingKeyframeAction::Cancel:
+                cancelKeyframeEdit();
+                break;
+            case PendingKeyframeAction::None:
+                break;
+            }
             ImGui::TreePop();
         }
     }

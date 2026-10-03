@@ -14,6 +14,10 @@ public:
     virtual ~SphericalCameraController() = default;
 
     void update(float dt) override;
+    // ImGuizmo uses ImGui's global mouse-capture flag for its primary-button handles. Camera
+    // orbit/pan/zoom remain valid viewport interactions in that case, while ordinary ImGui
+    // windows must still block them.
+    void update(float dt, bool gizmoCapturesPrimaryMouse);
 
     // The orbit: the camera looks at `target` from `radius` away, `azimuth` radians around +Y (0 = on
     // the +Z axis) and `elevation` radians above the horizontal. Setting it places the camera at once,

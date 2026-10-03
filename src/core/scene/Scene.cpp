@@ -202,7 +202,7 @@ void Scene::onHierarchyGUI()
     }
 }
 
-void Scene::onInspectorGUI()
+void Scene::onInspectorGUI(EditorContext &context)
 {
     if (!m_selectedObject)
     {
@@ -213,7 +213,7 @@ void Scene::onInspectorGUI()
     SceneObject &object = getSceneObject(m_selectedObject.value());
     ImGui::TextUnformatted(object.name.empty() ? "Unnamed Scene Object" : object.name.c_str());
     ImGui::Separator();
-    object.onGUI();
+    object.onGUI(context);
 }
 
 } // namespace lr

@@ -65,6 +65,36 @@ int main()
     assert(!animator.isPlaying());
     assert(near(animator.playbackSeconds(), 2.0f));
 
+    assert(animator.beginKeyframeEdit(0, 1));
+    targetTransform.setPosition(glm::vec3(9.0f, 0.0f, 0.0f));
+    animator.cancelKeyframeEdit();
+    assert(near(targetTransform.transform().position().x, 4.0f));
+    assert(near(std::get<lr::TranslationTrack>(animator.clips()[0].tracks()[0]).sample(2.0f)->x, 4.0f));
+
+    assert(animator.beginKeyframeEdit(0, 1));
+    targetTransform.setPosition(glm::vec3(7.0f, 0.0f, 0.0f));
+    animator.applyKeyframeEdit();
+    assert(!animator.keyframeEdit());
+    assert(near(std::get<lr::TranslationTrack>(animator.clips()[0].tracks()[0]).sample(2.0f)->x, 7.0f));
+
+    animator.seek(1.0f);
+    targetTransform.setPosition(glm::vec3(5.0f, 1.0f, 0.0f));
+    assert(animator.addKeyframe(0, animator.playbackSeconds()));
+    const auto &addedKeyframes = std::get<lr::TranslationTrack>(animator.clips()[0].tracks()[0]).keyframes();
+    assert(addedKeyframes.size() == 3);
+    assert(near(addedKeyframes[1].seconds, 1.0f));
+    assert(near(addedKeyframes[1].value.x, 5.0f));
+    assert(near(addedKeyframes[1].value.y, 1.0f));
+    assert(!animator.addKeyframe(1, 1.0f));
+
+    assert(animator.deleteKeyframe(0, 1));
+    const auto &remainingKeyframes =
+        std::get<lr::TranslationTrack>(animator.clips()[0].tracks()[0]).keyframes();
+    assert(remainingKeyframes.size() == 2);
+    assert(near(remainingKeyframes[0].seconds, 0.0f));
+    assert(near(remainingKeyframes[1].seconds, 2.0f));
+    assert(!animator.deleteKeyframe(0, 2));
+
     bool rejectedInvalidTime = false;
     try
     {

@@ -12,7 +12,6 @@
 #include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
 #include "core/passes/overlaylines/OverlayLinesPass.hpp"
 #include "core/passes/overlaypoints/OverlayPointsPass.hpp"
-#include "core/framegraph/ImageReadback.hpp"
 
 #include "core/scene/AreaLightVisual.hpp"
 #include "core/scene/Camera.hpp"
@@ -21,11 +20,13 @@
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
-#include "core/editor/gizmo/GizmoManager.hpp"
-#include "core/editor/gizmo/TranslateDragHandlerGizmo.hpp"
-#include "core/editor/gizmo/translate/TranslateArrowGizmo.hpp"
-#include "core/editor/gizmo/translate/TranslateBoxGizmo.hpp"
+#include "core/editor/gizmo/RotateGizmo.hpp"
+#include "core/editor/gizmo/ScaleGizmo.hpp"
+#include "core/editor/gizmo/TranslateGizmo.hpp"
 #include "core/editor/SceneObjectDragHandler.hpp"
+#include "core/editor/SceneObjectRotationHandler.hpp"
+#include "core/editor/SceneObjectScaleHandler.hpp"
+#include "core/editor/SceneObjectTransformController.hpp"
 #include "core/editor/selection/BoxSelectionTool.hpp"
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/VertexManager.hpp"
@@ -158,7 +159,7 @@ try
     }
 
     // MESH
-    const fs::path meshPath = lr::paths::assetDir / "samples/models/lion_head_4k.glb";
+    const fs::path meshPath = lr::paths::assetDir / "samples/models/bird_orange.glb";
 
     sceneManager.load(meshPath, sceneLoadConfig);
 
@@ -234,129 +235,6 @@ try
         testPlaneObject.addComponent<lr::ColliderComponent>(std::move(testPlaneCollider));
         testPlaneObject.addComponent<lr::RigidBodyComponent>(1.0f, lr::RigidBodyType::Static);
 
-        // CORNELL BOX — floor, ceiling, back, left (red) and right (green) walls built from
-        // scratch and sized around the lion's bounds. The floor sits exactly at boundsMin.y, so
-        // the lion's bottom (already there) touches the box floor with no extra transform. The
-        // front is left open so the camera can see inside.
-        {
-            const glm::vec3 center     = (boundsMin + boundsMax) * 0.5f;
-            const glm::vec3 extents    = boundsMax - boundsMin;
-            const float     halfX      = std::max(extents.x, 0.001f) * 1.5f;
-            const float     halfZ      = std::max(extents.z, 0.001f) * 1.5f;
-            const float     floorY     = boundsMin.y;
-            const float     ceilingY   = boundsMin.y + std::max(extents.y, 0.001f) * 2.5f;
-            const float     halfY      = (ceilingY - floorY) * 0.5f;
-            const glm::vec3 boxCenter  = glm::vec3(center.x, (floorY + ceilingY) * 0.5f, center.z);
-
-            // Each entry: world-space center, right axis, up axis (their cross product is the
-            // quad's facing normal — see AreaLightVisual.cpp for the same winding convention),
-            // and the material color. Shared by the room walls (inward-facing) and the pedestal
-            // cube below (outward-facing) — same quad-building code either way.
-            struct QuadSpec
-            {
-                std::string name;
-                glm::vec3   center;
-                glm::vec3   right;
-                glm::vec3   up;
-                glm::vec3   normal;
-                glm::vec3   color;
-            };
-
-            const auto buildQuadObject = [&](const QuadSpec &quad) {
-                lr::Material material;
-                material.name                                 = quad.name;
-                material.parameters[config.baseDiffuseName]   = lr::MaterialParam::ColorRGBA{glm::vec4(quad.color, 1.0f)};
-                material.parameters[config.baseEmissiveName]  = lr::MaterialParam::ColorRGB{glm::vec3(0.0f)};
-                material.parameters[config.baseRoughnessName] = lr::MaterialParam::NormalizedFloat{1.0f};
-                material.parameters[config.baseMetallicName]  = lr::MaterialParam::NormalizedFloat{0.0f};
-                const lr::MaterialHandle handle = sceneManager.materialStore().acquire(std::move(material));
-
-                std::vector<glm::vec3> positions = {
-                    quad.center - quad.right - quad.up,
-                    quad.center + quad.right - quad.up,
-                    quad.center + quad.right + quad.up,
-                    quad.center - quad.right + quad.up,
-                };
-                std::vector<uint32_t>   positionIndices = {0, 1, 2, 3};
-                std::vector<glm::uvec3> faces           = {{0, 1, 2}, {0, 2, 3}};
-
-                lr::Mesh quadMesh;
-                quadMesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
-                quadMesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, std::vector<glm::vec3>(4, quad.normal));
-                quadMesh.setPerVertexArray<glm::vec4>(
-                    config.tangentAttributeName,
-                    std::vector<glm::vec4>(4, glm::vec4(glm::normalize(quad.right), 1.0f)));
-                const std::vector<glm::vec2> uvs = {{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
-                quadMesh.setPerVertexArray<glm::vec2>(config.uvAttributeName, uvs);
-                quadMesh.setFaceGroups({handle, handle});
-
-                const lr::MeshHandle meshHandle = sceneManager.meshStore().add(std::move(quadMesh));
-
-                lr::SceneObject &quadObject = scene.createSceneObject();
-                quadObject.name             = quad.name;
-                quadObject.addComponent<lr::TransformComponent>();
-                quadObject.addComponent<lr::MeshComponent>(meshHandle, sceneManager.meshStore(),
-                                                            std::vector<lr::MaterialHandle>{handle},
-                                                            sceneManager.materialStore());
-                sceneManager.addMeshObject(quadObject);
-            };
-
-            const std::vector<QuadSpec> walls = {
-                {"Cornell Floor", {boxCenter.x, floorY, boxCenter.z}, {0, 0, halfZ}, {halfX, 0, 0}, {0, 1, 0},
-                 glm::vec3(0.73f)},
-                {"Cornell Ceiling", {boxCenter.x, ceilingY, boxCenter.z}, {halfX, 0, 0}, {0, 0, halfZ}, {0, -1, 0},
-                 glm::vec3(0.73f)},
-                {"Cornell Back Wall", {boxCenter.x, boxCenter.y, center.z - halfZ}, {halfX, 0, 0}, {0, halfY, 0},
-                 {0, 0, 1}, glm::vec3(0.73f)},
-                {"Cornell Left Wall", {center.x - halfX, boxCenter.y, boxCenter.z}, {0, halfY, 0}, {0, 0, halfZ},
-                 {1, 0, 0}, glm::vec3(0.75f, 0.05f, 0.05f)},
-                {"Cornell Right Wall", {center.x + halfX, boxCenter.y, boxCenter.z}, {0, 0, halfZ}, {0, halfY, 0},
-                 {-1, 0, 0}, glm::vec3(0.05f, 0.6f, 0.05f)},
-            };
-            for (const QuadSpec &wall : walls)
-            {
-                buildQuadObject(wall);
-            }
-
-            // PEDESTAL CUBE — a clean, sharp-edged procedural cube standing in for the lion's own
-            // sculpted base (which has a faceted/beveled edge — a diagnostic for the HBAO dotted-
-            // edge artifact: if a hand-built, single-flat-face-per-side cube shows the same dots
-            // along its edges, the artifact isn't specific to the lion's faceted geometry after
-            // all). The lion is lifted so its own (unmodified) base now sits on top of this cube
-            // rather than on the Cornell floor directly.
-            {
-                const float     pedestalHalf   = std::max(std::max(extents.x, extents.z) * 0.55f, 0.001f);
-                const float     pedestalHeight = std::max(extents.y, 0.001f) * 0.35f;
-                const glm::vec3 pedestalCenter(center.x, floorY + pedestalHeight * 0.5f, center.z);
-                const float     px = pedestalHalf;
-                const float     py = pedestalHeight * 0.5f;
-                const float     pz = pedestalHalf;
-
-                const std::vector<QuadSpec> pedestalFaces = {
-                    {"Pedestal Top", pedestalCenter + glm::vec3(0, py, 0), {0, 0, pz}, {px, 0, 0}, {0, 1, 0},
-                     glm::vec3(0.73f)},
-                    {"Pedestal Bottom", pedestalCenter - glm::vec3(0, py, 0), {px, 0, 0}, {0, 0, pz}, {0, -1, 0},
-                     glm::vec3(0.73f)},
-                    {"Pedestal Front", pedestalCenter + glm::vec3(0, 0, pz), {px, 0, 0}, {0, py, 0}, {0, 0, 1},
-                     glm::vec3(0.73f)},
-                    {"Pedestal Back", pedestalCenter - glm::vec3(0, 0, pz), {0, py, 0}, {px, 0, 0}, {0, 0, -1},
-                     glm::vec3(0.73f)},
-                    {"Pedestal Right", pedestalCenter + glm::vec3(px, 0, 0), {0, py, 0}, {0, 0, pz}, {1, 0, 0},
-                     glm::vec3(0.73f)},
-                    {"Pedestal Left", pedestalCenter - glm::vec3(px, 0, 0), {0, 0, pz}, {0, py, 0}, {-1, 0, 0},
-                     glm::vec3(0.73f)},
-                };
-                for (const QuadSpec &face : pedestalFaces)
-                {
-                    buildQuadObject(face);
-                }
-
-                // Lift the lion so its own (local-space, unchanged) bottom lands on the pedestal's
-                // top face instead of the Cornell floor.
-                lr::TransformComponent &meshTransform = meshObject->getComponent<lr::TransformComponent>();
-                meshTransform.setPosition(meshTransform.transform().position() + glm::vec3(0.0f, pedestalHeight, 0.0f));
-            }
-        }
     }
 
     lr::PhysicsWorld physicsWorld(scene);
@@ -461,6 +339,9 @@ try
     pbrPass.uploadResources(viewer.resources());
     pbrPass.build(viewer.frameGraph());
 
+    // Keep the geometry overlay stage alive even when it has no instances. Besides remaining
+    // available for future editor visuals (for example, bones), it owns the per-frame clear of
+    // the shared overlay color/depth targets before later overlay passes append to them.
     lr::OverlayGeometryPass overlayGeometryPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
     });
@@ -505,9 +386,6 @@ try
     sceneManager.registerEditorModeChangedCallback(applyEditorMode);
     applyEditorMode(sceneManager.editorMode());
 
-    // Gizmo hover — reads the picking image from the previous frame
-    lr::ImageReadback gizmoReadback(viewer.context(), viewer.allocator());
-
     lr::VertexManager vertexManager(meshComponent.mesh());
     vertexManager.registerUpdateCallback([&]() {
         sceneManager.updateSelectedMeshPositions();
@@ -521,53 +399,24 @@ try
     lr::SelectionManager &selectionManager = sceneManager.selectionManager();
     selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera, selectionManager));
 
-    // What the translate gizmos drive by default (plain vertex-drag editing). ArapTool swaps
-    // this out for an ARAP-solve handler on the same gizmo instances once a precompute succeeds.
+    // What the translation gizmo drives by default. ArapTool swaps this for its solve handler
+    // after a successful precompute.
     lr::DefaultVertexDragHandler defaultHandler(vertexManager, selectionManager, commandManager);
     lr::SceneObjectDragHandler   sceneObjectHandler(commandManager);
-
-    lr::GizmoManager gizmoManager(overlayGeometryPass, viewer.input());
-
-    auto arrowXGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::X, *camera,
-                                                                 viewer.input(), defaultHandler);
-    auto arrowYGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::Y, *camera,
-                                                                 viewer.input(), defaultHandler);
-    auto arrowZGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::Z, *camera,
-                                                                 viewer.input(), defaultHandler);
-    auto boxGizmo    = std::make_unique<lr::TranslateBoxGizmo>(*camera, viewer.input(), defaultHandler);
-
-    // Raw pointers kept for ArapTool (needs a generic TranslateDragHandlerGizmo list) and the gizmo-
-    // positioning loop below (reads whichever handler is currently wired) — ownership moves to
-    // gizmoManager via addGizmo() just below.
-    lr::TranslateArrowGizmo *arrowX      = arrowXGizmo.get();
-    lr::TranslateArrowGizmo *arrowY      = arrowYGizmo.get();
-    lr::TranslateArrowGizmo *arrowZ      = arrowZGizmo.get();
-    lr::TranslateBoxGizmo   *boxGizmoPtr = boxGizmo.get();
-
-    const std::vector<int> translateGizmoIds = {
-        gizmoManager.addGizmo(std::move(arrowXGizmo)),
-        gizmoManager.addGizmo(std::move(arrowYGizmo)),
-        gizmoManager.addGizmo(std::move(arrowZGizmo)),
-        gizmoManager.addGizmo(std::move(boxGizmo)),
-    };
-    for (int id : translateGizmoIds)
-    {
-        gizmoManager.hideGizmo(id);
-    }
-
-    const std::vector<lr::TranslateDragHandlerGizmo *> dragHandlerGizmos = {arrowX, arrowY, arrowZ, boxGizmoPtr};
+    lr::SceneObjectRotationHandler sceneObjectRotationHandler(commandManager);
+    lr::SceneObjectScaleHandler sceneObjectScaleHandler(commandManager);
+    lr::TranslateGizmo       translateGizmo(defaultHandler);
+    lr::RotateGizmo          rotateGizmo(sceneObjectRotationHandler);
+    lr::ScaleGizmo           scaleGizmo(sceneObjectScaleHandler);
     lr::TranslateDragHandler *objectTranslateReturnHandler = &defaultHandler;
 
-    enum class ObjectTransformTool
-    {
-        None,
-        Translate,
-    };
-    ObjectTransformTool objectTransformTool       = ObjectTransformTool::None;
+    lr::SceneObjectTransformController transformController(
+        sceneObjectHandler, sceneObjectRotationHandler, sceneObjectScaleHandler);
+    lr::EditorContext editorContext{transformController, commandManager};
     bool                objectTransformWindowOpen = false;
 
     lr::ArapTool arapTool(selectionManager, vertexManager, commandManager, meshComponent.mesh(), defaultHandler,
-                          dragHandlerGizmos);
+                          translateGizmo);
 
     lr::LaplaceBeltramiTool laplaceBeltramiTool(meshComponent.mesh(), sceneManager, vertexManager);
 
@@ -577,9 +426,8 @@ try
     // rebound together so every editing/analysis operation addresses the same object.
     scene.registerSelectionChangedCallback([&](lr::SceneObjectId id) {
         lr::SceneObject &object = scene.getSceneObject(id);
-        objectTransformTool       = ObjectTransformTool::None;
         objectTransformWindowOpen = true;
-        sceneObjectHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
+        transformController.setSelectedTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
         if (!lr::SceneManager::isEditable(object))
         {
             if (sceneManager.editorMode() == lr::EditorMode::Edit)
@@ -611,13 +459,12 @@ try
 
     scene.registerObjectsDestroyedCallback([&](std::span<const lr::SceneObjectId> ids) {
         viewer.context().waitIdle();
-        if (sceneObjectHandler.target() &&
-            std::ranges::find(ids, sceneObjectHandler.target()->id()) != ids.end())
+        if (transformController.target() &&
+            std::ranges::find(ids, transformController.target()->id()) != ids.end())
         {
-            sceneObjectHandler.setTarget(nullptr);
-            objectTransformTool       = ObjectTransformTool::None;
             objectTransformWindowOpen = false;
         }
+        transformController.onObjectsDestroyed(ids);
 
         lr::SceneObject *replacement = sceneManager.removeSceneObjects(ids);
         sceneManager.uploadLights();
@@ -640,19 +487,15 @@ try
                                           replacement->getComponent<lr::TransformComponent>());
     });
 
-    // Single combined LMB handler: gizmos get first refusal on a click (so
-    // dragging an arrow doesn't simultaneously start a box-select), and
-    // selection only sees the event if no gizmo consumed it.
+    // ImGuizmo gets first refusal so manipulating a handle does not also start a box-select.
     viewer.input().onMouseButton([&](int button, int action, bool shift, bool ctrl, bool alt) {
         if (button != GLFW_MOUSE_BUTTON_LEFT || ImGui::GetIO().WantCaptureMouse)
         {
             return;
         }
 
-        const bool wasInteracting = gizmoManager.isInteracting();
-        gizmoManager.mouseButtonCallback(button, action, shift, ctrl, alt);
-
-        if (wasInteracting || gizmoManager.isInteracting() || sceneManager.editorMode() != lr::EditorMode::Edit)
+        if (translateGizmo.capturesMouse() || rotateGizmo.capturesMouse() || scaleGizmo.capturesMouse() ||
+            sceneManager.editorMode() != lr::EditorMode::Edit)
         {
             return;
         }
@@ -895,7 +738,7 @@ try
         ImGui::SetNextWindowPos(bottomRight, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
         ImGui::Begin("Inspector");
-        scene.onInspectorGUI();
+        scene.onInspectorGUI(editorContext);
         ImGui::End();
 
         if (objectTransformWindowOpen && scene.selectedObject())
@@ -906,19 +749,22 @@ try
             ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_Appearing);
             if (ImGui::Begin("Transform Gizmo", &objectTransformWindowOpen, ImGuiWindowFlags_AlwaysAutoResize))
             {
-                const bool canTranslate = sceneObjectHandler.target() != nullptr;
-                ImGui::BeginDisabled(!canTranslate);
-                if (ImGui::RadioButton("Translate", objectTransformTool == ObjectTransformTool::Translate))
+                const bool canTransform = transformController.target() != nullptr;
+                ImGui::BeginDisabled(!canTransform || transformController.hasTemporaryEdit());
+                if (ImGui::RadioButton("Translate", transformController.tool() == lr::TransformTool::Translate))
                 {
-                    objectTransformTool = ObjectTransformTool::Translate;
+                    transformController.setTool(lr::TransformTool::Translate);
                 }
-                ImGui::EndDisabled();
-
                 ImGui::SameLine();
-                ImGui::BeginDisabled();
-                ImGui::RadioButton("Rotate", false);
+                if (ImGui::RadioButton("Rotate", transformController.tool() == lr::TransformTool::Rotate))
+                {
+                    transformController.setTool(lr::TransformTool::Rotate);
+                }
                 ImGui::SameLine();
-                ImGui::RadioButton("Scale", false);
+                if (ImGui::RadioButton("Scale", transformController.tool() == lr::TransformTool::Scale))
+                {
+                    transformController.setTool(lr::TransformTool::Scale);
+                }
                 ImGui::EndDisabled();
             }
             ImGui::End();
@@ -966,12 +812,9 @@ try
         physicsWorld.update(dt);
     });
 
-    viewer.onUpdate([&cameraController](float dt, VkExtent2D extent) {
-        cameraController.update(dt);
-    });
-
     viewer.onUpdate([&](float dt, VkExtent2D extent) {
-        gizmoManager.updateCallback(dt, extent, viewer.hasRenderedAtLeastOneFrame(), gizmoReadback, viewer.resources());
+        cameraController.update(dt, translateGizmo.capturesMouse() || rotateGizmo.capturesMouse() ||
+                                      scaleGizmo.capturesMouse());
     });
 
     // selectionManager's per-frame mouse/drag handling is driven by SceneManager::registerCallbacks()
@@ -1004,30 +847,28 @@ try
         const auto &selected = selectionManager.getSelectedIndices();
         arapTool.onGui(viewProj, extent, selected.empty() ? glm::vec3(0.0f) : worldCentroidOf(selected));
 
-        const bool objectTranslateActive = objectTransformTool == ObjectTransformTool::Translate &&
+        const bool objectTranslateActive = transformController.tool() == lr::TransformTool::Translate &&
                                            sceneManager.editorMode() == lr::EditorMode::View &&
                                            sceneObjectHandler.target() != nullptr;
+        const bool objectRotateActive = transformController.tool() == lr::TransformTool::Rotate &&
+                                        sceneManager.editorMode() == lr::EditorMode::View &&
+                                        sceneObjectRotationHandler.target() != nullptr;
+        const bool objectScaleActive = transformController.tool() == lr::TransformTool::Scale &&
+                                       sceneManager.editorMode() == lr::EditorMode::View &&
+                                       sceneObjectScaleHandler.target() != nullptr;
         if (objectTranslateActive)
         {
-            if (&arrowX->dragHandler() != &sceneObjectHandler)
+            if (&translateGizmo.dragHandler() != &sceneObjectHandler)
             {
-                objectTranslateReturnHandler = &arrowX->dragHandler();
+                objectTranslateReturnHandler = &translateGizmo.dragHandler();
             }
-            for (lr::TranslateDragHandlerGizmo *gizmo : dragHandlerGizmos)
-            {
-                gizmo->setDragHandler(sceneObjectHandler);
-            }
-        } else if (&arrowX->dragHandler() == &sceneObjectHandler)
+            translateGizmo.setDragHandler(sceneObjectHandler);
+        } else if (&translateGizmo.dragHandler() == &sceneObjectHandler)
         {
-            for (lr::TranslateDragHandlerGizmo *gizmo : dragHandlerGizmos)
-            {
-                gizmo->setDragHandler(*objectTranslateReturnHandler);
-            }
+            translateGizmo.setDragHandler(*objectTranslateReturnHandler);
         }
 
-        // All 4 gizmos always share the same handler (ArapTool swaps them together), so any one
-        // of them tells us which is currently active.
-        const lr::TranslateDragHandler &activeHandler = arrowX->dragHandler();
+        const lr::TranslateDragHandler &activeHandler = translateGizmo.dragHandler();
         const auto &driven = objectTranslateActive
                                  ? selectionManager.getSelectedIndices()
                                  : static_cast<const lr::VertexDragHandler &>(activeHandler).indices();
@@ -1040,36 +881,30 @@ try
         // leak the plain translate gizmo into View mode, since the default handler's indices are the
         // current selection, which SceneManager clears on leaving Edit — so driven.empty() already
         // covers that case on its own.
-        if ((!objectTranslateActive && driven.empty()) || suppressedByArapMode)
+        const bool gizmoVisible = (objectTranslateActive || !driven.empty()) && !suppressedByArapMode;
+        glm::vec3  centroid(0.0f);
+        if (gizmoVisible)
         {
-            for (int id : translateGizmoIds)
-            {
-                gizmoManager.hideGizmo(id);
-            }
-        } else
-        {
-            const glm::vec3 centroid = objectTranslateActive
-                                           ? glm::vec3(sceneObjectHandler.target()->worldMatrix()[3])
-                                           : worldCentroidOf(driven);
-
-            // Keep the gizmo a constant size on screen (~1/9 screen height) regardless of camera distance.
-            const glm::vec3 camPos = camera->getComponent<lr::TransformComponent>().transform().position();
-            const float     d      = glm::length(camPos - centroid);
-            const float     fov    = glm::radians(camera->getComponent<lr::Camera>().fovYDegrees);
-            const float     len    = 2.0f * d * std::tan(fov * 0.5f) / 5.0f;
-            const float     rad    = len * 0.45f;
-
-            for (size_t i = 0; i < translateGizmoIds.size(); ++i)
-            {
-                gizmoManager.unhideGizmo(translateGizmoIds[i]);
-                lr::Gizmo &gizmo = gizmoManager.getGizmo(translateGizmoIds[i]);
-                gizmo.setPosition(centroid);
-                // First 3 gizmos are the X/Y/Z arrows, the 4th is the screen-plane box.
-                gizmo.setScale(i < 3 ? glm::vec3(rad, len, rad) : glm::vec3(rad * 0.45f, rad * 0.45f, rad * 0.45f));
-            }
+            centroid = objectTranslateActive ? glm::vec3(sceneObjectHandler.target()->worldMatrix()[3])
+                                             : worldCentroidOf(driven);
         }
 
-        overlayGeometryPass.setInstances(gizmoManager.getVisibleGizmoInstances());
+        const lr::Camera &cameraComponent = camera->getComponent<lr::Camera>();
+        translateGizmo.draw(cameraComponent.viewMatrix(), cameraComponent.projectionMatrix(aspect),
+                            cameraComponent.projectionType == lr::ProjectionType::Orthographic, extent, centroid,
+                            gizmoVisible);
+        rotateGizmo.draw(cameraComponent.viewMatrix(), cameraComponent.projectionMatrix(aspect),
+                         cameraComponent.projectionType == lr::ProjectionType::Orthographic, extent,
+                         objectRotateActive
+                             ? glm::translate(glm::mat4(1.0f),
+                                              glm::vec3(sceneObjectRotationHandler.target()->worldMatrix()[3])) *
+                                   glm::mat4_cast(sceneObjectRotationHandler.target()->worldRotation())
+                             : glm::mat4(1.0f),
+                         objectRotateActive);
+        scaleGizmo.draw(cameraComponent.viewMatrix(), cameraComponent.projectionMatrix(aspect),
+                        cameraComponent.projectionType == lr::ProjectionType::Orthographic, extent,
+                        objectScaleActive ? sceneObjectScaleHandler.target()->worldMatrix() : glm::mat4(1.0f),
+                        objectScaleActive);
         overlayLinesPass.setLines(lr::buildColliderOverlayLines(scene));
     });
 

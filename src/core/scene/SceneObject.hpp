@@ -42,6 +42,7 @@ public:
     const std::vector<SceneObjectId> &children() const { return m_children; }
 
     glm::mat4 worldMatrix() const;
+    glm::quat worldRotation() const;
 
     template <typename T, typename... Args> T &addComponent(Args &&...args)
     {
@@ -71,7 +72,7 @@ public:
 
     template <typename T> bool hasComponent() const { return components.contains(std::type_index(typeid(T))); };
 
-    void onGUI()
+    void onGUI(EditorContext &context)
     {
         int  id = 0;
         bool first = true;
@@ -83,7 +84,7 @@ public:
             }
             first = false;
             ImGui::PushID(id++);
-            component->onGUI();
+            component->onGUI(context);
             ImGui::PopID();
         }
     }

@@ -8,10 +8,9 @@
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/selection/VertexRole.hpp"
 #include "core/editor/command/CommandManager.hpp"
-#include "core/editor/gizmo/TranslateDragHandlerGizmo.hpp"
+#include "core/editor/gizmo/TranslateGizmo.hpp"
 #include "core/scene/Mesh.hpp"
 
-#include <vector>
 #include <vulkan/vulkan.h>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
@@ -26,7 +25,7 @@ class ArapTool
 {
 public:
     ArapTool(SelectionManager &selectionManager, VertexManager &vertexManager, CommandManager &commandManager,
-             const Mesh &mesh, VertexDragHandler &defaultHandler, std::vector<TranslateDragHandlerGizmo *> gizmos);
+             const Mesh &mesh, VertexDragHandler &defaultHandler, TranslateGizmo &gizmo);
 
     void setModeActive(bool active);
     bool isModeActive() const { return m_modeActive; }
@@ -54,7 +53,7 @@ private:
     CommandManager                 &m_commandManager;
     const Mesh                     *m_mesh;
     VertexDragHandler              &m_defaultHandler;
-    std::vector<TranslateDragHandlerGizmo *> m_gizmos;
+    TranslateGizmo                 &m_gizmo;
 
     VertexRoleId m_anchorRole;
     VertexRoleId m_handleRole;
