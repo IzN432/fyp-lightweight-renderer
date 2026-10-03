@@ -115,6 +115,7 @@ add_library(lr_core STATIC
     src/core/upload/SkinUploader.cpp
 
     src/core/app/GuiManager.cpp
+    src/core/app/ImGuiWidgets.cpp
     src/core/app/InputHandler.cpp
     src/core/app/Viewer.cpp
 
