@@ -16,6 +16,21 @@ void CommandBuffer::drawIndexed(uint32_t indexCount, uint32_t instanceCount, uin
 
 void CommandBuffer::dispatch(uint32_t x, uint32_t y, uint32_t z) { vkCmdDispatch(m_handle, x, y, z); }
 
+void CommandBuffer::drawIndirect(VkBuffer buffer, VkDeviceSize offset, uint32_t drawCount, uint32_t stride)
+{
+    vkCmdDrawIndirect(m_handle, buffer, offset, drawCount, stride);
+}
+
+void CommandBuffer::drawIndexedIndirect(VkBuffer buffer, VkDeviceSize offset, uint32_t drawCount, uint32_t stride)
+{
+    vkCmdDrawIndexedIndirect(m_handle, buffer, offset, drawCount, stride);
+}
+
+void CommandBuffer::dispatchIndirect(VkBuffer buffer, VkDeviceSize offset)
+{
+    vkCmdDispatchIndirect(m_handle, buffer, offset);
+}
+
 void CommandBuffer::bindVertexBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize offset)
 {
     vkCmdBindVertexBuffers(m_handle, binding, 1, &buffer, &offset);

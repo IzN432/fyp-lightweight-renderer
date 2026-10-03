@@ -286,7 +286,16 @@ if(LR_BUILD_PYTHON)
                     --frames 120)
             add_test(NAME python.failures
                 COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_failures.py")
-            set_tests_properties(python.bindings python.spinning_torus python.pipeline_state python.failures PROPERTIES
+            # Both assert on their own results (readback vs numpy; compile counts) and, via the
+            # regex below, fail on any validation error, e.g. destroying a buffer still in use.
+            add_test(NAME python.gpu_instancing
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/gpu_instancing.py"
+                    --frames 250)
+            add_test(NAME python.live_edit
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/live_edit.py"
+                    --frames 300)
+            set_tests_properties(python.bindings python.spinning_torus python.pipeline_state python.failures
+                python.gpu_instancing python.live_edit PROPERTIES
                 ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
                 # nanobind prints leak reports to stderr without failing the process.
                 FAIL_REGULAR_EXPRESSION "nanobind: leaked|\\[error\\]")

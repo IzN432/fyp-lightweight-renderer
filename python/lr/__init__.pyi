@@ -231,6 +231,32 @@ class PassContext:
         """Push `data` (e.g. a float32 numpy array) into the pass's push-constant block."""
         ...
 
+    def draw_indirect(
+        self,
+        buffer: BufferHandle,
+        draw_count: int = 1,
+        offset: int = 0,
+        stride: int = 16,
+    ) -> None:
+        """vkCmdDrawIndirect from a buffer declared with indirect_buffer(); commands are 4 uint32s
+        (vertex_count, instance_count, first_vertex, first_instance)."""
+        ...
+
+    def draw_indexed_indirect(
+        self,
+        buffer: BufferHandle,
+        draw_count: int = 1,
+        offset: int = 0,
+        stride: int = 20,
+    ) -> None:
+        """vkCmdDrawIndexedIndirect; commands are 5 x 4 bytes (index_count, instance_count, first_index,
+        vertex_offset, first_instance)."""
+        ...
+
+    def dispatch_indirect(self, buffer: BufferHandle, offset: int = 0) -> None:
+        """vkCmdDispatchIndirect; the command is 3 uint32s (x, y, z)."""
+        ...
+
 # ---------------------------------------------------------------------------
 # Pass builder
 # ---------------------------------------------------------------------------
@@ -305,6 +331,14 @@ class PassBuilder:
     def vertex_buffer(self, binding: int, buffer: BufferHandle) -> PassBuilder: ...
     def index_buffer(self, buffer: BufferHandle) -> PassBuilder: ...
 
+    def indirect_buffer(self, buffer: BufferHandle) -> PassBuilder:
+        """Declare a buffer of draw/dispatch arguments for PassContext.draw_indirect() and friends."""
+        ...
+
+    def runs_last(self) -> PassBuilder:
+        """Order this pass after every other pass sharing a resource with it, even ones declared later."""
+        ...
+
     def color_attachment(
         self,
         image: ImageHandle,
@@ -348,6 +382,14 @@ class FrameGraph:
 
     def compile(self) -> None:
         """Rebuild pipelines and barriers after changing passes while running."""
+        ...
+
+    @property
+    def needs_recompile(self) -> bool: ...
+
+    @property
+    def compile_count(self) -> int:
+        """How many times the graph has been compiled."""
         ...
 
     def debug_dump(self) -> None: ...
@@ -404,6 +446,31 @@ class ResourceRegistry:
         """Create a sampled image from an array shaped (height, width[, channels])."""
         ...
 
+    def replace_image(
+        self,
+        name: str,
+        data: object,
+        format: Format,
+        generate_mipmaps: bool = False,
+    ) -> None:
+        """Replace an image created by upload_image() (any size/format). Safe while running: the old image
+        is kept until in-flight frames finish, and passes sampling it recompile on the next frame."""
+        ...
+
+    def replace_buffer(self, name: str, data: object, usage: BufferUsage) -> None:
+        """Replace a buffer created by upload_buffer() with new contents of any size. Safe while running."""
+        ...
+
+    def replace_dynamic_buffer(self, name: str, size: int, usage: BufferUsage) -> None:
+        """Reallocate a buffer created by register_dynamic_buffer() at a new size (contents start undefined).
+        Same safety as replace_buffer()."""
+        ...
+
+    def read_buffer(self, name: str) -> object:
+        """Copy a buffer back to the CPU as a uint8 numpy array (use .view(np.float32) etc.), as of the last
+        submitted frame. Waits for the GPU to go idle: meant for tests and debugging, not every frame."""
+        ...
+
     def has_buffer(self, name: str) -> bool: ...
     def has_image(self, name: str) -> bool: ...
 
@@ -420,7 +487,11 @@ class Viewer:
         width: int = 1600,
         height: int = 900,
         validation: bool = True,
-    ) -> None: ...
+        raise_validation_errors: bool = True,
+    ) -> None:
+        """With validation on (the default), a validation-layer error closes the window and run() raises
+        VulkanValidationError; pass raise_validation_errors=False to only log them."""
+        ...
 
     @property
     def frame_graph(self) -> FrameGraph: ...

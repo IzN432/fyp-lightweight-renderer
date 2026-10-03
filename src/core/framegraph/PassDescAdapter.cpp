@@ -66,6 +66,8 @@ lr::framegraph::ResourceUsage bufferUsage(lr::BufferUsage usage)
             return U::VertexBuffer;
         case lr::BufferUsage::Index:
             return U::IndexBuffer;
+        case lr::BufferUsage::Indirect:
+            return U::IndirectBuffer;
     }
     return U::Unknown;
 }
@@ -90,6 +92,10 @@ GraphDefinition translatePassDescriptions(std::span<const PassDesc> passes, cons
             throw std::invalid_argument("FrameGraph: pass has an invalid frontend handle");
         }
         passIds.push_back(graph.addPass(pass.name, passKind(pass.type)));
+        if (pass.runsLast)
+        {
+            graph.setRunsLast(passIds.back());
+        }
     }
 
     for (size_t passIndex = 0; passIndex < passes.size(); ++passIndex)

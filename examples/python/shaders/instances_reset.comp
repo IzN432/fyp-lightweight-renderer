@@ -1,0 +1,27 @@
+#version 450
+
+// Starts each frame's indexed-indirect draw command with no instances; "cull" counts them in.
+layout(local_size_x = 1) in;
+
+layout(set = 0, binding = 0) writeonly buffer DrawArgs
+{
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint firstInstance;
+} args;
+
+layout(push_constant) uniform PC
+{
+    uint indexCount;
+} pc;
+
+void main()
+{
+    args.indexCount    = pc.indexCount;
+    args.instanceCount = 0u;
+    args.firstIndex    = 0u;
+    args.vertexOffset  = 0;
+    args.firstInstance = 0u;
+}

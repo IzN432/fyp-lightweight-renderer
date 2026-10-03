@@ -14,6 +14,23 @@ uint32_t computeMipLevels(uint32_t width, uint32_t height)
 {
     return static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
 }
+
+void memoryBarrier(VkCommandBuffer cmd, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess,
+                   VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess)
+{
+    VkMemoryBarrier2 barrier{};
+    barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    barrier.srcStageMask  = srcStage;
+    barrier.srcAccessMask = srcAccess;
+    barrier.dstStageMask  = dstStage;
+    barrier.dstAccessMask = dstAccess;
+
+    VkDependencyInfo dep{};
+    dep.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers    = &barrier;
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
 } // namespace
 
 namespace lr
@@ -42,6 +59,12 @@ ResourceRegistry::~ResourceRegistry()
     for (auto &[name, entry] : m_buffers)
     {
         m_allocator.destroy(entry.buffer);
+    }
+
+    // The owner (Viewer) waits for the device before destroying the registry.
+    for (RetiredResource &retired : m_retired)
+    {
+        destroyRetired(retired);
     }
 
     vkDestroyCommandPool(m_ctx.getDevice(), m_uploadPool, nullptr);
@@ -255,7 +278,8 @@ void ResourceRegistry::queueImageUpload(const std::string &name, const void *dat
         {
             AllocatedImage oldImage = std::move(existing->second.image);
             existing->second        = std::move(prepared);
-            m_allocator.destroy(oldImage);
+            retire(std::move(oldImage));
+            ++m_generations[name];
         }
 
         // Capacity was reserved before committing the image, so this move cannot reallocate.
@@ -510,7 +534,8 @@ void ResourceRegistry::registerDynamicBuffer(const std::string &name, VkDeviceSi
     entry.size        = size;
     entry.usage       = usage;
     entry.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-    entry.buffer      = m_allocator.createBuffer(size, usage, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    entry.buffer =
+        m_allocator.createBuffer(size, usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
     m_buffers.emplace(name, std::move(entry));
     setDebugName(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(m_buffers.at(name).buffer.buffer), name);
     spdlog::debug("ResourceRegistry: dynamic buffer '{}' ({} bytes)", name, size);
@@ -527,7 +552,7 @@ void ResourceRegistry::registerStaticBuffer(const std::string &name, VkDeviceSiz
     entry.size        = size;
     entry.usage       = usage;
     entry.memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY;
-    entry.buffer      = m_allocator.createBuffer(size, usage, VMA_MEMORY_USAGE_GPU_ONLY);
+    entry.buffer = m_allocator.createBuffer(size, usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
     m_buffers.emplace(name, std::move(entry));
     setDebugName(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(m_buffers.at(name).buffer.buffer), name);
     spdlog::debug("ResourceRegistry: static buffer '{}' ({} bytes)", name, size);
@@ -615,7 +640,7 @@ void ResourceRegistry::reuploadBuffer(const std::string &name, const void *data,
 }
 
 void ResourceRegistry::replaceUploadedBuffer(const std::string &name, const void *data, VkDeviceSize size,
-                                              VkBufferUsageFlags usage)
+                                             VkBufferUsageFlags usage)
 {
     auto it = m_buffers.find(name);
     if (it == m_buffers.end())
@@ -628,19 +653,40 @@ void ResourceRegistry::replaceUploadedBuffer(const std::string &name, const void
                                  "' is not a static buffer created via uploadBuffer()");
     }
 
-    m_allocator.destroy(it->second.buffer);
-
+    // Create everything fallible first, so a failure leaves the existing buffer untouched.
     BufferEntry entry{};
     entry.size        = size;
-    entry.usage        = usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    entry.usage       = usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     entry.memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY;
     entry.buffer      = m_allocator.createBuffer(size, entry.usage, VMA_MEMORY_USAGE_GPU_ONLY);
-    it->second        = std::move(entry);
+
+    AllocatedBuffer staging{};
+    try
+    {
+        staging = m_allocator.createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+        m_pendingUploads.reserve(m_pendingUploads.size() + 1);
+    } catch (...)
+    {
+        m_allocator.destroy(entry.buffer);
+        throw;
+    }
+    std::memcpy(staging.info.pMappedData, data, size);
+
+    // Frames still in flight may be reading the old buffer.
+    retire(it->second.buffer);
+    it->second = std::move(entry);
+    ++m_generations[name];
     setDebugName(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(it->second.buffer.buffer), name);
 
-    AllocatedBuffer staging =
-        m_allocator.createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-    std::memcpy(staging.info.pMappedData, data, size);
+    // Uploads queued for the old buffer (e.g. a replace earlier this frame) are superseded.
+    std::erase_if(m_pendingUploads, [&](PendingUpload &pending) {
+        if (pending.type != PendingUpload::Type::Buffer || pending.resourceName != name)
+        {
+            return false;
+        }
+        m_allocator.destroy(pending.staging);
+        return true;
+    });
 
     PendingUpload upload{};
     upload.staging      = staging;
@@ -660,17 +706,19 @@ void ResourceRegistry::replaceDynamicBuffer(const std::string &name, VkDeviceSiz
     }
     if (it->second.memoryUsage != VMA_MEMORY_USAGE_CPU_TO_GPU)
     {
-        throw std::runtime_error("ResourceRegistry: replaceDynamicBuffer '" + name +
-                                 "' is not a dynamic buffer");
+        throw std::runtime_error("ResourceRegistry: replaceDynamicBuffer '" + name + "' is not a dynamic buffer");
     }
 
-    m_allocator.destroy(it->second.buffer);
     BufferEntry entry{};
     entry.size        = size;
-    entry.usage       = usage;
+    entry.usage       = usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     entry.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-    entry.buffer      = m_allocator.createBuffer(size, usage, VMA_MEMORY_USAGE_CPU_TO_GPU);
-    it->second        = std::move(entry);
+    entry.buffer      = m_allocator.createBuffer(size, entry.usage, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    // Frames still in flight may be reading the old buffer.
+    retire(it->second.buffer);
+    it->second = std::move(entry);
+    ++m_generations[name];
     setDebugName(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(it->second.buffer.buffer), name);
 }
 
@@ -687,27 +735,13 @@ void ResourceRegistry::flushUploads()
 
     spdlog::debug("ResourceRegistry: flushing {} upload(s)...", m_pendingUploads.size());
 
-    VkDevice device = m_ctx.getDevice();
-
-    // Allocate a one-time command buffer
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = m_uploadPool;
-    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    checkVk(vkAllocateCommandBuffers(device, &allocInfo, &cmd), "ResourceRegistry: vkAllocateCommandBuffers");
-
-    VkFence fence     = VK_NULL_HANDLE;
-    bool    submitted = false;
-    try
-    {
-
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        checkVk(vkBeginCommandBuffer(cmd, &beginInfo), "ResourceRegistry: vkBeginCommandBuffer");
+    runOneShotCommands([&](VkCommandBuffer cmd) {
+        // Frames submitted earlier may still be reading buffers this re-uploads into (reuploadBuffer
+        // writes in place). A barrier's first scope includes earlier submissions on the queue, so this
+        // orders the copies after them...
+        memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                      VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+                      VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
 
         for (auto &upload : m_pendingUploads)
         {
@@ -715,7 +749,8 @@ void ResourceRegistry::flushUploads()
             {
                 AllocatedBuffer *dest = getBuffer(upload.resourceName);
                 VkBufferCopy     region{};
-                region.size = dest->size;
+                // reuploadBuffer() may write less than the whole buffer.
+                region.size = std::min(upload.staging.size, dest->size);
                 vkCmdCopyBuffer(cmd, upload.staging.buffer, dest->buffer, 1, &region);
             } else
             {
@@ -856,9 +891,52 @@ void ResourceRegistry::flushUploads()
             }
         }
 
+        // ...and makes the uploaded data visible to every later submission, whatever stage reads it
+        // (the image transitions above only cover fragment shaders).
+        memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+    });
+
+    for (auto &upload : m_pendingUploads)
+    {
+        m_allocator.destroy(upload.staging);
+        if (upload.type == PendingUpload::Type::Image)
+        {
+            setImageLayout(upload.resourceName, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
+    }
+
+    m_pendingUploads.clear();
+
+    spdlog::debug("ResourceRegistry: uploads complete");
+}
+
+void ResourceRegistry::runOneShotCommands(const std::function<void(VkCommandBuffer)> &record)
+{
+    VkDevice device = m_ctx.getDevice();
+
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool        = m_uploadPool;
+    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    checkVk(vkAllocateCommandBuffers(device, &allocInfo, &cmd), "ResourceRegistry: vkAllocateCommandBuffers");
+
+    VkFence fence     = VK_NULL_HANDLE;
+    bool    submitted = false;
+    try
+    {
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        checkVk(vkBeginCommandBuffer(cmd, &beginInfo), "ResourceRegistry: vkBeginCommandBuffer");
+
+        record(cmd);
+
         checkVk(vkEndCommandBuffer(cmd), "ResourceRegistry: vkEndCommandBuffer");
 
-        // Submit and wait
         VkFenceCreateInfo fenceCI{};
         fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         checkVk(vkCreateFence(device, &fenceCI, nullptr, &fence), "ResourceRegistry: vkCreateFence");
@@ -891,22 +969,96 @@ void ResourceRegistry::flushUploads()
         throw;
     }
 
-    // Cleanup
     vkDestroyFence(device, fence, nullptr);
     vkFreeCommandBuffers(device, m_uploadPool, 1, &cmd);
+}
 
-    for (auto &upload : m_pendingUploads)
+// ---------------------------------------------------------------------------
+// Readback
+// ---------------------------------------------------------------------------
+
+std::vector<std::byte> ResourceRegistry::readBuffer(const std::string &name)
+{
+    const auto it = m_buffers.find(name);
+    if (it == m_buffers.end())
     {
-        m_allocator.destroy(upload.staging);
-        if (upload.type == PendingUpload::Type::Image)
-        {
-            setImageLayout(upload.resourceName, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        }
+        throw std::runtime_error("ResourceRegistry: readBuffer '" + name + "' not found");
     }
 
-    m_pendingUploads.clear();
+    flushUploads();
+    m_ctx.waitIdle();
 
-    spdlog::debug("ResourceRegistry: uploads complete");
+    const VkDeviceSize size   = it->second.size;
+    const VkBuffer     source = it->second.buffer.buffer;
+    AllocatedBuffer    staging =
+        m_allocator.createBuffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
+    std::vector<std::byte> contents(static_cast<size_t>(size));
+    try
+    {
+        runOneShotCommands([&](VkCommandBuffer cmd) {
+            // Shader/transfer writes from earlier submissions -> this copy -> the host.
+            memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+            VkBufferCopy region{};
+            region.size = size;
+            vkCmdCopyBuffer(cmd, source, staging.buffer, 1, &region);
+            memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
+        });
+        checkVk(vmaInvalidateAllocation(m_allocator.getHandle(), staging.allocation, 0, VK_WHOLE_SIZE),
+                "ResourceRegistry: vmaInvalidateAllocation");
+        std::memcpy(contents.data(), staging.info.pMappedData, contents.size());
+    } catch (...)
+    {
+        m_allocator.destroy(staging);
+        throw;
+    }
+    m_allocator.destroy(staging);
+    return contents;
+}
+
+// ---------------------------------------------------------------------------
+// Replacement tracking and deferred destruction
+// ---------------------------------------------------------------------------
+
+uint64_t ResourceRegistry::generation(const std::string &name) const
+{
+    const auto it = m_generations.find(name);
+    return it == m_generations.end() ? 0 : it->second;
+}
+
+void ResourceRegistry::retire(AllocatedBuffer buffer)
+{
+    m_retired.push_back({.resource = std::move(buffer), .retiredInFrame = m_currentFrame});
+}
+
+void ResourceRegistry::retire(AllocatedImage image)
+{
+    m_retired.push_back({.resource = std::move(image), .retiredInFrame = m_currentFrame});
+}
+
+void ResourceRegistry::destroyRetired(RetiredResource &retired)
+{
+    std::visit(
+        [this](auto &resource) {
+            m_allocator.destroy(resource);
+        },
+        retired.resource);
+}
+
+void ResourceRegistry::beginFrame(uint64_t frame, uint64_t lastCompletedFrame)
+{
+    m_currentFrame = frame;
+    // A resource retired during frame F may still be used by F itself (e.g. replaced from inside a
+    // pass callback after its buffers were bound), so it waits for F to complete, not just F - 1.
+    std::erase_if(m_retired, [&](RetiredResource &retired) {
+        if (retired.retiredInFrame > lastCompletedFrame)
+        {
+            return false;
+        }
+        destroyRetired(retired);
+        return true;
+    });
 }
 
 // ---------------------------------------------------------------------------

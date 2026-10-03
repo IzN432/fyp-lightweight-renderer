@@ -10,6 +10,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -287,6 +288,41 @@ void blendingReadsColorAttachments()
     }
 }
 
+void runsLastOrdersAfterLaterDeclaredPasses()
+{
+    // An overlay declared early (like the Viewer's ImGui pass) must still follow a pass added later that
+    // writes the same image — without the declaration-order WAW edge turning into a cycle.
+    lr::FrameGraphDefinition definition;
+    const auto               image = definition.image("swapchain");
+    builder(definition, definition.addPass("scene")).colorAttachment(image, VK_FORMAT_B8G8R8A8_UNORM);
+    builder(definition, definition.addPass("overlay"))
+        .runsLast()
+        .colorAttachment(image, VK_FORMAT_B8G8R8A8_UNORM, VK_ATTACHMENT_LOAD_OP_LOAD);
+    builder(definition, definition.addPass("added_later"))
+        .colorAttachment(image, VK_FORMAT_B8G8R8A8_UNORM, VK_ATTACHMENT_LOAD_OP_LOAD);
+    builder(definition, definition.addPass("unrelated"))
+        .storageBufferWrite(0, definition.buffer("b"), VK_SHADER_STAGE_COMPUTE_BIT);
+
+    require(sort(definition) == std::vector<size_t>({0, 2, 3, 1}),
+            "a runsLast pass should execute after every other pass, including later-declared ones");
+}
+
+void definitionRevisionTracksChanges()
+{
+    lr::FrameGraphDefinition definition;
+    const uint64_t           initial = definition.revision();
+    const auto               pass    = definition.addPass("p");
+    require(definition.revision() > initial, "adding a pass should change the revision");
+
+    const uint64_t afterAdd = definition.revision();
+    (void)std::as_const(definition).pass(pass);
+    (void)std::as_const(definition).passes();
+    require(definition.revision() == afterAdd, "read-only access should not change the revision");
+
+    builder(definition, pass).type(lr::PassType::Compute);
+    require(definition.revision() > afterAdd, "modifying a pass through its builder should change the revision");
+}
+
 void backbufferContractPlansPresentationTransitions()
 {
     lr::FrameGraphDefinition definition;
@@ -458,6 +494,8 @@ int main()
         {"whole-resource barriers", barriersRemainWholeResource},
         {"same-layout attachment hazard", sameLayoutAttachmentHazard},
         {"blending reads color attachments", blendingReadsColorAttachments},
+        {"runsLast orders after later-declared passes", runsLastOrdersAfterLaterDeclaredPasses},
+        {"definition revision tracks changes", definitionRevisionTracksChanges},
         {"backbuffer presentation contract", backbufferContractPlansPresentationTransitions},
         {"external binding ownership", externalBindingsEnforceHandleOwnership},
         {"read-only image coalescing", readOnlyImageAccessesCoalesce},

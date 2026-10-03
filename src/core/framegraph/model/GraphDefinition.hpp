@@ -61,6 +61,7 @@ enum class ResourceUsage
     DepthAttachment,
     VertexBuffer,
     IndexBuffer,
+    IndirectBuffer,
 };
 
 struct ResourceAccess
@@ -84,6 +85,9 @@ struct PassNode
     PassKind                    kind = PassKind::Graphics;
     std::vector<ResourceAccess> accesses;
     std::vector<PassId>         explicitDependencies;
+    // Ordered as if declared after every other pass (e.g. a UI overlay), so passes added to the
+    // graph later still come before it.
+    bool runsLast = false;
 };
 
 // This is the stable, backend-independent frame-graph input. It can be built
@@ -96,6 +100,7 @@ public:
     ResourceId addResource(std::string name, ResourceKind kind);
     void       addAccess(PassId pass, ResourceAccess access);
     void       addDependency(PassId pass, PassId dependency);
+    void       setRunsLast(PassId pass);
 
     const std::vector<ResourceNode> &resources() const { return m_resources; }
     const std::vector<PassNode>     &passes() const { return m_passes; }

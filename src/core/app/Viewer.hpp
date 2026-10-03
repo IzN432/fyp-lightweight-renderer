@@ -122,6 +122,7 @@ private:
     double                                              m_lastFrameTime     = 0.0;
     bool                                                m_frameExecuted     = false;
     bool                                                m_imguiPassAdded    = false;
+    uint64_t                                            m_submittedFrames   = 0;
 };
 
 } // namespace lr

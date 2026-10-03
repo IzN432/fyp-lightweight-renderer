@@ -79,14 +79,11 @@ void Viewer::addImguiPass()
         throw std::logic_error("Viewer: ImGui pass has already been added");
     }
 
-    // Snapshot pass handles before adding imgui to the graph definition.
-    // addPass() inserts immediately, so querying inside the builder chain would
-    // include "__imgui" itself and create a self-cycle.
-    const auto priorPasses = m_fg->passHandles();
-
+    // runsLast keeps the overlay after every pass touching the swapchain, including passes added
+    // after this one (e.g. while running).
     m_fg->addPass("__imgui")
         .type(PassType::Custom)
-        .dependsOn(priorPasses)
+        .runsLast()
         .colorAttachment(m_backbuffer, m_swapchain->getFormat(), VK_ATTACHMENT_LOAD_OP_LOAD)
         .execute([this](PassContext &ctx) {
             m_imguiPass->render(ctx.cmd(), m_swapchain->getImageView(m_currentImageIndex), ctx.renderingExtent());
@@ -145,6 +142,12 @@ void Viewer::runFrames()
 
         m_currentImageIndex = imageIndex;
 
+        // beginFrame() waited for this frame slot's previous submission, so every frame up to
+        // `frame - framesInFlight` has finished on the GPU.
+        const uint64_t frame          = m_submittedFrames + 1;
+        const uint64_t framesInFlight = m_renderer->framesInFlight();
+        m_resources->beginFrame(frame, frame > framesInFlight ? frame - framesInFlight : 0);
+
         const double now = glfwGetTime();
         const float  dt  = static_cast<float>(now - m_lastFrameTime);
         m_lastFrameTime  = now;
@@ -162,7 +165,9 @@ void Viewer::runFrames()
         m_fg->execute(cmd, externalImages);
         m_frameExecuted = true;
 
-        if (!m_renderer->endFrame(*m_swapchain, imageIndex))
+        const bool presented = m_renderer->endFrame(*m_swapchain, imageIndex);
+        ++m_submittedFrames;
+        if (!presented)
         {
             recreateSwapchain();
         }

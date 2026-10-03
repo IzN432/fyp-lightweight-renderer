@@ -1,6 +1,8 @@
 #include "GraphCompiler.hpp"
 
+#include <algorithm>
 #include <functional>
+#include <numeric>
 #include <optional>
 #include <queue>
 #include <stdexcept>
@@ -30,11 +32,25 @@ ExecutionPlan buildExecutionPlan(const GraphDefinition &graph)
         }
     };
 
+    // Effective declaration order: runsLast passes behave as if declared after all others, both
+    // when deriving hazards from access order and when breaking ties between ready passes.
+    std::vector<uint32_t> declarationOrder(passCount);
+    std::iota(declarationOrder.begin(), declarationOrder.end(), 0u);
+    std::stable_partition(declarationOrder.begin(), declarationOrder.end(), [&](uint32_t index) {
+        return !graph.passes()[index].runsLast;
+    });
+    std::vector<uint32_t> rank(passCount);
+    for (uint32_t position = 0; position < passCount; ++position)
+    {
+        rank[declarationOrder[position]] = position;
+    }
+
     // A frontend may mention the same resource more than once in one pass
     // (for example through two descriptor bindings). Collapse those mentions
     // before updating history so a pass can never create a dependency on itself.
-    for (const PassNode &pass : graph.passes())
+    for (const uint32_t passIndex : declarationOrder)
     {
+        const PassNode &pass = graph.passes()[passIndex];
         struct CombinedAccess
         {
             bool reads  = false;
@@ -106,14 +122,14 @@ ExecutionPlan buildExecutionPlan(const GraphDefinition &graph)
         }
     }
 
-    // Always choose the earliest-declared ready pass. This makes compilation
+    // Always choose the earliest-declared ready pass (by effective rank). This makes compilation
     // reproducible even though edge de-duplication uses unordered sets.
-    std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<>> ready;
+    std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<>> ready; // holds ranks
     for (uint32_t index = 0; index < passCount; ++index)
     {
         if (inDegree[index] == 0)
         {
-            ready.push(index);
+            ready.push(rank[index]);
         }
     }
 
@@ -121,7 +137,7 @@ ExecutionPlan buildExecutionPlan(const GraphDefinition &graph)
     plan.orderedPasses.reserve(passCount);
     while (!ready.empty())
     {
-        const uint32_t pass = ready.top();
+        const uint32_t pass = declarationOrder[ready.top()];
         ready.pop();
         plan.orderedPasses.push_back(PassId{pass});
 
@@ -129,7 +145,7 @@ ExecutionPlan buildExecutionPlan(const GraphDefinition &graph)
         {
             if (--inDegree[destination] == 0)
             {
-                ready.push(destination);
+                ready.push(rank[destination]);
             }
         }
     }

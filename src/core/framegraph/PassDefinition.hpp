@@ -45,7 +45,8 @@ enum class BufferUsage
     Uniform,
     Storage,
     Vertex,
-    Index
+    Index,
+    Indirect // draw/dispatch arguments read by vkCmdDraw*Indirect
 };
 
 // Applied to every color attachment of a pass.
@@ -138,6 +139,8 @@ struct PassDesc
     std::vector<BufferUse>             bufferUses;
     std::vector<PassHandle>            explicitDependencies;
     std::function<void(PassContext &)> executeCallback;
+    // Ordered as if declared after every other pass — see PassBuilder::runsLast().
+    bool runsLast = false;
 };
 
 } // namespace lr

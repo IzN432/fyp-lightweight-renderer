@@ -30,6 +30,7 @@
 #endif
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -231,6 +232,23 @@ uint32_t texelSize(VkFormat format)
         throw std::invalid_argument("upload_image: format not supported for uploads");
     }
     return it->second;
+}
+
+// (width, height) of an array shaped (height, width[, channels]) holding texels of `format`.
+std::pair<uint32_t, uint32_t> imageSize(const HostArray &data, VkFormat format, const char *function)
+{
+    if (data.ndim() < 2)
+    {
+        throw std::invalid_argument(std::string(function) + ": expected an array shaped (height, width[, channels])");
+    }
+    const auto height = static_cast<uint32_t>(data.shape(0));
+    const auto width  = static_cast<uint32_t>(data.shape(1));
+    if (data.nbytes() != static_cast<size_t>(width) * height * texelSize(format))
+    {
+        throw std::invalid_argument(std::string(function) +
+                                    ": array byte size doesn't match height * width * bytes-per-texel of the format");
+    }
+    return {width, height};
 }
 
 VkClearValue colorClear(const std::array<float, 4> &rgba)
@@ -446,21 +464,44 @@ void bindResources(nb::module_ &m)
         .def(
             "upload_image",
             [](ResourceRegistry &r, const std::string &name, HostArray data, VkFormat format, bool generateMipmaps) {
-                if (data.ndim() < 2)
-                {
-                    throw std::invalid_argument("upload_image: expected an array shaped (height, width[, channels])");
-                }
-                const auto height = static_cast<uint32_t>(data.shape(0));
-                const auto width  = static_cast<uint32_t>(data.shape(1));
-                if (data.nbytes() != static_cast<size_t>(width) * height * texelSize(format))
-                {
-                    throw std::invalid_argument("upload_image: array byte size doesn't match "
-                                                "height * width * bytes-per-texel of the format");
-                }
+                const auto [width, height] = imageSize(data, format, "upload_image");
                 r.uploadImage(name, data.data(), width, height, format, generateMipmaps);
             },
             "name"_a, "data"_a, "format"_a, "generate_mipmaps"_a = false,
             "Create a sampled image from an array shaped (height, width[, channels]).")
+        .def(
+            "replace_image",
+            [](ResourceRegistry &r, const std::string &name, HostArray data, VkFormat format, bool generateMipmaps) {
+                const auto [width, height] = imageSize(data, format, "replace_image");
+                r.replaceUploadedImage(name, data.data(), width, height, format, generateMipmaps);
+            },
+            "name"_a, "data"_a, "format"_a, "generate_mipmaps"_a = false,
+            "Replace an image created by upload_image() (any size/format). Safe while running: the old image "
+            "is kept until in-flight frames finish, and passes sampling it recompile on the next frame.")
+        .def(
+            "replace_buffer",
+            [](ResourceRegistry &r, const std::string &name, HostArray data, VkBufferUsageFlags usage) {
+                r.replaceUploadedBuffer(name, data.data(), data.nbytes(), usage);
+            },
+            "name"_a, "data"_a, "usage"_a,
+            "Replace a buffer created by upload_buffer() with new contents of any size. Safe while running: the "
+            "old buffer is kept until in-flight frames finish. Vertex/index/indirect buffers take effect "
+            "immediately; passes binding it as a uniform/storage buffer recompile on the next frame.")
+        .def("replace_dynamic_buffer", &ResourceRegistry::replaceDynamicBuffer, "name"_a, "size"_a, "usage"_a,
+             "Reallocate a buffer created by register_dynamic_buffer() at a new size (contents start undefined). "
+             "Same safety as replace_buffer().")
+        .def(
+            "read_buffer",
+            [](ResourceRegistry &r, const std::string &name) {
+                auto       *bytes = new std::vector<std::byte>(r.readBuffer(name));
+                nb::capsule owner(bytes, [](void *p) noexcept {
+                    delete static_cast<std::vector<std::byte> *>(p);
+                });
+                return nb::ndarray<nb::numpy, uint8_t, nb::ndim<1>>(bytes->data(), {bytes->size()}, owner);
+            },
+            "name"_a,
+            "Copy a buffer back to the CPU as a uint8 numpy array (use .view(np.float32) etc.), as of the last "
+            "submitted frame. Waits for the GPU to go idle: meant for tests and debugging, not every frame.")
         .def("has_buffer", &ResourceRegistry::hasBuffer, "name"_a)
         .def("has_image", &ResourceRegistry::hasImage, "name"_a)
         .def_prop_ro(
@@ -496,6 +537,16 @@ void bindPasses(nb::module_ &m)
                 return toTuple(ctx.extent(image));
             },
             "image"_a)
+        .def("draw_indirect", &PassContext::drawIndirect, "buffer"_a, "draw_count"_a = 1, "offset"_a = 0,
+             "stride"_a = uint32_t(sizeof(VkDrawIndirectCommand)),
+             "vkCmdDrawIndirect from a buffer declared with indirect_buffer(); commands are 4 uint32s "
+             "(vertex_count, instance_count, first_vertex, first_instance).")
+        .def("draw_indexed_indirect", &PassContext::drawIndexedIndirect, "buffer"_a, "draw_count"_a = 1, "offset"_a = 0,
+             "stride"_a = uint32_t(sizeof(VkDrawIndexedIndirectCommand)),
+             "vkCmdDrawIndexedIndirect; commands are 5 x 4 bytes (index_count, instance_count, first_index, "
+             "vertex_offset, first_instance).")
+        .def("dispatch_indirect", &PassContext::dispatchIndirect, "buffer"_a, "offset"_a = 0,
+             "vkCmdDispatchIndirect; the command is 3 uint32s (x, y, z).")
         .def(
             "push_constants",
             [](PassContext &ctx, VkShaderStageFlags stages, HostArray data, uint32_t offset) {
@@ -615,6 +666,11 @@ void bindPasses(nb::module_ &m)
              ref)
         .def("vertex_buffer", &PassBuilder::vertexBuffer, "binding"_a, "buffer"_a, ref)
         .def("index_buffer", &PassBuilder::indexBuffer, "buffer"_a, ref)
+        .def("indirect_buffer", &PassBuilder::indirectBuffer, "buffer"_a, ref,
+             "Declare a buffer of draw/dispatch arguments for PassContext.draw_indirect() and friends, e.g. "
+             "written by a compute pass; the frame graph inserts the barrier between them.")
+        .def("runs_last", &PassBuilder::runsLast, ref,
+             "Order this pass after every other pass sharing a resource with it, even ones declared later.")
         .def(
             "color_attachment",
             [](PassBuilder &b, ImageHandle image, VkFormat format, VkAttachmentLoadOp loadOp,
@@ -664,7 +720,11 @@ void bindPasses(nb::module_ &m)
              "Start declaring a pass; passes run in dependency order, derived from the resources they use.")
         .def("image", &FrameGraph::image, "name"_a, "Handle for a named image (\"swapchain\" is the window).")
         .def("buffer", &FrameGraph::buffer, "name"_a, "Handle for a named buffer.")
-        .def("compile", &FrameGraph::compile, "Rebuild pipelines and barriers after changing passes while running.")
+        .def("compile", &FrameGraph::compile,
+             "Build the graph now. Rarely needed: run() compiles, and changes while running (new or modified "
+             "passes, replaced uniform/storage buffers or sampled images) recompile automatically.")
+        .def_prop_ro("needs_recompile", &FrameGraph::needsRecompile)
+        .def_prop_ro("compile_count", &FrameGraph::compileCount, "How many times the graph has been compiled.")
         .def("debug_dump", &FrameGraph::debugDump);
 }
 

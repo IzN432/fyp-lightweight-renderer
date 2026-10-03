@@ -233,6 +233,18 @@ PassBuilder &PassBuilder::indexBuffer(BufferHandle buffer)
     return *this;
 }
 
+PassBuilder &PassBuilder::indirectBuffer(BufferHandle buffer)
+{
+    desc().bufferUses.push_back({.buffer = buffer, .usage = BufferUsage::Indirect, .access = AccessMode::Read});
+    return *this;
+}
+
+PassBuilder &PassBuilder::runsLast()
+{
+    desc().runsLast = true;
+    return *this;
+}
+
 PassBuilder &PassBuilder::colorAttachment(ImageHandle image, VkFormat format, VkAttachmentLoadOp loadOp,
                                           VkClearValue clearValue, ExtentSpec extent)
 {

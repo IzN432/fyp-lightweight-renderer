@@ -151,7 +151,7 @@ A slowly turning torus drawn by three passes into the window
 `shaders/{solid.frag, wire.frag, glass.vert, glass.frag}`. `spinning_torus.py` now imports its mesh from
 `meshes.py`.
 
-## Step 3 — shader reflection and Python-friendly errors ✅
+## Step 3 — shader reflection and Python-friendly errors ☑️ (committed 66b2fc7, with 3b)
 
 **Goal:** validate declared bindings and push-constant sizes against the shader's SPIR-V (SPIRV-Reflect) at
 `compile()`, and surface validation-layer errors as Python exceptions in debug builds.
@@ -223,7 +223,7 @@ are created; `core/framegraph/compiler/ShaderInterface.{hpp,cpp}`):
 `Viewer::onValidationError`, `PassContext::{pushConstantSize,pushConstantStages}`, `ShaderCode::name`;
 `spirv-reflect` in `vcpkg.json`.
 
-## Step 3b — failures inside lr itself ✅
+## Step 3b — failures inside lr itself ☑️ (committed 66b2fc7)
 
 **Goal:** a bug *inside* the library must surface as a Python exception or a readable crash report. It
 must never hang the script, show a modal dialog, exit silently, or destroy objects the GPU is still using.
@@ -299,13 +299,115 @@ It uses private failure-injection hooks in `lr._lr._testing` and checks four cas
 the debug-runtime setup and `_testing` submodule in `src/python/LrModule.cpp`, `faulthandler` in
 `python/lr/__init__.py`, `tests/python/test_failures.py`.
 
-## Step 4 — runtime robustness ⬜
+## Step 4 — runtime robustness ✅
 
 **Goal:** deferred destruction for replaced buffers/images (no manual `wait_idle`), automatic recompile when
 the graph changes, indirect draws, buffer readback.
 
-**Demo:** a compute pass whose output is read back into numpy and checked with `np.allclose`; a script that
-resizes a vertex buffer every frame and adds a pass while running; 10k instances drawn via one indirect call.
+**Demo 1 — GPU-driven instancing:**
+```
+PYTHONPATH=build/python python examples/python/gpu_instancing.py
+```
+[gpu_instancing.py](examples/python/gpu_instancing.py) runs three passes:
+- **"reset"** (compute) writes an indexed-indirect command.
+- **"cull"** (compute) animates a 100×100 grid and atomically compacts the visible instances into a
+  buffer, counting them into the command.
+- **"draw"** issues one `draw_indexed_indirect`, reading the compute output as a per-instance vertex
+  buffer.
+
+The CPU never knows the visible count. Every 120 frames the animation holds for 4 frames (more than
+the frames in flight); `read_buffer()` then pulls both buffers into numpy, and they're checked cell by
+cell against a numpy re-implementation of `instances_cull.comp` (`np.allclose`, atol 2e-3). Output:
+`frame 118: GPU kept 4864 of 10000 instances; readback matches numpy`.
+
+**Demo 2 — live editing:**
+```
+PYTHONPATH=build/python python examples/python/live_edit.py
+```
+[live_edit.py](examples/python/live_edit.py) makes three kinds of change while running, and checks
+`fg.compile_count` after each:
+- **Every frame:** the trail's vertex buffer is replaced with one more point → **0 recompiles**.
+- **Frame 120:** a new pass ("dots", instanced quads reading the same buffer per instance) is added
+  mid-run → **1 recompile**.
+- **Frame 240:** the uniform buffer both passes read is reallocated (`replace_dynamic_buffer`) →
+  **1 recompile**.
+
+Output: `300 frames, 302 trail points, 3 compiles: 1 at start, 1 for the added pass, 1 for the replaced
+uniform buffer`.
+
+**Result (2026-10-04):**
+- `ctest -C Debug` — 16/16 pass. New: `python.gpu_instancing` and `python.live_edit` (both fail on any
+  `[error]`); `framegraph.topology` cases "runsLast orders after later-declared passes" and "definition
+  revision tracks changes"; `python.bindings` cases for readback, replacement and undeclared indirect
+  buffers.
+- **Proved the live-edit test can fail.** With deferred destruction temporarily disabled, `live_edit.py`
+  immediately raised `lr.VulkanValidationError: vkDestroyBuffer(): can't be called on VkBuffer [trail]
+  that is currently in use`. With it enabled: no validation messages. The change was reverted (no
+  `TEMPORARY` markers left).
+- **Screenshots:** the culled disc of cubes; the spiral with the added dots and restyled colours.
+- `renderer.exe` is unchanged: the same 2 compiles (IBL + main) over 15 s, so nothing recompiles per
+  frame, and the same single pre-existing warning.
+
+**What changed (C++):**
+- **Deferred destruction (`ResourceRegistry`):**
+  - `replaceUploadedBuffer`, `replaceDynamicBuffer` and `replaceUploadedImage` now *retire* the old
+    resource instead of destroying it.
+  - `Viewer` numbers submitted frames and calls `resources().beginFrame(frame, lastCompleted)` after
+    each frame-slot fence wait (frames ≤ `frame − framesInFlight` are complete). Retired resources are
+    destroyed once the frame they were retired in has completed.
+  - `replaceUploadedBuffer` now allocates first and retires after, so a failure leaves the old buffer
+    usable. It also drops superseded pending uploads.
+- **Upload synchronisation:** `flushUploads` now opens and closes its command buffer with whole-queue
+  memory barriers. In-place `reuploadBuffer` writes therefore wait for in-flight frames still reading the
+  buffer, and the data is visible to every later stage (previously only fragment shaders, via the image
+  transitions). It also no longer copies `dest->size` bytes out of a smaller staging buffer, an existing
+  out-of-bounds read when re-uploading less than the whole buffer.
+- **Automatic recompile (`FrameGraph`):**
+  - `FrameGraphDefinition::revision()` increases on `addPass`/backbuffer import and on any mutable pass
+    access (i.e. `PassBuilder` calls); const access doesn't count.
+  - `ResourceRegistry::generation(name)` increases when a resource is replaced.
+  - `execute()` recompiles when the revision changed or a *descriptor-bound* resource's generation did.
+    Vertex, index and indirect buffers are looked up by name every frame, so replacing them never
+    recompiles.
+  - `compile()` waits for the device before discarding an old compiled graph, so an explicit
+    `fg.compile()` mid-run is also safe now.
+  - New `compileCount()`.
+- **ImGui stays last (`runsLast`):** a new pass flag, honoured by `GraphCompiler` both when deriving
+  hazards from declaration order and when breaking ties. `Viewer`'s ImGui pass uses it instead of
+  `dependsOn(passes declared so far)`, so passes added later still draw underneath the UI with no cycle.
+- **Indirect draws:**
+  - `BufferUsage::Indirect` and `PassBuilder::indirectBuffer()`; barriers use `DRAW_INDIRECT` /
+    `INDIRECT_COMMAND_READ`.
+  - `CommandBuffer::drawIndirect/drawIndexedIndirect/dispatchIndirect`.
+  - `PassContext::drawIndirect/drawIndexedIndirect/dispatchIndirect` check that the buffer was declared
+    with `indirectBuffer()` and bounds-check the read range.
+- **Readback:**
+  - `ResourceRegistry::readBuffer(name)` flushes pending uploads, waits idle, then copies through a
+    host-visible staging buffer with explicit barriers and `vmaInvalidateAllocation`.
+  - Every registry buffer now gets `TRANSFER_SRC` so any of them can be read back.
+  - The one-shot submit code is now shared (`runOneShotCommands`).
+
+**Python API:**
+- **`ResourceRegistry`:** `replace_buffer`, `replace_dynamic_buffer`, `replace_image`, and
+  `read_buffer(name)` (returns a `uint8` numpy array; use `.view(np.float32)` etc.).
+- **`PassBuilder`:** `indirect_buffer`, `runs_last`.
+- **`PassContext`:** `draw_indirect`, `draw_indexed_indirect`, `dispatch_indirect`.
+- **`FrameGraph`:** `needs_recompile`, `compile_count`.
+
+**Known limitation (not fixed here):** `update_buffer` writes a single persistently-mapped allocation.
+With 2 frames in flight, the CPU can write next frame's data while the previous frame is still reading
+it (the engine's own camera UBO has the same issue). It's usually invisible, but it is a race. The fix
+is per-frame-in-flight copies of dynamic buffers, which means per-frame descriptor sets. That's a natural
+next step.
+
+**Files:**
+- **Registry and graph:** `ResourceRegistry.{hpp,cpp}`, `FrameGraph.{hpp,cpp}`,
+  `FrameGraphDefinition.{hpp,cpp}`, `PassContext.{hpp,cpp}`, `PassBuilder.{hpp,cpp}`,
+  `PassDefinition.hpp`, `PassDescAdapter.cpp`, `VulkanBarrierPlanner.cpp`, `GraphCompiler.cpp`,
+  `model/GraphDefinition.{hpp,cpp}`.
+- **Vulkan and app:** `CommandBuffer.{hpp,cpp}`, `Renderer.hpp`, `Viewer.{hpp,cpp}`.
+- **Bindings:** `LrModule.cpp`.
+- **Examples:** `examples/python/{gpu_instancing.py, live_edit.py, meshes.py}` and 8 new shaders.
 
 ---
 

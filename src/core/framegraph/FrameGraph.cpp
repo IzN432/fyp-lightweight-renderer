@@ -2,13 +2,15 @@
 
 #include "FrameGraphTopology.hpp"
 
+#include <algorithm>
 #include <stdexcept>
+#include <utility>
 
 namespace lr
 {
 
 FrameGraph::FrameGraph(const VulkanContext &ctx, ResourceRegistry &registry)
-    : m_registry(registry), m_compiler(ctx, registry)
+    : m_ctx(ctx), m_registry(registry), m_compiler(ctx, registry)
 {}
 
 FrameGraph::~FrameGraph() = default;
@@ -29,7 +31,56 @@ void FrameGraph::compile()
     // Build the replacement completely before releasing the currently usable
     // graph. A compilation failure therefore leaves m_compiled untouched.
     std::unique_ptr<CompiledFrameGraph> replacement = m_compiler.compile(m_definition);
-    m_compiled                                      = std::move(replacement);
+    if (m_compiled)
+    {
+        m_ctx.waitIdle();
+    }
+    m_compiled = std::move(replacement);
+    ++m_compileCount;
+
+    m_compiledRevision = m_definition.revision();
+    m_descriptorGenerations.clear();
+    const auto record = [&](const std::string &name) {
+        m_descriptorGenerations.emplace_back(name, m_registry.generation(name));
+    };
+    for (const PassDesc &pass : std::as_const(m_definition).passes())
+    {
+        for (const ImageUse &use : pass.imageUses)
+        {
+            if (use.isDescriptor())
+            {
+                record(m_definition.name(use.image));
+            }
+        }
+        for (const BufferUse &use : pass.bufferUses)
+        {
+            if (use.isDescriptor())
+            {
+                record(m_definition.name(use.buffer));
+            }
+        }
+    }
+}
+
+bool FrameGraph::needsRecompile() const
+{
+    if (!m_compiled || m_definition.revision() != m_compiledRevision)
+    {
+        return true;
+    }
+    return std::ranges::any_of(m_descriptorGenerations, [&](const auto &entry) {
+        return m_registry.generation(entry.first) != entry.second;
+    });
+}
+
+void FrameGraph::recompileIfNeeded()
+{
+    // Vertex, index and indirect buffers are looked up by name every frame, so replacing those
+    // never needs this; changed passes or replaced descriptor-bound resources do.
+    if (m_compiled && needsRecompile())
+    {
+        compile();
+    }
 }
 
 void FrameGraph::execute(CommandBuffer &cmd)
@@ -38,6 +89,7 @@ void FrameGraph::execute(CommandBuffer &cmd)
     {
         throw std::logic_error("FrameGraph: execute called before compile");
     }
+    recompileIfNeeded();
     m_compiled->execute(cmd);
 }
 
@@ -47,6 +99,7 @@ void FrameGraph::execute(CommandBuffer &cmd, const ExternalImageBindings &extern
     {
         throw std::logic_error("FrameGraph: execute called before compile");
     }
+    recompileIfNeeded();
     m_compiled->execute(cmd, externalImages);
 }
 

@@ -46,6 +46,7 @@ public:
                                      VkImageLayout oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
     uint32_t currentFrame() const { return m_currentFrame; }
+    uint32_t framesInFlight() const { return static_cast<uint32_t>(m_frames.size()); }
 
 private:
     void destroyResources() noexcept;

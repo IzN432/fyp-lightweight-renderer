@@ -21,6 +21,7 @@ PassHandle FrameGraphDefinition::addPass(std::string name)
 
     const PassHandle handle{static_cast<uint32_t>(m_passes.size()), owner()};
     m_passes.push_back({.name = std::move(name), .handle = handle});
+    ++m_revision;
     return handle;
 }
 
@@ -39,10 +40,11 @@ ImageHandle FrameGraphDefinition::importBackbuffer(std::string_view name, VkForm
         }
     }
     m_externalImages.push_back({.image = handle, .format = format});
+    ++m_revision;
     return handle;
 }
 
-PassDesc &FrameGraphDefinition::pass(PassHandle handle)
+size_t FrameGraphDefinition::checkedIndex(PassHandle handle) const
 {
     if (handle.owner != owner())
     {
@@ -52,13 +54,17 @@ PassDesc &FrameGraphDefinition::pass(PassHandle handle)
     {
         throw std::out_of_range("FrameGraph: invalid pass handle");
     }
-    return m_passes[handle.index];
+    return handle.index;
 }
 
-const PassDesc &FrameGraphDefinition::pass(PassHandle handle) const
+PassDesc &FrameGraphDefinition::pass(PassHandle handle)
 {
-    return const_cast<FrameGraphDefinition &>(*this).pass(handle);
+    const size_t index = checkedIndex(handle);
+    ++m_revision;
+    return m_passes[index];
 }
+
+const PassDesc &FrameGraphDefinition::pass(PassHandle handle) const { return m_passes[checkedIndex(handle)]; }
 
 std::vector<PassHandle> FrameGraphDefinition::passHandles() const
 {

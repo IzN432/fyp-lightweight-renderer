@@ -6,8 +6,11 @@
 
 #include <vulkan/vulkan.h>
 
+#include <cstddef>
+#include <functional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace lr
@@ -56,8 +59,8 @@ public:
     void uploadImage(const std::string &name, const void *data, uint32_t width, uint32_t height, VkFormat format,
                      bool generateMipmaps = false);
 
-    // Replace an uploaded persistent image while preserving its registry name.
-    // The caller must ensure the GPU is no longer using the old image.
+    // Replace an uploaded persistent image while preserving its registry name. The old image is
+    // retired, not destroyed: it lives until every frame that may still use it has completed.
     void replaceUploadedImage(const std::string &name, const void *data, uint32_t width, uint32_t height,
                               VkFormat format, bool generateMipmaps = false);
 
@@ -112,21 +115,38 @@ public:
     // The copy is folded into the next flushUploads() call (i.e. the next frame's execute).
     void reuploadBuffer(const std::string &name, const void *data, VkDeviceSize size);
 
-    // Destroys and reallocates a static buffer previously created via uploadBuffer(), sized for
-    // `size` (unlike reuploadBuffer(), which requires the new data to fit the original allocation),
-    // then queues a staging upload into it. Preserves the registry name, so existing fg.buffer(name)
-    // bindings keep resolving. Mirrors replaceUploadedImage() — the caller must ensure the GPU is no
-    // longer using the old buffer (see its doc comment).
-    void replaceUploadedBuffer(const std::string &name, const void *data, VkDeviceSize size,
-                               VkBufferUsageFlags usage);
+    // Reallocates a static buffer previously created via uploadBuffer(), sized for `size` (unlike
+    // reuploadBuffer(), which requires the new data to fit the original allocation), then queues a
+    // staging upload into it. Preserves the registry name, so existing fg.buffer(name) bindings keep
+    // resolving. Like replaceUploadedImage(), the old buffer is retired rather than destroyed.
+    void replaceUploadedBuffer(const std::string &name, const void *data, VkDeviceSize size, VkBufferUsageFlags usage);
 
-    // Reallocates a persistently mapped dynamic buffer while preserving its registry name.
-    // The caller must ensure the GPU is no longer using the old allocation.
+    // Reallocates a persistently mapped dynamic buffer while preserving its registry name; the old
+    // allocation is retired.
     void replaceDynamicBuffer(const std::string &name, VkDeviceSize size, VkBufferUsageFlags usage);
 
     AllocatedBuffer       *getBuffer(const std::string &name);
     const AllocatedBuffer *getBuffer(const std::string &name) const;
     bool                   hasBuffer(const std::string &name) const;
+
+    // Copies a buffer's contents back to the CPU, as of the last submitted frame (pending uploads
+    // are flushed first). Waits for the device to go idle, so it's for tests, debugging and
+    // occasional readback, not per-frame use. Every registry buffer can be read back.
+    std::vector<std::byte> readBuffer(const std::string &name);
+
+    // -----------------------------------------------------------------------
+    // Replacement tracking and deferred destruction
+    // -----------------------------------------------------------------------
+
+    // Bumped each time a resource is replaced under the same name (a new VkBuffer/VkImage), so
+    // anything that captured the old handle — e.g. descriptor sets written at compile — can tell
+    // it needs refreshing. 0 for resources never replaced.
+    uint64_t generation(const std::string &name) const;
+
+    // Called by the frame loop once frame `frame` may start recording: every frame up to and
+    // including `lastCompletedFrame` has finished on the GPU, so resources retired during those
+    // frames are destroyed now. Frames are numbered from 1; 0 means "before the first frame".
+    void beginFrame(uint64_t frame, uint64_t lastCompletedFrame);
 
     // -----------------------------------------------------------------------
     // Upload queue — called automatically by FrameGraph::execute()
@@ -181,6 +201,21 @@ private:
         Replace,
     };
 
+    // A replaced resource the GPU may still be using, destroyed by beginFrame() once the frame it
+    // was retired in has completed.
+    struct RetiredResource
+    {
+        std::variant<AllocatedBuffer, AllocatedImage> resource;
+        uint64_t                                      retiredInFrame;
+    };
+
+    void retire(AllocatedBuffer buffer);
+    void retire(AllocatedImage image);
+    void destroyRetired(RetiredResource &retired);
+
+    // Records with `record`, submits on the graphics queue and waits for completion.
+    void runOneShotCommands(const std::function<void(VkCommandBuffer)> &record);
+
     void allocateImageEntry(const std::string &name, ImageEntry &entry);
     void queueImageUpload(const std::string &name, const void *data, uint32_t width, uint32_t height, VkFormat format,
                           bool generateMipmaps, ImageUploadMode mode);
@@ -197,6 +232,10 @@ private:
     std::unordered_map<std::string, BufferEntry>              m_buffers;
 
     std::vector<PendingUpload> m_pendingUploads;
+
+    std::vector<RetiredResource>              m_retired;
+    std::unordered_map<std::string, uint64_t> m_generations;
+    uint64_t                                  m_currentFrame = 0;
 
     VkCommandPool m_uploadPool = VK_NULL_HANDLE;
 };

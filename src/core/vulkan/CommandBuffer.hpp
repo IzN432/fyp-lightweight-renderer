@@ -23,6 +23,12 @@ public:
     void drawIndexed(uint32_t indexCount, uint32_t instanceCount = 1, uint32_t firstIndex = 0, int32_t vertexOffset = 0,
                      uint32_t firstInstance = 0);
 
+    // Indirect — arguments read from `buffer` at `offset` (VkDraw[Indexed]IndirectCommand,
+    // VkDispatchIndirectCommand)
+    void drawIndirect(VkBuffer buffer, VkDeviceSize offset, uint32_t drawCount, uint32_t stride);
+    void drawIndexedIndirect(VkBuffer buffer, VkDeviceSize offset, uint32_t drawCount, uint32_t stride);
+    void dispatchIndirect(VkBuffer buffer, VkDeviceSize offset);
+
     // Compute
     void dispatch(uint32_t x, uint32_t y, uint32_t z = 1);
 

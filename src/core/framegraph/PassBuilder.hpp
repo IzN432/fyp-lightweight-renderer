@@ -64,6 +64,8 @@ public:
     PassBuilder &storageBufferReadWrite(uint32_t binding, BufferHandle buffer, VkShaderStageFlags stages);
     PassBuilder &vertexBuffer(uint32_t binding, BufferHandle buffer);
     PassBuilder &indexBuffer(BufferHandle buffer);
+    // Arguments for PassContext::drawIndirect/drawIndexedIndirect, e.g. written by a compute pass.
+    PassBuilder &indirectBuffer(BufferHandle buffer);
 
     PassBuilder &colorAttachment(ImageHandle image, VkFormat format,
                                  VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, VkClearValue clearValue = {},
@@ -71,6 +73,10 @@ public:
     PassBuilder &depthAttachment(ImageHandle image, VkFormat format,
                                  VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, VkClearValue clearValue = {},
                                  ExtentSpec extent = ExtentSpec::swapchain());
+
+    // Order this pass after every other pass that shares a resource with it, including passes
+    // declared later — for a final overlay (e.g. the Viewer's ImGui pass).
+    PassBuilder &runsLast();
 
     PassBuilder &dependsOn(PassHandle dependency);
     PassBuilder &dependsOn(std::vector<PassHandle> dependencies);

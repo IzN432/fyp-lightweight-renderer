@@ -57,6 +57,12 @@ void GraphDefinition::addDependency(PassId passId, PassId dependency)
     m_passes[passId.value].explicitDependencies.push_back(dependency);
 }
 
+void GraphDefinition::setRunsLast(PassId passId)
+{
+    pass(passId);
+    m_passes[passId.value].runsLast = true;
+}
+
 const ResourceNode &GraphDefinition::resource(ResourceId id) const
 {
     if (id.value >= m_resources.size())

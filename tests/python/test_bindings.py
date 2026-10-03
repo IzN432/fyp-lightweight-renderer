@@ -147,6 +147,35 @@ def test_invalid_pipeline_state_raises_at_compile():
         raise AssertionError("expected RuntimeError for depth state without a depth attachment")
 
 
+def test_read_and_replace_buffers():
+    viewer = make_viewer()
+    res = viewer.resources
+    data = np.arange(16, dtype=np.float32)
+    res.upload_buffer("numbers", data, lr.BufferUsage.STORAGE)
+    assert np.array_equal(res.read_buffer("numbers").view(np.float32), data)
+
+    bigger = np.linspace(0.0, 1.0, 100, dtype=np.float32)
+    res.replace_buffer("numbers", bigger, lr.BufferUsage.STORAGE)
+    assert np.array_equal(res.read_buffer("numbers").view(np.float32), bigger)
+
+    res.register_dynamic_buffer("params", 16, lr.BufferUsage.UNIFORM)
+    res.update_buffer("params", np.array([1, 2, 3, 4], dtype=np.uint32))
+    assert res.read_buffer("params").view(np.uint32).tolist() == [1, 2, 3, 4]
+
+
+def test_indirect_draw_requires_declaration():
+    # The pass draws from "args" without declaring it with indirect_buffer(), so the frame graph
+    # couldn't have synchronised it.
+    viewer = make_viewer(on_execute=lambda ctx: ctx.draw_indirect(viewer.frame_graph.buffer("args")))
+    viewer.resources.upload_buffer("args", np.array([3, 1, 0, 0], dtype=np.uint32), lr.BufferUsage.INDIRECT)
+    try:
+        viewer.run()
+    except RuntimeError as e:
+        assert "without declaring it with indirectBuffer()" in str(e), str(e)
+    else:
+        raise AssertionError("expected an error for an undeclared indirect buffer")
+
+
 def main():
     tests = [
         test_compile_errors_raise_with_location,
@@ -156,6 +185,8 @@ def main():
         test_resource_errors_raise_immediately,
         test_pipeline_state_runs,
         test_invalid_pipeline_state_raises_at_compile,
+        test_read_and_replace_buffers,
+        test_indirect_draw_requires_declaration,
     ]
     for test in tests:
         test()
