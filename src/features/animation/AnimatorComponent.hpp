@@ -41,6 +41,8 @@ private:
     std::optional<size_t>      m_activeClip;
     float                      m_playbackSeconds = 0.0f;
     float                      m_speedMultiplier = 1.0f;
+    float                      m_trackViewCenter = 0.5f;
+    float                      m_trackViewHalfWidth = 0.5f;
     size_t                     m_selectedTrack = 0;
     bool                       m_loop = true;
     bool                       m_playing = false;

@@ -218,8 +218,10 @@ void AnimatorComponent::onGUIImpl()
                         keyframes.push_back(duration > 0.0f ? keyframe.seconds / duration : 0.0f);
                     }
 
-                    if (gui::animationTrack("##track", &progress, keyframes, 0.01f,
-                                            ImVec2(ImGui::GetContentRegionAvail().x, 36.0f)))
+                    const gui::AnimationTrackResult trackResult = gui::animationTrack(
+                        "##track", &progress, keyframes, &m_trackViewCenter, &m_trackViewHalfWidth, 0.01f,
+                        ImVec2(ImGui::GetContentRegionAvail().x, 36.0f));
+                    if (trackResult.progressChanged)
                     {
                         pause();
                         seek(progress * duration);
