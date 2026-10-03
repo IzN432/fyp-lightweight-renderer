@@ -10,8 +10,9 @@
 namespace lr
 {
 
-// Applies a world-space ImGuizmo result to an object's parent-local rotation and records the
-// completed interaction as one undoable command.
+// Applies a rigid world-space ImGuizmo orientation to an object's parent-local rotation and
+// records the completed interaction as one undoable command. Scale and shear deliberately do not
+// participate in the orientation conversion.
 class SceneObjectRotationHandler : public RotateDragHandler
 {
 public:

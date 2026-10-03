@@ -42,6 +42,7 @@ public:
     const std::vector<SceneObjectId> &children() const { return m_children; }
 
     glm::mat4 worldMatrix() const;
+    glm::quat worldRotation() const;
 
     template <typename T, typename... Args> T &addComponent(Args &&...args)
     {

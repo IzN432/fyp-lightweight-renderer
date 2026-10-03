@@ -50,6 +50,9 @@ namespace IMGUIZMO_NAMESPACE
    const float screenRotateSize = 0.06f;
    // scale a bit so translate axis do not touch when in universal
    const float rotationDisplayFactor = 1.2f;
+   // Keep the screen-space rotation handle outside the local-axis rings. Its 4 px hit band then
+   // starts where the axis rings' 8 px hit band ends, instead of competing for the same pixels.
+   const float screenRotatePadding = 12.0f;
 
    static OPERATION operator&(OPERATION lhs, OPERATION rhs)
    {
@@ -1455,6 +1458,10 @@ namespace IMGUIZMO_NAMESPACE
          {
             gContext.mRadiusSquareCenter = radiusAxis;
          }
+      }
+      if (hasRSC)
+      {
+         gContext.mRadiusSquareCenter += screenRotatePadding;
       }
       if(hasRSC && (!gContext.mbUsing || type == MT_ROTATE_SCREEN) && (!isMultipleAxesMasked && isNoAxesMasked))
       {

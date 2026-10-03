@@ -115,7 +115,23 @@ int main()
     const glm::mat4 desiredLocal =
         glm::translate(glm::mat4(1.0f), childTransform.transform().position()) *
         glm::mat4_cast(desiredRotation) * glm::scale(glm::mat4(1.0f), childTransform.transform().scale());
-    const glm::mat4 desiredWorld = rotationParent.worldMatrix() * desiredLocal;
+    const glm::quat desiredWorldRotation = glm::normalize(rotationParent.worldRotation() * desiredRotation);
+    const glm::mat4 desiredWorld =
+        glm::translate(glm::mat4(1.0f), glm::vec3((rotationParent.worldMatrix() * desiredLocal)[3])) *
+        glm::mat4_cast(desiredWorldRotation);
+
+    // The full render matrix is sheared by the parent's non-uniform scale, while the rigid frame
+    // supplied to the rotation gizmo remains orthonormal so its rendered rings and hit planes agree.
+    const glm::mat3 shearedWorld(rotationChild.worldMatrix());
+    const float shearAmount =
+        glm::max(glm::abs(glm::dot(glm::normalize(shearedWorld[0]), glm::normalize(shearedWorld[1]))),
+                 glm::max(glm::abs(glm::dot(glm::normalize(shearedWorld[0]), glm::normalize(shearedWorld[2]))),
+                          glm::abs(glm::dot(glm::normalize(shearedWorld[1]), glm::normalize(shearedWorld[2])))));
+    assert(shearAmount > 0.0001f);
+    const glm::mat3 rigidWorld(glm::mat4_cast(rotationChild.worldRotation()));
+    assert(glm::abs(glm::dot(rigidWorld[0], rigidWorld[1])) < 0.0001f);
+    assert(glm::abs(glm::dot(rigidWorld[0], rigidWorld[2])) < 0.0001f);
+    assert(glm::abs(glm::dot(rigidWorld[1], rigidWorld[2])) < 0.0001f);
 
     lr::CommandManager commandManager;
     lr::SceneObjectRotationHandler rotationHandler(commandManager);

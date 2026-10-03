@@ -1018,7 +1018,11 @@ try
                             gizmoVisible);
         rotateGizmo.draw(cameraComponent.viewMatrix(), cameraComponent.projectionMatrix(aspect),
                          cameraComponent.projectionType == lr::ProjectionType::Orthographic, extent,
-                         objectRotateActive ? sceneObjectRotationHandler.target()->worldMatrix() : glm::mat4(1.0f),
+                         objectRotateActive
+                             ? glm::translate(glm::mat4(1.0f),
+                                              glm::vec3(sceneObjectRotationHandler.target()->worldMatrix()[3])) *
+                                   glm::mat4_cast(sceneObjectRotationHandler.target()->worldRotation())
+                             : glm::mat4(1.0f),
                          objectRotateActive);
         scaleGizmo.draw(cameraComponent.viewMatrix(), cameraComponent.projectionMatrix(aspect),
                         cameraComponent.projectionType == lr::ProjectionType::Orthographic, extent,
