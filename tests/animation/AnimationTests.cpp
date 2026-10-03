@@ -87,6 +87,14 @@ int main()
     assert(near(addedKeyframes[1].value.y, 1.0f));
     assert(!animator.addKeyframe(1, 1.0f));
 
+    assert(animator.deleteKeyframe(0, 1));
+    const auto &remainingKeyframes =
+        std::get<lr::TranslationTrack>(animator.clips()[0].tracks()[0]).keyframes();
+    assert(remainingKeyframes.size() == 2);
+    assert(near(remainingKeyframes[0].seconds, 0.0f));
+    assert(near(remainingKeyframes[1].seconds, 2.0f));
+    assert(!animator.deleteKeyframe(0, 2));
+
     bool rejectedInvalidTime = false;
     try
     {

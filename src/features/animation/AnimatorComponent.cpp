@@ -24,11 +24,11 @@ namespace lr
 namespace
 {
 
-class UpdateKeyframeCommand final : public Command
+class UpdateAnimationTrackCommand final : public Command
 {
 public:
-    UpdateKeyframeCommand(AnimatorComponent &animator, size_t clipIndex, size_t trackIndex,
-                          AnimationChannel before, AnimationChannel after, float playbackSeconds)
+    UpdateAnimationTrackCommand(AnimatorComponent &animator, size_t clipIndex, size_t trackIndex,
+                                AnimationChannel before, AnimationChannel after, float playbackSeconds)
         : m_animator(animator), m_clipIndex(clipIndex), m_trackIndex(trackIndex),
           m_before(std::move(before)), m_after(std::move(after)), m_playbackSeconds(playbackSeconds)
     {}
@@ -129,6 +129,42 @@ bool AnimatorComponent::addKeyframe(size_t trackIndex, float seconds)
     return added;
 }
 
+bool AnimatorComponent::deleteKeyframe(size_t trackIndex, size_t keyframeIndex)
+{
+    if (!m_activeClip || m_keyframeEdit || trackIndex >= m_clips[*m_activeClip].tracks().size())
+    {
+        return false;
+    }
+
+    AnimationChannel before = m_clips[*m_activeClip].tracks()[trackIndex];
+    AnimationChannel after = before;
+    const bool removed = std::visit([&](auto &track) {
+        if (keyframeIndex >= track.keyframes().size())
+        {
+            return false;
+        }
+        return track.removeKeyframe(track.keyframes()[keyframeIndex].seconds);
+    }, after);
+    if (!removed)
+    {
+        return false;
+    }
+
+    pause();
+    if (editorContext())
+    {
+        editorContext()->commands.executeCommand(std::make_unique<UpdateAnimationTrackCommand>(
+            *this, *m_activeClip, trackIndex, std::move(before), std::move(after), m_playbackSeconds));
+    }
+    else
+    {
+        m_clips[*m_activeClip].tracks()[trackIndex] = std::move(after);
+        seek(m_playbackSeconds);
+    }
+    markDirty();
+    return true;
+}
+
 bool AnimatorComponent::beginKeyframeEdit(size_t trackIndex, size_t keyframeIndex)
 {
     if (!m_activeClip || m_keyframeEdit || trackIndex >= m_clips[*m_activeClip].tracks().size())
@@ -226,7 +262,7 @@ void AnimatorComponent::applyKeyframeEdit()
     }
     if (m_commandManager && before && after)
     {
-        m_commandManager->replaceTemporaryHistory(std::make_unique<UpdateKeyframeCommand>(
+        m_commandManager->replaceTemporaryHistory(std::make_unique<UpdateAnimationTrackCommand>(
             *this, edit.clipIndex, edit.trackIndex, std::move(*before), std::move(*after), edit.seconds));
     }
     else if (m_commandManager && m_commandManager->hasTemporaryHistory())
@@ -428,6 +464,9 @@ void AnimatorComponent::onGUIImpl()
             ImGui::EndDisabled();
 
             const AnimationChannel &selectedChannel = clip.tracks()[m_selectedTrack];
+            enum class PendingKeyframeAction { None, Add, Edit, Delete, Apply, Cancel };
+            PendingKeyframeAction pendingAction = PendingKeyframeAction::None;
+            std::optional<size_t> pendingKeyframeIndex;
             std::visit([&](const auto &track) {
                     std::vector<float> keyframes;
                     keyframes.reserve(track.keyframes().size());
@@ -513,12 +552,12 @@ void AnimatorComponent::onGUIImpl()
                         ImGui::Text("Editing keyframe at %.3f s", m_keyframeEdit->seconds);
                         if (ImGui::Button("Apply"))
                         {
-                            applyKeyframeEdit();
+                            pendingAction = PendingKeyframeAction::Apply;
                         }
                         ImGui::SameLine();
                         if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
                         {
-                            cancelKeyframeEdit();
+                            pendingAction = PendingKeyframeAction::Cancel;
                         }
                     }
                     else
@@ -526,14 +565,23 @@ void AnimatorComponent::onGUIImpl()
                         ImGui::BeginDisabled(keyframeAtPlayhead.has_value() || m_keyframeEdit.has_value());
                         if (ImGui::Button("Add Keyframe"))
                         {
-                            addKeyframe(m_selectedTrack, m_playbackSeconds);
+                            pendingAction = PendingKeyframeAction::Add;
                         }
                         ImGui::EndDisabled();
                         ImGui::SameLine();
                         ImGui::BeginDisabled(!keyframeAtPlayhead.has_value() || m_keyframeEdit.has_value());
                         if (ImGui::Button("Edit Keyframe"))
                         {
-                            beginKeyframeEdit(m_selectedTrack, *keyframeAtPlayhead);
+                            pendingAction = PendingKeyframeAction::Edit;
+                            pendingKeyframeIndex = keyframeAtPlayhead;
+                        }
+                        ImGui::EndDisabled();
+                        ImGui::SameLine();
+                        ImGui::BeginDisabled(!keyframeAtPlayhead.has_value() || m_keyframeEdit.has_value());
+                        if (ImGui::Button("Delete Keyframe"))
+                        {
+                            pendingAction = PendingKeyframeAction::Delete;
+                            pendingKeyframeIndex = keyframeAtPlayhead;
                         }
                         ImGui::EndDisabled();
                         if (!keyframeAtPlayhead)
@@ -543,6 +591,26 @@ void AnimatorComponent::onGUIImpl()
                         }
                     }
                 }, selectedChannel);
+            switch (pendingAction)
+            {
+            case PendingKeyframeAction::Add:
+                addKeyframe(m_selectedTrack, m_playbackSeconds);
+                break;
+            case PendingKeyframeAction::Edit:
+                beginKeyframeEdit(m_selectedTrack, *pendingKeyframeIndex);
+                break;
+            case PendingKeyframeAction::Delete:
+                deleteKeyframe(m_selectedTrack, *pendingKeyframeIndex);
+                break;
+            case PendingKeyframeAction::Apply:
+                applyKeyframeEdit();
+                break;
+            case PendingKeyframeAction::Cancel:
+                cancelKeyframeEdit();
+                break;
+            case PendingKeyframeAction::None:
+                break;
+            }
             ImGui::TreePop();
         }
     }

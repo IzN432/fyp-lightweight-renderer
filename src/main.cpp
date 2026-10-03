@@ -159,7 +159,7 @@ try
     }
 
     // MESH
-    const fs::path meshPath = lr::paths::assetDir / "samples/models/lion_head_4k.glb";
+    const fs::path meshPath = lr::paths::assetDir / "samples/models/bird_orange.glb";
 
     sceneManager.load(meshPath, sceneLoadConfig);
 

@@ -40,6 +40,7 @@ public:
 
     const std::optional<KeyframeEdit> &keyframeEdit() const { return m_keyframeEdit; }
     bool addKeyframe(size_t trackIndex, float seconds);
+    bool deleteKeyframe(size_t trackIndex, size_t keyframeIndex);
     bool beginKeyframeEdit(size_t trackIndex, size_t keyframeIndex);
     void applyKeyframeEdit();
     void cancelKeyframeEdit();
