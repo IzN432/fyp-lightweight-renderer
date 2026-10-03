@@ -21,6 +21,7 @@ public:
     void play(size_t clipIndex);
     void pause() { m_playing = false; }
     void stop();
+    void seek(float seconds);
     void update(float deltaSeconds);
 
     bool isPlaying() const { return m_playing; }
@@ -40,6 +41,7 @@ private:
     std::optional<size_t>      m_activeClip;
     float                      m_playbackSeconds = 0.0f;
     float                      m_speedMultiplier = 1.0f;
+    size_t                     m_selectedTrack = 0;
     bool                       m_loop = true;
     bool                       m_playing = false;
 };

@@ -1,12 +1,18 @@
 #include "features/animation/AnimatorComponent.hpp"
 
+#include "core/app/ImGuiWidgets.hpp"
+#include "core/scene/Scene.hpp"
 #include "core/scene/SceneObject.hpp"
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cmath>
+#include <string>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace lr
 {
@@ -22,6 +28,7 @@ void AnimatorComponent::play(size_t clipIndex)
         throw std::out_of_range("AnimatorComponent clip index is out of range");
     }
     m_activeClip = clipIndex;
+    m_selectedTrack = 0;
     m_playbackSeconds = 0.0f;
     m_playing = true;
     markDirty();
@@ -32,6 +39,28 @@ void AnimatorComponent::stop()
     m_playing = false;
     m_activeClip.reset();
     m_playbackSeconds = 0.0f;
+    markDirty();
+}
+
+void AnimatorComponent::seek(float seconds)
+{
+    if (!m_activeClip)
+    {
+        return;
+    }
+    if (!std::isfinite(seconds))
+    {
+        throw std::invalid_argument("AnimatorComponent playback time must be finite");
+    }
+
+    const AnimationClip &clip = m_clips[m_activeClip.value()];
+    m_playbackSeconds = std::clamp(seconds, 0.0f, clip.durationSeconds());
+    for (const AnimationChannel &channel : clip.tracks())
+    {
+        std::visit([&](const auto &track) {
+            track.apply(getOwningObject().scene(), m_playbackSeconds);
+        }, channel);
+    }
     markDirty();
 }
 
@@ -76,13 +105,7 @@ void AnimatorComponent::update(float deltaSeconds)
         }
     }
 
-    for (const AnimationChannel &channel : clip.tracks())
-    {
-        std::visit([&](const auto &track) {
-            track.apply(getOwningObject().scene(), m_playbackSeconds);
-        }, channel);
-    }
-    markDirty();
+    seek(m_playbackSeconds);
 }
 
 void AnimatorComponent::onGUIImpl()
@@ -132,6 +155,77 @@ void AnimatorComponent::onGUIImpl()
         if (ImGui::Button("Stop"))
         {
             stop();
+        }
+
+        if (ImGui::TreeNodeEx("Tracks", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            const float duration = clip.durationSeconds();
+            float progress = duration > 0.0f ? m_playbackSeconds / duration : 0.0f;
+            Scene &scene = getOwningObject().scene();
+
+            const auto trackLabel = [&](const AnimationChannel &channel) {
+                return std::visit([&](const auto &track) {
+                    std::string objectName = "Missing object";
+                    if (scene.contains(track.target()))
+                    {
+                        const SceneObject &target = scene.getSceneObject(track.target());
+                        objectName = target.name.empty() ? "Scene Object " + std::to_string(track.target())
+                                                         : target.name;
+                    }
+
+                    const char *propertyName = "Scale";
+                    using Track = std::decay_t<decltype(track)>;
+                    if constexpr (std::is_same_v<Track, TranslationTrack>)
+                    {
+                        propertyName = "Translation";
+                    }
+                    else if constexpr (std::is_same_v<Track, RotationTrack>)
+                    {
+                        propertyName = "Rotation";
+                    }
+                    return objectName + " (" + propertyName + ")";
+                }, channel);
+            };
+
+            m_selectedTrack = std::min(m_selectedTrack, clip.tracks().size() - 1);
+            const std::string selectedLabel = trackLabel(clip.tracks()[m_selectedTrack]);
+            if (ImGui::BeginCombo("Track", selectedLabel.c_str()))
+            {
+                for (size_t trackIndex = 0; trackIndex < clip.tracks().size(); ++trackIndex)
+                {
+                    const std::string label = trackLabel(clip.tracks()[trackIndex]);
+                    const bool selected = trackIndex == m_selectedTrack;
+                    ImGui::PushID(static_cast<int>(trackIndex));
+                    if (ImGui::Selectable(label.c_str(), selected))
+                    {
+                        m_selectedTrack = trackIndex;
+                    }
+                    if (selected)
+                    {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::EndCombo();
+            }
+
+            const AnimationChannel &selectedChannel = clip.tracks()[m_selectedTrack];
+            std::visit([&](const auto &track) {
+                    std::vector<float> keyframes;
+                    keyframes.reserve(track.keyframes().size());
+                    for (const auto &keyframe : track.keyframes())
+                    {
+                        keyframes.push_back(duration > 0.0f ? keyframe.seconds / duration : 0.0f);
+                    }
+
+                    if (gui::animationTrack("##track", &progress, keyframes, 0.01f,
+                                            ImVec2(ImGui::GetContentRegionAvail().x, 36.0f)))
+                    {
+                        pause();
+                        seek(progress * duration);
+                    }
+                }, selectedChannel);
+            ImGui::TreePop();
         }
     }
 }
