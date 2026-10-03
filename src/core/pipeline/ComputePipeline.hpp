@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Pipeline.hpp"
+#include "core/vulkan/ShaderLoader.hpp"
 #include "core/vulkan/VulkanContext.hpp"
 
 #include <vulkan/vulkan.h>
@@ -13,7 +14,7 @@ namespace lr
 class ComputePipeline : public Pipeline
 {
 public:
-    ComputePipeline(const VulkanContext &ctx, const std::string &shaderPath, VkPipelineLayout layout);
+    ComputePipeline(const VulkanContext &ctx, const ShaderCode &shader, VkPipelineLayout layout);
     ~ComputePipeline() override;
 
     ComputePipeline(const ComputePipeline &)            = delete;

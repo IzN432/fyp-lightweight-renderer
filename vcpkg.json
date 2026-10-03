@@ -10,6 +10,7 @@
         "vulkan-memory-allocator",
         "mikktspace",
         "libigl",
-        "reactphysics3d"
+        "reactphysics3d",
+        "glslang"
     ]
 }

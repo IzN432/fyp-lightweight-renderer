@@ -10,12 +10,12 @@
 namespace lr
 {
 
-ComputePipeline::ComputePipeline(const VulkanContext &ctx, const std::string &shaderPath, VkPipelineLayout layout)
+ComputePipeline::ComputePipeline(const VulkanContext &ctx, const ShaderCode &shader, VkPipelineLayout layout)
     : m_ctx(ctx)
 {
     VkDevice device = ctx.getDevice();
 
-    ShaderModule shaderModule(device, shaderPath);
+    ShaderModule shaderModule(device, shader);
 
     VkPipelineShaderStageCreateInfo stageCI{};
     stageCI.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -29,7 +29,7 @@ ComputePipeline::ComputePipeline(const VulkanContext &ctx, const std::string &sh
     pipelineCI.layout = layout;
 
     checkVk(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineCI, nullptr, &m_pipeline),
-            "ComputePipeline: vkCreateComputePipelines for " + shaderPath);
+            "ComputePipeline: vkCreateComputePipelines for " + shader.label());
 
     spdlog::debug("ComputePipeline: created");
 }

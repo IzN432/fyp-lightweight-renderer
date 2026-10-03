@@ -34,7 +34,13 @@ public:
     template <typename T>
     void pushConstants(VkPipelineLayout layout, VkShaderStageFlags stages, const T &data, uint32_t offset = 0)
     {
-        vkCmdPushConstants(m_handle, layout, stages, offset, sizeof(T), &data);
+        pushConstants(layout, stages, &data, sizeof(T), offset);
+    }
+    // Untyped form for callers without a C++ struct for the block (e.g. bytes from Python).
+    void pushConstants(VkPipelineLayout layout, VkShaderStageFlags stages, const void *data, uint32_t size,
+                       uint32_t offset = 0)
+    {
+        vkCmdPushConstants(m_handle, layout, stages, offset, size, data);
     }
 
     // Dynamic state

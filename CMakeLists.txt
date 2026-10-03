@@ -42,6 +42,7 @@ find_package(mikktspace CONFIG REQUIRED)
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h" REQUIRED)
 find_package(libigl CONFIG REQUIRED)
 find_package(ReactPhysics3D REQUIRED)
+find_package(glslang CONFIG REQUIRED)
 
 # MSVC flags
 add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/EHsc>)
@@ -55,6 +56,7 @@ add_subdirectory(external)
 add_library(lr_core STATIC
     src/core/vulkan/VulkanContext.cpp
     src/core/vulkan/ShaderLoader.cpp
+    src/core/vulkan/ShaderCompiler.cpp
     src/core/vulkan/Allocator.cpp
     src/core/vulkan/CommandBuffer.cpp
     src/core/vulkan/DescriptorAllocator.cpp
@@ -151,6 +153,11 @@ target_link_libraries(lr_core PUBLIC
     GPUOpen::VulkanMemoryAllocator
     imgui
     mikktspace::mikktspace
+)
+target_link_libraries(lr_core PRIVATE
+    glslang::glslang
+    glslang::glslang-default-resource-limits
+    glslang::SPIRV
 )
 target_include_directories(lr_core PUBLIC ${TINYGLTF_INCLUDE_DIRS})
 target_compile_definitions(lr_core PUBLIC
@@ -264,6 +271,15 @@ if(BUILD_TESTING)
     )
     target_link_libraries(rigid_body_collider_tests PRIVATE lr_rigid_body_feature)
     add_test(NAME rigid_body.collider COMMAND rigid_body_collider_tests)
+
+    add_executable(shader_compiler_tests
+        tests/vulkan/ShaderCompilerTests.cpp
+    )
+    target_link_libraries(shader_compiler_tests PRIVATE lr_core)
+    target_compile_definitions(shader_compiler_tests PRIVATE
+        LR_SHADER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src/core/passes"
+    )
+    add_test(NAME vulkan.shader_compiler COMMAND shader_compiler_tests)
 
     add_executable(framegraph_model_tests
         tests/framegraph/GraphModelTests.cpp

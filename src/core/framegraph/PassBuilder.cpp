@@ -30,17 +30,32 @@ PassBuilder &PassBuilder::type(PassType value)
 }
 PassBuilder &PassBuilder::vertShader(std::string path)
 {
-    desc().vertShader = std::move(path);
+    desc().vertShader = ShaderCode::fromFile(std::move(path));
+    return *this;
+}
+PassBuilder &PassBuilder::vertShader(std::vector<uint32_t> spirv)
+{
+    desc().vertShader = ShaderCode::fromSpirv(std::move(spirv));
     return *this;
 }
 PassBuilder &PassBuilder::fragShader(std::string path)
 {
-    desc().fragShader = std::move(path);
+    desc().fragShader = ShaderCode::fromFile(std::move(path));
+    return *this;
+}
+PassBuilder &PassBuilder::fragShader(std::vector<uint32_t> spirv)
+{
+    desc().fragShader = ShaderCode::fromSpirv(std::move(spirv));
     return *this;
 }
 PassBuilder &PassBuilder::computeShader(std::string path)
 {
-    desc().computeShader = std::move(path);
+    desc().computeShader = ShaderCode::fromFile(std::move(path));
+    return *this;
+}
+PassBuilder &PassBuilder::computeShader(std::vector<uint32_t> spirv)
+{
+    desc().computeShader = ShaderCode::fromSpirv(std::move(spirv));
     return *this;
 }
 PassBuilder &PassBuilder::pushConstantSize(uint32_t size, VkShaderStageFlags stages)
@@ -58,6 +73,13 @@ PassBuilder &PassBuilder::vertexLayout(const GpuMeshLayout &layout)
 {
     desc().vertexBindings   = layout.bindingDescriptions();
     desc().vertexAttributes = layout.attributeDescriptions();
+    return *this;
+}
+PassBuilder &PassBuilder::vertexLayout(std::vector<VkVertexInputBindingDescription>   bindings,
+                                       std::vector<VkVertexInputAttributeDescription> attributes)
+{
+    desc().vertexBindings   = std::move(bindings);
+    desc().vertexAttributes = std::move(attributes);
     return *this;
 }
 

@@ -19,9 +19,16 @@ public:
     PassBuilder &vertShader(std::string path);
     PassBuilder &fragShader(std::string path);
     PassBuilder &computeShader(std::string path);
+    // In-memory SPIR-V, e.g. from compileGlslFile() (see core/vulkan/ShaderCompiler.hpp).
+    PassBuilder &vertShader(std::vector<uint32_t> spirv);
+    PassBuilder &fragShader(std::vector<uint32_t> spirv);
+    PassBuilder &computeShader(std::vector<uint32_t> spirv);
     PassBuilder &pushConstantSize(uint32_t size, VkShaderStageFlags stages = VK_SHADER_STAGE_COMPUTE_BIT);
     PassBuilder &topology(VkPrimitiveTopology topology);
     PassBuilder &vertexLayout(const GpuMeshLayout &layout);
+    // Raw layout for vertex data that doesn't come from a Mesh.
+    PassBuilder &vertexLayout(std::vector<VkVertexInputBindingDescription>   bindings,
+                              std::vector<VkVertexInputAttributeDescription> attributes);
 
     PassBuilder &sampledImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages);
     PassBuilder &sampledDepth(uint32_t binding, ImageHandle image, VkShaderStageFlags stages);

@@ -2,6 +2,7 @@
 
 #include "ExtentSpec.hpp"
 #include "Handles.hpp"
+#include "core/vulkan/ShaderLoader.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -97,9 +98,9 @@ struct PassDesc
     PassHandle  handle;
     PassType    type = PassType::Fullscreen;
 
-    std::string                                    vertShader;
-    std::string                                    fragShader;
-    std::string                                    computeShader;
+    ShaderCode                                     vertShader;
+    ShaderCode                                     fragShader;
+    ShaderCode                                     computeShader;
     uint32_t                                       pushConstantSize   = 0;
     VkShaderStageFlags                             pushConstantStages = VK_SHADER_STAGE_COMPUTE_BIT;
     VkPrimitiveTopology                            topology           = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;

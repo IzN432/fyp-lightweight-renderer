@@ -18,8 +18,8 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext &ctx, const Config &confi
     // Shaders
     // -----------------------------------------------------------------------
 
-    ShaderModule vertModule(device, config.vertShaderPath);
-    ShaderModule fragModule(device, config.fragShaderPath);
+    ShaderModule vertModule(device, config.vertShader);
+    ShaderModule fragModule(device, config.fragShader);
 
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;

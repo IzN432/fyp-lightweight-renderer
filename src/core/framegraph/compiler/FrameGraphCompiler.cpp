@@ -263,8 +263,8 @@ void FrameGraphCompiler::buildPipelines(CompiledFrameGraph &graph) const
         }
 
         GraphicsPipeline::Config config{};
-        config.vertShaderPath          = pass.vertShader;
-        config.fragShaderPath          = pass.fragShader;
+        config.vertShader              = pass.vertShader;
+        config.fragShader              = pass.fragShader;
         config.vertexBindings          = pass.vertexBindings;
         config.vertexAttributes        = pass.vertexAttributes;
         config.passType                = pass.type;

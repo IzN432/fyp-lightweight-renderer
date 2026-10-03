@@ -2,6 +2,7 @@
 
 #include "Pipeline.hpp"
 #include "core/framegraph/PassDefinition.hpp"
+#include "core/vulkan/ShaderLoader.hpp"
 #include "core/vulkan/VulkanContext.hpp"
 
 #include <vulkan/vulkan.h>
@@ -17,8 +18,8 @@ class GraphicsPipeline : public Pipeline
 public:
     struct Config
     {
-        std::string                                    vertShaderPath;
-        std::string                                    fragShaderPath;
+        ShaderCode                                     vertShader;
+        ShaderCode                                     fragShader;
         std::vector<VkVertexInputBindingDescription>   vertexBindings;   // empty for Fullscreen passes
         std::vector<VkVertexInputAttributeDescription> vertexAttributes; // empty for Fullscreen passes
         PassType                                       passType = PassType::Fullscreen;
