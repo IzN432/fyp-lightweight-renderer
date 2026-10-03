@@ -18,6 +18,7 @@ Run from the repo root after building:
 
 import argparse
 import pathlib
+from typing import Any
 
 import numpy as np
 
@@ -42,7 +43,7 @@ def main():
     res.register_dynamic_buffer("frame_data", 16, lr.BufferUsage.UNIFORM)
     res.upload_buffer("history", np.full(HISTORY, 0xFFFFFFFF, dtype=np.uint32), lr.BufferUsage.STORAGE)
 
-    state = {"frame": 0, "time": 0.0}
+    state: dict[str, Any] = {"frame": 0, "time": 0.0}
 
     def draw_busy(ctx):
         pc = np.array([args.iterations, 0], dtype=np.uint32)

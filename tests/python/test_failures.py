@@ -119,12 +119,24 @@ def test_debug_assertion_exits_instead_of_hanging():
     assert 'File "<string>", line 3' in stderr, f"expected the Python line that called into lr:\n{stderr}"
 
 
+def test_plain_assert_reports_python_location():
+    # assert() reports through _wassert, separately from the CRT report hook (e.g. ImGui's IM_ASSERT).
+    if not _testing.DEBUG_BUILD:
+        print("skip test_plain_assert_reports_python_location (release build: assert is compiled out)")
+        return
+    returncode, stderr = crash_in_subprocess("assert")
+    assert returncode != 0
+    assert "plain assert" in stderr, stderr
+    assert 'File "<string>", line 3' in stderr, f"expected the Python line that called into lr:\n{stderr}"
+
+
 def main():
     tests = [
         test_library_exception_mid_frame_tears_down_cleanly,
         test_access_violation_reports_python_location,
         test_terminate_exits_with_report,
         test_debug_assertion_exits_instead_of_hanging,
+        test_plain_assert_reports_python_location,
     ]
     failures = 0
     for test in tests:

@@ -20,6 +20,7 @@ Run from the repo root after building:
 
 import argparse
 import pathlib
+from typing import Any
 
 import numpy as np
 
@@ -105,7 +106,7 @@ def main():
     res.register_dynamic_buffer("camera", 2 * 64, lr.BufferUsage.UNIFORM)
     instances, draw_args = fg.buffer("instances"), fg.buffer("draw_args")
 
-    state = {"time": 0.0, "frames": 0, "hold": 0, "checks": 0}
+    state: dict[str, Any] = {"time": 0.0, "frames": 0, "hold": 0, "checks": 0}
     index_count = np.array([len(cube_indices)], dtype=np.uint32)
 
     def reset(ctx):

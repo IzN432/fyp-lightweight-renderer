@@ -18,6 +18,7 @@ Run from the repo root after building:
 
 import argparse
 import pathlib
+from typing import Any
 
 import numpy as np
 
@@ -44,7 +45,7 @@ def main():
     fg, res = viewer.frame_graph, viewer.resources
     swapchain, trail, style = fg.image("swapchain"), fg.buffer("trail"), fg.buffer("style")
 
-    state = {"frames": 0, "points": spiral(2), "compiles": {}}
+    state: dict[str, Any] = {"frames": 0, "points": spiral(2), "compiles": {}}
     res.upload_buffer("trail", state["points"], lr.BufferUsage.VERTEX)
     res.register_dynamic_buffer("style", 32, lr.BufferUsage.UNIFORM)
     res.update_buffer("style", np.array([0.9, 0.9, 0.95, 1, 1.0, 0.45, 0.2, 1], dtype=np.float32))

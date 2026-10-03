@@ -20,7 +20,7 @@ for _error in (ShaderCompileError, ShaderInterfaceError, VulkanValidationError):
     _error.__module__ = __name__
 del _error
 
-from . import transforms  # noqa: F401
+from . import gui, transforms  # noqa: F401
 
 # A crash inside the native module (access violation, abort, failed runtime check) would otherwise
 # end the process with no output at all; faulthandler prints the Python traceback of every thread,

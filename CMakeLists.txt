@@ -297,11 +297,23 @@ if(LR_BUILD_PYTHON)
             # Asserts every frame read its own uniform data (149/150 frames didn't, before per-frame copies).
             add_test(NAME python.per_frame_data
                 COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/per_frame_data.py")
+            # Drives the orbit camera with injected mouse input and asserts it orbited and zoomed.
+            add_test(NAME python.interactive
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/interactive.py"
+                    --scripted)
             set_tests_properties(python.bindings python.spinning_torus python.pipeline_state python.failures
-                python.gpu_instancing python.live_edit python.per_frame_data PROPERTIES
+                python.gpu_instancing python.live_edit python.per_frame_data python.interactive PROPERTIES
                 ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
                 # nanobind prints leak reports to stderr without failing the process.
                 FAIL_REGULAR_EXPRESSION "nanobind: leaked|\\[error\\]")
+            # The hand-written stubs must match the module (names, parameters) and type-check the examples.
+            add_test(NAME python.stubs
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_stubs.py")
+            set_tests_properties(python.stubs PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python")
+            add_test(NAME python.typecheck
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/python/typecheck.py")
+            set_tests_properties(python.typecheck PROPERTIES SKIP_RETURN_CODE 77)
+
             # Provokes errors on purpose (including one logged validation error), and asserts on each.
             add_test(NAME python.error_handling
                 COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/error_handling.py")

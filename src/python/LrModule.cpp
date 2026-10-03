@@ -3,7 +3,12 @@
 // by the pure-Python `lr` package (python/lr/__init__.py).
 
 #include "core/Paths.hpp"
+#include "core/app/InputHandler.hpp"
 #include "core/app/Viewer.hpp"
+#include "core/editor/camera/SphericalCameraController.hpp"
+#include "core/scene/Camera.hpp"
+#include "core/scene/Scene.hpp"
+#include "core/scene/TransformComponent.hpp"
 #include "core/framegraph/FrameGraph.hpp"
 #include "core/framegraph/PassBuilder.hpp"
 #include "core/framegraph/PassContext.hpp"
@@ -12,11 +17,13 @@
 #include "core/vulkan/CommandBuffer.hpp"
 #include "core/vulkan/ShaderCompiler.hpp"
 
+#include <imgui.h>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/filesystem.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
 #include <nanobind/stl/vector.h>
@@ -30,6 +37,8 @@
 #endif
 
 #include <algorithm>
+#include <cassert>
+#include <csignal>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -51,6 +60,7 @@ using lr::CommandBuffer;
 using lr::ExtentSpec;
 using lr::FrameGraph;
 using lr::ImageHandle;
+using lr::InputHandler;
 using lr::PassBuilder;
 using lr::PassContext;
 using lr::PassHandle;
@@ -728,6 +738,454 @@ void bindPasses(nb::module_ &m)
         .def("debug_dump", &FrameGraph::debugDump);
 }
 
+// GLFW key/button codes, as Python enums.
+enum class Key : int
+{
+};
+enum class MouseButton : int
+{
+    Left   = GLFW_MOUSE_BUTTON_LEFT,
+    Right  = GLFW_MOUSE_BUTTON_RIGHT,
+    Middle = GLFW_MOUSE_BUTTON_MIDDLE,
+};
+
+void bindInput(nb::module_ &m)
+{
+    auto key = nb::enum_<Key>(m, "Key", "Keyboard keys (GLFW key codes).");
+    // nanobind keeps the name pointers, so they live in static storage.
+    static const std::array<std::string, 26> letters = [] {
+        std::array<std::string, 26> names;
+        for (int i = 0; i < 26; ++i)
+        {
+            names[i] = std::string(1, static_cast<char>('A' + i));
+        }
+        return names;
+    }();
+    static const std::array<std::string, 10> digits = [] {
+        std::array<std::string, 10> names;
+        for (int i = 0; i < 10; ++i)
+        {
+            names[i] = "DIGIT_" + std::to_string(i);
+        }
+        return names;
+    }();
+    static const std::array<std::string, 12> functionKeys = [] {
+        std::array<std::string, 12> names;
+        for (int i = 0; i < 12; ++i)
+        {
+            names[i] = "F" + std::to_string(i + 1);
+        }
+        return names;
+    }();
+    for (int i = 0; i < 26; ++i)
+    {
+        key.value(letters[i].c_str(), static_cast<Key>(GLFW_KEY_A + i));
+    }
+    for (int i = 0; i < 10; ++i)
+    {
+        key.value(digits[i].c_str(), static_cast<Key>(GLFW_KEY_0 + i));
+    }
+    for (int i = 0; i < 12; ++i)
+    {
+        key.value(functionKeys[i].c_str(), static_cast<Key>(GLFW_KEY_F1 + i));
+    }
+    key.value("SPACE", static_cast<Key>(GLFW_KEY_SPACE))
+        .value("ESCAPE", static_cast<Key>(GLFW_KEY_ESCAPE))
+        .value("ENTER", static_cast<Key>(GLFW_KEY_ENTER))
+        .value("TAB", static_cast<Key>(GLFW_KEY_TAB))
+        .value("BACKSPACE", static_cast<Key>(GLFW_KEY_BACKSPACE))
+        .value("DELETE", static_cast<Key>(GLFW_KEY_DELETE))
+        .value("LEFT", static_cast<Key>(GLFW_KEY_LEFT))
+        .value("RIGHT", static_cast<Key>(GLFW_KEY_RIGHT))
+        .value("UP", static_cast<Key>(GLFW_KEY_UP))
+        .value("DOWN", static_cast<Key>(GLFW_KEY_DOWN))
+        .value("LEFT_SHIFT", static_cast<Key>(GLFW_KEY_LEFT_SHIFT))
+        .value("RIGHT_SHIFT", static_cast<Key>(GLFW_KEY_RIGHT_SHIFT))
+        .value("LEFT_CONTROL", static_cast<Key>(GLFW_KEY_LEFT_CONTROL))
+        .value("RIGHT_CONTROL", static_cast<Key>(GLFW_KEY_RIGHT_CONTROL))
+        .value("LEFT_ALT", static_cast<Key>(GLFW_KEY_LEFT_ALT))
+        .value("RIGHT_ALT", static_cast<Key>(GLFW_KEY_RIGHT_ALT));
+
+    nb::enum_<MouseButton>(m, "MouseButton")
+        .value("LEFT", MouseButton::Left)
+        .value("RIGHT", MouseButton::Right)
+        .value("MIDDLE", MouseButton::Middle);
+
+    nb::class_<InputHandler>(m, "Input",
+                             "Keyboard and mouse state, updated once per frame before on_update. It reports the "
+                             "raw state even over UI; check lr.gui.want_capture_mouse() to leave the mouse to "
+                             "ImGui.")
+        .def(
+            "is_key_down",
+            [](const InputHandler &input, Key key) {
+                return input.isKeyPressed(static_cast<int>(key));
+            },
+            "key"_a)
+        .def(
+            "is_mouse_down",
+            [](const InputHandler &input, MouseButton button) {
+                return input.isMouseButtonPressed(static_cast<int>(button));
+            },
+            "button"_a)
+        .def_prop_ro(
+            "mouse_position",
+            [](const InputHandler &input) {
+                double x = 0.0, y = 0.0;
+                input.getMousePos(x, y);
+                return nb::make_tuple(x, y);
+            },
+            "Cursor position in window pixels, (x, y).")
+        .def_prop_ro(
+            "mouse_delta",
+            [](const InputHandler &input) {
+                double dx = 0.0, dy = 0.0;
+                input.getMouseDelta(dx, dy);
+                return nb::make_tuple(dx, dy);
+            },
+            "Cursor movement since the previous frame, (dx, dy) in pixels.")
+        .def_prop_ro("scroll_delta", &InputHandler::getScrollDelta, "Scroll-wheel movement since the previous frame.")
+        .def_prop_ro("shift", &InputHandler::isShiftPressed)
+        .def_prop_ro("ctrl", &InputHandler::isCtrlPressed)
+        .def_prop_ro("alt", &InputHandler::isAltPressed);
+}
+
+// ImGui from Python. Widgets only work between the frame's ImGui NewFrame and Render, i.e. inside an
+// on_gui callback; outside it ImGui would assert (aborting the interpreter), so they raise instead.
+// Windows left open (an exception inside `with gui.window(...)`, or a missing end()) are closed when
+// the callback returns, for the same reason.
+struct GuiScope
+{
+    bool active      = false;
+    int  openWindows = 0;
+};
+GuiScope g_gui;
+
+void requireGui(const char *function)
+{
+    if (!g_gui.active)
+    {
+        throw std::logic_error(std::string("lr.gui.") + function +
+                               "() can only be called from a Viewer.on_gui callback");
+    }
+}
+
+void bindGui(nb::module_ &m)
+{
+    nb::module_ gui = m.def_submodule("_gui", "ImGui subset; use it through lr.gui.");
+
+    gui.def(
+        "begin",
+        [](const std::string &title, bool closable, std::optional<std::array<float, 2>> size,
+           std::optional<std::array<float, 2>> position) {
+            requireGui("begin");
+            if (title.empty())
+            {
+                throw std::invalid_argument("lr.gui.window(): title must not be empty");
+            }
+            // Only the first time the window appears; afterwards the user's resizing/moving wins.
+            if (size)
+            {
+                ImGui::SetNextWindowSize(ImVec2((*size)[0], (*size)[1]), ImGuiCond_FirstUseEver);
+            }
+            if (position)
+            {
+                ImGui::SetNextWindowPos(ImVec2((*position)[0], (*position)[1]), ImGuiCond_FirstUseEver);
+            }
+            bool open    = true;
+            bool visible = ImGui::Begin(title.c_str(), closable ? &open : nullptr);
+            ++g_gui.openWindows;
+            return nb::make_tuple(visible, open);
+        },
+        "title"_a, "closable"_a = false, "size"_a = nb::none(), "position"_a = nb::none());
+    gui.def("end", [] {
+        requireGui("end");
+        if (g_gui.openWindows == 0)
+        {
+            throw std::logic_error("lr.gui.end() without a matching begin()");
+        }
+        ImGui::End();
+        --g_gui.openWindows;
+    });
+    gui.def(
+        "text",
+        [](const std::string &text) {
+            requireGui("text");
+            ImGui::TextUnformatted(text.c_str());
+        },
+        "text"_a);
+    gui.def(
+        "button",
+        [](const std::string &label) {
+            requireGui("button");
+            return ImGui::Button(label.c_str());
+        },
+        "label"_a);
+    gui.def(
+        "checkbox",
+        [](const std::string &label, bool value) {
+            requireGui("checkbox");
+            const bool changed = ImGui::Checkbox(label.c_str(), &value);
+            return nb::make_tuple(changed, value);
+        },
+        "label"_a, "value"_a);
+    gui.def(
+        "slider_float",
+        [](const std::string &label, float value, float min, float max, const std::string &format, bool logarithmic) {
+            requireGui("slider_float");
+            const bool changed = ImGui::SliderFloat(label.c_str(), &value, min, max, format.c_str(),
+                                                    logarithmic ? ImGuiSliderFlags_Logarithmic : 0);
+            return nb::make_tuple(changed, value);
+        },
+        "label"_a, "value"_a, "min"_a, "max"_a, "format"_a = "%.3f", "logarithmic"_a = false);
+    gui.def(
+        "slider_int",
+        [](const std::string &label, int value, int min, int max) {
+            requireGui("slider_int");
+            const bool changed = ImGui::SliderInt(label.c_str(), &value, min, max);
+            return nb::make_tuple(changed, value);
+        },
+        "label"_a, "value"_a, "min"_a, "max"_a);
+    gui.def(
+        "drag_float",
+        [](const std::string &label, float value, float speed, float min, float max) {
+            requireGui("drag_float");
+            const bool changed = ImGui::DragFloat(label.c_str(), &value, speed, min, max);
+            return nb::make_tuple(changed, value);
+        },
+        "label"_a, "value"_a, "speed"_a = 0.01f, "min"_a = 0.0f, "max"_a = 0.0f);
+    gui.def(
+        "color_edit3",
+        [](const std::string &label, std::array<float, 3> color) {
+            requireGui("color_edit3");
+            const bool changed = ImGui::ColorEdit3(label.c_str(), color.data());
+            return nb::make_tuple(changed, nb::make_tuple(color[0], color[1], color[2]));
+        },
+        "label"_a, "color"_a);
+    gui.def(
+        "color_edit4",
+        [](const std::string &label, std::array<float, 4> color) {
+            requireGui("color_edit4");
+            const bool changed = ImGui::ColorEdit4(label.c_str(), color.data());
+            return nb::make_tuple(changed, nb::make_tuple(color[0], color[1], color[2], color[3]));
+        },
+        "label"_a, "color"_a);
+    gui.def(
+        "combo",
+        [](const std::string &label, int current, const std::vector<std::string> &items) {
+            requireGui("combo");
+            if (items.empty())
+            {
+                throw std::invalid_argument("lr.gui.combo(): items must not be empty");
+            }
+            std::vector<const char *> names;
+            names.reserve(items.size());
+            for (const std::string &item : items)
+            {
+                names.push_back(item.c_str());
+            }
+            const bool changed = ImGui::Combo(label.c_str(), &current, names.data(), static_cast<int>(names.size()));
+            return nb::make_tuple(changed, current);
+        },
+        "label"_a, "current"_a, "items"_a);
+    gui.def(
+        "collapsing_header",
+        [](const std::string &label, bool defaultOpen) {
+            requireGui("collapsing_header");
+            return ImGui::CollapsingHeader(label.c_str(), defaultOpen ? ImGuiTreeNodeFlags_DefaultOpen : 0);
+        },
+        "label"_a, "default_open"_a = true);
+    gui.def("separator", [] {
+        requireGui("separator");
+        ImGui::Separator();
+    });
+    gui.def("same_line", [] {
+        requireGui("same_line");
+        ImGui::SameLine();
+    });
+    gui.def("spacing", [] {
+        requireGui("spacing");
+        ImGui::Spacing();
+    });
+    // Safe at any time once a Viewer exists (its ImGui context is created with it).
+    gui.def("want_capture_mouse", [] {
+        return ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse;
+    });
+    gui.def("want_capture_keyboard", [] {
+        return ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
+    });
+    gui.def("framerate", [] {
+        return ImGui::GetCurrentContext() ? ImGui::GetIO().Framerate : 0.0f;
+    });
+}
+
+// The engine's own orbit camera, as the C++ renderer uses it: a Camera + TransformComponent on a scene
+// object, driven by SphericalCameraController. Same controls, same maths, same projection.
+class OrbitCamera
+{
+public:
+    explicit OrbitCamera(Viewer &viewer)
+        : m_object(&m_scene.createSceneObject()), m_camera(&m_object->addComponent<lr::Camera>())
+    {
+        m_object->addComponent<lr::TransformComponent>();
+        m_controller = std::make_unique<lr::SphericalCameraController>(*m_object, viewer.input());
+        m_controller->setOrbitState(m_controller->orbitState()); // place the camera before the first update
+    }
+
+    lr::SphericalCameraController &controller() { return *m_controller; }
+    lr::Camera                    &camera() { return *m_camera; }
+    glm::vec3 position() const { return m_object->getComponent<lr::TransformComponent>().transform().position(); }
+
+private:
+    lr::Scene                                      m_scene; // owns the camera object; declared first
+    lr::SceneObject                               *m_object;
+    lr::Camera                                    *m_camera;
+    std::unique_ptr<lr::SphericalCameraController> m_controller;
+};
+
+// glm is column-major; numpy matrices here follow lr.transforms: row-major, acting on column vectors.
+nb::ndarray<nb::numpy, float, nb::shape<4, 4>> toNumpy(const glm::mat4 &matrix)
+{
+    auto *rows = new float[16];
+    for (int row = 0; row < 4; ++row)
+    {
+        for (int column = 0; column < 4; ++column)
+        {
+            rows[row * 4 + column] = matrix[column][row];
+        }
+    }
+    nb::capsule owner(rows, [](void *p) noexcept {
+        delete[] static_cast<float *>(p);
+    });
+    return nb::ndarray<nb::numpy, float, nb::shape<4, 4>>(rows, {4, 4}, owner);
+}
+
+void bindCamera(nb::module_ &m)
+{
+    using State              = lr::SphericalCameraController::OrbitState;
+    const auto orbitProperty = [](auto field) {
+        return [field](OrbitCamera &camera, float value) {
+            State state  = camera.controller().orbitState();
+            state.*field = value;
+            camera.controller().setOrbitState(state);
+        };
+    };
+
+    nb::class_<OrbitCamera>(m, "OrbitCamera",
+                            "The engine's orbit camera (SphericalCameraController + Camera), with the C++ "
+                            "renderer's controls: middle-drag orbits, Shift + middle-drag pans, the scroll wheel "
+                            "zooms and R resets. Ignores the mouse while it is over ImGui UI. Call update() once "
+                            "per frame, then use matrices(extent) for a `mat4 view; mat4 proj;` uniform block.")
+        .def(nb::init<Viewer &>(), "viewer"_a, nb::keep_alive<1, 2>())
+        .def(
+            "update",
+            [](OrbitCamera &camera, float dt) {
+                camera.controller().update(dt);
+            },
+            "dt"_a, "Apply this frame's input (from on_update).")
+        .def(
+            "view_matrix",
+            [](OrbitCamera &camera) {
+                return toNumpy(camera.camera().viewMatrix());
+            },
+            "4x4 float32 view matrix (row-major numpy, acting on column vectors).")
+        .def(
+            "projection_matrix",
+            [](OrbitCamera &camera, float aspect) {
+                return toNumpy(camera.camera().projectionMatrix(aspect));
+            },
+            "aspect"_a, "4x4 float32 projection: Vulkan clip space, depth in [0, 1], Y flipped — as the engine uses.")
+        .def(
+            "matrices",
+            [](OrbitCamera &camera, std::pair<uint32_t, uint32_t> extent) {
+                const float aspect = static_cast<float>(extent.first) / static_cast<float>(std::max(extent.second, 1u));
+                auto *data = new glm::mat4[2]{camera.camera().viewMatrix(), camera.camera().projectionMatrix(aspect)};
+                nb::capsule owner(data, [](void *p) noexcept {
+                    delete[] static_cast<glm::mat4 *>(p);
+                });
+                return nb::ndarray<nb::numpy, float, nb::shape<32>>(data, {32}, owner);
+            },
+            "extent"_a, "view and projection for a (width, height) extent, packed for a `mat4 view; mat4 proj;` block.")
+        .def_prop_ro(
+            "position",
+            [](const OrbitCamera &camera) {
+                const glm::vec3 p = camera.position();
+                return nb::make_tuple(p.x, p.y, p.z);
+            },
+            "Camera position in world space.")
+        .def_prop_rw(
+            "target",
+            [](OrbitCamera &camera) {
+                const glm::vec3 t = camera.controller().orbitState().target;
+                return nb::make_tuple(t.x, t.y, t.z);
+            },
+            [](OrbitCamera &camera, std::array<float, 3> target) {
+                State state  = camera.controller().orbitState();
+                state.target = glm::vec3(target[0], target[1], target[2]);
+                camera.controller().setOrbitState(state);
+            },
+            "The point orbited around.")
+        .def_prop_rw(
+            "radius",
+            [](OrbitCamera &camera) {
+                return camera.controller().orbitState().radius;
+            },
+            orbitProperty(&State::radius), "Distance from the target (clamped to [0.01, 1000]).")
+        .def_prop_rw(
+            "azimuth",
+            [](OrbitCamera &camera) {
+                return camera.controller().orbitState().azimuth;
+            },
+            orbitProperty(&State::azimuth), "Radians around +Y; 0 places the camera on the target's +Z side.")
+        .def_prop_rw(
+            "elevation",
+            [](OrbitCamera &camera) {
+                return camera.controller().orbitState().elevation;
+            },
+            orbitProperty(&State::elevation), "Radians above the horizontal (clamped to ±89°).")
+        .def_prop_rw(
+            "fov_y_degrees",
+            [](OrbitCamera &camera) {
+                return camera.camera().fovYDegrees;
+            },
+            [](OrbitCamera &camera, float value) {
+                camera.camera().fovYDegrees = value;
+            })
+        .def_prop_rw(
+            "near_plane",
+            [](OrbitCamera &camera) {
+                return camera.camera().nearPlane;
+            },
+            [](OrbitCamera &camera, float value) {
+                camera.camera().nearPlane = value;
+            })
+        .def_prop_rw(
+            "far_plane",
+            [](OrbitCamera &camera) {
+                return camera.camera().farPlane;
+            },
+            [](OrbitCamera &camera, float value) {
+                camera.camera().farPlane = value;
+            })
+        .def_prop_rw(
+            "orthographic",
+            [](OrbitCamera &camera) {
+                return camera.camera().projectionType == lr::ProjectionType::Orthographic;
+            },
+            [](OrbitCamera &camera, bool value) {
+                camera.camera().projectionType =
+                    value ? lr::ProjectionType::Orthographic : lr::ProjectionType::Perspective;
+            },
+            "Orthographic instead of perspective projection (height set by ortho_height).")
+        .def_prop_rw(
+            "ortho_height",
+            [](OrbitCamera &camera) {
+                return camera.camera().orthoHeight;
+            },
+            [](OrbitCamera &camera, float value) {
+                camera.camera().orthoHeight = value;
+            });
+}
+
 void bindViewer(nb::module_ &m)
 {
     nb::class_<Viewer>(m, "Viewer", "Window + Vulkan device + frame graph. Declare passes, then call run().")
@@ -781,6 +1239,31 @@ void bindViewer(nb::module_ &m)
                 });
             },
             "callback"_a, "Like on_update, but after every on_update callback has run.")
+        .def(
+            "on_gui",
+            [](Viewer &v, nb::callable callback) {
+                v.onGui([slot = g_callbackSlots.hold(std::move(callback))] {
+                    if (!*slot)
+                    {
+                        return;
+                    }
+                    g_gui.active      = true;
+                    g_gui.openWindows = 0;
+                    g_callbackErrors.guard([&] {
+                        (*slot)();
+                    });
+                    // Close what the callback left open, so ImGui's frame stays balanced.
+                    for (; g_gui.openWindows > 0; --g_gui.openWindows)
+                    {
+                        ImGui::End();
+                    }
+                    g_gui.active = false;
+                });
+            },
+            "callback"_a,
+            "callback(), called every frame to build ImGui panels with lr.gui (e.g. `with lr.gui.window(...)`).")
+        .def_prop_ro("input", &Viewer::input, nb::rv_policy::reference_internal,
+                     "Keyboard and mouse state for this window.")
         .def(
             "run",
             [](Viewer &v) {
@@ -886,6 +1369,12 @@ void routeDebugRuntimeErrorsToStderr()
         _CrtSetReportFile(reportType, _CRTDBG_FILE_STDERR);
     }
     _CrtSetReportHook2(_CRT_RPTHOOK_INSTALL, onDebugReport);
+    // Plain assert() (e.g. ImGui's IM_ASSERT) reports through _wassert, which bypasses the hook above:
+    // send its message to stderr, and route the abort() that follows through the interpreter's runtime.
+    _set_error_mode(_OUT_TO_STDERR);
+    std::signal(SIGABRT, [](int) {
+        abortThroughInterpreterRuntime();
+    });
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
     _set_invalid_parameter_handler(onInvalidParameter);
     std::set_terminate(onTerminate);
@@ -917,6 +1406,32 @@ void bindTesting(nb::module_ &m)
         },
         "viewer"_a, "after_frames"_a);
 
+    // Synthetic input, as if from the window: seen by viewer.input on the next frame.
+    testing.def(
+        "inject_mouse_move",
+        [](Viewer &viewer, double x, double y) {
+            viewer.input().notifyMouseMove(x, y);
+        },
+        "viewer"_a, "x"_a, "y"_a);
+    testing.def(
+        "inject_mouse_button",
+        [](Viewer &viewer, MouseButton button, bool pressed) {
+            viewer.input().notifyMouseButton(static_cast<int>(button), pressed ? GLFW_PRESS : GLFW_RELEASE);
+        },
+        "viewer"_a, "button"_a, "pressed"_a);
+    testing.def(
+        "inject_scroll",
+        [](Viewer &viewer, double delta) {
+            viewer.input().notifyScroll(delta);
+        },
+        "viewer"_a, "delta"_a);
+    testing.def(
+        "inject_key",
+        [](Viewer &viewer, Key key, bool pressed) {
+            viewer.input().notifyKey(static_cast<int>(key), pressed ? GLFW_PRESS : GLFW_RELEASE);
+        },
+        "viewer"_a, "key"_a, "pressed"_a);
+
     testing.def(
         "crash",
         [](const std::string &kind) {
@@ -933,6 +1448,11 @@ void bindTesting(nb::module_ &m)
             } else if (kind == "terminate")
             {
                 std::terminate();
+            } else if (kind == "assert")
+            {
+                // A plain assert(), as third-party code like ImGui uses (compiled out in Release).
+                volatile bool ok = false;
+                assert(ok && "lr._testing: plain assert");
             }
             throw std::invalid_argument("crash: unknown kind '" + kind + "'");
         },
@@ -957,7 +1477,10 @@ NB_MODULE(_lr, m)
     bindValueTypes(m);
     bindResources(m);
     bindPasses(m);
+    bindInput(m);
+    bindGui(m);
     bindViewer(m);
+    bindCamera(m);
     bindTesting(m);
 
     m.def(

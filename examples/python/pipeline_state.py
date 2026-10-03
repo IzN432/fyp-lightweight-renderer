@@ -14,6 +14,7 @@ Run from the repo root after building:
 
 import argparse
 import pathlib
+from typing import Any
 
 import numpy as np
 
@@ -57,7 +58,7 @@ def main():
     res.upload_buffer("glass_vertices", glass, lr.BufferUsage.VERTEX)
     res.register_dynamic_buffer("camera", 2 * 64, lr.BufferUsage.UNIFORM)
 
-    state = {"time": 0.0, "model": np.identity(4, dtype=np.float32), "frames": 0}
+    state: dict[str, Any] = {"time": 0.0, "model": np.identity(4, dtype=np.float32), "frames": 0}
     torus_layout = (
         [lr.VertexBinding(0, stride=vertices.strides[0])],
         [

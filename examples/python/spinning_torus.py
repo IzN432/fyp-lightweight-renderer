@@ -13,6 +13,7 @@ Run from the repo root after building:
 
 import argparse
 import pathlib
+from typing import Any
 
 import numpy as np
 
@@ -36,7 +37,7 @@ def main():
     res.upload_buffer("torus_indices", indices, lr.BufferUsage.INDEX)
     res.register_dynamic_buffer("camera", 2 * 64, lr.BufferUsage.UNIFORM)  # view + proj
 
-    state = {"time": 0.0, "model": np.identity(4, dtype=np.float32), "frames": 0}
+    state: dict[str, Any] = {"time": 0.0, "model": np.identity(4, dtype=np.float32), "frames": 0}
 
     def draw_torus(ctx):
         ctx.push_constants(lr.Stage.VERTEX, tf.to_gpu(state["model"]))

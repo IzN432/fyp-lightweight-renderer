@@ -47,6 +47,20 @@ void SphericalCameraController::update(float dt)
         }
     } // !WantCaptureMouse
 
+    applyPose();
+}
+
+void SphericalCameraController::setOrbitState(const OrbitState &state)
+{
+    m_orbitTarget    = state.target;
+    m_orbitRadius    = glm::clamp(state.radius, 0.01f, 1000.0f);
+    m_orbitAzimuth   = state.azimuth;
+    m_orbitElevation = glm::clamp(state.elevation, glm::radians(-89.0f), glm::radians(89.0f));
+    applyPose();
+}
+
+void SphericalCameraController::applyPose()
+{
     glm::vec3 pos(m_orbitTarget.x + m_orbitRadius * std::cos(m_orbitElevation) * std::sin(m_orbitAzimuth),
                   m_orbitTarget.y + m_orbitRadius * std::sin(m_orbitElevation),
                   m_orbitTarget.z + m_orbitRadius * std::cos(m_orbitElevation) * std::cos(m_orbitAzimuth));

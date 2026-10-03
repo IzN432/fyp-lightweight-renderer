@@ -26,7 +26,8 @@ def make_torus(major_radius=1.0, minor_radius=0.4, rings=96, sides=48):
 
 def make_cube(half_size=0.5):
     """A unit cube with flat per-face normals: 24 interleaved (position, normal) float32 vertices, 36 indices."""
-    vertices, indices = [], []
+    vertices: list[np.ndarray] = []
+    indices: list[int] = []
     for axis in range(3):
         for sign in (1.0, -1.0):
             normal = np.zeros(3)

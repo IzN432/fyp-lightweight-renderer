@@ -5,6 +5,7 @@ Run via ctest (`python.bindings`), or directly:
 """
 
 import gc
+from typing import Any
 
 import numpy as np
 
@@ -132,7 +133,13 @@ def test_pipeline_state_runs():
 
     viewer = make_viewer(configure=configure)
     frames = []
-    viewer.on_update(lambda dt, extent: (frames.append(dt), len(frames) >= 5 and viewer.close()))
+
+    def update(dt, extent):
+        frames.append(dt)
+        if len(frames) >= 5:
+            viewer.close()
+
+    viewer.on_update(update)
     viewer.run()
     assert len(frames) == 5
 
@@ -166,7 +173,10 @@ def test_read_and_replace_buffers():
 def test_indirect_draw_requires_declaration():
     # The pass draws from "args" without declaring it with indirect_buffer(), so the frame graph
     # couldn't have synchronised it.
-    viewer = make_viewer(on_execute=lambda ctx: ctx.draw_indirect(viewer.frame_graph.buffer("args")))
+    def draw(ctx):
+        ctx.draw_indirect(viewer.frame_graph.buffer("args"))
+
+    viewer = make_viewer(on_execute=draw)
     viewer.resources.upload_buffer("args", np.array([3, 1, 0, 0], dtype=np.uint32), lr.BufferUsage.INDIRECT)
     try:
         viewer.run()
@@ -240,6 +250,132 @@ def test_gpu_writes_to_dynamic_buffers_are_rejected():
         raise AssertionError("expected an error for a GPU write to a dynamic buffer")
 
 
+def run_frames(viewer, count, per_frame=None):
+    frame = [0]
+
+    def update(dt, extent):
+        if per_frame:
+            per_frame(frame[0])
+        frame[0] += 1
+        if frame[0] >= count:
+            viewer.close()
+
+    viewer.on_update(update)
+    viewer.run()
+
+
+def test_gui_outside_on_gui_raises():
+    make_viewer()  # an ImGui context exists, but no frame is being built
+    try:
+        lr.gui.text("hello")
+    except RuntimeError as e:
+        assert "on_gui" in str(e), str(e)
+    else:
+        raise AssertionError("expected RuntimeError outside on_gui")
+    assert lr.gui.want_capture_mouse() in (True, False)  # safe anywhere
+
+
+def test_gui_widgets_and_window_balancing():
+    viewer = make_viewer()
+    seen: dict[str, Any] = {}
+
+    def gui():
+        with lr.gui.window("Controls") as visible:
+            seen["visible"] = visible
+            lr.gui.text("text")
+            seen["button"] = lr.gui.button("Button")
+            seen["checkbox"] = lr.gui.checkbox("Check", True)
+            seen["slider"] = lr.gui.slider_float("Float", 0.5, 0.0, 1.0)
+            seen["slider_int"] = lr.gui.slider_int("Int", 3, 0, 10)
+            seen["drag"] = lr.gui.drag_float("Drag", 1.5)
+            seen["color"] = lr.gui.color_edit3("Color", (0.1, 0.2, 0.3))
+            seen["color4"] = lr.gui.color_edit4("Color4", (0.1, 0.2, 0.3, 1.0))
+            seen["combo"] = lr.gui.combo("Combo", 1, ["a", "b", "c"])
+            seen["header"] = lr.gui.collapsing_header("Header")
+            lr.gui.separator()
+            lr.gui.same_line()
+            lr.gui.spacing()
+        lr.gui.begin("Left open")  # never ended: closed automatically after the callback
+
+    viewer.on_gui(gui)
+    run_frames(viewer, 3)
+    assert seen["checkbox"] == (False, True), seen["checkbox"]
+    assert seen["slider"] == (False, 0.5) and seen["slider_int"] == (False, 3)
+    assert seen["combo"] == (False, 1) and seen["header"] is True
+    assert seen["color"][1] == tuple(np.array([0.1, 0.2, 0.3], dtype=np.float32).tolist())
+
+
+def test_gui_exception_closes_window_and_reraises():
+    viewer = make_viewer()
+
+    def gui():
+        with lr.gui.window("Broken"):
+            raise ValueError("boom from on_gui")
+
+    viewer.on_gui(gui)
+    try:
+        run_frames(viewer, 50)
+    except ValueError as e:
+        assert str(e) == "boom from on_gui"
+    else:
+        raise AssertionError("expected ValueError from run()")
+
+
+def test_input_reflects_injected_events():
+    viewer = make_viewer()
+    seen = []
+
+    def per_frame(frame):
+        if frame == 0:
+            _testing_inject(viewer)
+        elif frame == 1:  # events injected during frame 0 are visible from frame 1
+            inp = viewer.input
+            seen.append((inp.mouse_delta, inp.scroll_delta, inp.is_mouse_down(lr.MouseButton.LEFT),
+                         inp.is_key_down(lr.Key.W), inp.shift))
+
+    run_frames(viewer, 3, per_frame)
+    delta, scroll, left, w, shift = seen[0]
+    assert left and w and shift, seen[0]
+    assert scroll == 2.0, scroll
+    assert delta[0] != 0.0 or delta[1] != 0.0, delta
+
+
+def test_orbit_camera_is_the_engine_camera():
+    viewer = make_viewer()
+    camera = lr.OrbitCamera(viewer)
+    camera.target, camera.radius, camera.azimuth, camera.elevation = (1.0, 2.0, 3.0), 5.0, 0.5, 0.25
+
+    # SphericalCameraController's placement: on a sphere around the target.
+    expected = np.array([1.0, 2.0, 3.0]) + 5.0 * np.array(
+        [np.cos(0.25) * np.sin(0.5), np.sin(0.25), np.cos(0.25) * np.cos(0.5)])
+    assert np.allclose(camera.position, expected, atol=1e-5), (camera.position, expected)
+
+    # The view puts the target straight ahead at `radius`; the projection maps near/far to depth 0/1.
+    view = camera.view_matrix()
+    assert np.allclose(view @ np.array([1.0, 2.0, 3.0, 1.0]), [0.0, 0.0, -5.0, 1.0], atol=1e-4)
+    proj = camera.projection_matrix(16 / 9)
+    for distance, depth in ((camera.near_plane, 0.0), (camera.far_plane, 1.0)):
+        clip = proj @ np.array([0.0, 0.0, -distance, 1.0])
+        assert abs(clip[2] / clip[3] - depth) < 1e-4, (distance, clip)
+
+    # matrices() is (view, proj) in GLSL mat4 layout, as lr.transforms.to_gpu produces.
+    assert np.allclose(camera.matrices((1600, 900)), lr.transforms.to_gpu(view, proj), atol=1e-6)
+
+    camera.elevation, camera.radius = 3.0, 0.0  # clamped like the C++ controller
+    assert abs(camera.elevation - np.radians(89.0)) < 1e-5 and camera.radius == np.float32(0.01)
+
+
+def _testing_inject(viewer):
+    from lr._lr import _testing
+
+    x, y = viewer.input.mouse_position
+    _testing.inject_mouse_move(viewer, x + 40.0, y + 25.0)
+    _testing.inject_mouse_button(viewer, lr.MouseButton.LEFT, True)
+    _testing.inject_scroll(viewer, 2.0)
+    _testing.inject_key(viewer, lr.Key.W, True)
+    _testing.inject_key(viewer, lr.Key.LEFT_SHIFT, True)
+
+
 def main():
     tests = [
         test_compile_errors_raise_with_location,
@@ -253,6 +389,11 @@ def main():
         test_indirect_draw_requires_declaration,
         test_dynamic_data_written_once_reaches_every_frame,
         test_gpu_writes_to_dynamic_buffers_are_rejected,
+        test_gui_outside_on_gui_raises,
+        test_gui_widgets_and_window_balancing,
+        test_gui_exception_closes_window_and_reraises,
+        test_input_reflects_injected_events,
+        test_orbit_camera_is_the_engine_camera,
     ]
     for test in tests:
         test()

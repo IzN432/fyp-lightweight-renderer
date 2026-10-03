@@ -409,7 +409,7 @@ next step.
 - **Bindings:** `LrModule.cpp`.
 - **Examples:** `examples/python/{gpu_instancing.py, live_edit.py, meshes.py}` and 8 new shaders.
 
-## Step 5 — per-frame copies of CPU-written buffers ✅
+## Step 5 — per-frame copies of CPU-written buffers ☑️ (committed 2cb3d52)
 
 **Goal:** remove the known race from step 4. `update_buffer` writes a single persistently-mapped
 allocation, so with 2 frames in flight the CPU overwrites data a still-executing frame hasn't read yet.
@@ -473,6 +473,134 @@ frame 2; offsets seen: [1])`. Every frame with a successor read the successor's 
 **Files:** `ResourceRegistry.{hpp,cpp}`, `CompiledFrameGraph.{hpp,cpp}`, `FrameGraphCompiler.cpp`,
 `DescriptorAllocator.{hpp,cpp}`, `Viewer.cpp`, `LrModule.cpp`; `examples/python/per_frame_data.py` and
 `shaders/{busy.frag, record_frame.comp, show.frag}`; `tests/python/test_bindings.py`.
+
+## Type stubs — kept in sync automatically ✅
+
+`python/lr/__init__.pyi` (hand-written, with docs) is now checked by two ctests, so it can't drift:
+- **`python.stubs`** ([tests/python/test_stubs.py](tests/python/test_stubs.py)) generates a reference stub
+  from the compiled module with nanobind's stubgen. Every public class, method, property, enum member and
+  function must be in the hand-written stub with the same parameter names, and the stub may only describe
+  names that exist at runtime. stubgen omits some real names, such as `nb::exception` classes and inherited
+  enum members, so those are checked against the live module instead.
+- **`python.typecheck`** ([tests/python/typecheck.py](tests/python/typecheck.py)) runs mypy over the
+  examples and Python tests against the stub. mypy is optional: without it the test is reported as
+  skipped (exit code 77).
+
+**Stub fixes these found:**
+- Enums are now `enum.Enum` / `enum.IntFlag` subclasses, as at runtime, with `X = ...` members. `.name` and
+  `.value` are therefore typed for all of them, and the invalid narrowing `__or__`/`__and__` overrides on
+  the flag enums are gone.
+- `vert_shader`, `frag_shader`, `compute_shader` and `depends_on` are `@overload`s with the real parameter
+  names (`path=` / `spirv=`, `dependency=` / `dependencies=`).
+- Array arguments are typed `collections.abc.Buffer` (numpy arrays, bytes, …) instead of `object`.
+- `read_buffer` returns `NDArray[numpy.uint8]`.
+
+**Other:** the example and test scripts got small annotations so mypy runs cleanly on them (e.g. `state:
+dict[str, Any]`).
+
+## Step 6 — interaction from Python ✅
+
+**Goal:** a Python renderer can be interactive:
+- read keyboard and mouse state (`viewer.input`);
+- draw ImGui panels from Python (`viewer.on_gui()` + `lr.gui`), guarded so misuse raises instead of
+  tripping an ImGui assert;
+- drive the engine's own orbit camera (`lr.OrbitCamera`).
+
+**Demo:**
+```
+PYTHONPATH=build/python python examples/python/interactive.py
+PYTHONPATH=build/python python examples/python/interactive.py --scripted   # self-test
+```
+[interactive.py](examples/python/interactive.py) shows a torus with **the engine's own orbit camera**
+(`lr.OrbitCamera`, the C++ renderer's `SphericalCameraController`): middle-drag orbits, Shift + middle-drag
+pans, scroll zooms and R resets, the same controls as `renderer.exe`. The "Controls" panel has:
+- albedo colour picker, light yaw and pitch sliders, spin speed;
+- a wireframe-overlay checkbox (it just skips that pass's draw);
+- a "Frame torus" button;
+- live readouts of fps and `compile_count`.
+
+Colour and light go through a dynamic uniform buffer (step 5's per-frame copies). `--scripted` runs without
+the panel (the camera ignores the mouse over UI, and a real cursor resting on the panel would swallow the
+injected input). It injects a 30-frame middle-drag and 3 scroll notches, then checks the result against the
+controller's constants: `camera azimuth 0.00 -> -1.74, radius 4.00 -> 3.005 (expected 3.005)`. The drag
+moves 0.01 rad/px over 30 × 6 px; the zoom is radius ÷ 1.1 per notch.
+
+**Revision — use the engine camera (requested after review).** The first version shipped a separate
+pure-Python `lr.camera.OrbitCamera` with different controls (left-drag orbit, its own speeds and
+projection). That was replaced by a binding of the engine's `SphericalCameraController` + `Camera`
+component, so Python and C++ share one implementation:
+- **Engine change (behaviour-preserving):** `SphericalCameraController` gained
+  `orbitState()` / `setOrbitState()` (target, radius, azimuth, elevation, clamped like `update()`), and
+  its pose code moved into `applyPose()`, shared by both. `renderer.exe`'s view is unchanged (screenshot
+  identical to step 5's).
+- **`lr.OrbitCamera(viewer)`** owns a one-object `Scene` holding `Camera` + `TransformComponent`, as
+  `main.cpp` sets up the renderer's camera:
+  - `update(dt)`;
+  - `view_matrix()` and `projection_matrix(aspect)`, as row-major numpy, using the engine's `Camera`
+    projection: Vulkan depth [0, 1], Y flip;
+  - `matrices(extent)`, packed for a `mat4 view; mat4 proj;` block;
+  - `position`, plus read/write `target`, `radius`, `azimuth`, `elevation`, `fov_y_degrees`,
+    `near_plane`, `far_plane`, `orthographic`, `ortho_height`.
+- **Test:** `test_orbit_camera_is_the_engine_camera` checks the placement formula, that the view maps the
+  target to `(0, 0, −radius)`, that the projection maps near/far to depth 0/1, the `matrices()` layout, and
+  the clamping.
+- **Removed:** `python/lr/camera.py`.
+
+**Result (2026-10-04):**
+- `ctest -C Debug` — 20/20 pass:
+  - new `python.interactive`;
+  - 4 new `python.bindings` cases: gui outside `on_gui` raises; every widget works, and a never-ended
+    `begin()` is closed automatically; an exception inside `with gui.window()` closes it and reaches
+    `run()`; injected mouse, scroll and key events show up in `viewer.input`;
+  - a new `python.failures` case for plain `assert()` (Debug only).
+- `python.stubs` checks 258 public names (the new `Key` members included), and `python.typecheck` is clean.
+- A screenshot shows the panel and the wireframe overlay. The panel shows "1 compile(s)", so interacting
+  never recompiles.
+- **Proved the window-balancing test can fail.** With auto-close disabled, the test hit ImGui's "Missing
+  End()" assert and the process aborted (exit code 3). Reverted (no `TEMPORARY` markers).
+- **That experiment exposed a gap in step 3b:** a plain `assert()` from inside `lr` (as ImGui uses)
+  aborted with *no* message and no traceback. It goes through `_wassert` and the debug runtime's own
+  `abort()`, bypassing all three 3b hooks. Fixed: Debug builds now call `_set_error_mode(_OUT_TO_STDERR)`
+  and install a `SIGABRT` handler in the module's runtime that forwards to the interpreter's `abort()`. The
+  same failure now prints `Fatal Python error: Aborted` and the Python line that called into `lr`. Covered by
+  the new `python.failures` case.
+
+**API:**
+- **`viewer.input`** (`lr.Input`):
+  - `is_key_down(lr.Key.X)`, `is_mouse_down(lr.MouseButton.LEFT)`;
+  - `mouse_position`, `mouse_delta`, `scroll_delta`, `shift`, `ctrl`, `alt`.
+  - `lr.Key` covers A–Z, `DIGIT_0`–`DIGIT_9`, F1–F12, arrows, modifiers, space, enter, escape, tab,
+    backspace and delete.
+- **`viewer.on_gui(callback)` + `lr.gui`:**
+  - `window(title, size=, position=)` (context manager), `begin`/`end`, `text`, `button`, `checkbox`,
+    `slider_float` (incl. logarithmic), `slider_int`, `drag_float`, `color_edit3/4`, `combo`,
+    `collapsing_header`, `separator`, `same_line`, `spacing`;
+  - also `want_capture_mouse`, `want_capture_keyboard`, `framerate`, which are safe anywhere.
+  - Value widgets return `(changed, value)`.
+  - Typed Python wrappers live in `python/lr/gui.py` over a private native `_gui` module.
+- **`lr.OrbitCamera(viewer)`:** the engine's camera; see "Revision" above.
+- **Test-only:** `lr._lr._testing.inject_mouse_move/inject_mouse_button/inject_scroll/inject_key`.
+
+**Guarding ImGui from Python.** An ImGui assert would abort the interpreter, so the bindings stop misuse
+first:
+- widgets outside `on_gui` raise `RuntimeError`;
+- `on_gui` closes any windows a callback left open, so the frame stays balanced even when the callback
+  raises;
+- empty window titles and empty combo lists raise `ValueError`.
+
+**Stubs:** `__init__.pyi` gained `Key`, `MouseButton`, `Input`, `OrbitCamera`, `Viewer.on_gui` and
+`Viewer.input`, and now re-exports the `gui` and `transforms` submodules. Without that re-export mypy
+couldn't see `lr.gui`. `ShaderInterfaceError` and `VulkanValidationError` now subclass `RuntimeError`, as at runtime.
+`gui.py` is typed Python, so it needs no stub.
+
+**Build note:** new `python/lr/*.py` files are only copied into `build/python/lr` after a CMake
+**reconfigure**: the copy uses a configure-time file list, and building only the `lr_python` target doesn't
+re-run it.
+
+**Files:** `src/python/LrModule.cpp` (`Key`/`MouseButton`/`Input`, the `_gui` submodule, `on_gui`/`input`,
+input injection, the `assert()` abort routing, `OrbitCamera`); `SphericalCameraController.{hpp,cpp}`;
+`python/lr/{gui.py, __init__.py, __init__.pyi}`;
+`examples/python/interactive.py`, `shaders/lit.frag`; `tests/python/{test_bindings.py, test_failures.py}`.
 
 ---
 
