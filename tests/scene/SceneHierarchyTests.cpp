@@ -1,3 +1,4 @@
+#include "core/editor/SceneObjectRotationHandler.hpp"
 #include "core/loaders/MaterialStore.hpp"
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/MeshStore.hpp"
@@ -5,6 +6,8 @@
 #include "core/scene/TransformComponent.hpp"
 
 #include <glm/gtc/epsilon.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <cassert>
 #include <stdexcept>
@@ -92,4 +95,37 @@ int main()
 
     assert(firstMesh.meshHandle() == secondMesh.meshHandle());
     assert(&firstMesh.mesh() == &secondMesh.mesh());
+
+    // A gizmo supplies a desired world matrix, but a child stores its rotation in parent-local
+    // space. Verify conversion through a transformed parent and exact undo/redo restoration.
+    auto &rotationParent = scene.createSceneObject();
+    auto &rotationChild  = scene.createSceneObject();
+    rotationParent.addComponent<lr::TransformComponent>(
+        glm::vec3(2.0f, 1.0f, -3.0f), glm::angleAxis(glm::radians(25.0f), glm::vec3(0.0f, 1.0f, 0.0f)),
+        glm::vec3(2.0f, 3.0f, 4.0f));
+    auto &childTransform = rotationChild.addComponent<lr::TransformComponent>(
+        glm::vec3(1.0f, 2.0f, 3.0f), glm::angleAxis(glm::radians(10.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
+        glm::vec3(-1.5f, 0.75f, 2.0f));
+    scene.setParent(rotationChild.id(), rotationParent.id());
+
+    const glm::quat beforeRotation = childTransform.transform().rotation();
+    const glm::quat desiredRotation = glm::normalize(
+        glm::angleAxis(glm::radians(40.0f), glm::normalize(glm::vec3(1.0f, 2.0f, 3.0f))));
+    const glm::mat4 desiredLocal =
+        glm::translate(glm::mat4(1.0f), childTransform.transform().position()) *
+        glm::mat4_cast(desiredRotation) * glm::scale(glm::mat4(1.0f), childTransform.transform().scale());
+    const glm::mat4 desiredWorld = rotationParent.worldMatrix() * desiredLocal;
+
+    lr::CommandManager commandManager;
+    lr::SceneObjectRotationHandler rotationHandler(commandManager);
+    rotationHandler.setTarget(&rotationChild);
+    rotationHandler.beginDrag();
+    rotationHandler.rotateToWorld(desiredWorld);
+    rotationHandler.endDrag();
+    assert(glm::abs(glm::dot(childTransform.transform().rotation(), desiredRotation)) > 1.0f - 0.0001f);
+
+    commandManager.undo();
+    assert(glm::abs(glm::dot(childTransform.transform().rotation(), beforeRotation)) > 1.0f - 0.0001f);
+    commandManager.redo();
+    assert(glm::abs(glm::dot(childTransform.transform().rotation(), desiredRotation)) > 1.0f - 0.0001f);
 }

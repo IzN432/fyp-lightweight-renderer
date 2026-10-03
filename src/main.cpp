@@ -19,8 +19,10 @@
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
+#include "core/editor/gizmo/RotateGizmo.hpp"
 #include "core/editor/gizmo/TranslateGizmo.hpp"
 #include "core/editor/SceneObjectDragHandler.hpp"
+#include "core/editor/SceneObjectRotationHandler.hpp"
 #include "core/editor/selection/BoxSelectionTool.hpp"
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/VertexManager.hpp"
@@ -510,13 +512,16 @@ try
     // after a successful precompute.
     lr::DefaultVertexDragHandler defaultHandler(vertexManager, selectionManager, commandManager);
     lr::SceneObjectDragHandler   sceneObjectHandler(commandManager);
+    lr::SceneObjectRotationHandler sceneObjectRotationHandler(commandManager);
     lr::TranslateGizmo       translateGizmo(defaultHandler);
+    lr::RotateGizmo          rotateGizmo(sceneObjectRotationHandler);
     lr::TranslateDragHandler *objectTranslateReturnHandler = &defaultHandler;
 
     enum class ObjectTransformTool
     {
         None,
         Translate,
+        Rotate,
     };
     ObjectTransformTool objectTransformTool       = ObjectTransformTool::None;
     bool                objectTransformWindowOpen = false;
@@ -535,6 +540,7 @@ try
         objectTransformTool       = ObjectTransformTool::None;
         objectTransformWindowOpen = true;
         sceneObjectHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
+        sceneObjectRotationHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
         if (!lr::SceneManager::isEditable(object))
         {
             if (sceneManager.editorMode() == lr::EditorMode::Edit)
@@ -570,6 +576,7 @@ try
             std::ranges::find(ids, sceneObjectHandler.target()->id()) != ids.end())
         {
             sceneObjectHandler.setTarget(nullptr);
+            sceneObjectRotationHandler.setTarget(nullptr);
             objectTransformTool       = ObjectTransformTool::None;
             objectTransformWindowOpen = false;
         }
@@ -602,7 +609,8 @@ try
             return;
         }
 
-        if (translateGizmo.capturesMouse() || sceneManager.editorMode() != lr::EditorMode::Edit)
+        if (translateGizmo.capturesMouse() || rotateGizmo.capturesMouse() ||
+            sceneManager.editorMode() != lr::EditorMode::Edit)
         {
             return;
         }
@@ -856,19 +864,21 @@ try
             ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_Appearing);
             if (ImGui::Begin("Transform Gizmo", &objectTransformWindowOpen, ImGuiWindowFlags_AlwaysAutoResize))
             {
-                const bool canTranslate = sceneObjectHandler.target() != nullptr;
-                ImGui::BeginDisabled(!canTranslate);
+                const bool canTransform = sceneObjectHandler.target() != nullptr;
+                ImGui::BeginDisabled(!canTransform);
                 if (ImGui::RadioButton("Translate", objectTransformTool == ObjectTransformTool::Translate))
                 {
                     objectTransformTool = ObjectTransformTool::Translate;
                 }
-                ImGui::EndDisabled();
-
+                ImGui::SameLine();
+                if (ImGui::RadioButton("Rotate", objectTransformTool == ObjectTransformTool::Rotate))
+                {
+                    objectTransformTool = ObjectTransformTool::Rotate;
+                }
                 ImGui::SameLine();
                 ImGui::BeginDisabled();
-                ImGui::RadioButton("Rotate", false);
-                ImGui::SameLine();
                 ImGui::RadioButton("Scale", false);
+                ImGui::EndDisabled();
                 ImGui::EndDisabled();
             }
             ImGui::End();
@@ -917,7 +927,7 @@ try
     });
 
     viewer.onUpdate([&](float dt, VkExtent2D extent) {
-        cameraController.update(dt, translateGizmo.capturesMouse());
+        cameraController.update(dt, translateGizmo.capturesMouse() || rotateGizmo.capturesMouse());
     });
 
     // selectionManager's per-frame mouse/drag handling is driven by SceneManager::registerCallbacks()
@@ -953,6 +963,9 @@ try
         const bool objectTranslateActive = objectTransformTool == ObjectTransformTool::Translate &&
                                            sceneManager.editorMode() == lr::EditorMode::View &&
                                            sceneObjectHandler.target() != nullptr;
+        const bool objectRotateActive = objectTransformTool == ObjectTransformTool::Rotate &&
+                                        sceneManager.editorMode() == lr::EditorMode::View &&
+                                        sceneObjectRotationHandler.target() != nullptr;
         if (objectTranslateActive)
         {
             if (&translateGizmo.dragHandler() != &sceneObjectHandler)
@@ -990,6 +1003,10 @@ try
         translateGizmo.draw(cameraComponent.viewMatrix(), cameraComponent.projectionMatrix(aspect),
                             cameraComponent.projectionType == lr::ProjectionType::Orthographic, extent, centroid,
                             gizmoVisible);
+        rotateGizmo.draw(cameraComponent.viewMatrix(), cameraComponent.projectionMatrix(aspect),
+                         cameraComponent.projectionType == lr::ProjectionType::Orthographic, extent,
+                         objectRotateActive ? sceneObjectRotationHandler.target()->worldMatrix() : glm::mat4(1.0f),
+                         objectRotateActive);
         overlayLinesPass.setLines(lr::buildColliderOverlayLines(scene));
     });
 
