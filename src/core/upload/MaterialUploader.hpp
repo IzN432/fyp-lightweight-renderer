@@ -3,6 +3,9 @@
 #include "core/framegraph/ResourceRegistry.hpp"
 
 #include "core/loaders/Material.hpp"
+#include "core/loaders/MaterialStore.hpp"
+
+#include <span>
 
 namespace lr
 {
@@ -26,6 +29,11 @@ public:
 
     void update(const std::vector<const Material *> &materials, const GpuMaterialLayout &gpuLayout,
                 const MaterialUploadResult &result);
+
+    // Replaces texture-array slots for newly acquired material handles. Existing descriptor sets
+    // must be rebuilt by the caller after the image views change.
+    void updateTextures(const std::vector<const Material *> &materials, const GpuMaterialLayout &gpuLayout,
+                        const MaterialUploadResult &result, std::span<const MaterialHandle> handles);
 
 private:
     ResourceRegistry &m_registry;

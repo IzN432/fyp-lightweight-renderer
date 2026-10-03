@@ -129,4 +129,34 @@ void MaterialUploader::update(const std::vector<const Material *> &materials, co
                             static_cast<VkDeviceSize>(materialInfoBuffer.size()));
 }
 
+void MaterialUploader::updateTextures(const std::vector<const Material *> &materials,
+                                      const GpuMaterialLayout &gpuLayout, const MaterialUploadResult &result,
+                                      std::span<const MaterialHandle> handles)
+{
+    const std::array<uint8_t, 4> fallbackPixel = {255, 255, 255, 255};
+    for (const auto &[materialTextureName, format, shouldGenerateMipmaps] : gpuLayout.textures())
+    {
+        const std::string &arrayName = result.textureNameMap.at(materialTextureName);
+        for (MaterialHandle handle : handles)
+        {
+            if (handle >= materials.size())
+            {
+                throw std::out_of_range("MaterialUploader::updateTextures: material handle is out of range");
+            }
+            const Material &material = *materials[handle];
+            const auto image = material.textures.find(materialTextureName);
+            const std::string slotName = arrayName + "[" + std::to_string(handle) + "]";
+            if (image != material.textures.end() && !image->second.empty())
+            {
+                m_registry.replaceUploadedImage(slotName, image->second.pixels.data(), image->second.width,
+                                                image->second.height, format, shouldGenerateMipmaps);
+            }
+            else
+            {
+                m_registry.replaceUploadedImage(slotName, fallbackPixel.data(), 1, 1, format, false);
+            }
+        }
+    }
+}
+
 } // namespace lr

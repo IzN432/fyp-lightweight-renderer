@@ -335,6 +335,27 @@ IndexBufferUploadResult MeshUploader::uploadIndexBuffer(const std::vector<const 
     return result;
 }
 
+IndexBufferUploadResult MeshUploader::replaceIndexBuffer(const std::vector<const Mesh *> &meshes,
+                                                          const IndexBufferUploadConfig   &config)
+{
+    IndexBufferUploadResult result;
+    uint32_t totalFaceCount = 0;
+    for (const Mesh *mesh : meshes) totalFaceCount += mesh->faceCount();
+
+    std::vector<std::byte> data(static_cast<size_t>(totalFaceCount) * sizeof(glm::uvec3));
+    uint32_t faceOffset = 0;
+    for (const Mesh *mesh : meshes)
+    {
+        result.singleMeshResults.push_back({.firstIndex = faceOffset * 3, .indexCount = mesh->faceCount() * 3});
+        std::memcpy(data.data() + faceOffset * sizeof(glm::uvec3), mesh->faces().data(),
+                    mesh->faceCount() * sizeof(glm::uvec3));
+        faceOffset += mesh->faceCount();
+    }
+    m_registry.replaceUploadedBuffer(config.indexBufferName, data.data(), data.size(),
+                                     VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    return result;
+}
+
 void MeshUploader::uploadFaceGroupBuffer(const std::vector<const Mesh *>   &meshes,
                                          const FaceGroupBufferUploadConfig &config)
 {
@@ -372,6 +393,26 @@ void MeshUploader::uploadFaceGroupBuffer(const std::vector<const Mesh *>   &mesh
     const std::string name = config.faceGroupBufferName;
     m_registry.uploadBuffer(name, faceGroupBuffer.data(), static_cast<VkDeviceSize>(faceGroupBuffer.size()),
                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+}
+
+void MeshUploader::replaceFaceGroupBuffer(const std::vector<const Mesh *> &meshes,
+                                           const FaceGroupBufferUploadConfig &config)
+{
+    uint32_t totalFaceCount = 0;
+    for (const Mesh *mesh : meshes) totalFaceCount += mesh->faceCount();
+    std::vector<uint32_t> data(totalFaceCount, 0u);
+    uint32_t faceOffset = 0;
+    for (const Mesh *mesh : meshes)
+    {
+        if (!mesh->faceGroups().empty())
+        {
+            std::memcpy(data.data() + faceOffset, mesh->faceGroups().data(),
+                        mesh->faceGroups().size() * sizeof(uint32_t));
+        }
+        faceOffset += mesh->faceCount();
+    }
+    m_registry.replaceUploadedBuffer(config.faceGroupBufferName, data.data(), data.size() * sizeof(uint32_t),
+                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 }
 
 } // namespace lr

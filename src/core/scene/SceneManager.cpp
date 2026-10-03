@@ -46,7 +46,14 @@ SceneObject &SceneManager::load(const std::filesystem::path &path, const SceneLo
         throw std::runtime_error("SceneManager::load: imported scene does not instantiate a mesh");
     }
 
-    addMeshObject(m_scene->getSceneObject(imported.firstMeshObject.value()));
+    for (const auto objectId : imported.nodeObjects)
+    {
+        if (!objectId) continue;
+        SceneObject &object = m_scene->getSceneObject(*objectId);
+        if (object.hasComponent<MeshComponent>()) addMeshObject(object);
+    }
+    m_pendingTextureUpdates.insert(m_pendingTextureUpdates.end(), imported.materialHandles.begin(),
+                                   imported.materialHandles.end());
     return m_scene->getSceneObject(imported.rootObject);
 }
 
@@ -214,6 +221,7 @@ void SceneManager::uploadMeshes(const GpuMaterialLayout        &materialLayout,
                                 const std::vector<std::string> &vertexAttributeNames)
 {
     m_materialLayout = materialLayout;
+    m_vertexAttributeNames = vertexAttributeNames;
 
     gatherGeometry(vertexAttributeNames);
 
@@ -239,6 +247,34 @@ void SceneManager::uploadMeshes(const GpuMaterialLayout        &materialLayout,
     m_skinUploadResult = m_skinUploader.upload(m_geometryMeshes, m_meshSkins);
 
     m_materialUploadResult = m_materialUploader.upload(m_materialStore.snapshot(), m_materialLayout, "material");
+    m_pendingTextureUpdates.clear();
+}
+
+void SceneManager::rebuildGeometry()
+{
+    if (m_meshObjects.empty())
+    {
+        throw std::runtime_error("SceneManager::rebuildGeometry: scene has no renderable meshes");
+    }
+
+    gatherGeometry(m_vertexAttributeNames);
+    m_meshPositions = m_meshUploader.replaceVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
+    m_meshUploader.replaceVertexBuffer(m_geometryMeshes, m_meshAttributeUploadConfig);
+    m_indexBuffer = m_meshUploader.replaceIndexBuffer(
+        m_geometryMeshes, {.indexBufferName = m_meshIndexBufferName});
+    m_meshUploader.replaceFaceGroupBuffer(
+        m_geometryMeshes, {.faceGroupBufferName = m_meshFaceGroupBufferName});
+    m_skinUploadResult = m_skinUploader.upload(m_geometryMeshes, m_meshSkins);
+    updateMaterials();
+    if (!m_pendingTextureUpdates.empty())
+    {
+        std::ranges::sort(m_pendingTextureUpdates);
+        const auto unique = std::ranges::unique(m_pendingTextureUpdates);
+        m_pendingTextureUpdates.erase(unique.begin(), unique.end());
+        m_materialUploader.updateTextures(m_materialStore.snapshot(), m_materialLayout, m_materialUploadResult,
+                                          m_pendingTextureUpdates);
+        m_pendingTextureUpdates.clear();
+    }
 }
 
 void SceneManager::uploadLights()

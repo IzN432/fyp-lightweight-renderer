@@ -93,8 +93,12 @@ public:
 
     IndexBufferUploadResult uploadIndexBuffer(const std::vector<const Mesh *> &meshes,
                                               const IndexBufferUploadConfig   &config);
+    IndexBufferUploadResult replaceIndexBuffer(const std::vector<const Mesh *> &meshes,
+                                               const IndexBufferUploadConfig   &config);
 
     void uploadFaceGroupBuffer(const std::vector<const Mesh *> &meshes, const FaceGroupBufferUploadConfig &config);
+    void replaceFaceGroupBuffer(const std::vector<const Mesh *> &meshes,
+                                const FaceGroupBufferUploadConfig &config);
 
 private:
     ResourceRegistry &m_registry;

@@ -32,9 +32,9 @@ class SkinUploader
 public:
     explicit SkinUploader(ResourceRegistry &registry, std::string name = "skin");
 
-    // meshes and skins are parallel. A null Skin entry denotes an unskinned mesh and produces
-    // zero influence counts for that mesh. This is intended to be called once after scene geometry
-    // has been gathered, because the resulting dynamic palette buffer has a fixed capacity.
+    // Meshes and skins are parallel. A null Skin entry denotes an unskinned mesh. Calling upload
+    // again replaces the existing buffers, allowing runtime scene imports to change topology and
+    // joint capacity after the caller has synchronized with the GPU.
     SkinUploadResult upload(const std::vector<const Mesh *> &meshes, const std::vector<Skin *> &skins);
 
     // Re-packs the current matrices from the same palette ordering established by upload().

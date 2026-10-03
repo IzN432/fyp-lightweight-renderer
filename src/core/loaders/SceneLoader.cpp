@@ -45,6 +45,7 @@ SceneLoadResult SceneLoader::load(const std::filesystem::path &path, Scene &scen
     }
 
     SceneLoadResult result;
+    result.materialHandles = loaded.materialHandles;
     SceneObject     &importRoot = scene.createSceneObject();
     importRoot.name = path.stem().string();
     importRoot.addComponent<TransformComponent>();

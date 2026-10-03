@@ -120,6 +120,10 @@ public:
     void replaceUploadedBuffer(const std::string &name, const void *data, VkDeviceSize size,
                                VkBufferUsageFlags usage);
 
+    // Reallocates a persistently mapped dynamic buffer while preserving its registry name.
+    // The caller must ensure the GPU is no longer using the old allocation.
+    void replaceDynamicBuffer(const std::string &name, VkDeviceSize size, VkBufferUsageFlags usage);
+
     AllocatedBuffer       *getBuffer(const std::string &name);
     const AllocatedBuffer *getBuffer(const std::string &name) const;
     bool                   hasBuffer(const std::string &name) const;

@@ -26,6 +26,7 @@ struct SceneLoadResult
     // scene are not instantiated and therefore have no SceneObjectId.
     std::vector<std::optional<SceneObjectId>> nodeObjects;
     std::optional<SceneObjectId>              firstMeshObject;
+    std::vector<MaterialHandle>               materialHandles;
 };
 
 // Selects a format loader from the filename and instantiates its common

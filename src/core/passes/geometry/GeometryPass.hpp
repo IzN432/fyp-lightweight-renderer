@@ -50,6 +50,10 @@ public:
 
     void build(FrameGraph &fg, const GpuMeshLayout &layout) const;
 
+    void setSceneGeometry(VertexBufferUploadResult vertices, IndexBufferUploadResult indices,
+                          std::vector<const TransformComponent *> transforms,
+                          std::vector<SceneObject *> objects, std::vector<SkinDrawInfo> skins);
+
     void setSkinningEnabled(bool enabled) { m_skinningEnabled = enabled; }
     bool isSkinningEnabled() const { return m_skinningEnabled; }
 

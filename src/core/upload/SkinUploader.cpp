@@ -20,10 +20,6 @@ SkinUploader::SkinUploader(ResourceRegistry &registry, std::string name)
 SkinUploadResult SkinUploader::upload(const std::vector<const Mesh *> &meshes,
                                       const std::vector<Skin *> &skins)
 {
-    if (m_uploaded)
-    {
-        throw std::logic_error("SkinUploader::upload may only be called once");
-    }
     if (meshes.size() != skins.size())
     {
         throw std::invalid_argument("SkinUploader::upload: meshes and skins must be parallel");
@@ -31,7 +27,7 @@ SkinUploadResult SkinUploader::upload(const std::vector<const Mesh *> &meshes,
 
     SkinUploadResult result;
     result.drawInfos.resize(meshes.size());
-    m_expectedJointCounts.resize(skins.size(), 0u);
+    m_expectedJointCounts.assign(skins.size(), 0u);
 
     uint32_t totalPositionCount = 0;
     uint32_t totalVertexCount   = 0;
@@ -116,16 +112,30 @@ SkinUploadResult SkinUploader::upload(const std::vector<const Mesh *> &meshes,
         vertexCursor += mesh.vertexCount();
     }
 
-    m_registry.uploadBuffer(m_influenceEntriesBufferName, entries.data(), entries.size() * sizeof(entries[0]),
-                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-    m_registry.uploadBuffer(m_influenceOffsetsBufferName, offsets.data(), offsets.size() * sizeof(offsets[0]),
-                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-    m_registry.uploadBuffer(m_positionIndicesBufferName, positionIndices.data(),
-                            positionIndices.size() * sizeof(positionIndices[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-
     m_jointMatrixCapacity = std::max(totalJointCount, 1u);
-    m_registry.registerDynamicBuffer(m_jointMatricesBufferName, m_jointMatrixCapacity * sizeof(glm::mat4),
-                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    if (!m_uploaded)
+    {
+        m_registry.uploadBuffer(m_influenceEntriesBufferName, entries.data(), entries.size() * sizeof(entries[0]),
+                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        m_registry.uploadBuffer(m_influenceOffsetsBufferName, offsets.data(), offsets.size() * sizeof(offsets[0]),
+                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        m_registry.uploadBuffer(m_positionIndicesBufferName, positionIndices.data(),
+                                positionIndices.size() * sizeof(positionIndices[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        m_registry.registerDynamicBuffer(m_jointMatricesBufferName, m_jointMatrixCapacity * sizeof(glm::mat4),
+                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    }
+    else
+    {
+        m_registry.replaceUploadedBuffer(m_influenceEntriesBufferName, entries.data(),
+                                         entries.size() * sizeof(entries[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        m_registry.replaceUploadedBuffer(m_influenceOffsetsBufferName, offsets.data(),
+                                         offsets.size() * sizeof(offsets[0]), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        m_registry.replaceUploadedBuffer(m_positionIndicesBufferName, positionIndices.data(),
+                                         positionIndices.size() * sizeof(positionIndices[0]),
+                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        m_registry.replaceDynamicBuffer(m_jointMatricesBufferName, m_jointMatrixCapacity * sizeof(glm::mat4),
+                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    }
 
     result.jointMatrixCount = totalJointCount;
     m_uploaded              = true;

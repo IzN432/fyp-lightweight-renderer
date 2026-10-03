@@ -105,6 +105,22 @@ try
         .baseMetallicName             = "baseMetallic",
         .baseEmissiveName             = "baseEmissive",
     };
+    const lr::SceneLoaderConfig sceneLoadConfig{
+        .gltf = config,
+        .obj = {
+            .normalAttributeName  = config.normalAttributeName,
+            .tangentAttributeName = config.tangentAttributeName,
+            .uvAttributeName      = config.uvAttributeName,
+            .diffuseTextureName   = config.diffuseTextureName,
+            .normalTextureName    = config.normalTextureName,
+            .roughnessTextureName = config.metallicRoughnessTextureName,
+            .emissiveTextureName  = config.emissiveTextureName,
+            .baseDiffuseName      = config.baseDiffuseName,
+            .baseRoughnessName    = config.baseRoughnessName,
+            .baseMetallicName     = config.baseMetallicName,
+            .baseEmissiveName     = config.baseEmissiveName,
+        },
+    };
 
     // Flat, up-front reservation for the MaterialStore's GPU-side buffer/texture-array capacity —
     // growing this would mean rebuilding the frame graph's descriptor sets (see MaterialStore.hpp),
@@ -144,7 +160,7 @@ try
     // MESH
     const fs::path meshPath = lr::paths::assetDir / "samples/models/lion_head_4k.glb";
 
-    sceneManager.load(meshPath, {.gltf = config});
+    sceneManager.load(meshPath, sceneLoadConfig);
 
     // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets its own MeshComponent
     // (a quad), separate from scene geometry. The quad still draws through the
@@ -706,6 +722,7 @@ try
     std::optional<fs::path> environmentHdriPath;
     std::string             environmentLoadError;
     bool                    environmentDirty = false;
+    std::string             sceneImportError;
 
     viewer.onGui([&]() {
         const ImGuiViewport *viewport = ImGui::GetMainViewport();
@@ -812,8 +829,56 @@ try
         ImGui::SetNextWindowPos(topRight, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
         ImGui::Begin("Scene Hierarchy");
+        if (ImGui::Button("Import..."))
+        {
+            IGFD::FileDialogConfig dialogConfig;
+            dialogConfig.path  = ".";
+            dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_ReadOnlyFileNameField |
+                                 ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
+                                 ImGuiFileDialogFlags_ShowDevicesButton;
+            ImGuiFileDialog::Instance()->OpenDialog("ImportScene", "Import Mesh or Animated Mesh",
+                                                     ".obj,.gltf,.glb", dialogConfig);
+        }
+        if (!sceneImportError.empty())
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Import failed: %s", sceneImportError.c_str());
+        }
+        ImGui::Separator();
         scene.onHierarchyGUI();
         ImGui::End();
+
+        if (ImGuiFileDialog::Instance()->Display("ImportScene", ImGuiWindowFlags_NoCollapse,
+                                                  ImVec2(640.0f, 360.0f)))
+        {
+            if (ImGuiFileDialog::Instance()->IsOk())
+            {
+                try
+                {
+                    const fs::path selectedPath(ImGuiFileDialog::Instance()->GetFilePathName());
+                    viewer.context().waitIdle();
+                    sceneManager.load(selectedPath, sceneLoadConfig);
+                    sceneManager.rebuildGeometry();
+                    geometryPass.setSceneGeometry(sceneManager.meshPositions(), sceneManager.indexBuffer(),
+                                                  sceneManager.meshTransforms(), sceneManager.geometryObjects(),
+                                                  sceneManager.skinUploadResult().drawInfos);
+                    if (lr::SceneObject *selectedMesh = sceneManager.editedMeshObject())
+                    {
+                        heatmapPass.setMeshSource(sceneManager.selectedMeshHeatmap(),
+                                                  sceneManager.selectedMeshIndexRange(),
+                                                  selectedMesh->getComponent<lr::TransformComponent>());
+                    }
+                    physicsWorld.onSceneChanged();
+                    viewer.frameGraph().compile();
+                    sceneImportError.clear();
+                }
+                catch (const std::exception &e)
+                {
+                    sceneImportError = e.what();
+                    spdlog::error("Failed to import scene: {}", e.what());
+                }
+            }
+            ImGuiFileDialog::Instance()->Close();
+        }
 
         ImGui::SetNextWindowPos(bottomRight, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);

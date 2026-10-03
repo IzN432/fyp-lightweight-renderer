@@ -3,6 +3,8 @@
 #include "core/Paths.hpp"
 #include "core/scene/Scene.hpp"
 
+#include <stdexcept>
+
 namespace lr
 {
 
@@ -22,6 +24,24 @@ struct GeometryPC
 } // namespace
 
 GeometryPass::GeometryPass(Config cfg) : m_cfg(std::move(cfg)) {}
+
+void GeometryPass::setSceneGeometry(VertexBufferUploadResult vertices, IndexBufferUploadResult indices,
+                                    std::vector<const TransformComponent *> transforms,
+                                    std::vector<SceneObject *> objects, std::vector<SkinDrawInfo> skins)
+{
+    if (vertices.singleMeshResults.size() != indices.singleMeshResults.size() ||
+        vertices.singleMeshResults.size() != transforms.size() ||
+        vertices.singleMeshResults.size() != objects.size() ||
+        vertices.singleMeshResults.size() != skins.size())
+    {
+        throw std::invalid_argument("GeometryPass::setSceneGeometry: draw arrays must be parallel");
+    }
+    m_cfg.vertexBufferUploadResult = std::move(vertices);
+    m_cfg.indexBufferUploadResult  = std::move(indices);
+    m_cfg.meshTransforms           = std::move(transforms);
+    m_cfg.meshObjects              = std::move(objects);
+    m_cfg.skinDrawInfos            = std::move(skins);
+}
 
 void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
 {

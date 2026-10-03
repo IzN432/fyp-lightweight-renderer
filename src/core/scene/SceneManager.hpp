@@ -142,6 +142,10 @@ public:
     // uploads them, plus the initial materials SSBO/texture arrays snapshot.
     void uploadMeshes(const GpuMaterialLayout &materialLayout, const std::vector<std::string> &vertexAttributeNames);
 
+    // Re-packs all render geometry after runtime imports/deletions. The caller must wait for the
+    // GPU before calling and refresh pass draw metadata afterward.
+    void rebuildGeometry();
+
     void uploadLights();
 
     // Repacks the GBuffer position buffer plus the deduped position+color buffer (see
@@ -273,6 +277,8 @@ private:
     VertexBufferUploadConfig       m_meshPositionUploadConfig;
     VertexBufferUploadConfig       m_meshAttributeUploadConfig;
     GpuMaterialLayout              m_materialLayout;
+    std::vector<std::string>       m_vertexAttributeNames;
+    std::vector<MaterialHandle>    m_pendingTextureUpdates;
 
     const std::string m_meshPositionBufferName         = "meshPositionBuffer";
     const std::string m_selectedMeshPointsBufferName   = "meshPointsBuffer";

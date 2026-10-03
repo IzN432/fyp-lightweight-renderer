@@ -615,7 +615,7 @@ void ResourceRegistry::reuploadBuffer(const std::string &name, const void *data,
 }
 
 void ResourceRegistry::replaceUploadedBuffer(const std::string &name, const void *data, VkDeviceSize size,
-                                             VkBufferUsageFlags usage)
+                                              VkBufferUsageFlags usage)
 {
     auto it = m_buffers.find(name);
     if (it == m_buffers.end())
@@ -649,6 +649,29 @@ void ResourceRegistry::replaceUploadedBuffer(const std::string &name, const void
     m_pendingUploads.push_back(upload);
 
     spdlog::debug("ResourceRegistry: replaced buffer '{}' ({} bytes)", name, size);
+}
+
+void ResourceRegistry::replaceDynamicBuffer(const std::string &name, VkDeviceSize size, VkBufferUsageFlags usage)
+{
+    auto it = m_buffers.find(name);
+    if (it == m_buffers.end())
+    {
+        throw std::runtime_error("ResourceRegistry: replaceDynamicBuffer '" + name + "' not found");
+    }
+    if (it->second.memoryUsage != VMA_MEMORY_USAGE_CPU_TO_GPU)
+    {
+        throw std::runtime_error("ResourceRegistry: replaceDynamicBuffer '" + name +
+                                 "' is not a dynamic buffer");
+    }
+
+    m_allocator.destroy(it->second.buffer);
+    BufferEntry entry{};
+    entry.size        = size;
+    entry.usage       = usage;
+    entry.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+    entry.buffer      = m_allocator.createBuffer(size, usage, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    it->second        = std::move(entry);
+    setDebugName(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(it->second.buffer.buffer), name);
 }
 
 // ---------------------------------------------------------------------------
