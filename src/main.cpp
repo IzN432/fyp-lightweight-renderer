@@ -21,9 +21,11 @@
 #include "core/scene/SceneObject.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
 #include "core/editor/gizmo/RotateGizmo.hpp"
+#include "core/editor/gizmo/ScaleGizmo.hpp"
 #include "core/editor/gizmo/TranslateGizmo.hpp"
 #include "core/editor/SceneObjectDragHandler.hpp"
 #include "core/editor/SceneObjectRotationHandler.hpp"
+#include "core/editor/SceneObjectScaleHandler.hpp"
 #include "core/editor/selection/BoxSelectionTool.hpp"
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/VertexManager.hpp"
@@ -524,8 +526,10 @@ try
     lr::DefaultVertexDragHandler defaultHandler(vertexManager, selectionManager, commandManager);
     lr::SceneObjectDragHandler   sceneObjectHandler(commandManager);
     lr::SceneObjectRotationHandler sceneObjectRotationHandler(commandManager);
+    lr::SceneObjectScaleHandler sceneObjectScaleHandler(commandManager);
     lr::TranslateGizmo       translateGizmo(defaultHandler);
     lr::RotateGizmo          rotateGizmo(sceneObjectRotationHandler);
+    lr::ScaleGizmo           scaleGizmo(sceneObjectScaleHandler);
     lr::TranslateDragHandler *objectTranslateReturnHandler = &defaultHandler;
 
     enum class ObjectTransformTool
@@ -533,6 +537,7 @@ try
         None,
         Translate,
         Rotate,
+        Scale,
     };
     ObjectTransformTool objectTransformTool       = ObjectTransformTool::None;
     bool                objectTransformWindowOpen = false;
@@ -552,6 +557,7 @@ try
         objectTransformWindowOpen = true;
         sceneObjectHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
         sceneObjectRotationHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
+        sceneObjectScaleHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
         if (!lr::SceneManager::isEditable(object))
         {
             if (sceneManager.editorMode() == lr::EditorMode::Edit)
@@ -588,6 +594,7 @@ try
         {
             sceneObjectHandler.setTarget(nullptr);
             sceneObjectRotationHandler.setTarget(nullptr);
+            sceneObjectScaleHandler.setTarget(nullptr);
             objectTransformTool       = ObjectTransformTool::None;
             objectTransformWindowOpen = false;
         }
@@ -620,7 +627,7 @@ try
             return;
         }
 
-        if (translateGizmo.capturesMouse() || rotateGizmo.capturesMouse() ||
+        if (translateGizmo.capturesMouse() || rotateGizmo.capturesMouse() || scaleGizmo.capturesMouse() ||
             sceneManager.editorMode() != lr::EditorMode::Edit)
         {
             return;
@@ -887,9 +894,10 @@ try
                     objectTransformTool = ObjectTransformTool::Rotate;
                 }
                 ImGui::SameLine();
-                ImGui::BeginDisabled();
-                ImGui::RadioButton("Scale", false);
-                ImGui::EndDisabled();
+                if (ImGui::RadioButton("Scale", objectTransformTool == ObjectTransformTool::Scale))
+                {
+                    objectTransformTool = ObjectTransformTool::Scale;
+                }
                 ImGui::EndDisabled();
             }
             ImGui::End();
@@ -938,7 +946,8 @@ try
     });
 
     viewer.onUpdate([&](float dt, VkExtent2D extent) {
-        cameraController.update(dt, translateGizmo.capturesMouse() || rotateGizmo.capturesMouse());
+        cameraController.update(dt, translateGizmo.capturesMouse() || rotateGizmo.capturesMouse() ||
+                                      scaleGizmo.capturesMouse());
     });
 
     // selectionManager's per-frame mouse/drag handling is driven by SceneManager::registerCallbacks()
@@ -977,6 +986,9 @@ try
         const bool objectRotateActive = objectTransformTool == ObjectTransformTool::Rotate &&
                                         sceneManager.editorMode() == lr::EditorMode::View &&
                                         sceneObjectRotationHandler.target() != nullptr;
+        const bool objectScaleActive = objectTransformTool == ObjectTransformTool::Scale &&
+                                       sceneManager.editorMode() == lr::EditorMode::View &&
+                                       sceneObjectScaleHandler.target() != nullptr;
         if (objectTranslateActive)
         {
             if (&translateGizmo.dragHandler() != &sceneObjectHandler)
@@ -1018,6 +1030,10 @@ try
                          cameraComponent.projectionType == lr::ProjectionType::Orthographic, extent,
                          objectRotateActive ? sceneObjectRotationHandler.target()->worldMatrix() : glm::mat4(1.0f),
                          objectRotateActive);
+        scaleGizmo.draw(cameraComponent.viewMatrix(), cameraComponent.projectionMatrix(aspect),
+                        cameraComponent.projectionType == lr::ProjectionType::Orthographic, extent,
+                        objectScaleActive ? sceneObjectScaleHandler.target()->worldMatrix() : glm::mat4(1.0f),
+                        objectScaleActive);
         overlayLinesPass.setLines(lr::buildColliderOverlayLines(scene));
     });
 

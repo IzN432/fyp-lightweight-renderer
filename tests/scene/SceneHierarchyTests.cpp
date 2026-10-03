@@ -1,4 +1,5 @@
 #include "core/editor/SceneObjectRotationHandler.hpp"
+#include "core/editor/SceneObjectScaleHandler.hpp"
 #include "core/loaders/MaterialStore.hpp"
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/MeshStore.hpp"
@@ -128,4 +129,23 @@ int main()
     assert(glm::abs(glm::dot(childTransform.transform().rotation(), beforeRotation)) > 1.0f - 0.0001f);
     commandManager.redo();
     assert(glm::abs(glm::dot(childTransform.transform().rotation(), desiredRotation)) > 1.0f - 0.0001f);
+
+    const glm::vec3 beforeScale = childTransform.transform().scale();
+    const glm::vec3 desiredScale(-2.5f, 1.25f, 0.5f);
+    const glm::mat4 desiredScaledLocal =
+        glm::translate(glm::mat4(1.0f), childTransform.transform().position()) *
+        glm::mat4_cast(childTransform.transform().rotation()) * glm::scale(glm::mat4(1.0f), desiredScale);
+    const glm::mat4 desiredScaledWorld = rotationParent.worldMatrix() * desiredScaledLocal;
+
+    lr::SceneObjectScaleHandler scaleHandler(commandManager);
+    scaleHandler.setTarget(&rotationChild);
+    scaleHandler.beginDrag();
+    scaleHandler.scaleToWorld(desiredScaledWorld);
+    scaleHandler.endDrag();
+    assert(glm::all(glm::epsilonEqual(childTransform.transform().scale(), desiredScale, 0.0001f)));
+
+    commandManager.undo();
+    assert(glm::all(glm::epsilonEqual(childTransform.transform().scale(), beforeScale, 0.0001f)));
+    commandManager.redo();
+    assert(glm::all(glm::epsilonEqual(childTransform.transform().scale(), desiredScale, 0.0001f)));
 }

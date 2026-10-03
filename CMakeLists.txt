@@ -123,10 +123,12 @@ add_library(lr_core STATIC
     src/core/editor/DefaultVertexDragHandler.cpp
     src/core/editor/SceneObjectDragHandler.cpp
     src/core/editor/SceneObjectRotationHandler.cpp
+    src/core/editor/SceneObjectScaleHandler.cpp
 
     src/core/editor/command/TranslatePointsCommand.cpp
     src/core/editor/command/TranslateSceneObjectCommand.cpp
     src/core/editor/command/RotateSceneObjectCommand.cpp
+    src/core/editor/command/ScaleSceneObjectCommand.cpp
     src/core/editor/command/CommandManager.cpp
 
     src/core/editor/selection/BoxSelectionTool.cpp
@@ -134,6 +136,7 @@ add_library(lr_core STATIC
 
     src/core/editor/gizmo/TranslateGizmo.cpp
     src/core/editor/gizmo/RotateGizmo.cpp
+    src/core/editor/gizmo/ScaleGizmo.cpp
 
     src/core/editor/camera/SphericalCameraController.cpp
 
