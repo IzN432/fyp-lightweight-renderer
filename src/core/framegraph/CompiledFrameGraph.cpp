@@ -227,10 +227,12 @@ void CompiledFrameGraph::execute(CommandBuffer &cmd, const ExternalImageBindings
         {
             vkCmdBindPipeline(cmd.get(), compiled.pipeline->bindPoint(), compiled.pipeline->get());
         }
-        if (compiled.descriptorSet != VK_NULL_HANDLE && compiled.pipeline)
+        if (!compiled.descriptorSets.empty() && compiled.pipeline)
         {
-            vkCmdBindDescriptorSets(cmd.get(), compiled.pipeline->bindPoint(), compiled.pipelineLayout, 0, 1,
-                                    &compiled.descriptorSet, 0, nullptr);
+            const VkDescriptorSet set =
+                compiled.descriptorSets[m_registry.frameSlot() % compiled.descriptorSets.size()];
+            vkCmdBindDescriptorSets(cmd.get(), compiled.pipeline->bindPoint(), compiled.pipelineLayout, 0, 1, &set, 0,
+                                    nullptr);
         }
 
         PassContext context(cmd, compiled.pipelineLayout, compiled.renderingExtent, m_definition, m_registry, pass);

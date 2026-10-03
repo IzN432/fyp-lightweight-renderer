@@ -30,7 +30,8 @@ public:
     // layouts. Call before recompiling passes so the pool doesn't exhaust.
     void reset();
 
-    // Allocate a descriptor set from the internal pool.
+    // Allocate a descriptor set; when the current pool is exhausted another is created, so the number
+    // of sets (e.g. one per frame in flight for some passes) isn't capped by a fixed pool size.
     VkDescriptorSet allocate(VkDescriptorSetLayout layout);
 
     // Accumulate descriptor writes.
@@ -45,8 +46,10 @@ public:
     void commit();
 
 private:
-    VkDevice         m_device;
-    VkDescriptorPool m_pool = VK_NULL_HANDLE;
+    VkDescriptorPool createPool();
+
+    VkDevice                      m_device;
+    std::vector<VkDescriptorPool> m_pools; // the last one is allocated from
 
     std::vector<VkDescriptorSetLayout> m_layouts;
     std::vector<VkPipelineLayout>      m_pipelineLayouts;

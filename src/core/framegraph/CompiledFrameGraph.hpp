@@ -74,9 +74,11 @@ private:
 
     struct CompiledPass
     {
-        VkDescriptorSetLayout              descriptorLayout = VK_NULL_HANDLE;
-        VkPipelineLayout                   pipelineLayout   = VK_NULL_HANDLE;
-        VkDescriptorSet                    descriptorSet    = VK_NULL_HANDLE;
+        VkDescriptorSetLayout descriptorLayout = VK_NULL_HANDLE;
+        VkPipelineLayout      pipelineLayout   = VK_NULL_HANDLE;
+        // One set, or one per frame in flight when the pass binds a per-frame (dynamic) buffer;
+        // execute() binds the one for the registry's current frame slot.
+        std::vector<VkDescriptorSet>       descriptorSets;
         std::unique_ptr<Pipeline>          pipeline;
         VkExtent2D                         renderingExtent{};
         std::vector<CompiledImageBarrier>  imageBarriers;

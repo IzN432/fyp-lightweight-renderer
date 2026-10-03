@@ -96,7 +96,9 @@ public:
     // -----------------------------------------------------------------------
 
     // Dynamic — CPU_TO_GPU, persistently mapped. Written by CPU each frame.
-    // Use for uniforms, light data, per-frame scene parameters.
+    // Use for uniforms, light data, per-frame scene parameters. Holds one copy per frame in flight
+    // (see setFramesInFlight) so the CPU never overwrites data a still-executing frame reads; GPU
+    // writes to dynamic buffers aren't supported (use a static buffer).
     void registerDynamicBuffer(const std::string &name, VkDeviceSize size, VkBufferUsageFlags usage);
 
     // Static — GPU_ONLY, no initial data. Use for compute scratch buffers.
@@ -107,8 +109,9 @@ public:
     // flushUploads() (called internally by FrameGraph::execute) does the actual transfer.
     void uploadBuffer(const std::string &name, const void *data, VkDeviceSize size, VkBufferUsageFlags usage);
 
-    // Overwrite the contents of a dynamic buffer registered via registerDynamicBuffer().
-    // data must point to at least size bytes. Call once per frame before fg.execute().
+    // Overwrite the first `size` bytes of a dynamic buffer registered via registerDynamicBuffer().
+    // Writes this frame's copy; the contents persist (later frames' copies are brought up to date
+    // as they come round), so data written once before the first frame is seen by every frame.
     void updateBuffer(const std::string &name, const void *data, VkDeviceSize size);
 
     // Queue a staging upload to an existing static buffer (created via uploadBuffer()).
@@ -121,17 +124,24 @@ public:
     // resolving. Like replaceUploadedImage(), the old buffer is retired rather than destroyed.
     void replaceUploadedBuffer(const std::string &name, const void *data, VkDeviceSize size, VkBufferUsageFlags usage);
 
-    // Reallocates a persistently mapped dynamic buffer while preserving its registry name; the old
-    // allocation is retired.
+    // Reallocates a dynamic buffer (all its per-frame copies) while preserving its registry name; the
+    // old allocations are retired, and the contents start zeroed.
     void replaceDynamicBuffer(const std::string &name, VkDeviceSize size, VkBufferUsageFlags usage);
 
+    // For a dynamic buffer, the copy belonging to the current frame (see frameSlot()).
     AllocatedBuffer       *getBuffer(const std::string &name);
     const AllocatedBuffer *getBuffer(const std::string &name) const;
+    // The copy a given frame slot uses (static buffers have one, whatever the slot).
+    const AllocatedBuffer *getBuffer(const std::string &name, uint32_t frameSlot) const;
     bool                   hasBuffer(const std::string &name) const;
+    // True for dynamic buffers with more than one copy, i.e. ones whose descriptors differ per frame.
+    bool isPerFrame(const std::string &name) const;
+    bool isDynamic(const std::string &name) const;
 
     // Copies a buffer's contents back to the CPU, as of the last submitted frame (pending uploads
     // are flushed first). Waits for the device to go idle, so it's for tests, debugging and
-    // occasional readback, not per-frame use. Every registry buffer can be read back.
+    // occasional readback, not per-frame use. Every registry buffer can be read back; for a dynamic
+    // buffer this is simply its latest CPU-written contents.
     std::vector<std::byte> readBuffer(const std::string &name);
 
     // -----------------------------------------------------------------------
@@ -147,6 +157,14 @@ public:
     // including `lastCompletedFrame` has finished on the GPU, so resources retired during those
     // frames are destroyed now. Frames are numbered from 1; 0 means "before the first frame".
     void beginFrame(uint64_t frame, uint64_t lastCompletedFrame);
+
+    // How many frames the frame loop keeps in flight; dynamic buffers get that many copies. Set by
+    // the owner (Viewer) before any dynamic buffer is registered. Defaults to 1 (no overlap).
+    void     setFramesInFlight(uint32_t count);
+    uint32_t framesInFlight() const { return m_framesInFlight; }
+    // Which per-frame copy the current frame uses: frame % framesInFlight. The copy for frame F was
+    // last used by frame F - framesInFlight, which has completed by the time F begins.
+    uint32_t frameSlot() const { return static_cast<uint32_t>(m_currentFrame % m_framesInFlight); }
 
     // -----------------------------------------------------------------------
     // Upload queue — called automatically by FrameGraph::execute()
@@ -178,10 +196,19 @@ private:
 
     struct BufferEntry
     {
-        AllocatedBuffer    buffer;
+        AllocatedBuffer    buffer; // static buffers; dynamic ones use frameCopies
         VkDeviceSize       size;
         VkBufferUsageFlags usage;
         VmaMemoryUsage     memoryUsage;
+
+        // Dynamic buffers: one persistently mapped copy per frame in flight, the latest CPU-written
+        // contents, and which version of them each copy holds.
+        std::vector<AllocatedBuffer> frameCopies;
+        std::vector<std::byte>       contents;
+        uint64_t                     version = 0;
+        std::vector<uint64_t>        copyVersions;
+
+        bool isDynamic() const { return memoryUsage == VMA_MEMORY_USAGE_CPU_TO_GPU; }
     };
 
     struct PendingUpload
@@ -211,6 +238,11 @@ private:
 
     void retire(AllocatedBuffer buffer);
     void retire(AllocatedImage image);
+
+    // Creates a dynamic buffer's per-frame copies, zero-filled.
+    BufferEntry createDynamicEntry(const std::string &name, VkDeviceSize size, VkBufferUsageFlags usage);
+    // Writes the entry's latest contents into the given copy.
+    void syncCopy(BufferEntry &entry, uint32_t slot);
     void destroyRetired(RetiredResource &retired);
 
     // Records with `record`, submits on the graphics queue and waits for completion.
@@ -235,7 +267,8 @@ private:
 
     std::vector<RetiredResource>              m_retired;
     std::unordered_map<std::string, uint64_t> m_generations;
-    uint64_t                                  m_currentFrame = 0;
+    uint64_t                                  m_currentFrame   = 0;
+    uint32_t                                  m_framesInFlight = 1;
 
     VkCommandPool m_uploadPool = VK_NULL_HANDLE;
 };

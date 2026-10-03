@@ -12,6 +12,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -134,6 +135,13 @@ void FrameGraphCompiler::buildDescriptorSets(CompiledFrameGraph &graph) const
             {
                 continue;
             }
+            const std::string &name = graph.m_definition.name(use.buffer);
+            if (use.access != AccessMode::Read && m_registry.isDynamic(name))
+            {
+                throw std::runtime_error("FrameGraph: pass '" + pass.name + "' writes dynamic buffer '" + name +
+                                         "' — dynamic buffers are written by the CPU (one copy per frame in "
+                                         "flight); use a static buffer for GPU writes");
+            }
             const VkDescriptorType type = use.usage == BufferUsage::Uniform ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
                                                                             : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             addLayoutBinding(use.binding, type, 1, use.stages);
@@ -148,84 +156,96 @@ void FrameGraphCompiler::buildDescriptorSets(CompiledFrameGraph &graph) const
             continue;
         }
 
-        compiled.descriptorSet = graph.m_descriptorAllocator.allocate(compiled.descriptorLayout);
-        for (const ImageUse &use : pass.imageUses)
+        // A pass binding a per-frame (dynamic) buffer gets one set per frame in flight, each pointing at
+        // that frame slot's copy; everything else in the sets is identical.
+        const bool     perFrame = std::ranges::any_of(pass.bufferUses, [&](const BufferUse &use) {
+            return use.isDescriptor() && m_registry.isPerFrame(graph.m_definition.name(use.buffer));
+        });
+        const uint32_t setCount = perFrame ? m_registry.framesInFlight() : 1;
+        for (uint32_t slot = 0; slot < setCount; ++slot)
         {
-            if (!use.isDescriptor())
+            const VkDescriptorSet descriptorSet = graph.m_descriptorAllocator.allocate(compiled.descriptorLayout);
+            compiled.descriptorSets.push_back(descriptorSet);
+            for (const ImageUse &use : pass.imageUses)
             {
-                continue;
-            }
-            const std::string     &name    = graph.m_definition.name(use.image);
-            const bool             storage = use.usage == ImageUsage::Storage;
-            const VkDescriptorType type =
-                storage ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            const VkSampler     sampler = storage ? VK_NULL_HANDLE : graph.m_defaultSampler;
-            const VkImageLayout layout =
-                storage ? VK_IMAGE_LAYOUT_GENERAL
-                        : (use.usage == ImageUsage::SampledDepth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
-                                                                 : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-            if (use.usage == ImageUsage::SampledArray)
-            {
-                const auto images = m_registry.getImageArray(name);
-                if (images.size() < use.descriptorCount)
+                if (!use.isDescriptor())
                 {
-                    throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds image array '" + name +
-                                             "' with too few slots");
+                    continue;
                 }
-                std::vector<VkImageView> views;
-                views.reserve(use.descriptorCount);
-                for (uint32_t arrayIndex = 0; arrayIndex < use.descriptorCount; ++arrayIndex)
+                const std::string     &name    = graph.m_definition.name(use.image);
+                const bool             storage = use.usage == ImageUsage::Storage;
+                const VkDescriptorType type =
+                    storage ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                const VkSampler     sampler = storage ? VK_NULL_HANDLE : graph.m_defaultSampler;
+                const VkImageLayout layout =
+                    storage ? VK_IMAGE_LAYOUT_GENERAL
+                            : (use.usage == ImageUsage::SampledDepth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                                                     : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+                if (use.usage == ImageUsage::SampledArray)
                 {
-                    if (!images[arrayIndex])
+                    const auto images = m_registry.getImageArray(name);
+                    if (images.size() < use.descriptorCount)
                     {
-                        throw std::runtime_error("FrameGraph: image array '" + name + "' has an empty slot");
+                        throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds image array '" + name +
+                                                 "' with too few slots");
                     }
-                    views.push_back(images[arrayIndex]->view);
+                    std::vector<VkImageView> views;
+                    views.reserve(use.descriptorCount);
+                    for (uint32_t arrayIndex = 0; arrayIndex < use.descriptorCount; ++arrayIndex)
+                    {
+                        if (!images[arrayIndex])
+                        {
+                            throw std::runtime_error("FrameGraph: image array '" + name + "' has an empty slot");
+                        }
+                        views.push_back(images[arrayIndex]->view);
+                    }
+                    graph.m_descriptorAllocator.writeImageArray(descriptorSet, use.binding, views, sampler, layout,
+                                                                type);
+                    continue;
                 }
-                graph.m_descriptorAllocator.writeImageArray(compiled.descriptorSet, use.binding, views, sampler, layout,
-                                                            type);
-                continue;
+
+                const AllocatedImage *image = m_registry.getImage(name);
+                if (!image)
+                {
+                    throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds unknown image '" + name + "'");
+                }
+                VkImageView view = image->view;
+                if (use.boundMip != allImageMips)
+                {
+                    if (!storage)
+                    {
+                        throw std::runtime_error(
+                            "FrameGraph: mip-specific views are only supported for storage images");
+                    }
+                    if (use.boundMip >= image->mipViews.size())
+                    {
+                        throw std::runtime_error("FrameGraph: pass '" + pass.name + "' requests invalid mip for '" +
+                                                 name + "'");
+                    }
+                    view = image->mipViews[use.boundMip];
+                }
+                graph.m_descriptorAllocator.writeImage(descriptorSet, use.binding, view, sampler, layout, type);
             }
 
-            const AllocatedImage *image = m_registry.getImage(name);
-            if (!image)
+            for (const BufferUse &use : pass.bufferUses)
             {
-                throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds unknown image '" + name + "'");
-            }
-            VkImageView view = image->view;
-            if (use.boundMip != allImageMips)
-            {
-                if (!storage)
+                if (!use.isDescriptor())
                 {
-                    throw std::runtime_error("FrameGraph: mip-specific views are only supported for storage images");
+                    continue;
                 }
-                if (use.boundMip >= image->mipViews.size())
+                const std::string     &name   = graph.m_definition.name(use.buffer);
+                const AllocatedBuffer *buffer = m_registry.getBuffer(name, slot);
+                if (!buffer)
                 {
-                    throw std::runtime_error("FrameGraph: pass '" + pass.name + "' requests invalid mip for '" + name +
+                    throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds unknown buffer '" + name +
                                              "'");
                 }
-                view = image->mipViews[use.boundMip];
+                const VkDescriptorType type = use.usage == BufferUsage::Uniform ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+                                                                                : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                graph.m_descriptorAllocator.writeBuffer(descriptorSet, use.binding, buffer->buffer, 0, buffer->size,
+                                                        type);
             }
-            graph.m_descriptorAllocator.writeImage(compiled.descriptorSet, use.binding, view, sampler, layout, type);
-        }
-
-        for (const BufferUse &use : pass.bufferUses)
-        {
-            if (!use.isDescriptor())
-            {
-                continue;
-            }
-            const std::string     &name   = graph.m_definition.name(use.buffer);
-            const AllocatedBuffer *buffer = m_registry.getBuffer(name);
-            if (!buffer)
-            {
-                throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds unknown buffer '" + name + "'");
-            }
-            const VkDescriptorType type = use.usage == BufferUsage::Uniform ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-                                                                            : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            graph.m_descriptorAllocator.writeBuffer(compiled.descriptorSet, use.binding, buffer->buffer, 0,
-                                                    buffer->size, type);
         }
         graph.m_descriptorAllocator.commit();
     }

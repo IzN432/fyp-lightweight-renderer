@@ -185,7 +185,7 @@ class CommandBuffer:
         """Record an indexed draw call."""
         ...
 
-    def dispatch(self, x: int, y: int, z: int = 1) -> None:
+    def dispatch(self, x: int, y: int = 1, z: int = 1) -> None:
         """Dispatch a compute shader."""
         ...
 

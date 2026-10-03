@@ -35,6 +35,8 @@ Viewer::Viewer(const Config &config)
     m_swapchain = std::make_unique<Swapchain>(*m_ctx, *m_window);
     m_resources = std::make_unique<ResourceRegistry>(*m_ctx, *m_allocator, m_swapchain->getExtent());
     m_renderer  = std::make_unique<Renderer>(*m_ctx, *m_swapchain);
+    // Before anything registers a dynamic buffer: each gets one copy per frame in flight.
+    m_resources->setFramesInFlight(m_renderer->framesInFlight());
     m_fg        = std::make_unique<FrameGraph>(*m_ctx, *m_resources);
     m_imguiPass = std::make_unique<ImguiPass>(*m_ctx, *m_window, *m_swapchain);
 

@@ -294,8 +294,11 @@ if(LR_BUILD_PYTHON)
             add_test(NAME python.live_edit
                 COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/live_edit.py"
                     --frames 300)
+            # Asserts every frame read its own uniform data (149/150 frames didn't, before per-frame copies).
+            add_test(NAME python.per_frame_data
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/per_frame_data.py")
             set_tests_properties(python.bindings python.spinning_torus python.pipeline_state python.failures
-                python.gpu_instancing python.live_edit PROPERTIES
+                python.gpu_instancing python.live_edit python.per_frame_data PROPERTIES
                 ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
                 # nanobind prints leak reports to stderr without failing the process.
                 FAIL_REGULAR_EXPRESSION "nanobind: leaked|\\[error\\]")

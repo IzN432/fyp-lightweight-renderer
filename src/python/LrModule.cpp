@@ -519,7 +519,7 @@ void bindPasses(nb::module_ &m)
              "first_instance"_a = 0)
         .def("draw_indexed", &CommandBuffer::drawIndexed, "index_count"_a, "instance_count"_a = 1, "first_index"_a = 0,
              "vertex_offset"_a = 0, "first_instance"_a = 0)
-        .def("dispatch", &CommandBuffer::dispatch, "x"_a, "y"_a, "z"_a = 1)
+        .def("dispatch", &CommandBuffer::dispatch, "x"_a, "y"_a = 1, "z"_a = 1)
         .def("set_viewport", &CommandBuffer::setViewport, "x"_a, "y"_a, "width"_a, "height"_a, "min_depth"_a = 0.0f,
              "max_depth"_a = 1.0f)
         .def("set_scissor", &CommandBuffer::setScissor, "x"_a, "y"_a, "width"_a, "height"_a);

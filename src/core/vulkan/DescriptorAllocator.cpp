@@ -8,8 +8,12 @@
 namespace lr
 {
 
-DescriptorAllocator::DescriptorAllocator(VkDevice device) : m_device(device)
+DescriptorAllocator::DescriptorAllocator(VkDevice device) : m_device(device) { m_pools.push_back(createPool()); }
+
+VkDescriptorPool DescriptorAllocator::createPool()
 {
+    // Sized so any single set fits (the largest, GeometryPass's, needs ~4 * 256 samplers); more pools
+    // are added on demand.
     VkDescriptorPoolSize sizes[] = {
         // GeometryPass binds 4 material texture arrays (diffuse/normal/metallicRoughness/emissive),
         // each sized to MaterialStore's fixed capacity (see kMaterialCapacity in main.cpp) — plus
@@ -26,9 +30,10 @@ DescriptorAllocator::DescriptorAllocator(VkDevice device) : m_device(device)
     ci.poolSizeCount = static_cast<uint32_t>(std::size(sizes));
     ci.pPoolSizes    = sizes;
 
-    checkVk(vkCreateDescriptorPool(m_device, &ci, nullptr, &m_pool), "DescriptorAllocator: vkCreateDescriptorPool");
-
-    spdlog::debug("DescriptorAllocator: created");
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    checkVk(vkCreateDescriptorPool(m_device, &ci, nullptr, &pool), "DescriptorAllocator: vkCreateDescriptorPool");
+    spdlog::debug("DescriptorAllocator: created pool {}", m_pools.size() + 1);
+    return pool;
 }
 
 DescriptorAllocator::~DescriptorAllocator()
@@ -41,9 +46,9 @@ DescriptorAllocator::~DescriptorAllocator()
     {
         vkDestroyPipelineLayout(m_device, layout, nullptr);
     }
-    if (m_pool != VK_NULL_HANDLE)
+    for (VkDescriptorPool pool : m_pools)
     {
-        vkDestroyDescriptorPool(m_device, m_pool, nullptr);
+        vkDestroyDescriptorPool(m_device, pool, nullptr);
     }
 }
 
@@ -59,7 +64,13 @@ void DescriptorAllocator::reset()
     }
     m_layouts.clear();
     m_pipelineLayouts.clear();
-    checkVk(vkResetDescriptorPool(m_device, m_pool, 0), "DescriptorAllocator: vkResetDescriptorPool");
+    // Keep one pool, reset; drop the extra ones.
+    for (size_t index = 1; index < m_pools.size(); ++index)
+    {
+        vkDestroyDescriptorPool(m_device, m_pools[index], nullptr);
+    }
+    m_pools.resize(1);
+    checkVk(vkResetDescriptorPool(m_device, m_pools.front(), 0), "DescriptorAllocator: vkResetDescriptorPool");
 }
 
 VkDescriptorSetLayout DescriptorAllocator::createLayout(std::span<const VkDescriptorSetLayoutBinding> bindings)
@@ -107,13 +118,19 @@ VkDescriptorSet DescriptorAllocator::allocate(VkDescriptorSetLayout layout)
 {
     VkDescriptorSetAllocateInfo ai{};
     ai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    ai.descriptorPool     = m_pool;
+    ai.descriptorPool     = m_pools.back();
     ai.descriptorSetCount = 1;
     ai.pSetLayouts        = &layout;
 
-    VkDescriptorSet set;
-    checkVk(vkAllocateDescriptorSets(m_device, &ai, &set), "DescriptorAllocator: vkAllocateDescriptorSets");
-
+    VkDescriptorSet set    = VK_NULL_HANDLE;
+    VkResult        result = vkAllocateDescriptorSets(m_device, &ai, &set);
+    if (result == VK_ERROR_OUT_OF_POOL_MEMORY || result == VK_ERROR_FRAGMENTED_POOL)
+    {
+        m_pools.push_back(createPool());
+        ai.descriptorPool = m_pools.back();
+        result            = vkAllocateDescriptorSets(m_device, &ai, &set);
+    }
+    checkVk(result, "DescriptorAllocator: vkAllocateDescriptorSets");
     return set;
 }
 

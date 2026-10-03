@@ -176,6 +176,70 @@ def test_indirect_draw_requires_declaration():
         raise AssertionError("expected an error for an undeclared indirect buffer")
 
 
+RECORD_COMP = """
+#version 450
+layout(local_size_x = 1) in;
+layout(set = 0, binding = 0) uniform Data { uint value; } data;
+layout(set = 0, binding = 1) buffer History { uint seen[]; } history;
+layout(push_constant) uniform PC { uint frame; } pc;
+void main() { history.seen[pc.frame] = data.value; }
+"""
+
+
+def make_recorder(writes_dynamic=False):
+    """A viewer whose compute pass stores the dynamic buffer "data"'s value in "history"[frame]."""
+    viewer = make_viewer()
+    fg, res = viewer.frame_graph, viewer.resources
+    res.register_dynamic_buffer("data", 16, lr.BufferUsage.UNIFORM | lr.BufferUsage.STORAGE)
+    res.upload_buffer("history", np.zeros(16, dtype=np.uint32), lr.BufferUsage.STORAGE)
+    frame = [0]
+
+    def record(ctx):
+        ctx.push_constants(lr.Stage.COMPUTE, np.array([frame[0]], dtype=np.uint32))
+        ctx.cmd.dispatch(1)
+
+    builder = fg.add_pass("record").type(lr.PassType.COMPUTE)
+    if writes_dynamic:
+        source = RECORD_COMP.replace("uniform Data", "buffer Data")
+        builder.compute_shader(lr.compile_glsl_source(source, lr.ShaderStage.COMPUTE))
+        builder.storage_buffer_read_write(0, fg.buffer("data"), lr.Stage.COMPUTE)
+    else:
+        builder.compute_shader(lr.compile_glsl_source(RECORD_COMP, lr.ShaderStage.COMPUTE))
+        builder.uniform_buffer(0, fg.buffer("data"), lr.Stage.COMPUTE)
+    (
+        builder.storage_buffer_read_write(1, fg.buffer("history"), lr.Stage.COMPUTE)
+        .push_constant_size(4, lr.Stage.COMPUTE)
+        .execute(record)
+    )
+
+    def update(dt, extent):
+        frame[0] += 1
+        if frame[0] >= 8:
+            viewer.close()
+
+    viewer.on_update(update)
+    return viewer
+
+
+def test_dynamic_data_written_once_reaches_every_frame():
+    # Each frame in flight has its own copy; data written before run() must still reach all of them.
+    viewer = make_recorder()
+    viewer.resources.update_buffer("data", np.array([1234], dtype=np.uint32))
+    viewer.run()
+    seen = viewer.resources.read_buffer("history").view(np.uint32)
+    assert seen[1:8].tolist() == [1234] * 7, seen[:8].tolist()
+
+
+def test_gpu_writes_to_dynamic_buffers_are_rejected():
+    viewer = make_recorder(writes_dynamic=True)
+    try:
+        viewer.run()
+    except RuntimeError as e:
+        assert "writes dynamic buffer 'data'" in str(e), str(e)
+    else:
+        raise AssertionError("expected an error for a GPU write to a dynamic buffer")
+
+
 def main():
     tests = [
         test_compile_errors_raise_with_location,
@@ -187,6 +251,8 @@ def main():
         test_invalid_pipeline_state_raises_at_compile,
         test_read_and_replace_buffers,
         test_indirect_draw_requires_declaration,
+        test_dynamic_data_written_once_reaches_every_frame,
+        test_gpu_writes_to_dynamic_buffers_are_rejected,
     ]
     for test in tests:
         test()

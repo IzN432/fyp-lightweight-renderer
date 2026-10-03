@@ -1,0 +1,32 @@
+#version 450
+
+// Records which frame's uniform data this frame's GPU work actually read. The push constant is baked
+// into the command buffer when the frame is recorded, so it's always this frame's number; the uniform
+// buffer is shared CPU-written memory, so it shows what was there when the GPU got to it.
+layout(local_size_x = 1) in;
+
+layout(set = 0, binding = 0) uniform FrameData
+{
+    uint frameIndex;
+} frameData;
+
+layout(set = 0, binding = 1) buffer History
+{
+    uint seen[];
+} history;
+
+// Sampling the slow pass's output makes this run after it, late in the frame.
+layout(set = 0, binding = 2) uniform sampler2D busy;
+
+layout(push_constant) uniform PC
+{
+    uint frameIndex;
+    uint historySize;
+} pc;
+
+void main()
+{
+    const float wait  = texelFetch(busy, ivec2(0), 0).r;
+    const uint  index = pc.frameIndex % pc.historySize;
+    history.seen[index] = wait < -1.0 ? 0u : frameData.frameIndex;
+}

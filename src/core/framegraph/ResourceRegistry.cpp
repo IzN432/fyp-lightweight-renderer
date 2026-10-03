@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
+#include <utility>
 
 namespace
 {
@@ -59,6 +60,10 @@ ResourceRegistry::~ResourceRegistry()
     for (auto &[name, entry] : m_buffers)
     {
         m_allocator.destroy(entry.buffer);
+        for (AllocatedBuffer &copy : entry.frameCopies)
+        {
+            m_allocator.destroy(copy);
+        }
     }
 
     // The owner (Viewer) waits for the device before destroying the registry.
@@ -530,15 +535,9 @@ void ResourceRegistry::registerDynamicBuffer(const std::string &name, VkDeviceSi
         throw std::runtime_error("ResourceRegistry: duplicate buffer '" + name + "'");
     }
 
-    BufferEntry entry{};
-    entry.size        = size;
-    entry.usage       = usage;
-    entry.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-    entry.buffer =
-        m_allocator.createBuffer(size, usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-    m_buffers.emplace(name, std::move(entry));
-    setDebugName(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(m_buffers.at(name).buffer.buffer), name);
-    spdlog::debug("ResourceRegistry: dynamic buffer '{}' ({} bytes)", name, size);
+    m_buffers.emplace(name, createDynamicEntry(name, size, usage));
+    spdlog::debug("ResourceRegistry: dynamic buffer '{}' ({} bytes x {} frames in flight)", name, size,
+                  m_framesInFlight);
 }
 
 void ResourceRegistry::registerStaticBuffer(const std::string &name, VkDeviceSize size, VkBufferUsageFlags usage)
@@ -580,14 +579,35 @@ void ResourceRegistry::uploadBuffer(const std::string &name, const void *data, V
 
 AllocatedBuffer *ResourceRegistry::getBuffer(const std::string &name)
 {
-    auto it = m_buffers.find(name);
-    return (it != m_buffers.end()) ? &it->second.buffer : nullptr;
+    return const_cast<AllocatedBuffer *>(std::as_const(*this).getBuffer(name, frameSlot()));
 }
 
 const AllocatedBuffer *ResourceRegistry::getBuffer(const std::string &name) const
 {
+    return getBuffer(name, frameSlot());
+}
+
+const AllocatedBuffer *ResourceRegistry::getBuffer(const std::string &name, uint32_t slot) const
+{
     auto it = m_buffers.find(name);
-    return (it != m_buffers.end()) ? &it->second.buffer : nullptr;
+    if (it == m_buffers.end())
+    {
+        return nullptr;
+    }
+    const BufferEntry &entry = it->second;
+    return entry.isDynamic() ? &entry.frameCopies[slot % entry.frameCopies.size()] : &entry.buffer;
+}
+
+bool ResourceRegistry::isDynamic(const std::string &name) const
+{
+    auto it = m_buffers.find(name);
+    return it != m_buffers.end() && it->second.isDynamic();
+}
+
+bool ResourceRegistry::isPerFrame(const std::string &name) const
+{
+    auto it = m_buffers.find(name);
+    return it != m_buffers.end() && it->second.frameCopies.size() > 1;
 }
 
 bool ResourceRegistry::hasBuffer(const std::string &name) const { return m_buffers.count(name) > 0; }
@@ -608,7 +628,12 @@ void ResourceRegistry::updateBuffer(const std::string &name, const void *data, V
     {
         throw std::runtime_error("ResourceRegistry: updateBuffer '" + name + "' size overflow");
     }
-    std::memcpy(it->second.buffer.info.pMappedData, data, size);
+    BufferEntry &entry = it->second;
+    std::memcpy(entry.contents.data(), data, size);
+    ++entry.version;
+    // Only this frame's copy is written now: the others may still be in use by frames in flight, and
+    // are brought up to date by beginFrame() when their turn comes.
+    syncCopy(entry, frameSlot());
 }
 
 void ResourceRegistry::reuploadBuffer(const std::string &name, const void *data, VkDeviceSize size)
@@ -709,17 +734,15 @@ void ResourceRegistry::replaceDynamicBuffer(const std::string &name, VkDeviceSiz
         throw std::runtime_error("ResourceRegistry: replaceDynamicBuffer '" + name + "' is not a dynamic buffer");
     }
 
-    BufferEntry entry{};
-    entry.size        = size;
-    entry.usage       = usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    entry.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-    entry.buffer      = m_allocator.createBuffer(size, entry.usage, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    BufferEntry entry = createDynamicEntry(name, size, usage);
 
-    // Frames still in flight may be reading the old buffer.
-    retire(it->second.buffer);
+    // Frames still in flight may be reading the old copies.
+    for (AllocatedBuffer &copy : it->second.frameCopies)
+    {
+        retire(copy);
+    }
     it->second = std::move(entry);
     ++m_generations[name];
-    setDebugName(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(it->second.buffer.buffer), name);
 }
 
 // ---------------------------------------------------------------------------
@@ -985,6 +1008,12 @@ std::vector<std::byte> ResourceRegistry::readBuffer(const std::string &name)
         throw std::runtime_error("ResourceRegistry: readBuffer '" + name + "' not found");
     }
 
+    if (it->second.isDynamic())
+    {
+        // GPU writes to dynamic buffers aren't allowed, so the latest CPU contents are the contents.
+        return it->second.contents;
+    }
+
     flushUploads();
     m_ctx.waitIdle();
 
@@ -1059,6 +1088,72 @@ void ResourceRegistry::beginFrame(uint64_t frame, uint64_t lastCompletedFrame)
         destroyRetired(retired);
         return true;
     });
+
+    // This frame's copy of each dynamic buffer was last used by frame `frame - framesInFlight`,
+    // which has completed, so it can be brought up to date with the latest contents.
+    const uint32_t slot = frameSlot();
+    for (auto &[name, entry] : m_buffers)
+    {
+        if (entry.isDynamic() && entry.copyVersions[slot] != entry.version)
+        {
+            syncCopy(entry, slot);
+        }
+    }
+}
+
+void ResourceRegistry::setFramesInFlight(uint32_t count)
+{
+    if (count == 0)
+    {
+        throw std::invalid_argument("ResourceRegistry: frames in flight must be at least 1");
+    }
+    if (count != m_framesInFlight && std::ranges::any_of(m_buffers, [](const auto &entry) {
+            return entry.second.isDynamic();
+        }))
+    {
+        throw std::logic_error("ResourceRegistry: setFramesInFlight must be called before registering dynamic "
+                               "buffers");
+    }
+    m_framesInFlight = count;
+}
+
+ResourceRegistry::BufferEntry ResourceRegistry::createDynamicEntry(const std::string &name, VkDeviceSize size,
+                                                                   VkBufferUsageFlags usage)
+{
+    BufferEntry entry{};
+    entry.size        = size;
+    entry.usage       = usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    entry.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+    entry.contents.assign(static_cast<size_t>(size), std::byte{0});
+    entry.copyVersions.assign(m_framesInFlight, 0);
+    try
+    {
+        for (uint32_t slot = 0; slot < m_framesInFlight; ++slot)
+        {
+            entry.frameCopies.push_back(m_allocator.createBuffer(size, entry.usage, VMA_MEMORY_USAGE_CPU_TO_GPU));
+            std::memset(entry.frameCopies.back().info.pMappedData, 0, static_cast<size_t>(size));
+            setDebugName(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(entry.frameCopies.back().buffer),
+                         m_framesInFlight > 1 ? name + "[" + std::to_string(slot) + "]" : name);
+        }
+    } catch (...)
+    {
+        for (AllocatedBuffer &copy : entry.frameCopies)
+        {
+            m_allocator.destroy(copy);
+        }
+        throw;
+    }
+    return entry;
+}
+
+void ResourceRegistry::syncCopy(BufferEntry &entry, uint32_t slot)
+{
+    AllocatedBuffer &copy = entry.frameCopies[slot % entry.frameCopies.size()];
+    std::memcpy(copy.info.pMappedData, entry.contents.data(), entry.contents.size());
+    // CPU_TO_GPU memory may not be host-coherent.
+    checkVk(vmaFlushAllocation(m_allocator.getHandle(), copy.allocation, 0, VK_WHOLE_SIZE),
+            "ResourceRegistry: vmaFlushAllocation");
+    entry.copyVersions[slot % entry.copyVersions.size()] = entry.version;
 }
 
 // ---------------------------------------------------------------------------

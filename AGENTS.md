@@ -299,7 +299,7 @@ It uses private failure-injection hooks in `lr._lr._testing` and checks four cas
 the debug-runtime setup and `_testing` submodule in `src/python/LrModule.cpp`, `faulthandler` in
 `python/lr/__init__.py`, `tests/python/test_failures.py`.
 
-## Step 4 — runtime robustness ✅
+## Step 4 — runtime robustness ☑️ (committed 1d55ba2)
 
 **Goal:** deferred destruction for replaced buffers/images (no manual `wait_idle`), automatic recompile when
 the graph changes, indirect draws, buffer readback.
@@ -394,7 +394,7 @@ uniform buffer`.
 - **`PassContext`:** `draw_indirect`, `draw_indexed_indirect`, `dispatch_indirect`.
 - **`FrameGraph`:** `needs_recompile`, `compile_count`.
 
-**Known limitation (not fixed here):** `update_buffer` writes a single persistently-mapped allocation.
+**Known limitation (fixed in step 5):** `update_buffer` writes a single persistently-mapped allocation.
 With 2 frames in flight, the CPU can write next frame's data while the previous frame is still reading
 it (the engine's own camera UBO has the same issue). It's usually invisible, but it is a race. The fix
 is per-frame-in-flight copies of dynamic buffers, which means per-frame descriptor sets. That's a natural
@@ -408,6 +408,71 @@ next step.
 - **Vulkan and app:** `CommandBuffer.{hpp,cpp}`, `Renderer.hpp`, `Viewer.{hpp,cpp}`.
 - **Bindings:** `LrModule.cpp`.
 - **Examples:** `examples/python/{gpu_instancing.py, live_edit.py, meshes.py}` and 8 new shaders.
+
+## Step 5 — per-frame copies of CPU-written buffers ✅
+
+**Goal:** remove the known race from step 4. `update_buffer` writes a single persistently-mapped
+allocation, so with 2 frames in flight the CPU overwrites data a still-executing frame hasn't read yet.
+Fix: each dynamic buffer gets one copy per frame in flight, and passes that bind one get one descriptor
+set per frame.
+
+**Demo:**
+```
+PYTHONPATH=build/python python examples/python/per_frame_data.py
+```
+[per_frame_data.py](examples/python/per_frame_data.py) runs a slow pass so frames overlap, then has a
+compute pass record which frame's uniform data each frame actually read. The true frame number comes
+from a push constant, which can't race. The script reads the record back and counts frames that saw
+another frame's data.
+
+**Before (measured on 1d55ba2):** `149 of 150 frames read another frame's uniform data (e.g. frame 1 saw
+frame 2; offsets seen: [1])`. Every frame with a successor read the successor's value.
+
+**After:** `0 of 150 frames read another frame's uniform data`.
+
+**Result (2026-10-04):**
+- `ctest -C Debug` — 17/17 pass. New: `python.per_frame_data` (the demo; asserts 0 stale frames), and two
+  `python.bindings` cases:
+  - `test_dynamic_data_written_once_reaches_every_frame`: data written once before `run()` reaches the
+    copy of every frame in flight;
+  - `test_gpu_writes_to_dynamic_buffers_are_rejected`.
+- **Proved the write-once test can fail.** With the per-frame refresh in `beginFrame` disabled, the
+  copy that was never filled showed up as zeros on every other frame (`[0, 0, 1234, 0, 1234, 0, 1234, 0]`)
+  and the test failed. Reverted (no `TEMPORARY` markers).
+- **`renderer.exe` (the engine's own camera/light buffers now go through per-frame copies):**
+  - logs are unchanged: 2 compiles, 2 descriptor pools, the same single pre-existing warning;
+  - a screenshot shows the Cornell box and lion lit and in perspective, so the camera and light data
+    reach the GPU.
+
+**What changed:**
+- **`ResourceRegistry` dynamic buffers:**
+  - Each one holds `framesInFlight` persistently mapped copies, a CPU shadow of the latest contents, and
+    a version per copy.
+  - `updateBuffer` writes the shadow and the current frame's copy, and flushes the allocation
+    (CPU_TO_GPU memory may not be coherent).
+  - `beginFrame` refreshes the new frame's copy from the shadow if it's behind. That copy was last used
+    by frame `F − framesInFlight`, which has completed. So data written once (e.g. before `run()`)
+    reaches every copy, and partial updates keep the rest of the buffer.
+  - `getBuffer(name)` returns the current frame's copy, so vertex, index and indirect bindings (looked
+    up per frame) pick up the right copy with no further changes.
+  - `readBuffer` returns the CPU contents for dynamic buffers.
+  - `replaceDynamicBuffer` retires all copies.
+  - The slot is `frame % framesInFlight`. `Viewer` calls `setFramesInFlight` (2) before anything can
+    register a buffer, and the default is 1, so standalone `FrameGraph` use is unchanged.
+- **Descriptor sets:** a pass that binds a per-frame buffer gets one descriptor set per frame in flight,
+  each pointing at that slot's copy. `CompiledFrameGraph::execute` binds the set for
+  `registry.frameSlot()`. Passes without per-frame buffers still get a single set.
+- **`DescriptorAllocator` pools:** these now grow. When a pool is exhausted, another with the same sizes
+  is created and the allocation retried. This replaces the fixed 64-set pool, which per-frame sets could
+  have exhausted. Each pool still fits the largest single set (`GeometryPass`'s 4 × 256 samplers).
+- **New compile error:** a pass that writes a dynamic buffer (storage write/read-write). GPU writes would
+  land in one frame's copy only; static buffers are the right tool. None of the engine's passes do this.
+- **Python:** `cmd.dispatch(x, y=1, z=1)`. `y` now defaults to 1; `dispatch(n)` used to be a
+  `TypeError`.
+
+**Files:** `ResourceRegistry.{hpp,cpp}`, `CompiledFrameGraph.{hpp,cpp}`, `FrameGraphCompiler.cpp`,
+`DescriptorAllocator.{hpp,cpp}`, `Viewer.cpp`, `LrModule.cpp`; `examples/python/per_frame_data.py` and
+`shaders/{busy.frag, record_frame.comp, show.frag}`; `tests/python/test_bindings.py`.
 
 ---
 
