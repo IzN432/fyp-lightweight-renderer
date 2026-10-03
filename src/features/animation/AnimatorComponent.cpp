@@ -46,6 +46,50 @@ void AnimatorComponent::stop()
     markDirty();
 }
 
+bool AnimatorComponent::addKeyframe(size_t trackIndex, float seconds)
+{
+    if (!m_activeClip || m_keyframeEdit || !std::isfinite(seconds) || seconds < 0.0f ||
+        trackIndex >= m_clips[*m_activeClip].tracks().size())
+    {
+        return false;
+    }
+
+    AnimationChannel &channel = m_clips[*m_activeClip].tracks()[trackIndex];
+    const bool added = std::visit([&](auto &track) {
+        Scene &scene = getOwningObject().scene();
+        if (!scene.contains(track.target()) ||
+            !scene.getSceneObject(track.target()).hasComponent<TransformComponent>())
+        {
+            return false;
+        }
+
+        const Transform &transform =
+            scene.getSceneObject(track.target()).getComponent<TransformComponent>().transform();
+        using Track = std::decay_t<decltype(track)>;
+        if constexpr (std::is_same_v<Track, TranslationTrack>)
+        {
+            track.setKeyframe(seconds, transform.position());
+        }
+        else if constexpr (std::is_same_v<Track, RotationTrack>)
+        {
+            track.setKeyframe(seconds, transform.rotation());
+        }
+        else
+        {
+            track.setKeyframe(seconds, transform.scale());
+        }
+        return true;
+    }, channel);
+
+    if (added)
+    {
+        pause();
+        seek(seconds);
+        markDirty();
+    }
+    return added;
+}
+
 bool AnimatorComponent::beginKeyframeEdit(size_t trackIndex, size_t keyframeIndex)
 {
     if (!m_activeClip || trackIndex >= m_clips[*m_activeClip].tracks().size())
@@ -419,6 +463,13 @@ void AnimatorComponent::onGUIImpl()
                     }
                     else
                     {
+                        ImGui::BeginDisabled(keyframeAtPlayhead.has_value() || m_keyframeEdit.has_value());
+                        if (ImGui::Button("Add Keyframe"))
+                        {
+                            addKeyframe(m_selectedTrack, m_playbackSeconds);
+                        }
+                        ImGui::EndDisabled();
+                        ImGui::SameLine();
                         ImGui::BeginDisabled(!keyframeAtPlayhead.has_value() || m_keyframeEdit.has_value());
                         if (ImGui::Button("Edit Keyframe"))
                         {
@@ -428,7 +479,7 @@ void AnimatorComponent::onGUIImpl()
                         if (!keyframeAtPlayhead)
                         {
                             ImGui::SameLine();
-                            ImGui::TextDisabled("Move the playhead onto a keyframe");
+                            ImGui::TextDisabled("Captures the current transform");
                         }
                     }
                 }, selectedChannel);
