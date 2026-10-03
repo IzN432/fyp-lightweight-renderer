@@ -7,7 +7,9 @@
 namespace lr
 {
 
-void SphericalCameraController::update(float dt)
+void SphericalCameraController::update(float dt) { update(dt, false); }
+
+void SphericalCameraController::update(float dt, bool gizmoCapturesPrimaryMouse)
 {
     double dx, dy;
     m_input.getMouseDelta(dx, dy);
@@ -24,7 +26,7 @@ void SphericalCameraController::update(float dt)
         m_orbitElevation = 0.0f;
     }
 
-    if (!ImGui::GetIO().WantCaptureMouse)
+    if (!ImGui::GetIO().WantCaptureMouse || gizmoCapturesPrimaryMouse)
     {
         if (mmb && shift)
         {
@@ -45,7 +47,7 @@ void SphericalCameraController::update(float dt)
             m_orbitRadius *= std::pow(1.0f / 1.1f, (float)scroll);
             m_orbitRadius = glm::clamp(m_orbitRadius, 0.01f, 1000.0f);
         }
-    } // !WantCaptureMouse
+    }
 
     glm::vec3 pos(m_orbitTarget.x + m_orbitRadius * std::cos(m_orbitElevation) * std::sin(m_orbitAzimuth),
                   m_orbitTarget.y + m_orbitRadius * std::sin(m_orbitElevation),

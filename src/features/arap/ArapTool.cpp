@@ -15,10 +15,9 @@ constexpr glm::vec3 kHandleColor{1.0f, 0.6f, 0.1f};
 } // namespace
 
 ArapTool::ArapTool(SelectionManager &selectionManager, VertexManager &vertexManager, CommandManager &commandManager,
-                   const Mesh &mesh, VertexDragHandler &defaultHandler,
-                   std::vector<TranslateDragHandlerGizmo *> gizmos)
+                   const Mesh &mesh, VertexDragHandler &defaultHandler, TranslateGizmo &gizmo)
     : m_selectionManager(selectionManager), m_vertexManager(vertexManager), m_commandManager(commandManager),
-      m_mesh(&mesh), m_defaultHandler(defaultHandler), m_gizmos(std::move(gizmos)),
+      m_mesh(&mesh), m_defaultHandler(defaultHandler), m_gizmo(gizmo),
       m_anchorRole(selectionManager.registerRole(kAnchorColor)),
       m_handleRole(selectionManager.registerRole(kHandleColor)),
       m_arapHandler(m_solver, vertexManager, selectionManager, m_handleRole, commandManager)
@@ -39,10 +38,7 @@ void ArapTool::setModeActive(bool active)
         // Reactivating (e.g. Tab back into Edit, then 'A') after a Tab-out only ever detached the
         // gizmos from the solver via resetToDefaultHandler() above — the precomputed matrix itself
         // is untouched, so restore the wiring immediately instead of forcing a redundant re-Solve.
-        for (TranslateDragHandlerGizmo *gizmo : m_gizmos)
-        {
-            gizmo->setDragHandler(m_arapHandler);
-        }
+        m_gizmo.setDragHandler(m_arapHandler);
     }
 }
 
@@ -62,10 +58,7 @@ void ArapTool::onRoleChanged()
 
 void ArapTool::resetToDefaultHandler()
 {
-    for (TranslateDragHandlerGizmo *gizmo : m_gizmos)
-    {
-        gizmo->setDragHandler(m_defaultHandler);
-    }
+    m_gizmo.setDragHandler(m_defaultHandler);
 }
 
 void ArapTool::onSolveClicked()
@@ -76,10 +69,7 @@ void ArapTool::onSolveClicked()
     m_lastSolveFailed = !m_solver.precompute(*m_mesh, anchors, handles);
     if (!m_lastSolveFailed)
     {
-        for (TranslateDragHandlerGizmo *gizmo : m_gizmos)
-        {
-            gizmo->setDragHandler(m_arapHandler);
-        }
+        m_gizmo.setDragHandler(m_arapHandler);
     }
 }
 

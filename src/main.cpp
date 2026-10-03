@@ -9,10 +9,8 @@
 #include "core/passes/ibl/IblPass.hpp"
 #include "core/passes/pbr/PbrPass.hpp"
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
-#include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
 #include "core/passes/overlaylines/OverlayLinesPass.hpp"
 #include "core/passes/overlaypoints/OverlayPointsPass.hpp"
-#include "core/framegraph/ImageReadback.hpp"
 
 #include "core/scene/AreaLightVisual.hpp"
 #include "core/scene/Camera.hpp"
@@ -21,10 +19,7 @@
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
-#include "core/editor/gizmo/GizmoManager.hpp"
-#include "core/editor/gizmo/TranslateDragHandlerGizmo.hpp"
-#include "core/editor/gizmo/translate/TranslateArrowGizmo.hpp"
-#include "core/editor/gizmo/translate/TranslateBoxGizmo.hpp"
+#include "core/editor/gizmo/TranslateGizmo.hpp"
 #include "core/editor/SceneObjectDragHandler.hpp"
 #include "core/editor/selection/BoxSelectionTool.hpp"
 #include "core/editor/selection/SelectionManager.hpp"
@@ -461,13 +456,6 @@ try
     pbrPass.uploadResources(viewer.resources());
     pbrPass.build(viewer.frameGraph());
 
-    lr::OverlayGeometryPass overlayGeometryPass({
-        .cameraBufferResourceName = sceneManager.cameraBufferName(),
-    });
-    overlayGeometryPass.uploadResources(viewer.resources());
-    overlayGeometryPass.build(viewer.frameGraph());
-    overlayGeometryPass.setInstances({});
-
     lr::OverlayLinesPass overlayLinesPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
     }, viewer.resources());
@@ -505,9 +493,6 @@ try
     sceneManager.registerEditorModeChangedCallback(applyEditorMode);
     applyEditorMode(sceneManager.editorMode());
 
-    // Gizmo hover — reads the picking image from the previous frame
-    lr::ImageReadback gizmoReadback(viewer.context(), viewer.allocator());
-
     lr::VertexManager vertexManager(meshComponent.mesh());
     vertexManager.registerUpdateCallback([&]() {
         sceneManager.updateSelectedMeshPositions();
@@ -521,41 +506,11 @@ try
     lr::SelectionManager &selectionManager = sceneManager.selectionManager();
     selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera, selectionManager));
 
-    // What the translate gizmos drive by default (plain vertex-drag editing). ArapTool swaps
-    // this out for an ARAP-solve handler on the same gizmo instances once a precompute succeeds.
+    // What the translation gizmo drives by default. ArapTool swaps this for its solve handler
+    // after a successful precompute.
     lr::DefaultVertexDragHandler defaultHandler(vertexManager, selectionManager, commandManager);
     lr::SceneObjectDragHandler   sceneObjectHandler(commandManager);
-
-    lr::GizmoManager gizmoManager(overlayGeometryPass, viewer.input());
-
-    auto arrowXGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::X, *camera,
-                                                                 viewer.input(), defaultHandler);
-    auto arrowYGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::Y, *camera,
-                                                                 viewer.input(), defaultHandler);
-    auto arrowZGizmo = std::make_unique<lr::TranslateArrowGizmo>(lr::TranslateArrowGizmoAxis::Z, *camera,
-                                                                 viewer.input(), defaultHandler);
-    auto boxGizmo    = std::make_unique<lr::TranslateBoxGizmo>(*camera, viewer.input(), defaultHandler);
-
-    // Raw pointers kept for ArapTool (needs a generic TranslateDragHandlerGizmo list) and the gizmo-
-    // positioning loop below (reads whichever handler is currently wired) — ownership moves to
-    // gizmoManager via addGizmo() just below.
-    lr::TranslateArrowGizmo *arrowX      = arrowXGizmo.get();
-    lr::TranslateArrowGizmo *arrowY      = arrowYGizmo.get();
-    lr::TranslateArrowGizmo *arrowZ      = arrowZGizmo.get();
-    lr::TranslateBoxGizmo   *boxGizmoPtr = boxGizmo.get();
-
-    const std::vector<int> translateGizmoIds = {
-        gizmoManager.addGizmo(std::move(arrowXGizmo)),
-        gizmoManager.addGizmo(std::move(arrowYGizmo)),
-        gizmoManager.addGizmo(std::move(arrowZGizmo)),
-        gizmoManager.addGizmo(std::move(boxGizmo)),
-    };
-    for (int id : translateGizmoIds)
-    {
-        gizmoManager.hideGizmo(id);
-    }
-
-    const std::vector<lr::TranslateDragHandlerGizmo *> dragHandlerGizmos = {arrowX, arrowY, arrowZ, boxGizmoPtr};
+    lr::TranslateGizmo       translateGizmo(defaultHandler);
     lr::TranslateDragHandler *objectTranslateReturnHandler = &defaultHandler;
 
     enum class ObjectTransformTool
@@ -567,7 +522,7 @@ try
     bool                objectTransformWindowOpen = false;
 
     lr::ArapTool arapTool(selectionManager, vertexManager, commandManager, meshComponent.mesh(), defaultHandler,
-                          dragHandlerGizmos);
+                          translateGizmo);
 
     lr::LaplaceBeltramiTool laplaceBeltramiTool(meshComponent.mesh(), sceneManager, vertexManager);
 
@@ -640,19 +595,14 @@ try
                                           replacement->getComponent<lr::TransformComponent>());
     });
 
-    // Single combined LMB handler: gizmos get first refusal on a click (so
-    // dragging an arrow doesn't simultaneously start a box-select), and
-    // selection only sees the event if no gizmo consumed it.
+    // ImGuizmo gets first refusal so manipulating a handle does not also start a box-select.
     viewer.input().onMouseButton([&](int button, int action, bool shift, bool ctrl, bool alt) {
         if (button != GLFW_MOUSE_BUTTON_LEFT || ImGui::GetIO().WantCaptureMouse)
         {
             return;
         }
 
-        const bool wasInteracting = gizmoManager.isInteracting();
-        gizmoManager.mouseButtonCallback(button, action, shift, ctrl, alt);
-
-        if (wasInteracting || gizmoManager.isInteracting() || sceneManager.editorMode() != lr::EditorMode::Edit)
+        if (translateGizmo.capturesMouse() || sceneManager.editorMode() != lr::EditorMode::Edit)
         {
             return;
         }
@@ -966,12 +916,8 @@ try
         physicsWorld.update(dt);
     });
 
-    viewer.onUpdate([&cameraController](float dt, VkExtent2D extent) {
-        cameraController.update(dt);
-    });
-
     viewer.onUpdate([&](float dt, VkExtent2D extent) {
-        gizmoManager.updateCallback(dt, extent, viewer.hasRenderedAtLeastOneFrame(), gizmoReadback, viewer.resources());
+        cameraController.update(dt, translateGizmo.capturesMouse());
     });
 
     // selectionManager's per-frame mouse/drag handling is driven by SceneManager::registerCallbacks()
@@ -1009,25 +955,17 @@ try
                                            sceneObjectHandler.target() != nullptr;
         if (objectTranslateActive)
         {
-            if (&arrowX->dragHandler() != &sceneObjectHandler)
+            if (&translateGizmo.dragHandler() != &sceneObjectHandler)
             {
-                objectTranslateReturnHandler = &arrowX->dragHandler();
+                objectTranslateReturnHandler = &translateGizmo.dragHandler();
             }
-            for (lr::TranslateDragHandlerGizmo *gizmo : dragHandlerGizmos)
-            {
-                gizmo->setDragHandler(sceneObjectHandler);
-            }
-        } else if (&arrowX->dragHandler() == &sceneObjectHandler)
+            translateGizmo.setDragHandler(sceneObjectHandler);
+        } else if (&translateGizmo.dragHandler() == &sceneObjectHandler)
         {
-            for (lr::TranslateDragHandlerGizmo *gizmo : dragHandlerGizmos)
-            {
-                gizmo->setDragHandler(*objectTranslateReturnHandler);
-            }
+            translateGizmo.setDragHandler(*objectTranslateReturnHandler);
         }
 
-        // All 4 gizmos always share the same handler (ArapTool swaps them together), so any one
-        // of them tells us which is currently active.
-        const lr::TranslateDragHandler &activeHandler = arrowX->dragHandler();
+        const lr::TranslateDragHandler &activeHandler = translateGizmo.dragHandler();
         const auto &driven = objectTranslateActive
                                  ? selectionManager.getSelectedIndices()
                                  : static_cast<const lr::VertexDragHandler &>(activeHandler).indices();
@@ -1040,36 +978,18 @@ try
         // leak the plain translate gizmo into View mode, since the default handler's indices are the
         // current selection, which SceneManager clears on leaving Edit — so driven.empty() already
         // covers that case on its own.
-        if ((!objectTranslateActive && driven.empty()) || suppressedByArapMode)
+        const bool gizmoVisible = (objectTranslateActive || !driven.empty()) && !suppressedByArapMode;
+        glm::vec3  centroid(0.0f);
+        if (gizmoVisible)
         {
-            for (int id : translateGizmoIds)
-            {
-                gizmoManager.hideGizmo(id);
-            }
-        } else
-        {
-            const glm::vec3 centroid = objectTranslateActive
-                                           ? glm::vec3(sceneObjectHandler.target()->worldMatrix()[3])
-                                           : worldCentroidOf(driven);
-
-            // Keep the gizmo a constant size on screen (~1/9 screen height) regardless of camera distance.
-            const glm::vec3 camPos = camera->getComponent<lr::TransformComponent>().transform().position();
-            const float     d      = glm::length(camPos - centroid);
-            const float     fov    = glm::radians(camera->getComponent<lr::Camera>().fovYDegrees);
-            const float     len    = 2.0f * d * std::tan(fov * 0.5f) / 5.0f;
-            const float     rad    = len * 0.45f;
-
-            for (size_t i = 0; i < translateGizmoIds.size(); ++i)
-            {
-                gizmoManager.unhideGizmo(translateGizmoIds[i]);
-                lr::Gizmo &gizmo = gizmoManager.getGizmo(translateGizmoIds[i]);
-                gizmo.setPosition(centroid);
-                // First 3 gizmos are the X/Y/Z arrows, the 4th is the screen-plane box.
-                gizmo.setScale(i < 3 ? glm::vec3(rad, len, rad) : glm::vec3(rad * 0.45f, rad * 0.45f, rad * 0.45f));
-            }
+            centroid = objectTranslateActive ? glm::vec3(sceneObjectHandler.target()->worldMatrix()[3])
+                                             : worldCentroidOf(driven);
         }
 
-        overlayGeometryPass.setInstances(gizmoManager.getVisibleGizmoInstances());
+        const lr::Camera &cameraComponent = camera->getComponent<lr::Camera>();
+        translateGizmo.draw(cameraComponent.viewMatrix(), cameraComponent.projectionMatrix(aspect),
+                            cameraComponent.projectionType == lr::ProjectionType::Orthographic, extent, centroid,
+                            gizmoVisible);
         overlayLinesPass.setLines(lr::buildColliderOverlayLines(scene));
     });
 
