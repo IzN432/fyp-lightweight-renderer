@@ -16,11 +16,12 @@ namespace lr
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                                     VkDebugUtilsMessageTypeFlagsEXT /*type*/,
                                                     const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
-                                                    void * /*pUserData*/)
+                                                    void *pUserData)
 {
     if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
     {
         spdlog::error("[Vulkan] {}", pCallbackData->pMessage);
+        static_cast<const VulkanContext *>(pUserData)->notifyValidationError(pCallbackData->pMessage);
     } else if (severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
     {
         spdlog::warn("[Vulkan] {}", pCallbackData->pMessage);
@@ -97,6 +98,15 @@ int VulkanContext::getTransferQueueFamily() const
 }
 
 void VulkanContext::waitIdle() const { checkVk(vkDeviceWaitIdle(m_device), "VulkanContext: vkDeviceWaitIdle"); }
+
+void VulkanContext::waitIdleNoThrow() const noexcept
+{
+    const VkResult result = vkDeviceWaitIdle(m_device);
+    if (result != VK_SUCCESS)
+    {
+        spdlog::error("VulkanContext: vkDeviceWaitIdle failed: {}", vkResultName(result));
+    }
+}
 
 void VulkanContext::setDebugName(VkObjectType type, uint64_t handle, std::string_view name) const
 {
@@ -256,6 +266,7 @@ void VulkanContext::createDebugMessenger()
     ci.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                      VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     ci.pfnUserCallback = debugCallback;
+    ci.pUserData       = this;
 
     auto fn = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
         vkGetInstanceProcAddr(m_instance, "vkCreateDebugUtilsMessengerEXT"));

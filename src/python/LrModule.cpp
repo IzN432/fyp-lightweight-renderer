@@ -8,6 +8,7 @@
 #include "core/framegraph/PassBuilder.hpp"
 #include "core/framegraph/PassContext.hpp"
 #include "core/framegraph/ResourceRegistry.hpp"
+#include "core/framegraph/compiler/ShaderInterface.hpp"
 #include "core/vulkan/CommandBuffer.hpp"
 #include "core/vulkan/ShaderCompiler.hpp"
 
@@ -20,8 +21,19 @@
 #include <nanobind/stl/string_view.h>
 #include <nanobind/stl/vector.h>
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
+#include <crtdbg.h>
+#endif
+
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -53,10 +65,46 @@ using HostArray = nb::ndarray<nb::ro, nb::c_contig, nb::device::cpu>;
 // Python callbacks run inside the C++ frame loop, so an exception unwinding through it would abandon
 // a half-recorded command buffer. Instead the first one is stashed here, the window is asked to close
 // so run() returns after the current frame, and run() re-raises it (with its traceback).
+// Raised from run() for validation-layer errors (Viewer(raise_validation_errors=True), the default).
+class VulkanValidationError : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
 struct CallbackErrorTrap
 {
     Viewer                         *running = nullptr;
     std::optional<nb::python_error> error;
+
+    // Validation errors arrive through a C++ handler, outside any Python call, so they're kept as
+    // text with the Viewer that produced them; run() raises the first one that belongs to it.
+    Viewer                    *validationSource = nullptr;
+    std::optional<std::string> validationError;
+    size_t                     laterValidationErrors = 0;
+
+    void recordValidationError(Viewer &viewer, std::string_view message)
+    {
+        if (validationError && validationSource == &viewer)
+        {
+            ++laterValidationErrors;
+            return;
+        }
+        validationSource      = &viewer;
+        validationError       = std::string(message);
+        laterValidationErrors = 0;
+        if (running == &viewer)
+        {
+            viewer.requestClose();
+        }
+    }
+
+    void clearValidationErrors()
+    {
+        validationSource = nullptr;
+        validationError.reset();
+        laterValidationErrors = 0;
+    }
 
     template <typename F> void guard(F &&callback)
     {
@@ -78,13 +126,32 @@ struct CallbackErrorTrap
         }
     }
 
-    void rethrowPending()
+    // A Python exception from a callback takes priority: it's usually the cause of what followed.
+    void rethrowPending(Viewer &viewer)
     {
+        const bool        hasValidation = validationError && validationSource == &viewer;
+        const std::string validation    = hasValidation ? *validationError : std::string();
+        const size_t      later         = laterValidationErrors;
+        clearValidationErrors();
+
         if (error)
         {
             nb::python_error pending = std::move(*error);
             error.reset();
             throw pending;
+        }
+        if (hasValidation)
+        {
+            std::string message =
+                "Vulkan validation error (the window closed after the frame that caused it):\n" + validation;
+            if (later > 0)
+            {
+                message += "\n(" + std::to_string(later) + " more validation error(s) followed; see the log)";
+            }
+            // The layer can't tell a mistake in the script from one in lr's own Vulkan usage.
+            message += "\nIf your passes and draw calls look correct, this may be a bug in lr itself: please report "
+                       "it with this message and the log.";
+            throw VulkanValidationError(message);
         }
     }
 };
@@ -432,8 +499,24 @@ void bindPasses(nb::module_ &m)
         .def(
             "push_constants",
             [](PassContext &ctx, VkShaderStageFlags stages, HostArray data, uint32_t offset) {
-                ctx.cmd().pushConstants(ctx.pipelineLayout(), stages, data.data(), static_cast<uint32_t>(data.nbytes()),
-                                        offset);
+                const size_t size = data.nbytes();
+                if (size % 4 != 0 || offset % 4 != 0)
+                {
+                    throw std::invalid_argument("push_constants: offset and byte size must be multiples of 4");
+                }
+                if (offset + size > ctx.pushConstantSize())
+                {
+                    throw std::invalid_argument("push_constants: writes bytes [" + std::to_string(offset) + ", " +
+                                                std::to_string(offset + size) +
+                                                ") but the pass declares push_constant_size(" +
+                                                std::to_string(ctx.pushConstantSize()) + ")");
+                }
+                if ((stages & ~ctx.pushConstantStages()) != 0)
+                {
+                    throw std::invalid_argument("push_constants: stages must be among those given to "
+                                                "push_constant_size()");
+                }
+                ctx.cmd().pushConstants(ctx.pipelineLayout(), stages, data.data(), static_cast<uint32_t>(size), offset);
             },
             "stages"_a, "data"_a, "offset"_a = 0,
             "Push `data` (e.g. a float32 numpy array) into the pass's push-constant block.");
@@ -448,40 +531,42 @@ void bindPasses(nb::module_ &m)
         .def(
             "vert_shader",
             [](PassBuilder &b, nb::bytes spirv) -> PassBuilder & {
-                return b.vertShader(bytesToSpirv(spirv));
+                return b.vertShader(bytesToSpirv(spirv), "vertex shader (SPIR-V bytes)");
             },
             "spirv"_a, ref)
         .def(
             "vert_shader",
             [](PassBuilder &b, const fs::path &path) -> PassBuilder & {
                 return isSpirvFile(path) ? b.vertShader(path.string())
-                                         : b.vertShader(lr::compileGlslFile(path, ShaderStage::Vertex));
+                                         : b.vertShader(lr::compileGlslFile(path, ShaderStage::Vertex), path.string());
             },
             "path"_a, ref)
         .def(
             "frag_shader",
             [](PassBuilder &b, nb::bytes spirv) -> PassBuilder & {
-                return b.fragShader(bytesToSpirv(spirv));
+                return b.fragShader(bytesToSpirv(spirv), "fragment shader (SPIR-V bytes)");
             },
             "spirv"_a, ref)
         .def(
             "frag_shader",
             [](PassBuilder &b, const fs::path &path) -> PassBuilder & {
-                return isSpirvFile(path) ? b.fragShader(path.string())
-                                         : b.fragShader(lr::compileGlslFile(path, ShaderStage::Fragment));
+                return isSpirvFile(path)
+                           ? b.fragShader(path.string())
+                           : b.fragShader(lr::compileGlslFile(path, ShaderStage::Fragment), path.string());
             },
             "path"_a, ref)
         .def(
             "compute_shader",
             [](PassBuilder &b, nb::bytes spirv) -> PassBuilder & {
-                return b.computeShader(bytesToSpirv(spirv));
+                return b.computeShader(bytesToSpirv(spirv), "compute shader (SPIR-V bytes)");
             },
             "spirv"_a, ref)
         .def(
             "compute_shader",
             [](PassBuilder &b, const fs::path &path) -> PassBuilder & {
-                return isSpirvFile(path) ? b.computeShader(path.string())
-                                         : b.computeShader(lr::compileGlslFile(path, ShaderStage::Compute));
+                return isSpirvFile(path)
+                           ? b.computeShader(path.string())
+                           : b.computeShader(lr::compileGlslFile(path, ShaderStage::Compute), path.string());
             },
             "path"_a, ref)
         .def("push_constant_size", &PassBuilder::pushConstantSize, "size"_a, "stages"_a, ref)
@@ -588,15 +673,25 @@ void bindViewer(nb::module_ &m)
     nb::class_<Viewer>(m, "Viewer", "Window + Vulkan device + frame graph. Declare passes, then call run().")
         .def(
             "__init__",
-            [](Viewer *self, const std::string &title, int width, int height, bool validation) {
+            [](Viewer *self, const std::string &title, int width, int height, bool validation,
+               bool raiseValidationErrors) {
                 new (self) Viewer(Viewer::Config{
                     .title            = title,
                     .width            = width,
                     .height           = height,
                     .enableValidation = validation,
                 });
+                if (validation && raiseValidationErrors)
+                {
+                    self->onValidationError([self](std::string_view message) {
+                        g_callbackErrors.recordValidationError(*self, message);
+                    });
+                }
             },
-            "title"_a = "lr", "width"_a = 1600, "height"_a = 900, "validation"_a = true)
+            "title"_a = "lr", "width"_a = 1600, "height"_a = 900, "validation"_a = true,
+            "raise_validation_errors"_a = true,
+            "With validation on (the default), a validation-layer error closes the window and run() raises "
+            "VulkanValidationError; pass raise_validation_errors=False to only log them.")
         .def_prop_ro("frame_graph", &Viewer::frameGraph, nb::rv_policy::reference_internal)
         .def_prop_ro("resources", &Viewer::resources, nb::rv_policy::reference_internal)
         .def_prop_ro("swapchain_format", &Viewer::swapchainFormat)
@@ -634,6 +729,12 @@ void bindViewer(nb::module_ &m)
                 {
                     v.addImguiPass();
                 }
+                // Validation errors left over from a different (e.g. already destroyed) Viewer don't belong to this
+                // run.
+                if (g_callbackErrors.validationSource != &v)
+                {
+                    g_callbackErrors.clearValidationErrors();
+                }
                 g_callbackErrors.running = &v;
                 try
                 {
@@ -642,17 +743,140 @@ void bindViewer(nb::module_ &m)
                 {
                     g_callbackErrors.running = nullptr;
                     g_callbackErrors.error.reset();
+                    g_callbackErrors.clearValidationErrors();
                     g_callbackSlots.releaseAll();
                     throw;
                 }
                 g_callbackErrors.running = nullptr;
                 // The window is closed, so no callback can fire again.
                 g_callbackSlots.releaseAll();
-                g_callbackErrors.rethrowPending();
+                g_callbackErrors.rethrowPending(v);
             },
             "Compile the frame graph and run until the window closes. An exception raised in any callback "
             "closes the window and is re-raised here. A Viewer runs once: its callbacks are released on return.")
         .def("close", &Viewer::requestClose, "Ask run() to return after the current frame.");
+}
+
+#if defined(_MSC_VER) && defined(_DEBUG)
+// Debug builds of this module run on the debug C runtime, separate from the interpreter's. By default
+// it reports fatal errors (failed checked-iterator/STL assertions, abort(), std::terminate) in modal
+// dialogs, which freeze a script until someone clicks them away, and its abort() raises SIGABRT in
+// its own signal table, which the interpreter's faulthandler never sees. So: reports go to stderr, and
+// fatal paths end in the *interpreter's* abort(), letting faulthandler print the Python traceback.
+// Release builds share the interpreter's runtime and need none of this.
+
+[[noreturn]] void abortThroughInterpreterRuntime() noexcept
+{
+    std::fflush(stderr);
+    using AbortFn = void (*)();
+    if (HMODULE ucrt = GetModuleHandleW(L"ucrtbase.dll"))
+    {
+        if (const auto hostAbort = reinterpret_cast<AbortFn>(GetProcAddress(ucrt, "abort")))
+        {
+            hostAbort();
+        }
+    }
+    std::abort();
+}
+
+void onTerminate() noexcept
+{
+    std::fputs("lr: std::terminate called", stderr);
+    if (const std::exception_ptr pending = std::current_exception())
+    {
+        try
+        {
+            std::rethrow_exception(pending);
+        } catch (const std::exception &e)
+        {
+            std::fprintf(stderr, " after an uncaught exception: %s", e.what());
+        } catch (...)
+        {
+            std::fputs(" after an uncaught non-std exception", stderr);
+        }
+    }
+    std::fputs("\n", stderr);
+    abortThroughInterpreterRuntime();
+}
+
+void onInvalidParameter(const wchar_t *, const wchar_t *, const wchar_t *, unsigned int, uintptr_t)
+{
+    std::fputs("lr: C runtime check failed (see the report above)\n", stderr);
+    abortThroughInterpreterRuntime();
+}
+
+// Failed assertions and checked-iterator errors are reported here first; after the report, recent
+// MSVC STLs __fastfail without consulting the invalid-parameter handler, which skips faulthandler.
+int onDebugReport(int reportType, char *message, int *returnValue)
+{
+    if (reportType == _CRT_WARN)
+    {
+        return FALSE; // default handling (stderr, per the report mode below)
+    }
+    std::fprintf(stderr, "lr: %s", message ? message : "C runtime assertion failed\n");
+    *returnValue = 0;
+    abortThroughInterpreterRuntime();
+}
+
+void routeDebugRuntimeErrorsToStderr()
+{
+    for (const int reportType : {_CRT_WARN, _CRT_ASSERT, _CRT_ERROR})
+    {
+        _CrtSetReportMode(reportType, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(reportType, _CRTDBG_FILE_STDERR);
+    }
+    _CrtSetReportHook2(_CRT_RPTHOOK_INSTALL, onDebugReport);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+    _set_invalid_parameter_handler(onInvalidParameter);
+    std::set_terminate(onTerminate);
+}
+#endif
+
+// Failure injection for lr's own tests (tests/python/test_failures.py): paths that correct Python
+// code can't reach, such as a C++ exception thrown inside the frame loop or a hard crash. Not API.
+void bindTesting(nb::module_ &m)
+{
+    nb::module_ testing = m.def_submodule("_testing", "Failure injection for lr's own tests. Not part of the API.");
+#if defined(_DEBUG)
+    testing.attr("DEBUG_BUILD") = true;
+#else
+    testing.attr("DEBUG_BUILD") = false;
+#endif
+
+    testing.def(
+        "throw_in_frame_loop",
+        [](Viewer &viewer, int afterFrames) {
+            // A C++ (not Python) callback, so the exception escapes Viewer::run() mid-frame — after
+            // the swapchain image is acquired, with earlier frames possibly still on the GPU.
+            viewer.onLateUpdate([frames = std::make_shared<int>(0), afterFrames](float, VkExtent2D) {
+                if (++*frames > afterFrames)
+                {
+                    throw std::runtime_error("lr._testing: injected C++ failure inside the frame loop");
+                }
+            });
+        },
+        "viewer"_a, "after_frames"_a);
+
+    testing.def(
+        "crash",
+        [](const std::string &kind) {
+            if (kind == "access_violation")
+            {
+                volatile int *null = nullptr;
+                *null              = 1;
+            } else if (kind == "debug_assert")
+            {
+                // Out of range: a checked-iterator assertion in MSVC Debug builds.
+                std::vector<int> empty;
+                volatile size_t  index = 1;
+                (void)empty[index];
+            } else if (kind == "terminate")
+            {
+                std::terminate();
+            }
+            throw std::invalid_argument("crash: unknown kind '" + kind + "'");
+        },
+        "kind"_a);
 }
 
 } // namespace
@@ -661,13 +885,20 @@ NB_MODULE(_lr, m)
 {
     m.doc() = "Python frontend for the lightweight renderer's frame graph.";
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+    routeDebugRuntimeErrorsToStderr();
+#endif
+
     nb::exception<lr::ShaderCompileError>(m, "ShaderCompileError");
+    nb::exception<lr::ShaderInterfaceError>(m, "ShaderInterfaceError", PyExc_RuntimeError);
+    nb::exception<VulkanValidationError>(m, "VulkanValidationError", PyExc_RuntimeError);
 
     bindEnums(m);
     bindValueTypes(m);
     bindResources(m);
     bindPasses(m);
     bindViewer(m);
+    bindTesting(m);
 
     m.def(
         "compile_glsl",

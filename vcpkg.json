@@ -11,6 +11,7 @@
         "mikktspace",
         "libigl",
         "reactphysics3d",
-        "glslang"
+        "glslang",
+        "spirv-reflect"
     ]
 }

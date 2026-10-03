@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 
 #include <array>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -69,8 +70,25 @@ public:
     // Optional features — enabled when the device supports them.
     bool supportsWireframe() const { return m_fillModeNonSolid; }
 
+    // Called with every validation-layer message of error severity (in addition to logging it), on
+    // the thread that made the offending Vulkan call. Only fires when validation is enabled.
+    void setValidationErrorHandler(std::function<void(std::string_view message)> handler)
+    {
+        m_validationErrorHandler = std::move(handler);
+    }
+    // Invoked by the debug messenger.
+    void notifyValidationError(std::string_view message) const
+    {
+        if (m_validationErrorHandler)
+        {
+            m_validationErrorHandler(message);
+        }
+    }
+
     // Sync
     void waitIdle() const;
+    // For destructors and error paths: logs a failure (e.g. VK_ERROR_DEVICE_LOST) instead of throwing.
+    void waitIdleNoThrow() const noexcept;
 
     // Debug — no-op if enableDebugNames is false or the extension isn't loaded.
     void setDebugName(VkObjectType type, uint64_t handle, std::string_view name) const;
@@ -105,6 +123,8 @@ private:
     int     m_transferQueueFamily  = -1;
     bool    m_hasDedicatedTransfer = false;
     bool    m_fillModeNonSolid     = false;
+
+    std::function<void(std::string_view)> m_validationErrorHandler;
 
     VkPhysicalDeviceMemoryProperties   m_memProperties{};
     VkPhysicalDeviceProperties2        m_deviceProperties2{};

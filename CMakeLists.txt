@@ -43,6 +43,7 @@ find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h" REQUIRED)
 find_package(libigl CONFIG REQUIRED)
 find_package(ReactPhysics3D REQUIRED)
 find_package(glslang CONFIG REQUIRED)
+find_package(unofficial-spirv-reflect CONFIG REQUIRED)
 
 # MSVC flags
 add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/EHsc>)
@@ -75,6 +76,7 @@ add_library(lr_core STATIC
     src/core/framegraph/compiler/GraphCompiler.cpp
     src/core/framegraph/compiler/FrameGraphCompiler.cpp
     src/core/framegraph/compiler/VulkanBarrierPlanner.cpp
+    src/core/framegraph/compiler/ShaderInterface.cpp
     src/core/framegraph/ImageReadback.cpp
 
     src/core/pipeline/GraphicsPipeline.cpp
@@ -158,6 +160,7 @@ target_link_libraries(lr_core PRIVATE
     glslang::glslang
     glslang::glslang-default-resource-limits
     glslang::SPIRV
+    unofficial::spirv-reflect
 )
 target_include_directories(lr_core PUBLIC ${TINYGLTF_INCLUDE_DIRS})
 target_compile_definitions(lr_core PUBLIC
@@ -281,10 +284,18 @@ if(LR_BUILD_PYTHON)
             add_test(NAME python.pipeline_state
                 COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/pipeline_state.py"
                     --frames 120)
-            set_tests_properties(python.bindings python.spinning_torus python.pipeline_state PROPERTIES
+            add_test(NAME python.failures
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_failures.py")
+            set_tests_properties(python.bindings python.spinning_torus python.pipeline_state python.failures PROPERTIES
                 ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
                 # nanobind prints leak reports to stderr without failing the process.
                 FAIL_REGULAR_EXPRESSION "nanobind: leaked|\\[error\\]")
+            # Provokes errors on purpose (including one logged validation error), and asserts on each.
+            add_test(NAME python.error_handling
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/error_handling.py")
+            set_tests_properties(python.error_handling PROPERTIES
+                ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
+                FAIL_REGULAR_EXPRESSION "nanobind: leaked")
         endif()
     endif()
 endif()
@@ -333,6 +344,12 @@ if(BUILD_TESTING)
         LR_SHADER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src/core/passes"
     )
     add_test(NAME vulkan.shader_compiler COMMAND shader_compiler_tests)
+
+    add_executable(shader_interface_tests
+        tests/framegraph/ShaderInterfaceTests.cpp
+    )
+    target_link_libraries(shader_interface_tests PRIVATE lr_core)
+    add_test(NAME framegraph.shader_interface COMMAND shader_interface_tests)
 
     add_executable(framegraph_model_tests
         tests/framegraph/GraphModelTests.cpp

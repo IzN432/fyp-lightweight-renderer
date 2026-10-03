@@ -19,10 +19,11 @@ public:
     PassBuilder &vertShader(std::string path);
     PassBuilder &fragShader(std::string path);
     PassBuilder &computeShader(std::string path);
-    // In-memory SPIR-V, e.g. from compileGlslFile() (see core/vulkan/ShaderCompiler.hpp).
-    PassBuilder &vertShader(std::vector<uint32_t> spirv);
-    PassBuilder &fragShader(std::vector<uint32_t> spirv);
-    PassBuilder &computeShader(std::vector<uint32_t> spirv);
+    // In-memory SPIR-V, e.g. from compileGlslFile() (see core/vulkan/ShaderCompiler.hpp); `name` labels it
+    // in error messages.
+    PassBuilder &vertShader(std::vector<uint32_t> spirv, std::string name = {});
+    PassBuilder &fragShader(std::vector<uint32_t> spirv, std::string name = {});
+    PassBuilder &computeShader(std::vector<uint32_t> spirv, std::string name = {});
     PassBuilder &pushConstantSize(uint32_t size, VkShaderStageFlags stages = VK_SHADER_STAGE_COMPUTE_BIT);
     PassBuilder &topology(VkPrimitiveTopology topology);
     PassBuilder &vertexLayout(const GpuMeshLayout &layout);

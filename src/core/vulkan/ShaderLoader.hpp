@@ -17,12 +17,24 @@ struct ShaderCode
 {
     std::string           path;
     std::vector<uint32_t> spirv;
+    // Optional label for in-memory SPIR-V in messages, e.g. the GLSL file it was compiled from.
+    std::string name;
 
     static ShaderCode fromFile(std::string spvPath) { return {.path = std::move(spvPath)}; }
-    static ShaderCode fromSpirv(std::vector<uint32_t> words) { return {.spirv = std::move(words)}; }
+    static ShaderCode fromSpirv(std::vector<uint32_t> words, std::string name = {})
+    {
+        return {.spirv = std::move(words), .name = std::move(name)};
+    }
 
     bool        empty() const { return path.empty() && spirv.empty(); }
-    std::string label() const { return path.empty() ? std::string("<in-memory SPIR-V>") : path; }
+    std::string label() const
+    {
+        if (!name.empty())
+        {
+            return name;
+        }
+        return path.empty() ? std::string("<in-memory SPIR-V>") : path;
+    }
 };
 
 std::vector<uint32_t> readSpirvFile(const std::filesystem::path &spvPath);

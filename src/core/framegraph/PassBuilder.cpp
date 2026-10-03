@@ -33,9 +33,9 @@ PassBuilder &PassBuilder::vertShader(std::string path)
     desc().vertShader = ShaderCode::fromFile(std::move(path));
     return *this;
 }
-PassBuilder &PassBuilder::vertShader(std::vector<uint32_t> spirv)
+PassBuilder &PassBuilder::vertShader(std::vector<uint32_t> spirv, std::string name)
 {
-    desc().vertShader = ShaderCode::fromSpirv(std::move(spirv));
+    desc().vertShader = ShaderCode::fromSpirv(std::move(spirv), std::move(name));
     return *this;
 }
 PassBuilder &PassBuilder::fragShader(std::string path)
@@ -43,9 +43,9 @@ PassBuilder &PassBuilder::fragShader(std::string path)
     desc().fragShader = ShaderCode::fromFile(std::move(path));
     return *this;
 }
-PassBuilder &PassBuilder::fragShader(std::vector<uint32_t> spirv)
+PassBuilder &PassBuilder::fragShader(std::vector<uint32_t> spirv, std::string name)
 {
-    desc().fragShader = ShaderCode::fromSpirv(std::move(spirv));
+    desc().fragShader = ShaderCode::fromSpirv(std::move(spirv), std::move(name));
     return *this;
 }
 PassBuilder &PassBuilder::computeShader(std::string path)
@@ -53,9 +53,9 @@ PassBuilder &PassBuilder::computeShader(std::string path)
     desc().computeShader = ShaderCode::fromFile(std::move(path));
     return *this;
 }
-PassBuilder &PassBuilder::computeShader(std::vector<uint32_t> spirv)
+PassBuilder &PassBuilder::computeShader(std::vector<uint32_t> spirv, std::string name)
 {
-    desc().computeShader = ShaderCode::fromSpirv(std::move(spirv));
+    desc().computeShader = ShaderCode::fromSpirv(std::move(spirv), std::move(name));
     return *this;
 }
 PassBuilder &PassBuilder::pushConstantSize(uint32_t size, VkShaderStageFlags stages)

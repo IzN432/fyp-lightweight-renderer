@@ -1,6 +1,7 @@
 #include "FrameGraphCompiler.hpp"
 
 #include "GraphCompiler.hpp"
+#include "ShaderInterface.hpp"
 #include "VulkanBarrierPlanner.hpp"
 #include "core/framegraph/CompiledFrameGraph.hpp"
 #include "core/framegraph/FrameGraphTopology.hpp"
@@ -20,6 +21,12 @@ namespace lr
 std::unique_ptr<CompiledFrameGraph> FrameGraphCompiler::compile(const FrameGraphDefinition &definition) const
 {
     spdlog::info("FrameGraph: compiling {} passes...", definition.passes().size());
+
+    // Shader/declaration mismatches are reported before any Vulkan object is created from them.
+    for (const PassDesc &pass : definition.passes())
+    {
+        validateShaderInterface(pass);
+    }
 
     // Validate and plan the backend-independent topology before creating any
     // Vulkan objects. The compiled graph then owns this independent snapshot.

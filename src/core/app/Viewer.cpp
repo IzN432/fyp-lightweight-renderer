@@ -55,7 +55,15 @@ Viewer::Viewer(const Config &config)
     m_backbuffer = m_fg->importBackbuffer("swapchain", m_swapchain->getFormat());
 }
 
-Viewer::~Viewer() = default;
+// Frames may still be executing (e.g. when run() exited with an exception, or never returned
+// normally), so wait before any member destroys objects the GPU might be using.
+Viewer::~Viewer()
+{
+    if (m_ctx)
+    {
+        m_ctx->waitIdleNoThrow();
+    }
+}
 
 void Viewer::recreateSwapchain()
 {
@@ -96,6 +104,21 @@ void Viewer::run()
 
     m_fg->compile();
 
+    try
+    {
+        runFrames();
+    } catch (...)
+    {
+        // Leave nothing in flight for whoever handles the exception (e.g. replaces resources).
+        m_ctx->waitIdleNoThrow();
+        throw;
+    }
+
+    m_ctx->waitIdle();
+}
+
+void Viewer::runFrames()
+{
     while (!m_window->shouldClose())
     {
         m_window->pollEvents();
@@ -144,8 +167,6 @@ void Viewer::run()
             recreateSwapchain();
         }
     }
-
-    m_ctx->waitIdle();
 }
 
 } // namespace lr

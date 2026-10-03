@@ -55,7 +55,7 @@ ImguiPass::ImguiPass(const VulkanContext &ctx, const Window &window, const Swapc
 
 ImguiPass::~ImguiPass()
 {
-    m_ctx.waitIdle();
+    m_ctx.waitIdleNoThrow();
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();

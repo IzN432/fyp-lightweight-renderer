@@ -71,6 +71,13 @@ public:
         m_lateUpdateCallbacks.push_back(std::move(cb));
     }
 
+    // Called for each validation-layer error (only when Config::enableValidation). Replaces any
+    // previous handler; see VulkanContext::setValidationErrorHandler.
+    void onValidationError(std::function<void(std::string_view message)> cb)
+    {
+        m_ctx->setValidationErrorHandler(std::move(cb));
+    }
+
     // -----------------------------------------------------------------------
     // Run — compiles the frame graph and enters the event/render loop.
     // Returns when the window is closed.
@@ -90,6 +97,7 @@ public:
     bool hasRenderedAtLeastOneFrame() const { return m_frameExecuted; }
 
 private:
+    void runFrames();
     void recreateSwapchain();
 
     // -----------------------------------------------------------------------

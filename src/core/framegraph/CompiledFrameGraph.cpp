@@ -233,7 +233,7 @@ void CompiledFrameGraph::execute(CommandBuffer &cmd, const ExternalImageBindings
                                     &compiled.descriptorSet, 0, nullptr);
         }
 
-        PassContext context(cmd, compiled.pipelineLayout, compiled.renderingExtent, m_definition, m_registry);
+        PassContext context(cmd, compiled.pipelineLayout, compiled.renderingExtent, m_definition, m_registry, pass);
         if (pass.type == PassType::Compute || pass.type == PassType::Custom)
         {
             if (pass.executeCallback)
