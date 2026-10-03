@@ -558,6 +558,14 @@ try
     const std::vector<lr::TranslateDragHandlerGizmo *> dragHandlerGizmos = {arrowX, arrowY, arrowZ, boxGizmoPtr};
     lr::TranslateDragHandler *objectTranslateReturnHandler = &defaultHandler;
 
+    enum class ObjectTransformTool
+    {
+        None,
+        Translate,
+    };
+    ObjectTransformTool objectTransformTool       = ObjectTransformTool::None;
+    bool                objectTransformWindowOpen = false;
+
     lr::ArapTool arapTool(selectionManager, vertexManager, commandManager, meshComponent.mesh(), defaultHandler,
                           dragHandlerGizmos);
 
@@ -569,6 +577,8 @@ try
     // rebound together so every editing/analysis operation addresses the same object.
     scene.registerSelectionChangedCallback([&](lr::SceneObjectId id) {
         lr::SceneObject &object = scene.getSceneObject(id);
+        objectTransformTool       = ObjectTransformTool::None;
+        objectTransformWindowOpen = true;
         sceneObjectHandler.setTarget(object.hasComponent<lr::TransformComponent>() ? &object : nullptr);
         if (!lr::SceneManager::isEditable(object))
         {
@@ -605,6 +615,8 @@ try
             std::ranges::find(ids, sceneObjectHandler.target()->id()) != ids.end())
         {
             sceneObjectHandler.setTarget(nullptr);
+            objectTransformTool       = ObjectTransformTool::None;
+            objectTransformWindowOpen = false;
         }
 
         lr::SceneObject *replacement = sceneManager.removeSceneObjects(ids);
@@ -885,6 +897,32 @@ try
         ImGui::Begin("Inspector");
         scene.onInspectorGUI();
         ImGui::End();
+
+        if (objectTransformWindowOpen && scene.selectedObject())
+        {
+            ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
+                                           viewport->WorkPos.y + 20.0f),
+                                    ImGuiCond_Appearing, ImVec2(0.5f, 0.0f));
+            ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_Appearing);
+            if (ImGui::Begin("Transform Gizmo", &objectTransformWindowOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                const bool canTranslate = sceneObjectHandler.target() != nullptr;
+                ImGui::BeginDisabled(!canTranslate);
+                if (ImGui::RadioButton("Translate", objectTransformTool == ObjectTransformTool::Translate))
+                {
+                    objectTransformTool = ObjectTransformTool::Translate;
+                }
+                ImGui::EndDisabled();
+
+                ImGui::SameLine();
+                ImGui::BeginDisabled();
+                ImGui::RadioButton("Rotate", false);
+                ImGui::SameLine();
+                ImGui::RadioButton("Scale", false);
+                ImGui::EndDisabled();
+            }
+            ImGui::End();
+        }
     });
 
     // Application-level rendering policy: the C++ demo owns the IBL shaders, resource names,
@@ -966,7 +1004,8 @@ try
         const auto &selected = selectionManager.getSelectedIndices();
         arapTool.onGui(viewProj, extent, selected.empty() ? glm::vec3(0.0f) : worldCentroidOf(selected));
 
-        const bool objectTranslateActive = sceneManager.editorMode() == lr::EditorMode::View &&
+        const bool objectTranslateActive = objectTransformTool == ObjectTransformTool::Translate &&
+                                           sceneManager.editorMode() == lr::EditorMode::View &&
                                            sceneObjectHandler.target() != nullptr;
         if (objectTranslateActive)
         {
