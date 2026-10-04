@@ -25,13 +25,22 @@ class ImguiPass;
 class Viewer
 {
 public:
+    // The frame-graph image name of the window's current swapchain image: draw to fg.image(kBackbufferName).
+    static constexpr const char *kBackbufferName = "swapchain";
+
     struct Config
     {
         std::string title            = "Viewer";
         int         width            = 1600;
         int         height           = 900;
         bool        enableValidation = true;
+        // Without it there is no ImGui context: onGui() throws, and nothing is drawn over the frame.
+        bool enableGui = true;
     };
+
+    // Runs a call that may block on the GPU or the display (fence waits, image acquire, present,
+    // waitIdle). See setBlockingCallWrapper.
+    using BlockingCallWrapper = std::function<void(const std::function<void()> &call)>;
 
     explicit Viewer(const Config &config = {});
     ~Viewer();
@@ -55,8 +64,9 @@ public:
     // -----------------------------------------------------------------------
 
     // Called once per frame between imguiPass.beginFrame() and fg.execute().
-    // Place all ImGui:: calls here.
-    void onGui(std::function<void()> cb) { m_guiCallbacks.push_back(std::move(cb)); }
+    // Place all ImGui:: calls here. Throws if the Viewer was created without a GUI.
+    void onGui(std::function<void()> cb);
+    bool guiEnabled() const { return m_imguiPass != nullptr; }
 
     // Called once per frame after a valid swapchain image is acquired.
     // dt is seconds since the last frame. extent is the current swapchain size.
@@ -81,8 +91,9 @@ public:
     // -----------------------------------------------------------------------
     // Frame loop — run() owns it; step() lets the caller own it instead.
     // -----------------------------------------------------------------------
-    // Explicitly append the terminal ImGui compositing pass. Call this after
-    // declaring all application passes and before run()/step().
+    // Explicitly append the terminal pass, which composites ImGui (if enabled) over the frame and leaves
+    // the window image ready to present, even if no other pass drew to it. Call this after declaring all
+    // application passes and before run()/step().
     void addImguiPass();
     bool hasImguiPass() const { return m_imguiPassAdded; }
 
@@ -98,6 +109,11 @@ public:
     // True until the window has been closed (by the user, or requestClose() and the next step()).
     bool isOpen() const { return !m_finished; }
 
+    // Every call that may block on the GPU or the display goes through `wrapper`, which must run it
+    // exactly once. Embedders use it to step aside while waiting (e.g. Python releases its GIL, so other
+    // threads run while a frame waits for vsync). Nothing that calls back into app code runs inside it.
+    void setBlockingCallWrapper(BlockingCallWrapper wrapper) { m_blockingCall = std::move(wrapper); }
+
     // Ends run() after the current frame finishes (the next step() returns false).
     void requestClose() { m_window->requestClose(); }
 
@@ -109,6 +125,8 @@ public:
 private:
     void renderFrame();
     void recreateSwapchain();
+    // Runs `call` through the blocking-call wrapper (if any) and returns its result by value.
+    template <typename F> auto blocking(F &&call);
 
     // -----------------------------------------------------------------------
     // Systems — constructed in field order, destroyed in reverse
@@ -133,6 +151,7 @@ private:
     bool                                                m_frameExecuted     = false;
     bool                                                m_imguiPassAdded    = false;
     bool                                                m_started           = false;
+    BlockingCallWrapper                                 m_blockingCall;
     bool                                                m_finished          = false;
     uint64_t                                            m_submittedFrames   = 0;
 };

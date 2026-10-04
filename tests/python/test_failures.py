@@ -46,7 +46,7 @@ def make_viewer(iterations=0):
         .vert_shader(lr.compile_glsl_source(VERT, lr.ShaderStage.VERTEX))
         .frag_shader(lr.compile_glsl_source(FRAG, lr.ShaderStage.FRAGMENT))
         .push_constant_size(4, lr.Stage.FRAGMENT)
-        .color_attachment(fg.image("swapchain"), viewer.swapchain_format)
+        .color_attachment(fg.image(lr.SWAPCHAIN), viewer.swapchain_format)
         .execute(draw)
     )
     return viewer

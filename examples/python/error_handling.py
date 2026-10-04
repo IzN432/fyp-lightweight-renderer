@@ -55,7 +55,7 @@ def run_pass(frag_source=FRAG, tint_binding=0, push_size=16, push_data=None, rec
         .frag_shader(lr.compile_glsl_source(frag_source, lr.ShaderStage.FRAGMENT, "tinted.frag"))
         .uniform_buffer(tint_binding, fg.buffer("tint"), lr.Stage.FRAGMENT)
         .push_constant_size(push_size, lr.Stage.FRAGMENT)
-        .color_attachment(fg.image("swapchain"), viewer.swapchain_format)
+        .color_attachment(fg.image(lr.SWAPCHAIN), viewer.swapchain_format)
         .execute(execute)
     )
 

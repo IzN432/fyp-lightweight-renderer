@@ -94,7 +94,7 @@ def main():
         .storage_buffer_read(1, fg.buffer("particles"), lr.Stage.VERTEX)
         .push_constant_size(radius.nbytes, lr.Stage.VERTEX)
         .cull(lr.CullMode.NONE)
-        .color_attachment(fg.image("swapchain"), viewer.swapchain_format, clear_color=(0.05, 0.05, 0.08, 1.0))
+        .color_attachment(fg.image(lr.SWAPCHAIN), viewer.swapchain_format, clear_color=(0.05, 0.05, 0.08, 1.0))
         .depth_attachment(fg.image("depth"))
         .execute(draw)
     )

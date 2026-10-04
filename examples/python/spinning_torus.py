@@ -78,7 +78,7 @@ def main():
         .frag_shader(SHADERS / "post.frag")
         .sampled_image(0, fg.image("torus_color"), lr.Stage.FRAGMENT)
         .push_constant_size(post_params.nbytes, lr.Stage.FRAGMENT)
-        .color_attachment(fg.image("swapchain"), viewer.swapchain_format)
+        .color_attachment(fg.image(lr.SWAPCHAIN), viewer.swapchain_format)
         .execute(draw_post)
     )
 

@@ -904,6 +904,48 @@ uploads it to a dynamic storage buffer, and draws instanced billboards (`shaders
 - **Demo:** `examples/python/step_loop.py`, `shaders/particles.{vert,frag}`.
 - **Tests:** `tests/python/test_bindings.py`, `CMakeLists.txt`.
 
+## Step 9 — remaining items from the original plan ✅
+
+**`lr.SWAPCHAIN`:** the frame-graph name of the window image, backed by `Viewer::kBackbufferName` in
+C++. Examples and tests use it instead of the `"swapchain"` string.
+
+**Optional ImGui: `Viewer(gui=False)` / `Viewer::Config::enableGui`.**
+- **No ImGui context.** `on_gui` raises, and nothing is drawn over the frame.
+- **The terminal pass stays, as a no-op.** It still declares the window image, so the image is
+  presentable even when no pass draws to it, e.g. compute plus readback. Without it the frame graph
+  refuses: `exported image 'swapchain' is not used by any pass`.
+- **Orbit camera:** `SphericalCameraController` called `ImGui::GetIO()` unconditionally. It now checks
+  for a context first; without the check, ImGui asserts.
+
+**The GIL is released while frames wait.**
+- `Viewer::setBlockingCallWrapper()` is a generic hook. Every call that may block on the GPU or the
+  display goes through it: `Renderer::beginFrame` (fence wait and acquire), `endFrame` (submit and
+  present) and the final `waitIdle`.
+- Python installs a wrapper that releases the GIL; callbacks and command recording keep it.
+- `read_buffer` and the `Ibl` precompute also release it while they wait for the GPU.
+
+**Measured** with a deliberately slow compute pass (frames ~20 ms either way): a busy background
+thread gets 96% of wall time with the release, and 21–26% with the GIL held.
+
+**Caveats:**
+- **lr is not thread-safe.** Call it from one thread; other threads may run plain Python and numpy
+  while frames wait.
+- **GIL convoy:** a CPU-bound pure-Python background thread can delay getting the GIL back by up to
+  CPython's switch interval (5 ms) each time the frame needs it. That cost appeared in a probe whose
+  GPU work was short (3 ms frames became 10–17 ms); it is absent when there's no busy thread.
+  `sys.setswitchinterval` reduces it.
+
+**Not done:** `draw_indexed_many`. Indirect draws already cover batched draws.
+
+**Tests:**
+- `test_viewer_without_gui`: `on_gui` raises; a compute-only graph presents cleanly under validation;
+  the orbit camera orbits with injected input.
+- `test_gil_released_while_waiting_for_the_gpu`: background share above 70%.
+
+Each test failed with its feature temporarily removed: GIL held (20%), camera guard removed (ImGui
+assert), no terminal pass (the frame-graph error above). Results: `ctest` 26/26; `renderer.exe` log
+unchanged.
+
 ## Split: `lr` (frame graph) vs `lr.engine` (the engine's renderer) ✅
 
 **Why:** so it's clear which parts are the general-purpose frame graph and which are the engine's own,
@@ -1067,6 +1109,8 @@ input injection, the `assert()` abort routing, `OrbitCamera`); `SphericalCameraC
   when the window closes (`run()` returning, or `step()` returning False) and at interpreter exit
   (`atexit`). As a result, a `Viewer` runs once. Creating a new `Viewer` also releases an earlier one
   that never finished.
+- **Threads:** `lr` is not thread-safe; use it from one thread. The GIL is released only while a
+  frame waits on the GPU or the display (step 9), so other Python threads can run meanwhile.
 - `PassContext` is only valid inside its execute callback; keeping it afterwards is undefined (documented
   in its docstring, not enforced).
 - Push-constant sizes and descriptor bindings are checked against the shader since step 3.

@@ -565,7 +565,12 @@ void bindResources(nb::module_ &m)
         .def(
             "read_buffer",
             [](ResourceRegistry &r, const std::string &name) {
-                auto       *bytes = new std::vector<std::byte>(r.readBuffer(name));
+                std::vector<std::byte> contents;
+                {
+                    nb::gil_scoped_release release; // waits for the GPU
+                    contents = r.readBuffer(name);
+                }
+                auto       *bytes = new std::vector<std::byte>(std::move(contents));
                 nb::capsule owner(bytes, [](void *p) noexcept {
                     delete static_cast<std::vector<std::byte> *>(p);
                 });
@@ -794,7 +799,7 @@ void bindPasses(nb::module_ &m)
     nb::class_<FrameGraph>(m, "FrameGraph")
         .def("add_pass", &FrameGraph::addPass, "name"_a, nb::keep_alive<0, 1>(),
              "Start declaring a pass; passes run in dependency order, derived from the resources they use.")
-        .def("image", &FrameGraph::image, "name"_a, "Handle for a named image (\"swapchain\" is the window).")
+        .def("image", &FrameGraph::image, "name"_a, "Handle for a named image (lr.SWAPCHAIN is the window).")
         .def("buffer", &FrameGraph::buffer, "name"_a, "Handle for a named buffer.")
         .def("compile", &FrameGraph::compile,
              "Build the graph now. Rarely needed: run() compiles, and changes while running (new or modified "
@@ -2241,6 +2246,7 @@ void bindBuildingBlocks(nb::module_ &m)
                                   pass.build(fg);
                               },
                               {"ibl_env"});
+                nb::gil_scoped_release release; // the precompute waits for the GPU
                 graph.executeAndWait({
                     {"ibl_irradiance", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                     {"ibl_prefiltered", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
@@ -2466,7 +2472,7 @@ void bindViewer(nb::module_ &m)
         .def(
             "__init__",
             [](Viewer *self, const std::string &title, int width, int height, bool validation,
-               bool raiseValidationErrors) {
+               bool raiseValidationErrors, bool gui) {
                 if (g_liveViewers > 0)
                 {
                     // An earlier Viewer that never ran (e.g. an exception before run()) is kept alive only
@@ -2486,8 +2492,15 @@ void bindViewer(nb::module_ &m)
                     .width            = width,
                     .height           = height,
                     .enableValidation = validation,
+                    .enableGui        = gui,
                 });
                 self->onUpdate([token = std::make_shared<ViewerToken>()](float, VkExtent2D) {});
+                // Other Python threads run while a frame waits on the GPU or the display (fences, vsync,
+                // present). Nothing inside these calls touches Python; callbacks and recording keep the GIL.
+                self->setBlockingCallWrapper([](const std::function<void()> &call) {
+                    nb::gil_scoped_release release;
+                    call();
+                });
                 if (validation && raiseValidationErrors)
                 {
                     self->onValidationError([self](std::string_view message) {
@@ -2496,9 +2509,11 @@ void bindViewer(nb::module_ &m)
                 }
             },
             "title"_a = "lr", "width"_a = 1600, "height"_a = 900, "validation"_a = true,
-            "raise_validation_errors"_a = true,
+            "raise_validation_errors"_a = true, "gui"_a = true,
             "With validation on (the default), a validation-layer error closes the window and run() raises "
-            "VulkanValidationError; pass raise_validation_errors=False to only log them.")
+            "VulkanValidationError; pass raise_validation_errors=False to only log them. gui=False creates no "
+            "ImGui context: on_gui() raises and nothing is drawn over your frame.")
+        .def_prop_ro("gui", &Viewer::guiEnabled, "Whether this Viewer has ImGui (see the gui argument).")
         .def_prop_ro("frame_graph", &Viewer::frameGraph, nb::rv_policy::reference_internal)
         .def_prop_ro("resources", &Viewer::resources, nb::rv_policy::reference_internal)
         .def_prop_ro("swapchain_format", &Viewer::swapchainFormat)
@@ -2531,6 +2546,10 @@ void bindViewer(nb::module_ &m)
         .def(
             "on_gui",
             [](Viewer &v, nb::callable callback) {
+                if (!v.guiEnabled())
+                {
+                    throw std::logic_error("on_gui: this Viewer was created with gui=False");
+                }
                 v.onGui([slot = g_callbackSlots.hold(std::move(callback))] {
                     if (!*slot)
                     {
@@ -2781,6 +2800,7 @@ NB_MODULE(_lr, m)
         "source"_a, "stage"_a, "name"_a = "<source>", "include_dirs"_a = std::vector<fs::path>{},
         "Compile GLSL source text to SPIR-V bytes.");
 
+    m.attr("SWAPCHAIN")  = Viewer::kBackbufferName;
     m.attr("SHADER_DIR") = lr::paths::shaderDir;
     m.attr("ASSET_DIR")  = lr::paths::assetDir;
 

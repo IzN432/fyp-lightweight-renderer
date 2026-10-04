@@ -34,7 +34,7 @@ def main():
 
     viewer = lr.Viewer(title="lr - interactive (Python)", width=1280, height=720)
     fg, res = viewer.frame_graph, viewer.resources
-    swapchain, depth = fg.image("swapchain"), fg.image("depth")
+    swapchain, depth = fg.image(lr.SWAPCHAIN), fg.image("depth")
 
     vertices, indices = make_torus()
     res.upload_buffer("torus_vertices", vertices, lr.BufferUsage.VERTEX)

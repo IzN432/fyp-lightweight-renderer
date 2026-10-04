@@ -81,7 +81,7 @@ def main():
         .vert_shader(fullscreen)
         .frag_shader(SHADERS / "show.frag")
         .sampled_image(0, busy, lr.Stage.FRAGMENT)
-        .color_attachment(fg.image("swapchain"), viewer.swapchain_format)
+        .color_attachment(fg.image(lr.SWAPCHAIN), viewer.swapchain_format)
         .execute(lambda ctx: ctx.cmd.draw(3))
     )
 

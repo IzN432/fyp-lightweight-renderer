@@ -5,6 +5,7 @@ Run via ctest (`python.bindings`), or directly:
 """
 
 import gc
+import threading
 import time
 from typing import Any
 
@@ -43,7 +44,7 @@ def make_viewer(on_execute=None, configure=None):
         .vert_shader(lr.compile_glsl_source(CLEAR_VERT, lr.ShaderStage.VERTEX, "clear.vert"))
         .frag_shader(lr.compile_glsl_source(CLEAR_FRAG, lr.ShaderStage.FRAGMENT, "clear.frag"))
         .push_constant_size(tint.nbytes, lr.Stage.FRAGMENT)
-        .color_attachment(fg.image("swapchain"), viewer.swapchain_format)
+        .color_attachment(fg.image(lr.SWAPCHAIN), viewer.swapchain_format)
         .execute(execute)
     )
     if configure:
@@ -413,7 +414,7 @@ def test_recompile_before_the_first_frame_runs():
         .vert_shader(vert)
         .frag_shader(lr.compile_glsl_source(SAMPLE_FRAG, lr.ShaderStage.FRAGMENT, "sample.frag"))
         .sampled_image(0, fg.image("offscreen"), lr.Stage.FRAGMENT)
-        .color_attachment(fg.image("swapchain"), viewer.swapchain_format)
+        .color_attachment(fg.image(lr.SWAPCHAIN), viewer.swapchain_format)
         .execute(lambda ctx: ctx.cmd.draw(3))
     )
     frames = [0]
@@ -511,8 +512,114 @@ def test_step_then_run():
     assert len(frames) == 6 and not viewer.is_open
 
 
+SLOW_COMP = """
+#version 450
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) buffer Out { float values[]; } outBuffer;
+layout(push_constant) uniform Work { uint iterations; } work;
+void main()
+{
+    float x = float(gl_GlobalInvocationID.x);
+    for (uint i = 0u; i < work.iterations; ++i) { x = sin(x) * 1.0001 + 0.5; }
+    outBuffer.values[gl_GlobalInvocationID.x] = x;
+}
+"""
+
+
+def test_viewer_without_gui():
+    from lr._lr import _testing
+
+    assert lr.SWAPCHAIN == "swapchain"
+    viewer = lr.Viewer(title="lr binding test", width=320, height=240, gui=False)
+    assert viewer.gui is False
+    try:
+        viewer.on_gui(lambda: None)
+    except RuntimeError as e:
+        assert "gui=False" in str(e), e
+    else:
+        raise AssertionError("expected on_gui to raise without a GUI")
+
+    # Nothing draws to the window (compute only): the window image must still be presentable, or the
+    # validation layer reports it (raised from step()).
+    fg, res = viewer.frame_graph, viewer.resources
+    res.register_static_buffer("out", 4 * 64, lr.BufferUsage.STORAGE)
+    work = np.array([10], np.uint32)
+
+    def compute(ctx):
+        ctx.push_constants(lr.Stage.COMPUTE, work)
+        ctx.cmd.dispatch(1)
+
+    (
+        fg.add_pass("compute")
+        .type(lr.PassType.COMPUTE)
+        .compute_shader(lr.compile_glsl_source(SLOW_COMP, lr.ShaderStage.COMPUTE, "work.comp"))
+        .storage_buffer_write(0, fg.buffer("out"), lr.Stage.COMPUTE)
+        .push_constant_size(work.nbytes, lr.Stage.COMPUTE)
+        .execute(compute)
+    )
+    # The orbit camera reads ImGui's mouse capture; without an ImGui context it must still work.
+    camera = lr.OrbitCamera(viewer)
+    azimuth = camera.azimuth
+    viewer.on_update(lambda dt, extent: camera.update(dt))
+    x, y = viewer.input.mouse_position
+    _testing.inject_mouse_button(viewer, lr.MouseButton.MIDDLE, True)
+    for i in range(4):
+        _testing.inject_mouse_move(viewer, x + 30.0 * (i + 1), y)
+        assert viewer.step()
+    _testing.inject_mouse_button(viewer, lr.MouseButton.MIDDLE, False)
+    assert camera.azimuth != azimuth, "middle-drag should orbit the camera"
+    viewer.close()
+    assert not viewer.step()
+
+
+def test_gil_released_while_waiting_for_the_gpu():
+    # While a frame waits for the GPU, other Python threads must run. A deliberately slow compute pass
+    # makes the waits dominate each frame; a background thread then gets most of the wall-clock time
+    # (about 96%; about 25% when the GIL was held through the waits).
+    viewer = lr.Viewer(title="lr binding test", width=320, height=240, gui=False)
+    fg, res = viewer.frame_graph, viewer.resources
+    res.register_static_buffer("out", 4 * 64 * 64, lr.BufferUsage.STORAGE)
+    work = np.array([2_000_000], np.uint32)
+
+    def compute(ctx):
+        ctx.push_constants(lr.Stage.COMPUTE, work)
+        ctx.cmd.dispatch(64)
+
+    (
+        fg.add_pass("slow")
+        .type(lr.PassType.COMPUTE)
+        .compute_shader(lr.compile_glsl_source(SLOW_COMP, lr.ShaderStage.COMPUTE, "slow.comp"))
+        .storage_buffer_write(0, fg.buffer("out"), lr.Stage.COMPUTE)
+        .push_constant_size(work.nbytes, lr.Stage.COMPUTE)
+        .execute(compute)
+    )
+    assert viewer.step()  # compile outside the measurement
+
+    stop, cpu = threading.Event(), {}
+
+    def busy():
+        while not stop.is_set():
+            pass
+        cpu["seconds"] = time.thread_time()
+
+    thread = threading.Thread(target=busy)
+    start = time.perf_counter()
+    thread.start()
+    for _ in range(20):
+        assert viewer.step()
+    wall = time.perf_counter() - start
+    stop.set()
+    thread.join()
+    viewer.close()
+    viewer.step()
+    share = cpu["seconds"] / wall
+    assert share > 0.7, f"background thread got only {share:.0%} of the time while frames waited on the GPU"
+
+
 def main():
     tests = [
+        test_viewer_without_gui,
+        test_gil_released_while_waiting_for_the_gpu,
         test_step_lets_python_own_the_loop,
         test_cpu_writes_between_steps_reach_that_frame,
         test_step_reraises_callback_errors,

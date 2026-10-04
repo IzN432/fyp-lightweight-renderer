@@ -144,7 +144,7 @@ def main():
         .sampled_image_array(1, fg.image("base_colors"), len(materials), lr.Stage.FRAGMENT)
         .push_constant_size(push.nbytes, lr.Stage.VERTEX | lr.Stage.FRAGMENT)
         .cull(lr.CullMode.NONE)  # imported meshes aren't always closed or consistently wound
-        .color_attachment(fg.image("swapchain"), viewer.swapchain_format, clear_color=(0.08, 0.08, 0.1, 1.0))
+        .color_attachment(fg.image(lr.SWAPCHAIN), viewer.swapchain_format, clear_color=(0.08, 0.08, 0.1, 1.0))
         .depth_attachment(fg.image("depth"))
         .execute(draw_scene)
     )

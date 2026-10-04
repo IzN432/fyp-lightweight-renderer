@@ -26,7 +26,9 @@ void SphericalCameraController::update(float dt, bool gizmoCapturesPrimaryMouse)
         m_orbitElevation = 0.0f;
     }
 
-    if (!ImGui::GetIO().WantCaptureMouse || gizmoCapturesPrimaryMouse)
+    // No ImGui context means no UI to keep the mouse from (e.g. a Viewer without a GUI).
+    const bool uiHasMouse = ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse;
+    if (!uiHasMouse || gizmoCapturesPrimaryMouse)
     {
         if (mmb && shift)
         {

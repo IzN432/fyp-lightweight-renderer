@@ -156,7 +156,7 @@ def main():
         .index_buffer(fg.buffer("cube_indices"))
         .indirect_buffer(draw_args)
         .uniform_buffer(0, fg.buffer("camera"), lr.Stage.VERTEX)
-        .color_attachment(fg.image("swapchain"), viewer.swapchain_format, clear_color=(0.05, 0.05, 0.07, 1.0))
+        .color_attachment(fg.image(lr.SWAPCHAIN), viewer.swapchain_format, clear_color=(0.05, 0.05, 0.07, 1.0))
         .depth_attachment(fg.image("depth"))
         .execute(lambda ctx: ctx.draw_indexed_indirect(draw_args))
     )

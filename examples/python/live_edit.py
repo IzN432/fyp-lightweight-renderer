@@ -43,7 +43,7 @@ def main():
 
     viewer = lr.Viewer(title="lr - live editing (Python)", width=1280, height=720)
     fg, res = viewer.frame_graph, viewer.resources
-    swapchain, trail, style = fg.image("swapchain"), fg.buffer("trail"), fg.buffer("style")
+    swapchain, trail, style = fg.image(lr.SWAPCHAIN), fg.buffer("trail"), fg.buffer("style")
 
     state: dict[str, Any] = {"frames": 0, "points": spiral(2), "compiles": {}}
     res.upload_buffer("trail", state["points"], lr.BufferUsage.VERTEX)

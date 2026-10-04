@@ -472,7 +472,7 @@ class FrameGraph:
         ...
 
     def image(self, name: str) -> ImageHandle:
-        """Handle for a named image. Use \"swapchain\" for the window's back buffer."""
+        """Handle for a named image. Use lr.SWAPCHAIN for the window's back buffer."""
         ...
 
     def buffer(self, name: str) -> BufferHandle:
@@ -625,9 +625,16 @@ class Viewer:
         height: int = 900,
         validation: bool = True,
         raise_validation_errors: bool = True,
+        gui: bool = True,
     ) -> None:
         """With validation on (the default), a validation-layer error closes the window and run() raises
-        VulkanValidationError; pass raise_validation_errors=False to only log them."""
+        VulkanValidationError; pass raise_validation_errors=False to only log them. gui=False creates no
+        ImGui context: on_gui() raises and nothing is drawn over your frame."""
+        ...
+
+    @property
+    def gui(self) -> bool:
+        """Whether this Viewer has ImGui (see the gui argument)."""
         ...
 
     @property
@@ -774,5 +781,7 @@ def compile_glsl_source(
     """Compile GLSL source text to SPIR-V bytes."""
     ...
 
+SWAPCHAIN: str
+"""Frame-graph name of the window's current image: draw to fg.image(lr.SWAPCHAIN) to show something."""
 SHADER_DIR: pathlib.Path
 ASSET_DIR: pathlib.Path
