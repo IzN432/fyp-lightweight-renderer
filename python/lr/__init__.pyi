@@ -614,7 +614,8 @@ class Input:
     def alt(self) -> bool: ...
 
 class Viewer:
-    """Window + Vulkan device + frame graph. Declare passes, then call run()."""
+    """Window + Vulkan device + frame graph. Declare passes, then call run(), or call step() in your own
+    loop."""
 
     def __init__(
         self,
@@ -655,11 +656,26 @@ class Viewer:
         ...
 
     def run(self) -> None:
-        """Compile the frame graph and run until the window closes."""
+        """Compile the frame graph and run frames until the window closes. An exception raised in any
+        callback closes the window and is re-raised here. Once the window has closed, its callbacks are
+        released: a Viewer runs once."""
+        ...
+
+    def step(self) -> bool:
+        """Render one frame (compiling the frame graph on the first call) and return True, or False once
+        the window has closed: `while viewer.step(): ...` lets your code own the loop. The window only
+        responds while it is being stepped. Callbacks run as with run(); an exception raised in one
+        closes the window and is re-raised from this step. Once the window has closed, its callbacks
+        are released."""
+        ...
+
+    @property
+    def is_open(self) -> bool:
+        """True until the window has closed."""
         ...
 
     def close(self) -> None:
-        """Ask run() to return after the current frame."""
+        """Close the window after the current frame (run() returns, step() returns False)."""
         ...
 
 class OrbitCamera:

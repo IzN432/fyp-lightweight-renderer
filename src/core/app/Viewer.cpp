@@ -96,83 +96,104 @@ void Viewer::addImguiPass()
 
 void Viewer::run()
 {
-    if (!m_imguiPassAdded)
+    while (step())
     {
-        throw std::logic_error("Viewer: addImguiPass() must be called before run()");
     }
-
-    m_fg->compile();
-
-    try
-    {
-        runFrames();
-    } catch (...)
-    {
-        // Leave nothing in flight for whoever handles the exception (e.g. replaces resources).
-        m_ctx->waitIdleNoThrow();
-        throw;
-    }
-
-    m_ctx->waitIdle();
 }
 
-void Viewer::runFrames()
+bool Viewer::step()
 {
-    while (!m_window->shouldClose())
+    if (m_finished)
     {
-        m_window->pollEvents();
-        m_input.update();
-
-        if (m_window->wasResized())
+        return false;
+    }
+    if (!m_started)
+    {
+        if (!m_imguiPassAdded)
         {
-            recreateSwapchain();
-            m_window->clearResizedFlag();
+            throw std::logic_error("Viewer: addImguiPass() must be called before run()/step()");
         }
+        m_fg->compile();
+        m_lastFrameTime = glfwGetTime(); // the first frame's dt starts here, not at GLFW init
+        m_started       = true;
+    }
 
-        m_imguiPass->beginFrame();
-        for (auto &cb : m_guiCallbacks)
+    if (!m_window->shouldClose())
+    {
+        try
         {
-            cb();
-        }
-
-        auto [cmd, imageIndex] = m_renderer->beginFrame(*m_swapchain);
-        if (imageIndex == UINT32_MAX)
+            renderFrame();
+        } catch (...)
         {
-            recreateSwapchain();
-            continue;
+            // Leave nothing in flight for whoever handles the exception (e.g. replaces resources).
+            m_ctx->waitIdleNoThrow();
+            throw;
         }
+    }
 
-        m_currentImageIndex = imageIndex;
+    if (m_window->shouldClose())
+    {
+        m_finished = true;
+        m_ctx->waitIdle();
+        return false;
+    }
+    return true;
+}
 
-        // beginFrame() waited for this frame slot's previous submission, so every frame up to
-        // `frame - framesInFlight` has finished on the GPU.
-        const uint64_t frame          = m_submittedFrames + 1;
-        const uint64_t framesInFlight = m_renderer->framesInFlight();
-        m_resources->beginFrame(frame, frame > framesInFlight ? frame - framesInFlight : 0);
+void Viewer::renderFrame()
+{
+    m_window->pollEvents();
+    m_input.update();
 
-        const double now = glfwGetTime();
-        const float  dt  = static_cast<float>(now - m_lastFrameTime);
-        m_lastFrameTime  = now;
-        for (auto &cb : m_updateCallbacks)
-        {
-            cb(dt, m_swapchain->getExtent());
-        }
-        for (auto &cb : m_lateUpdateCallbacks)
-        {
-            cb(dt, m_swapchain->getExtent());
-        }
+    if (m_window->wasResized())
+    {
+        recreateSwapchain();
+        m_window->clearResizedFlag();
+    }
 
-        ExternalImageBindings externalImages;
-        externalImages.bind(m_backbuffer, m_swapchain->getImage(imageIndex), m_swapchain->getImageView(imageIndex));
-        m_fg->execute(cmd, externalImages);
-        m_frameExecuted = true;
+    m_imguiPass->beginFrame();
+    for (auto &cb : m_guiCallbacks)
+    {
+        cb();
+    }
 
-        const bool presented = m_renderer->endFrame(*m_swapchain, imageIndex);
-        ++m_submittedFrames;
-        if (!presented)
-        {
-            recreateSwapchain();
-        }
+    auto [cmd, imageIndex] = m_renderer->beginFrame(*m_swapchain);
+    if (imageIndex == UINT32_MAX)
+    {
+        recreateSwapchain();
+        return;
+    }
+
+    m_currentImageIndex = imageIndex;
+
+    // beginFrame() waited for this frame slot's previous submission, so every frame up to
+    // `frame - framesInFlight` has finished on the GPU.
+    const uint64_t frame          = m_submittedFrames + 1;
+    const uint64_t framesInFlight = m_renderer->framesInFlight();
+    m_resources->beginFrame(frame, frame > framesInFlight ? frame - framesInFlight : 0);
+
+    const double now = glfwGetTime();
+    const float  dt  = static_cast<float>(now - m_lastFrameTime);
+    m_lastFrameTime  = now;
+    for (auto &cb : m_updateCallbacks)
+    {
+        cb(dt, m_swapchain->getExtent());
+    }
+    for (auto &cb : m_lateUpdateCallbacks)
+    {
+        cb(dt, m_swapchain->getExtent());
+    }
+
+    ExternalImageBindings externalImages;
+    externalImages.bind(m_backbuffer, m_swapchain->getImage(imageIndex), m_swapchain->getImageView(imageIndex));
+    m_fg->execute(cmd, externalImages);
+    m_frameExecuted = true;
+
+    const bool presented = m_renderer->endFrame(*m_swapchain, imageIndex);
+    ++m_submittedFrames;
+    if (!presented)
+    {
+        recreateSwapchain();
     }
 }
 

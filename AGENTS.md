@@ -845,6 +845,65 @@ aim while running, and samples both the bird and the quad. It fails with either 
   `FrameGraphCompiler` (layout commit).
 - **Tests:** `tests/python/test_blocks.py`, `test_scene.py`.
 
+## Step 8 — your own frame loop: `viewer.step()` ✅
+
+**Goal:** Python owns the loop when it wants to, e.g. for simulations, scripted captures or
+notebooks:
+```python
+while viewer.step():   # window events + one rendered frame; False once the window has closed
+    simulate(dt)       # plain Python between frames
+    res.update_buffer(...)
+```
+
+**Demo:**
+```
+PYTHONPATH=build/python python examples/python/step_loop.py
+```
+[step_loop.py](examples/python/step_loop.py) simulates a 6,000-particle fountain in numpy between steps,
+uploads it to a dynamic storage buffer, and draws instanced billboards (`shaders/particles.{vert,frag}`).
+- Callbacks still run inside each step: the orbit camera via `on_update`, and an ImGui panel tuning
+  gravity, spread and bounce.
+- Space pauses the simulation.
+- After the loop it prints a summary, since the code after the loop is the script's own.
+- **Timings:** about 0.13 ms to simulate and 0.4 ms per frame.
+
+**C++:**
+- `Viewer::step()`: compiles on the first call, renders one frame, and returns false once the window
+  has closed, after waiting for the GPU; later calls do nothing.
+- `run()` is now `while (step()) {}`.
+- `isOpen()`.
+- **`dt` fix:** the first frame's `dt` used to count from GLFW initialisation, so it included all setup
+  time (over 2 s in a test). It now counts from the first frame.
+
+**Python:**
+- `Viewer.step() -> bool` and `Viewer.is_open`. `run()` and `step()` share `driveFrames()`:
+  - callback exceptions and validation errors raised during a frame are re-raised from that
+    `step()`, which closes the window;
+  - callbacks and held objects are released once the window has closed.
+- Mixing works: step a few frames, then `run()` to continue.
+
+**Results:**
+- `ctest` 26/26. New tests:
+  - **`python.bindings`** gained 4:
+    - frames run in your own loop, and closing ends it;
+    - a CPU write made before each step reaches exactly that frame (GPU readback over 7 frames);
+    - callback errors are re-raised from the step where they happened;
+    - `step()` then `run()` continues the same loop.
+  - **`python.step_loop`:** the demo, for 200 frames.
+- **The tests can fail:** each of three temporary breaks failed its intended test, and all were
+  reverted.
+  1. Remove the `dt` fix.
+  2. `step()` keeps returning true after the window closes.
+  3. `step()` stops re-raising callback errors.
+- **`renderer.exe` log:** unchanged.
+
+**Files:**
+- **C++:** `core/app/Viewer.{hpp,cpp}`.
+- **Bindings:** `LrModule.cpp`.
+- **Stubs:** `python/lr/__init__.pyi`.
+- **Demo:** `examples/python/step_loop.py`, `shaders/particles.{vert,frag}`.
+- **Tests:** `tests/python/test_bindings.py`, `CMakeLists.txt`.
+
 ## Step 6 — interaction from Python ☑️ (committed deb6235)
 
 **Goal:** a Python renderer can be interactive:
@@ -970,7 +1029,9 @@ input injection, the `assert()` abort routing, `OrbitCamera`); `SphericalCameraC
   This avoids unwinding through a half-recorded command buffer.
 - **Callback lifetimes:** callbacks usually capture the `Viewer`, which creates a reference cycle
   through C++ that Python's GC can't see. The callables are therefore held in slots that are released
-  when `run()` returns and at interpreter exit (`atexit`). As a result, a `Viewer` can only `run()` once.
+  when the window closes (`run()` returning, or `step()` returning False) and at interpreter exit
+  (`atexit`). As a result, a `Viewer` runs once. Creating a new `Viewer` also releases an earlier one
+  that never finished.
 - `PassContext` is only valid inside its execute callback; keeping it afterwards is undefined (documented
   in its docstring, not enforced).
 - Push-constant sizes and descriptor bindings are checked against the shader since step 3.

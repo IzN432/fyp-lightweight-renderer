@@ -79,16 +79,26 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // Run — compiles the frame graph and enters the event/render loop.
-    // Returns when the window is closed.
+    // Frame loop — run() owns it; step() lets the caller own it instead.
     // -----------------------------------------------------------------------
     // Explicitly append the terminal ImGui compositing pass. Call this after
-    // declaring all application passes and before run().
+    // declaring all application passes and before run()/step().
     void addImguiPass();
     bool hasImguiPass() const { return m_imguiPassAdded; }
+
+    // Runs frames until the window is closed: `while (step()) {}`.
     void run();
 
-    // Ends run() after the current frame finishes.
+    // Processes window events and renders one frame (the first call compiles the frame graph first).
+    // Returns false once the window has been closed, after waiting for the GPU to finish; from then
+    // on it does nothing and keeps returning false. The window only responds while it is being
+    // stepped. If a frame throws, the GPU is left idle before the exception propagates.
+    bool step();
+
+    // True until the window has been closed (by the user, or requestClose() and the next step()).
+    bool isOpen() const { return !m_finished; }
+
+    // Ends run() after the current frame finishes (the next step() returns false).
     void requestClose() { m_window->requestClose(); }
 
     // True once at least one frame has been fully executed since the last
@@ -97,7 +107,7 @@ public:
     bool hasRenderedAtLeastOneFrame() const { return m_frameExecuted; }
 
 private:
-    void runFrames();
+    void renderFrame();
     void recreateSwapchain();
 
     // -----------------------------------------------------------------------
@@ -122,6 +132,8 @@ private:
     double                                              m_lastFrameTime     = 0.0;
     bool                                                m_frameExecuted     = false;
     bool                                                m_imguiPassAdded    = false;
+    bool                                                m_started           = false;
+    bool                                                m_finished          = false;
     uint64_t                                            m_submittedFrames   = 0;
 };
 

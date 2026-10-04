@@ -2407,9 +2407,62 @@ void bindBuildingBlocks(nb::module_ &m)
             "to write (default: the window).");
 }
 
+enum class FrameCount
+{
+    One,
+    UntilClosed,
+};
+
+// Runs one frame (step) or frames until the window closes (run), with the Python-side bookkeeping
+// around them: callback errors are trapped during the frames and re-raised afterwards, and once the
+// window has closed nothing can call into Python again, so the held callbacks are released. Returns
+// whether the window is still open.
+bool driveFrames(Viewer &v, FrameCount count)
+{
+    // The ImGui pass composites onto the swapchain, so it must come after every user pass.
+    if (!v.hasImguiPass())
+    {
+        v.addImguiPass();
+    }
+    // Validation errors left over from a different (e.g. already destroyed) Viewer don't belong to it.
+    if (g_callbackErrors.validationSource != &v)
+    {
+        g_callbackErrors.clearValidationErrors();
+    }
+    g_callbackErrors.running = &v;
+    bool open                = false;
+    try
+    {
+        if (count == FrameCount::One)
+        {
+            open = v.step();
+        } else
+        {
+            v.run();
+        }
+    } catch (...)
+    {
+        g_callbackErrors.running = nullptr;
+        g_callbackErrors.error.reset();
+        g_callbackErrors.clearValidationErrors();
+        g_callbackSlots.releaseAll();
+        throw;
+    }
+    g_callbackErrors.running = nullptr;
+    if (!open)
+    {
+        g_callbackSlots.releaseAll();
+    }
+    // A trapped error asked the window to close, so the frame that raised it was the last.
+    g_callbackErrors.rethrowPending(v);
+    return open;
+}
+
 void bindViewer(nb::module_ &m)
 {
-    nb::class_<Viewer>(m, "Viewer", "Window + Vulkan device + frame graph. Declare passes, then call run().")
+    nb::class_<Viewer>(m, "Viewer",
+                       "Window + Vulkan device + frame graph. Declare passes, then call run(), or call step() "
+                       "in your own loop.")
         .def(
             "__init__",
             [](Viewer *self, const std::string &title, int width, int height, bool validation,
@@ -2503,37 +2556,24 @@ void bindViewer(nb::module_ &m)
         .def(
             "run",
             [](Viewer &v) {
-                // The ImGui pass composites onto the swapchain, so it must come after every user pass.
-                if (!v.hasImguiPass())
-                {
-                    v.addImguiPass();
-                }
-                // Validation errors left over from a different (e.g. already destroyed) Viewer don't belong to this
-                // run.
-                if (g_callbackErrors.validationSource != &v)
-                {
-                    g_callbackErrors.clearValidationErrors();
-                }
-                g_callbackErrors.running = &v;
-                try
-                {
-                    v.run();
-                } catch (...)
-                {
-                    g_callbackErrors.running = nullptr;
-                    g_callbackErrors.error.reset();
-                    g_callbackErrors.clearValidationErrors();
-                    g_callbackSlots.releaseAll();
-                    throw;
-                }
-                g_callbackErrors.running = nullptr;
-                // The window is closed, so no callback can fire again.
-                g_callbackSlots.releaseAll();
-                g_callbackErrors.rethrowPending(v);
+                driveFrames(v, FrameCount::UntilClosed);
             },
-            "Compile the frame graph and run until the window closes. An exception raised in any callback "
-            "closes the window and is re-raised here. A Viewer runs once: its callbacks are released on return.")
-        .def("close", &Viewer::requestClose, "Ask run() to return after the current frame.");
+            "Compile the frame graph and run frames until the window closes. An exception raised in any "
+            "callback closes the window and is re-raised here. Once the window has closed, its callbacks are "
+            "released: a Viewer runs once.")
+        .def(
+            "step",
+            [](Viewer &v) {
+                return driveFrames(v, FrameCount::One);
+            },
+            "Render one frame (compiling the frame graph on the first call) and return True, or False once the "
+            "window has closed: `while viewer.step(): ...` lets your code own the loop. The window only responds "
+            "while it is being stepped. Callbacks run as with run(); an exception raised in one closes the window "
+            "and is re-raised from this step. Once the window has closed, its callbacks are released.")
+        .def_prop_ro("is_open", &Viewer::isOpen, "True until the window has closed.")
+        .def("close", &Viewer::requestClose,
+             "Close the window after the current frame (run() returns, step() "
+             "returns False).");
 }
 
 #if defined(_MSC_VER) && defined(_DEBUG)

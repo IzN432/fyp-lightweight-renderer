@@ -339,7 +339,11 @@ if(LR_BUILD_PYTHON)
             add_test(NAME python.light_editor
                 COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/light_editor.py"
                     --scripted)
-            set_tests_properties(python.blocks python.deferred_blocks python.light_editor PROPERTIES
+            # A frame loop owned by the script: viewer.step() with a numpy simulation between frames.
+            add_test(NAME python.step_loop
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/step_loop.py"
+                    --frames 200)
+            set_tests_properties(python.blocks python.deferred_blocks python.light_editor python.step_loop PROPERTIES
                 ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
                 FAIL_REGULAR_EXPRESSION "nanobind: leaked|\\[error\\]")
 

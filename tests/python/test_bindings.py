@@ -5,6 +5,7 @@ Run via ctest (`python.bindings`), or directly:
 """
 
 import gc
+import time
 from typing import Any
 
 import numpy as np
@@ -429,8 +430,93 @@ def test_recompile_before_the_first_frame_runs():
     assert fg.compile_count == 2, fg.compile_count
 
 
+COPY_COMP = """
+#version 450
+layout(local_size_x = 1) in;
+layout(set = 0, binding = 0) uniform Value { vec4 value; } source;
+layout(set = 0, binding = 1) buffer Copy { vec4 value; } copy;
+void main() { copy.value = source.value; }
+"""
+
+
+def test_step_lets_python_own_the_loop():
+    viewer = make_viewer()
+    dts = []
+    viewer.on_update(lambda dt, extent: dts.append(dt))
+    time.sleep(1.2)  # setup time before the loop starts must not count as the first frame
+    for _ in range(5):
+        assert viewer.step() and viewer.is_open
+    assert len(dts) == 5 and viewer.frame_graph.compile_count == 1
+    assert 0.0 < dts[0] < 1.0, f"the first frame's dt should start at the first step, not at startup: {dts[0]}"
+    viewer.close()
+    assert viewer.step() is False and not viewer.is_open
+    assert viewer.step() is False and len(dts) == 5, "a closed viewer renders nothing more"
+
+
+def test_cpu_writes_between_steps_reach_that_frame():
+    # Work done between step() calls is ordinary Python code; each frame must see what was written before it.
+    viewer = lr.Viewer(title="lr binding test", width=320, height=240)
+    fg, res = viewer.frame_graph, viewer.resources
+    res.register_dynamic_buffer("value", 16, lr.BufferUsage.UNIFORM)
+    res.register_static_buffer("copy", 16, lr.BufferUsage.STORAGE)
+    (
+        fg.add_pass("copy")
+        .type(lr.PassType.COMPUTE)
+        .compute_shader(lr.compile_glsl_source(COPY_COMP, lr.ShaderStage.COMPUTE, "copy.comp"))
+        .uniform_buffer(0, fg.buffer("value"), lr.Stage.COMPUTE)
+        .storage_buffer_write(1, fg.buffer("copy"), lr.Stage.COMPUTE)
+        .execute(lambda ctx: ctx.cmd.dispatch(1))
+    )
+    for frame in range(1, 8):
+        res.update_buffer("value", np.full(4, frame, dtype=np.float32))
+        assert viewer.step()
+        copied = res.read_buffer("copy").view(np.float32)
+        assert np.all(copied == frame), (frame, copied)
+    viewer.close()
+    assert not viewer.step()
+
+
+def test_step_reraises_callback_errors():
+    viewer = make_viewer()
+    frames = []
+
+    def update(dt, extent):
+        frames.append(dt)
+        if len(frames) == 3:
+            raise ValueError("boom from on_update")
+
+    viewer.on_update(update)
+    assert viewer.step() and viewer.step()
+    try:
+        viewer.step()
+    except ValueError as e:
+        assert "boom" in str(e)
+    else:
+        raise AssertionError("expected the callback's ValueError from the third step")
+    assert not viewer.is_open and viewer.step() is False and len(frames) == 3
+
+
+def test_step_then_run():
+    viewer = make_viewer()
+    frames = []
+
+    def update(dt, extent):
+        frames.append(dt)
+        if len(frames) == 6:
+            viewer.close()
+
+    viewer.on_update(update)
+    assert viewer.step() and viewer.step()
+    viewer.run()  # continues the same frame loop until the window closes
+    assert len(frames) == 6 and not viewer.is_open
+
+
 def main():
     tests = [
+        test_step_lets_python_own_the_loop,
+        test_cpu_writes_between_steps_reach_that_frame,
+        test_step_reraises_callback_errors,
+        test_step_then_run,
         test_recompile_before_the_first_frame_runs,
         test_compile_errors_raise_with_location,
         test_runs_frames_and_closes,
