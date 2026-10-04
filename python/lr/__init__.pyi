@@ -760,6 +760,10 @@ class Light:
     def area_size(self) -> tuple[float, float] | None:
         """Area lights only: (width, height) in world units."""
         ...
+    @property
+    def two_sided(self) -> bool | None:
+        """Area lights only: emits from both faces (True) or only along its forward axis."""
+        ...
 
 class Material:
     """A material from the scene's material store. The loaders use the engine's names: parameters
@@ -875,6 +879,19 @@ class SceneObject:
     def light(self) -> Light | None:
         """The object's light, or None."""
         ...
+    def set_light(
+        self,
+        type: str | None = None,
+        color: Sequence[float] | None = None,
+        intensity: float | None = None,
+        size: Sequence[float] | None = None,
+        inner_cone_degrees: float | None = None,
+        outer_cone_degrees: float | None = None,
+        two_sided: bool | None = None,
+    ) -> None:
+        """Change this object's light; parameters left as None keep their current values. Move or turn
+        it with position/rotation. A SceneGpu showing the scene picks the change up on the next frame."""
+        ...
     @property
     def animator(self) -> Animator | None:
         """The object's animation player, or None."""
@@ -915,12 +932,18 @@ class Scene:
         size: Sequence[float] = (1.0, 1.0),
         inner_cone_degrees: float = 15.0,
         outer_cone_degrees: float = 30.0,
+        two_sided: bool = True,
         name: str = "Light",
     ) -> SceneObject:
         """Add a light object: 'point', 'spot', 'area', 'directional' or 'image' (environment lighting
         from an Ibl, scaled by color * intensity). It shines along its rotation's forward axis (spot,
-        area, directional); rotation is a quaternion (x, y, z, w); size is an area light's (width,
-        height). Add lights before creating a SceneGpu for this scene."""
+        area, directional; area lights shine from both faces unless two_sided=False); rotation is a
+        quaternion (x, y, z, w); size is an area light's (width, height). A SceneGpu showing this scene picks it up on the next frame."""
+        ...
+    def remove(self, object: SceneObject) -> None:
+        """Remove an object and its descendants from the scene. A SceneGpu showing this scene stops
+        drawing them, and removed lights stop lighting it, from the next frame. The Python objects
+        remain but no longer appear in objects/roots."""
         ...
 
 def load_scene(path: str | os.PathLike[str]) -> Scene:
@@ -986,7 +1009,8 @@ class SceneGpu:
     def __init__(self, viewer: Viewer, scene: Scene, camera: OrbitCamera) -> None:
         """Upload `scene` (its meshes and lights as they are now) and keep it in sync with `camera`.
         Every light also gets a quad mesh, drawn with the scene (bright for area lights, invisible
-        otherwise)."""
+        otherwise). The quads belong to the SceneGpu: `scene` itself isn't modified and can be shown
+        again later."""
         ...
     @property
     def camera_buffer(self) -> str:
@@ -997,7 +1021,13 @@ class SceneGpu:
         """Light SSBO, as pbr.frag reads it."""
         ...
     @property
-    def num_lights(self) -> int: ...
+    def num_lights(self) -> int:
+        """Lights currently in the light buffer."""
+        ...
+    @property
+    def max_lights(self) -> int:
+        """Most lights the light buffer holds; more raises an error on the next frame."""
+        ...
     @property
     def mesh_count(self) -> int: ...
     @property

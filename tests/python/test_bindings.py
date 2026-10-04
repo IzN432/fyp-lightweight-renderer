@@ -376,8 +376,62 @@ def _testing_inject(viewer):
     _testing.inject_key(viewer, lr.Key.LEFT_SHIFT, True)
 
 
+SAMPLE_FRAG = """
+#version 450
+layout(location = 0) out vec4 outColor;
+layout(set = 0, binding = 0) uniform sampler2D source;
+void main() { outColor = texture(source, gl_FragCoord.xy / vec2(textureSize(source, 0))); }
+"""
+UNIFORM_FRAG = """
+#version 450
+layout(location = 0) out vec4 outColor;
+layout(set = 0, binding = 0) uniform Tint { vec4 color; } tint;
+void main() { outColor = tint.color; }
+"""
+
+
+def test_recompile_before_the_first_frame_runs():
+    # A recompile before the graph has executed once (here: a uniform buffer replaced in the first
+    # frame's update) must not assume the images are already in the layouts a frame would leave them in.
+    viewer = lr.Viewer(title="lr binding test", width=320, height=240)
+    fg, res = viewer.frame_graph, viewer.resources
+    res.upload_buffer("tint", np.array([1.0, 0.5, 0.25, 1.0], dtype=np.float32), lr.BufferUsage.UNIFORM)
+    vert = lr.compile_glsl_source(CLEAR_VERT, lr.ShaderStage.VERTEX, "clear.vert")
+    (
+        fg.add_pass("offscreen")
+        .type(lr.PassType.FULLSCREEN)
+        .vert_shader(vert)
+        .frag_shader(lr.compile_glsl_source(UNIFORM_FRAG, lr.ShaderStage.FRAGMENT, "uniform.frag"))
+        .uniform_buffer(0, fg.buffer("tint"), lr.Stage.FRAGMENT)
+        .color_attachment(fg.image("offscreen"), lr.Format.R16G16B16A16_SFLOAT)
+        .execute(lambda ctx: ctx.cmd.draw(3))
+    )
+    (
+        fg.add_pass("present")
+        .type(lr.PassType.FULLSCREEN)
+        .vert_shader(vert)
+        .frag_shader(lr.compile_glsl_source(SAMPLE_FRAG, lr.ShaderStage.FRAGMENT, "sample.frag"))
+        .sampled_image(0, fg.image("offscreen"), lr.Stage.FRAGMENT)
+        .color_attachment(fg.image("swapchain"), viewer.swapchain_format)
+        .execute(lambda ctx: ctx.cmd.draw(3))
+    )
+    frames = [0]
+
+    def update(dt, extent):
+        frames[0] += 1
+        if frames[0] == 1:
+            res.replace_buffer("tint", np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32), lr.BufferUsage.UNIFORM)
+        if frames[0] == 3:
+            viewer.close()
+
+    viewer.on_update(update)
+    viewer.run()  # raises VulkanValidationError if the recompiled graph skipped the initial transitions
+    assert fg.compile_count == 2, fg.compile_count
+
+
 def main():
     tests = [
+        test_recompile_before_the_first_frame_runs,
         test_compile_errors_raise_with_location,
         test_runs_frames_and_closes,
         test_update_callback_exception_is_reraised,

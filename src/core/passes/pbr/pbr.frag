@@ -17,7 +17,11 @@ struct LightData
     float innerConeAngle;
     float outerConeAngle;
     vec2 areaSize;
+
+    uint flags; // bit 0: two-sided (area lights)
 };
+
+#define LIGHT_FLAG_TWO_SIDED 1u
 
 layout(set = 0, binding = 0) uniform CameraUbo
 {
@@ -223,11 +227,14 @@ vec3 CalcAreaLight(LightData light, vec3 position, vec3 normal, vec3 albedo, flo
     vec3 right = (cameraUbo.view * vec4(quaternionToRightVector(light.rotation), 0.0)).xyz * (light.areaSize.x * 0.5);
     vec3 up = (cameraUbo.view * vec4(quaternionToUpVector(light.rotation), 0.0)).xyz * (light.areaSize.y * 0.5);
 
+    // Counter-clockwise seen from the light's forward side (forward = right x up = local -Z), so a
+    // one-sided light emits along its forward axis, like spot and directional lights; a two-sided one
+    // emits from both faces.
     vec3 points[4];
     points[0] = lightViewPos - right - up;
-    points[1] = lightViewPos - right + up;
+    points[1] = lightViewPos + right - up;
     points[2] = lightViewPos + right + up;
-    points[3] = lightViewPos + right - up;
+    points[3] = lightViewPos - right + up;
 
     vec3 N = normal;
     vec3 V = normalize(-position);
@@ -247,10 +254,11 @@ vec3 CalcAreaLight(LightData light, vec3 position, vec3 normal, vec3 albedo, flo
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
-    vec3 specular = LTC_Evaluate(N, V, position, Minv, points, false);
+    const bool twoSided = (light.flags & LIGHT_FLAG_TWO_SIDED) != 0u;
+    vec3 specular = LTC_Evaluate(N, V, position, Minv, points, twoSided);
     specular *= F0 * t2.x + (vec3(1.0) - F0) * t2.y;
 
-    vec3 diffuse = LTC_Evaluate(N, V, position, mat3(1.0), points, false);
+    vec3 diffuse = LTC_Evaluate(N, V, position, mat3(1.0), points, twoSided);
 
     vec3 result = light.color * light.intensity * (albedo * (1.0 - metallic) * diffuse + specular);
     return result / (2.0 * PI);

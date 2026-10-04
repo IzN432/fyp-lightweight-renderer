@@ -454,16 +454,8 @@ void FrameGraphCompiler::buildBarriers(CompiledFrameGraph &graph) const
         graph.m_finalImageBarriers.push_back({barrier, planned.resourceName});
     }
 
-    for (const auto &[name, layout] : plan.finalImageLayouts)
-    {
-        if (m_registry.hasImageArray(name))
-        {
-            m_registry.setImageArrayLayout(name, layout);
-        } else
-        {
-            m_registry.setImageLayout(name, layout);
-        }
-    }
+    // Applied to the registry by CompiledFrameGraph::execute(), once the graph actually records a frame.
+    graph.m_finalImageLayouts = plan.finalImageLayouts;
 }
 
 } // namespace lr

@@ -20,9 +20,13 @@ struct alignas(16) LightGpuData
     float     innerConeAngle; // 4 bytes (spot lights)
     float     outerConeAngle; // 4 bytes (spot lights)
     glm::vec2 areaSize;       // 8 bytes (area lights)
+
+    uint32_t flags; // 4 bytes: bit 0 = two-sided (area lights); padded to 16 by alignas
 };
 
-static_assert(sizeof(LightGpuData) == 64, "LightGpuData size mismatch!");
+inline constexpr uint32_t kLightFlagTwoSided = 1u;
+
+static_assert(sizeof(LightGpuData) == 80, "LightGpuData size mismatch!");
 
 class LightUploader
 {
@@ -33,11 +37,12 @@ public:
 
     const std::string &bufferName() const { return m_bufferName; }
     const uint32_t    &numLights() const { return m_numLights; }
+    uint32_t           maxLights() const { return m_maxLights; }
 
 private:
     ResourceRegistry &m_registry;
     std::string       m_bufferName;
     uint32_t          m_maxLights;
-    uint32_t          m_numLights;
+    uint32_t          m_numLights = 0;
 };
 } // namespace lr

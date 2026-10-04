@@ -31,8 +31,24 @@ void main()
 """
 
 
+def probe_pass(viewer):
+    """Adds a compute pass writing the centre pixel of "pbr" and "gbufferDepth" to the "probe" buffer."""
+    res, fg = viewer.resources, viewer.frame_graph
+    res.register_static_buffer("probe", 32, lr.BufferUsage.STORAGE)
+    (
+        fg.add_pass("probe")
+        .type(lr.PassType.COMPUTE)
+        .compute_shader(lr.compile_glsl_source(PROBE, lr.ShaderStage.COMPUTE, "probe.comp"))
+        .sampled_image(0, fg.image("pbr"), lr.Stage.COMPUTE)
+        .sampled_depth(1, fg.image("gbufferDepth"), lr.Stage.COMPUTE)
+        .storage_buffer_write(2, fg.buffer("probe"), lr.Stage.COMPUTE)
+        .execute(lambda ctx: ctx.cmd.dispatch(1))
+    )
+
+
 @dataclasses.dataclass
 class Chain:
+    gpu_scene: lr.Scene
     viewer: lr.Viewer
     camera: lr.OrbitCamera
     ibl: lr.Ibl
@@ -59,7 +75,7 @@ def build(extra=None) -> Chain:
     if extra:
         extra(viewer)
     composite = lr.CompositePass(viewer, gpu)
-    return Chain(viewer, camera, ibl, gpu, geometry, ao, pbr, composite)
+    return Chain(scene, viewer, camera, ibl, gpu, geometry, ao, pbr, composite)
 
 
 def run_frames(viewer, frames, each=None):
@@ -113,25 +129,120 @@ def test_contracts_come_from_the_declared_passes():
 
 
 def test_scene_renders_and_custom_passes_read_engine_outputs():
-    def probe(viewer):
-        res, fg = viewer.resources, viewer.frame_graph
-        res.register_static_buffer("probe", 32, lr.BufferUsage.STORAGE)
-        (
-            fg.add_pass("probe")
-            .type(lr.PassType.COMPUTE)
-            .compute_shader(lr.compile_glsl_source(PROBE, lr.ShaderStage.COMPUTE, "probe.comp"))
-            .sampled_image(0, fg.image("pbr"), lr.Stage.COMPUTE)
-            .sampled_depth(1, fg.image("gbufferDepth"), lr.Stage.COMPUTE)
-            .storage_buffer_write(2, fg.buffer("probe"), lr.Stage.COMPUTE)
-            .execute(lambda ctx: ctx.cmd.dispatch(1))
-        )
-
-    c = build(probe)
+    c = build(probe_pass)
     run_frames(c.viewer, 5)
     color_and_depth = c.viewer.resources.read_buffer("probe").view(np.float32)
     color, depth = color_and_depth[:4], color_and_depth[4]
     assert 0.0 < depth < 1.0, f"the bird should cover the centre (depth {depth})"
     assert np.all(np.isfinite(color)) and color[:3].max() > 0.01, f"the bird should be lit: {color}"
+
+
+def test_lights_added_and_removed_while_running_light_the_scene():
+    # PbrPass must see the new light count (it used to keep the count it was built with), and the
+    # geometry must stay consistent as light quads come and go.
+    c = build(probe_pass)
+    scene = c.gpu_scene
+    samples, lights = {}, {}
+
+    def probe():
+        return c.viewer.resources.read_buffer("probe").view(np.float32)[:3].copy()
+
+    def each(frame):
+        if frame == 3:
+            samples["before"] = probe()
+            lights["red"] = scene.add_light("point", color=(1.0, 0.0, 0.0), intensity=40.0, position=(0.0, 0.6, 1.0))
+        elif frame == 6:
+            samples["added"] = probe()
+            scene.remove(lights["red"])
+        elif frame == 9:
+            samples["removed"] = probe()
+
+    run_frames(c.viewer, 9, each)
+    before, added, removed = samples["before"], samples["added"], samples["removed"]
+    assert added[0] > before[0] + 0.05 and added[0] - before[0] > 2 * abs(added[2] - before[2]), (before, added)
+    assert np.allclose(removed, before, atol=1e-3), (before, removed)
+    assert c.gpu.num_lights == 2
+
+
+PROBE_POINTS = """
+#version 450
+layout(local_size_x = 2) in;
+layout(set = 0, binding = 0) uniform sampler2D lit;
+layout(set = 0, binding = 1) buffer Probe { vec4 color[2]; } probe;
+layout(push_constant) uniform Points { vec2 uv[2]; } points;
+void main() { probe.color[gl_LocalInvocationID.x] = texture(lit, points.uv[gl_LocalInvocationID.x]); }
+"""
+
+
+def test_area_lights_face_forward_or_both_ways():
+    # An area light between the camera (+Z side) and the bird. Aimed at the bird (its forward, -Z, points
+    # there), a one-sided light lights the bird and shows the camera its back, so its quad is culled.
+    # Two-sided, the camera sees the quad too. Turned around, a one-sided light no longer lights the bird
+    # and the camera sees its emitting face. (Both used to be reversed.)
+    light_position = np.array([0.0, 1.0, 1.2])
+    scene = lr.load_scene(BIRD)  # no other lights; the environment is black
+    light = scene.add_light("area", intensity=10.0, size=(0.6, 0.6), position=tuple(light_position),
+                            two_sided=False)
+    viewer = lr.Viewer(title="lr building blocks test", width=320, height=240)
+    camera = lr.OrbitCamera(viewer)
+    camera.target, camera.radius, camera.elevation, camera.azimuth = (0.0, 0.5, 0.0), 4.0, 0.15, 0.0
+    gpu = lr.SceneGpu(viewer, scene, camera)
+    lr.GeometryPass(viewer, gpu)
+    lr.AmbientOcclusionPass(viewer, gpu, sphere_radius=0.05)
+    lr.PbrPass(viewer, gpu, lr.Ibl(viewer, env_res=64, irr_res=16, pf_res=64, pf_mips=4))
+    fg, res = viewer.frame_graph, viewer.resources
+    res.register_static_buffer("probe", 32, lr.BufferUsage.STORAGE)
+    uv = np.zeros(4, np.float32)  # bird centre, light centre
+
+    def probe(ctx):
+        ctx.push_constants(lr.Stage.COMPUTE, uv)
+        ctx.cmd.dispatch(1)
+
+    (
+        fg.add_pass("probe")
+        .type(lr.PassType.COMPUTE)
+        .compute_shader(lr.compile_glsl_source(PROBE_POINTS, lr.ShaderStage.COMPUTE, "probe_points.comp"))
+        .sampled_image(0, fg.image("pbr"), lr.Stage.COMPUTE)
+        .storage_buffer_write(1, fg.buffer("probe"), lr.Stage.COMPUTE)
+        .push_constant_size(uv.nbytes, lr.Stage.COMPUTE)
+        .execute(probe)
+    )
+    lr.CompositePass(viewer, gpu)
+    samples = {}
+
+    def sample():
+        bird, quad = res.read_buffer("probe").view(np.float32).reshape(2, 4)[:, :3]
+        return float(bird.max()), float(quad.min())
+
+    def each(frame):
+        view, proj = camera.view_matrix(), camera.projection_matrix(320 / 240)
+        for i, point in enumerate([np.array([0.0, 0.45, 0.0]), light_position]):
+            clip = proj @ view @ np.array([*point, 1.0])
+            uv[2 * i: 2 * i + 2] = clip[:2] / clip[3] * 0.5 + 0.5
+        if frame == 4:
+            samples["one-sided, aimed at the bird"] = sample()
+            light.set_light(two_sided=True)
+        elif frame == 7:
+            samples["two-sided, aimed at the bird"] = sample()
+            light.set_light(two_sided=False)
+            light.rotation = (0.0, 1.0, 0.0, 0.0)  # turned to face the camera
+        elif frame == 10:
+            samples["one-sided, aimed away"] = sample()
+
+    run_frames(viewer, 10, each)
+    lit_bird, hidden_quad = samples["one-sided, aimed at the bird"]
+    two_sided_bird, two_sided_quad = samples["two-sided, aimed at the bird"]
+    unlit_bird, facing_quad = samples["one-sided, aimed away"]
+    assert lit_bird > unlit_bird + 0.05, samples  # one-sided lights shine forward only
+    assert hidden_quad < 5.0 and two_sided_quad > 9.0 and facing_quad > 9.0, samples  # quad pixel: 10 when seen
+    assert abs(two_sided_bird - lit_bird) < 1e-3, samples
+
+
+def test_lights_added_before_the_first_frame():
+    c = build()
+    c.gpu_scene.add_light("spot", position=(0.0, 1.0, 1.0))  # picked up in frame 1, before anything has run
+    run_frames(c.viewer, 3)
+    assert c.gpu.num_lights == 3
 
 
 def test_camera_buffer_follows_the_camera():
@@ -189,6 +300,25 @@ def test_misuse_is_reported():
         raise AssertionError("expected ValueError for an unknown light type")
 
 
+def test_a_scene_can_be_shown_again():
+    # SceneGpu draws each light as a quad it owns; the scene itself must come out unchanged.
+    scene = lr.load_scene(BIRD)
+    light = scene.add_light("area", size=(0.5, 0.5), position=(0.0, 1.5, 1.0))
+    objects_before = [obj.id for obj in scene.objects]
+    counts = []
+    for _ in range(2):
+        viewer = lr.Viewer(title="lr building blocks test", width=320, height=240)
+        camera = lr.OrbitCamera(viewer)
+        gpu = lr.SceneGpu(viewer, scene, camera)
+        lr.GeometryPass(viewer, gpu)
+        counts.append((gpu.mesh_count, gpu.num_lights))
+        run_frames(viewer, 2)
+        assert light.mesh is None, "the light's quad must not become a scene mesh"
+        del viewer, camera, gpu
+    assert counts == [(1, 1), (1, 1)], counts
+    assert [obj.id for obj in scene.objects] == objects_before
+
+
 def test_a_viewer_that_never_ran_is_released_by_the_next():
     # SceneGpu and the passes are held by the Viewer until run() returns; without run() (say an
     # exception first), creating the next Viewer releases and collects the old one.
@@ -210,9 +340,13 @@ def main():
     tests = [
         test_contracts_come_from_the_declared_passes,
         test_scene_renders_and_custom_passes_read_engine_outputs,
+        test_lights_added_and_removed_while_running_light_the_scene,
+        test_lights_added_before_the_first_frame,
+        test_area_lights_face_forward_or_both_ways,
         test_camera_buffer_follows_the_camera,
         test_ao_parameters_change_while_running,
         test_misuse_is_reported,
+        test_a_scene_can_be_shown_again,
         test_a_viewer_that_never_ran_is_released_by_the_next,
     ]
     failures = 0

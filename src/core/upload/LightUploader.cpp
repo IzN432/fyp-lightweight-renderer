@@ -3,6 +3,9 @@
 #include "core/scene/TransformComponent.hpp"
 #include "core/scene/SceneObject.hpp"
 
+#include <stdexcept>
+#include <string>
+
 namespace lr
 {
 
@@ -16,6 +19,11 @@ LightUploader::LightUploader(ResourceRegistry &registry, const std::string name,
 
 void LightUploader::upload(std::vector<SceneObject *> &lights)
 {
+    if (lights.size() > m_maxLights)
+    {
+        throw std::length_error("LightUploader: " + std::to_string(lights.size()) + " lights, but the light buffer holds " +
+                                std::to_string(m_maxLights));
+    }
     std::vector<LightGpuData> data;
     data.reserve(lights.size());
 
@@ -36,6 +44,7 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
                 gpuData.innerConeAngle = 0.0f;            // default for point and directional
                 gpuData.outerConeAngle = 0.0f;            // default for point and directional
                 gpuData.areaSize       = glm::vec2(0.0f); // default for point and directional
+                gpuData.flags          = 0;
 
                 if constexpr (std::is_same_v<T, PointLight>)
                 {
@@ -57,6 +66,7 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
                     gpuData.rotation     = transform.transform().rotation();
                     gpuData.type         = 2;
                     gpuData.areaSize     = l.size;
+                    gpuData.flags        = l.twoSided ? kLightFlagTwoSided : 0u;
                 } else if constexpr (std::is_same_v<T, DirectionalLight>)
                 {
                     TransformComponent &transform = lightObject->getComponent<TransformComponent>();

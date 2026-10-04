@@ -50,22 +50,32 @@ size, and resized with the window.
 
 ## `lr.SceneGpu(viewer, scene, camera)`
 
-**What it does:** uploads every mesh and light in `scene` as it is at construction, and keeps the
-buffers current each frame:
+**What it does:** uploads every mesh and light in `scene`, and keeps the buffers current each frame:
 - the camera, from `camera` (an `lr.OrbitCamera`);
 - animation playback and GPU skinning palettes;
-- light and material edits.
+- light and material edits;
+- lights added or removed while running.
+
+**Changing lights while running:** each change shows from the next frame, and `GeometryPass` and
+`PbrPass` follow automatically. [`examples/python/light_editor.py`](../examples/python/light_editor.py)
+demonstrates all of these.
+- `scene.add_light(...)` adds a light.
+- `scene.remove(obj)` removes one.
+- `obj.set_light(...)` changes its type, colour, intensity, area size, two-sidedness or cone angles.
+- `obj.position` and `obj.rotation` move and aim it.
 
 **Rules and side effects:**
 - Use one per Viewer.
-- Add lights before creating it.
+- At most `gpu.max_lights` (16) lights; more raises an error on the next frame.
 - Every light gets a quad mesh drawn with the scene. Area lights show as emissive quads; other light
   types have invisible quads.
+- The quads belong to the `SceneGpu`, not to the scene: the scene isn't modified, so it can be
+  uploaded again later, for example by the next Viewer.
 
 | Buffer (`gpu.buffers` key) | Name | Contents |
 |---|---|---|
 | `camera` | `camera_cb` | Uniform, std140, 336 bytes: `mat4 view, proj, viewProj, invView, invProj; vec3 position; float pad`. Vulkan clip space: depth in [0, 1], Y flipped. |
-| `lights` | `lights_lb` | Storage buffer, one 64-byte entry per light: `vec3 position; uint type; vec4 rotation (quaternion xyzw); vec3 color; float intensity; float innerCone, outerCone (degrees); vec2 areaSize`. The type is 0 point, 1 spot, 2 area, 3 directional, 4 image. `gpu.num_lights` gives the count. |
+| `lights` | `lights_lb` | Storage buffer, one 80-byte entry per light: `vec3 position; uint type; vec4 rotation (quaternion xyzw); vec3 color; float intensity; float innerCone, outerCone (radians); vec2 areaSize; uint flags` (bit 0: two-sided area light), padded to 80. The type is 0 point, 1 spot, 2 area, 3 directional, 4 image. `gpu.num_lights` gives the count. |
 | `positions` | `meshPositionBuffer` | Vertex buffer, binding 0: `vec3` position per render vertex, all meshes back to back. |
 | `attributes` | `meshVertexBuffer` | Vertex buffer, binding 1: interleaved `vec3 normal, vec4 tangent (w = handedness), vec2 uv`. |
 | `indices` | `meshIndexBuffer` | `uint32` triangle indices. |
@@ -131,13 +141,14 @@ depth-aware blur.
 
 Deferred lighting with a Cook-Torrance BRDF (GGX, Smith, Schlick):
 - **point, spot and directional lights** are evaluated as delta lights;
-- **area lights** use linearly transformed cosines (LTC);
+- **area lights** use linearly transformed cosines (LTC). They emit along their forward axis (local −Z),
+  or from both faces if two-sided (the default);
 - **`image` lights** apply the `Ibl` (diffuse irradiance plus split-sum specular), scaled by the light's
   colour × intensity and darkened by `hbao_ao`.
 
 Emissive is added on top. Background pixels (depth 1) are black.
 
-**Light count:** fixed when the pass is constructed.
+**Light count:** kept current by the `SceneGpu`, as lights are added or removed.
 
 | | Name | Format | Meaning |
 |---|---|---|---|

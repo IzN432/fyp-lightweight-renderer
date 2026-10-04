@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -32,6 +34,9 @@
 //   - "material*"            materials SSBO + texture arrays (conventions::materialLayout)
 //   - skin buffers           joint palettes etc. for skinned meshes (SkinUploader)
 // Every light also gets a quad mesh (see AreaLightVisual.hpp) drawn with the rest of the geometry.
+// SceneGpu owns those quads and their MaterialStore slots: the scene itself is never modified, so it
+// can be uploaded again later (e.g. by the next Viewer), and the quads aren't scene meshes anyone can
+// select or edit.
 //
 // It knows nothing about editing: SceneManager layers the editor's selection/heatmap buffers on top.
 namespace lr
@@ -43,6 +48,8 @@ class SceneGpu
 {
 public:
     SceneGpu(ResourceRegistry &registry, Scene &scene, MeshStore &meshStore, MaterialStore &materialStore);
+    // Returns the light visuals' MaterialStore slots.
+    ~SceneGpu();
 
     SceneGpu(const SceneGpu &)            = delete;
     SceneGpu &operator=(const SceneGpu &) = delete;
@@ -59,7 +66,8 @@ public:
     // upload by the next rebuildGeometry() (initialize() uploads every texture anyway).
     void addLoaded(const SceneLoadResult &result);
 
-    // Forgets removed objects (meshes and light visuals). Call rebuildGeometry() afterwards.
+    // Forgets removed mesh objects. Call rebuildGeometry() afterwards. (Removed lights need nothing:
+    // flushDirty() notices them, see syncLights().)
     void removeSceneObjects(std::span<const SceneObjectId> ids);
 
     const std::vector<SceneObject *> &meshObjects() const { return m_meshObjects; }
@@ -84,15 +92,28 @@ public:
     void registerCallbacks(Viewer &viewer);
 
     // Re-uploads whatever the camera, light and mesh components have marked dirty since the last call,
-    // and clears their flags.
+    // and clears their flags. Also calls syncLights() if lights were added to or removed from the scene.
     void flushDirty();
+
+    // Brings the light visuals and the light buffer in line with the lights now in the scene: drops the
+    // quads of removed lights, builds quads for new ones, rebuilds the geometry and re-uploads the lights.
+    // Safe between frames (replaced buffers are retired, not destroyed); listeners are notified.
+    void syncLights();
+
+    // Called after rebuildGeometry() (draw lists changed: refresh GeometryPass::setSceneGeometry) and
+    // after uploadLights() (with the new light count: PbrPass::setNumLights). Listeners must stay valid
+    // until removed, or for the SceneGpu's lifetime.
+    using ListenerId = uint64_t;
+    ListenerId onGeometryRebuilt(std::function<void(const SceneGpu &)> listener);
+    ListenerId onLightsUploaded(std::function<void(uint32_t numLights)> listener);
+    void       removeListener(ListenerId id);
 
     // The steps initialize() runs, for callers that sequence setup themselves.
     void createLightVisuals(const AreaLightVisualConfig &config);
     void uploadMeshes(const GpuMaterialLayout &materialLayout, const std::vector<std::string> &vertexAttributeNames);
 
-    // Re-packs all geometry after objects were added or removed. The caller must wait for the GPU
-    // first and refresh GeometryPass's draw metadata afterwards (GeometryPass::setSceneGeometry).
+    // Re-packs all geometry after objects were added or removed, then notifies onGeometryRebuilt
+    // listeners, which refresh GeometryPass's draw metadata (GeometryPass::setSceneGeometry).
     void rebuildGeometry();
 
     void uploadLights();
@@ -114,6 +135,7 @@ public:
     const std::string &cameraBufferName() const { return m_cameraUploader.bufferName(); }
     const std::string &lightBufferName() const { return m_lightUploader.bufferName(); }
     uint32_t           numLights() const { return m_lightUploader.numLights(); }
+    uint32_t           maxLights() const { return m_lightUploader.maxLights(); }
 
     const SkinUploadResult &skinUploadResult() const { return m_skinUploadResult; }
     const std::string &skinInfluenceEntriesBufferName() const { return m_skinUploader.influenceEntriesBufferName(); }
@@ -133,7 +155,31 @@ public:
     const MaterialUploadResult                    &materialUploadResult() const { return m_materialUploadResult; }
 
 private:
+    // A light's quad (see AreaLightVisual.hpp). The mesh is heap-allocated so the pointers in
+    // m_geometryMeshes stay valid as visuals are added or removed.
+    struct LightVisual
+    {
+        SceneObject          *light = nullptr;
+        std::unique_ptr<Mesh> mesh;
+        MaterialHandle        material;
+    };
+
     void gatherGeometry(const std::vector<std::string> &vertexAttributeNames);
+    void releaseLightVisuals();
+    // Whether `object` is a light still in the scene.
+    bool isLiveLight(const SceneObject &object) const;
+    // True if lights were added to or removed from the scene since the visuals were built.
+    bool        lightsChanged() const;
+    LightVisual makeLightVisual(SceneObject &light);
+
+    struct Listener
+    {
+        ListenerId                              id;
+        std::function<void(const SceneGpu &)>   geometryRebuilt;
+        std::function<void(uint32_t numLights)> lightsUploaded;
+    };
+    std::vector<Listener> m_listeners;
+    ListenerId            m_nextListenerId = 1;
 
     ResourceRegistry &m_registry;
     Scene            &m_scene;
@@ -152,7 +198,7 @@ private:
     float                      m_aspect      = 1600.0f / 900.0f;
     bool                       m_initialized = false;
     std::vector<SceneObject *> m_meshObjects;
-    std::vector<SceneObject *> m_lightVisualObjects;
+    std::vector<LightVisual>   m_lightVisuals;
     AreaLightVisualConfig      m_areaLightVisualConfig;
 
     // Cached once in uploadMeshes(), reused by position/light-visual updates so

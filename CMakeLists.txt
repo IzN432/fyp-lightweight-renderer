@@ -335,7 +335,11 @@ if(LR_BUILD_PYTHON)
             add_test(NAME python.deferred_blocks
                 COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/deferred_blocks.py"
                     --frames 120)
-            set_tests_properties(python.blocks python.deferred_blocks PROPERTIES
+            # Adds, edits and removes lights while running, checking the GPU light buffer after each step.
+            add_test(NAME python.light_editor
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/light_editor.py"
+                    --scripted)
+            set_tests_properties(python.blocks python.deferred_blocks python.light_editor PROPERTIES
                 ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
                 FAIL_REGULAR_EXPRESSION "nanobind: leaked|\\[error\\]")
 

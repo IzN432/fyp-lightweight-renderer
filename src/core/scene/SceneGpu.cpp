@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <string>
 
 namespace lr
 {
@@ -27,6 +28,17 @@ SceneGpu::SceneGpu(ResourceRegistry &registry, Scene &scene, MeshStore &meshStor
       m_meshUploader(registry), m_materialUploader(registry), m_lightUploader(registry), m_cameraUploader(registry),
       m_skinUploader(registry)
 {}
+
+SceneGpu::~SceneGpu() { releaseLightVisuals(); }
+
+void SceneGpu::releaseLightVisuals()
+{
+    for (const LightVisual &visual : m_lightVisuals)
+    {
+        m_materialStore.release(visual.material);
+    }
+    m_lightVisuals.clear();
+}
 
 void SceneGpu::addMeshObject(SceneObject &object)
 {
@@ -60,7 +72,93 @@ void SceneGpu::removeSceneObjects(std::span<const SceneObjectId> ids)
         return object && std::ranges::find(ids, object->id()) != ids.end();
     };
     std::erase_if(m_meshObjects, removed);
-    std::erase_if(m_lightVisualObjects, removed);
+    // Light visuals stay until syncLights(): m_geometryMeshes still points at their meshes, and
+    // GeometryPass already skips draws whose object has left the scene.
+}
+
+bool SceneGpu::isLiveLight(const SceneObject &object) const
+{
+    return m_scene.contains(object.id()) && object.hasComponent<Light>();
+}
+
+bool SceneGpu::lightsChanged() const
+{
+    // Each live light has at most one visual, so the sets match when every visual's light is live
+    // and the counts agree.
+    size_t liveLights = 0;
+    for (const auto &object : m_scene.sceneObjects())
+    {
+        liveLights += isLiveLight(*object) ? 1 : 0;
+    }
+    return liveLights != m_lightVisuals.size() || std::ranges::any_of(m_lightVisuals, [&](const LightVisual &visual) {
+               return !isLiveLight(*visual.light);
+           });
+}
+
+SceneGpu::LightVisual SceneGpu::makeLightVisual(SceneObject &light)
+{
+    const auto               *areaLight = std::get_if<AreaLight>(&light.getComponent<Light>().light);
+    const AreaLight          &lightData = areaLight ? *areaLight : kHiddenAreaLightVisual;
+    const TransformComponent &transform = light.getComponent<TransformComponent>();
+
+    LightVisual visual{.light    = &light,
+                       .mesh     = std::make_unique<Mesh>(),
+                       .material = m_materialStore.acquire(buildAreaLightMaterial(lightData, m_areaLightVisualConfig))};
+    buildAreaLightQuadMesh(*visual.mesh, transform, lightData, visual.material, m_areaLightVisualConfig);
+    return visual;
+}
+
+void SceneGpu::syncLights()
+{
+    // Checked before anything changes, so a throw leaves the current geometry intact.
+    const auto liveLights = std::ranges::count_if(m_scene.sceneObjects(), [&](const auto &object) {
+        return isLiveLight(*object);
+    });
+    if (static_cast<uint32_t>(liveLights) > maxLights())
+    {
+        throw std::length_error("SceneGpu: the scene has " + std::to_string(liveLights) + " lights, but at most " +
+                                std::to_string(maxLights()) + " are supported");
+    }
+
+    std::erase_if(m_lightVisuals, [&](const LightVisual &visual) {
+        if (isLiveLight(*visual.light))
+        {
+            return false;
+        }
+        m_materialStore.release(visual.material);
+        return true;
+    });
+    for (const auto &object : m_scene.sceneObjects())
+    {
+        const bool hasVisual = std::ranges::any_of(m_lightVisuals, [&](const LightVisual &visual) {
+            return visual.light == object.get();
+        });
+        if (isLiveLight(*object) && !hasVisual)
+        {
+            m_lightVisuals.push_back(makeLightVisual(*object));
+        }
+    }
+    uploadLights();
+    rebuildGeometry();
+}
+
+SceneGpu::ListenerId SceneGpu::onGeometryRebuilt(std::function<void(const SceneGpu &)> listener)
+{
+    m_listeners.push_back({.id = m_nextListenerId, .geometryRebuilt = std::move(listener)});
+    return m_nextListenerId++;
+}
+
+SceneGpu::ListenerId SceneGpu::onLightsUploaded(std::function<void(uint32_t)> listener)
+{
+    m_listeners.push_back({.id = m_nextListenerId, .lightsUploaded = std::move(listener)});
+    return m_nextListenerId++;
+}
+
+void SceneGpu::removeListener(ListenerId id)
+{
+    std::erase_if(m_listeners, [id](const Listener &listener) {
+        return listener.id == id;
+    });
 }
 
 void SceneGpu::initialize(const AreaLightVisualConfig &areaLightVisualConfig, const GpuMaterialLayout &materialLayout,
@@ -105,33 +203,13 @@ void SceneGpu::createLightVisuals(const AreaLightVisualConfig &config)
 {
     m_areaLightVisualConfig = config;
 
-    m_lightVisualObjects.clear();
+    releaseLightVisuals();
     for (const auto &object : m_scene.sceneObjects())
     {
-        if (!m_scene.contains(object->id()))
+        if (isLiveLight(*object))
         {
-            continue;
+            m_lightVisuals.push_back(makeLightVisual(*object));
         }
-        if (object->hasComponent<Light>())
-        {
-            m_lightVisualObjects.push_back(object.get());
-        }
-    }
-
-    for (SceneObject *lightObject : m_lightVisualObjects)
-    {
-        const auto               *areaLight = std::get_if<AreaLight>(&lightObject->getComponent<Light>().light);
-        const AreaLight          &lightData = areaLight ? *areaLight : kHiddenAreaLightVisual;
-        const TransformComponent &transform = lightObject->getComponent<TransformComponent>();
-
-        const MaterialHandle handle = m_materialStore.acquire(buildAreaLightMaterial(lightData, config));
-
-        Mesh quadMesh;
-        buildAreaLightQuadMesh(quadMesh, transform, lightData, handle, config);
-
-        const MeshHandle meshHandle = m_meshStore.add(std::move(quadMesh));
-        lightObject->addComponent<MeshComponent>(meshHandle, m_meshStore, std::vector<MaterialHandle>{handle},
-                                                 m_materialStore, /*hideFromGui=*/true);
     }
 }
 
@@ -150,10 +228,12 @@ void SceneGpu::gatherGeometry(const std::vector<std::string> &vertexAttributeNam
                                                                     : nullptr);
     }
 
-    for (SceneObject *lightVisualObject : m_lightVisualObjects)
+    for (const LightVisual &visual : m_lightVisuals)
     {
-        m_geometryObjects.push_back(lightVisualObject);
-        m_geometryMeshes.push_back(&lightVisualObject->getComponent<MeshComponent>().mesh());
+        // The light object stands in for the quad in the draw list: GeometryPass skips draws whose
+        // object has left the scene.
+        m_geometryObjects.push_back(visual.light);
+        m_geometryMeshes.push_back(visual.mesh.get());
         // Light visuals bake their TransformComponent into vertex positions directly (see
         // AreaLightVisual.hpp), so they'd be double-transformed by also applying their TransformComponent
         // here — nullptr means "draw with an identity model matrix".
@@ -208,6 +288,13 @@ void SceneGpu::rebuildGeometry()
                                           m_pendingTextureUpdates);
         m_pendingTextureUpdates.clear();
     }
+    for (const Listener &listener : m_listeners)
+    {
+        if (listener.geometryRebuilt)
+        {
+            listener.geometryRebuilt(*this);
+        }
+    }
 }
 
 void SceneGpu::uploadLights()
@@ -215,16 +302,19 @@ void SceneGpu::uploadLights()
     std::vector<SceneObject *> lights;
     for (const auto &object : m_scene.sceneObjects())
     {
-        if (!m_scene.contains(object->id()))
-        {
-            continue;
-        }
-        if (object->hasComponent<Light>())
+        if (isLiveLight(*object))
         {
             lights.push_back(object.get());
         }
     }
     m_lightUploader.upload(lights);
+    for (const Listener &listener : m_listeners)
+    {
+        if (listener.lightsUploaded)
+        {
+            listener.lightsUploaded(numLights());
+        }
+    }
 }
 
 void SceneGpu::updatePositions() { m_meshUploader.updateVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig); }
@@ -276,16 +366,18 @@ void SceneGpu::updateSkins()
 
 void SceneGpu::updateLightVisuals()
 {
-    for (SceneObject *lightObject : m_lightVisualObjects)
+    for (const LightVisual &visual : m_lightVisuals)
     {
-        const auto               *areaLight = std::get_if<AreaLight>(&lightObject->getComponent<Light>().light);
+        if (!isLiveLight(*visual.light))
+        {
+            continue; // removed; dropped by the next syncLights()
+        }
+        const auto               *areaLight = std::get_if<AreaLight>(&visual.light->getComponent<Light>().light);
         const AreaLight          &lightData = areaLight ? *areaLight : kHiddenAreaLightVisual;
-        const TransformComponent &transform = lightObject->getComponent<TransformComponent>();
-        auto                     &lightMesh = lightObject->getComponent<MeshComponent>();
+        const TransformComponent &transform = visual.light->getComponent<TransformComponent>();
 
-        const MaterialHandle handle = lightMesh.materialHandles().front();
-        buildAreaLightQuadMesh(lightMesh.mesh(), transform, lightData, handle, m_areaLightVisualConfig);
-        m_materialStore.get(handle) = buildAreaLightMaterial(lightData, m_areaLightVisualConfig);
+        buildAreaLightQuadMesh(*visual.mesh, transform, lightData, visual.material, m_areaLightVisualConfig);
+        m_materialStore.get(visual.material) = buildAreaLightMaterial(lightData, m_areaLightVisualConfig);
     }
 
     m_meshUploader.updateVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
@@ -304,25 +396,32 @@ void SceneGpu::flushDirty()
         cameraTransform.clearDirty();
     }
 
+    // Lights added or removed since the last frame: new quads, a rebuilt geometry and a re-uploaded light
+    // buffer, built from the lights' current state (so their dirty flags are handled below as well).
+    if (lightsChanged())
+    {
+        syncLights();
+    }
+
     // Any single light visual going dirty rebuilds every light visual, since updateLightVisuals()
     // repacks the shared vertex/attribute buffers for all of them at once — including switching a
     // light to a different type at runtime (see Light::onGUIImpl's type combo), at which point its
     // quad collapses to (or springs from) the hidden zero-sized state.
     bool anyLightVisualDirty = false;
-    for (SceneObject *lightObject : m_lightVisualObjects)
+    for (const LightVisual &visual : m_lightVisuals)
     {
         anyLightVisualDirty |=
-            lightObject->getComponent<Light>().isDirty() || lightObject->getComponent<TransformComponent>().isDirty();
+            visual.light->getComponent<Light>().isDirty() || visual.light->getComponent<TransformComponent>().isDirty();
     }
 
     if (anyLightVisualDirty)
     {
         updateLightVisuals();
         uploadLights();
-        for (SceneObject *lightObject : m_lightVisualObjects)
+        for (const LightVisual &visual : m_lightVisuals)
         {
-            lightObject->getComponent<Light>().clearDirty();
-            lightObject->getComponent<TransformComponent>().clearDirty();
+            visual.light->getComponent<Light>().clearDirty();
+            visual.light->getComponent<TransformComponent>().clearDirty();
         }
     }
 

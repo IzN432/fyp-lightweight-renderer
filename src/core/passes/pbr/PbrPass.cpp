@@ -31,8 +31,6 @@ void PbrPass::uploadResources(ResourceRegistry &resources) const
 
 void PbrPass::build(FrameGraph &fg) const
 {
-    const PbrPC pbrPC{.pfMips = m_cfg.pfMips, .numLights = m_cfg.numLights};
-
     fg.addPass("pbr")
         .type(PassType::Fullscreen)
         .vertShader((paths::shaderDir / "fullscreen.vert.spv").string())
@@ -52,7 +50,9 @@ void PbrPass::build(FrameGraph &fg) const
         .storageBufferRead(11, fg.buffer(m_cfg.lightBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(12, fg.image("hbao_ao"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .colorAttachment(fg.image("pbr"), VK_FORMAT_R16G16B16A16_SFLOAT)
-        .execute([pbrPC](PassContext &ctx) {
+        // Reads m_cfg when the pass runs, so setNumLights() takes effect without rebuilding the graph.
+        .execute([this](PassContext &ctx) {
+            const PbrPC pbrPC{.pfMips = m_cfg.pfMips, .numLights = m_cfg.numLights};
             ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_FRAGMENT_BIT, pbrPC);
             ctx.cmd().draw(3);
         });

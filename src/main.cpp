@@ -127,12 +127,12 @@ try
 
     sceneManager.load(meshPath, sceneLoadConfig);
 
-    // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets its own MeshComponent
-    // (a quad), separate from scene geometry. The quad still draws through the
-    // same GeometryPass (see AreaLightVisual.hpp for why the visual needs to be real
+    // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets a quad mesh owned by
+    // SceneGpu (not a component on the light, so it isn't selectable or editable). The quad still draws
+    // through the same GeometryPass (see AreaLightVisual.hpp for why the visual needs to be real
     // geometry rather than an overlay); its material lives in a MaterialStore slot acquired up front,
     // so switching a light's type at runtime (see Light::onGUIImpl) just rewrites that slot in place —
-    // see SceneManager::updateLightVisuals.
+    // see SceneGpu::updateLightVisuals.
     const lr::AreaLightVisualConfig areaLightVisualConfig = lr::conventions::areaLightVisualConfig();
 
     lr::SceneObject *meshObject = &sceneManager.selectedMeshObject();
@@ -253,6 +253,16 @@ try
     });
     pbrPass.uploadResources(viewer.resources());
     pbrPass.build(viewer.frameGraph());
+
+    // Whenever SceneGpu re-packs geometry (an import, lights added or removed) or re-uploads the lights,
+    // keep the passes' draw lists and light count in step.
+    sceneManager.gpu().onGeometryRebuilt([&](const lr::SceneGpu &gpu) {
+        geometryPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
+                                      gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
+    });
+    sceneManager.gpu().onLightsUploaded([&](uint32_t numLights) {
+        pbrPass.setNumLights(numLights);
+    });
 
     // Keep the geometry overlay stage alive even when it has no instances. Besides remaining
     // available for future editor visuals (for example, bones), it owns the per-frame clear of
@@ -383,7 +393,6 @@ try
 
         lr::SceneObject *replacement = sceneManager.removeSceneObjects(ids);
         sceneManager.uploadLights();
-        pbrPass.setNumLights(sceneManager.numLights());
         physicsWorld.onSceneChanged();
         if (!replacement)
         {
@@ -627,10 +636,7 @@ try
                     const fs::path selectedPath(ImGuiFileDialog::Instance()->GetFilePathName());
                     viewer.context().waitIdle();
                     sceneManager.load(selectedPath, sceneLoadConfig);
-                    sceneManager.rebuildGeometry();
-                    geometryPass.setSceneGeometry(sceneManager.meshPositions(), sceneManager.indexBuffer(),
-                                                  sceneManager.meshTransforms(), sceneManager.geometryObjects(),
-                                                  sceneManager.skinUploadResult().drawInfos);
+                    sceneManager.rebuildGeometry(); // refreshes geometryPass via onGeometryRebuilt
                     if (lr::SceneObject *selectedMesh = sceneManager.editedMeshObject())
                     {
                         heatmapPass.setMeshSource(sceneManager.selectedMeshHeatmap(),

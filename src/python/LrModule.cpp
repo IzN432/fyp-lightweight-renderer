@@ -1350,6 +1350,7 @@ struct LightInfo
     std::optional<float>                innerConeDegrees;
     std::optional<float>                outerConeDegrees;
     std::optional<std::array<float, 2>> areaSize;
+    std::optional<bool>                 twoSided;
 };
 
 LightInfo describeLight(const lr::Light &light)
@@ -1372,6 +1373,7 @@ LightInfo describeLight(const lr::Light &light)
             {
                 info.type     = "area";
                 info.areaSize = std::array<float, 2>{l.size.x, l.size.y};
+                info.twoSided = l.twoSided;
             } else if constexpr (std::is_same_v<T, lr::DirectionalLight>)
             {
                 info.type = "directional";
@@ -1382,6 +1384,46 @@ LightInfo describeLight(const lr::Light &light)
         },
         light.light);
     return info;
+}
+
+// Everything that defines a light apart from its transform, as Scene.add_light/SceneObject.set_light take it.
+struct LightSpec
+{
+    std::string          type;
+    std::array<float, 3> color{};
+    float                intensity        = 1.0f;
+    float                innerConeDegrees = 15.0f;
+    float                outerConeDegrees = 30.0f;
+    std::array<float, 2> size{1.0f, 1.0f};
+    bool                 twoSided = true;
+};
+
+lr::LightVariant makeLight(const char *function, const LightSpec &spec)
+{
+    const lr::BaseLight base{glm::vec3(spec.color[0], spec.color[1], spec.color[2]), spec.intensity};
+    if (spec.type == "point")
+    {
+        return lr::PointLight{base};
+    }
+    if (spec.type == "spot")
+    {
+        return lr::SpotLight{base, spec.innerConeDegrees, spec.outerConeDegrees};
+    }
+    if (spec.type == "area")
+    {
+        return lr::AreaLight{base, glm::vec2(spec.size[0], spec.size[1]), spec.twoSided};
+    }
+    if (spec.type == "directional")
+    {
+        return lr::DirectionalLight{base};
+    }
+    if (spec.type == "image")
+    {
+        return lr::ImageLight{base};
+    }
+    throw std::invalid_argument(std::string(function) +
+                                ": type must be 'point', 'spot', 'area', 'directional' or 'image', not '" + spec.type +
+                                "'");
 }
 
 nb::object materialValue(const lr::MaterialValue &value)
@@ -1441,7 +1483,9 @@ void bindScene(nb::module_ &m)
                 }
                 return nb::make_tuple((*light.areaSize)[0], (*light.areaSize)[1]);
             },
-            "Area lights only: (width, height) in world units.");
+            "Area lights only: (width, height) in world units.")
+        .def_ro("two_sided", &LightInfo::twoSided,
+                "Area lights only: emits from both faces (True) or only along its forward axis.");
 
     nb::class_<lr::Material>(m, "Material",
                              "A material from the scene's material store (see EngineConventions.hpp "
@@ -1653,6 +1697,33 @@ void bindScene(nb::module_ &m)
                 return describeLight(object.getComponent<lr::Light>());
             },
             "The object's light, or None.")
+        .def(
+            "set_light",
+            [](lr::SceneObject &object, std::optional<std::string> type, std::optional<std::array<float, 3>> color,
+               std::optional<float> intensity, std::optional<std::array<float, 2>> size,
+               std::optional<float> innerConeDegrees, std::optional<float> outerConeDegrees,
+               std::optional<bool> twoSided) {
+                if (!object.hasComponent<lr::Light>())
+                {
+                    throw std::logic_error("set_light: scene object '" + object.name + "' has no light");
+                }
+                lr::Light      &light   = object.getComponent<lr::Light>();
+                const LightInfo current = describeLight(light);
+                // Unspecified values keep the light's current ones (or the add_light defaults, for
+                // parameters its current type doesn't have).
+                LightSpec spec{.type      = type.value_or(current.type),
+                               .color     = color.value_or(current.color),
+                               .intensity = intensity.value_or(current.intensity)};
+                spec.innerConeDegrees = innerConeDegrees.value_or(current.innerConeDegrees.value_or(15.0f));
+                spec.outerConeDegrees = outerConeDegrees.value_or(current.outerConeDegrees.value_or(30.0f));
+                spec.size             = size.value_or(current.areaSize.value_or(std::array<float, 2>{1.0f, 1.0f}));
+                spec.twoSided         = twoSided.value_or(current.twoSided.value_or(true));
+                light.set(makeLight("set_light", spec));
+            },
+            "type"_a = nb::none(), "color"_a = nb::none(), "intensity"_a = nb::none(), "size"_a = nb::none(),
+            "inner_cone_degrees"_a = nb::none(), "outer_cone_degrees"_a = nb::none(), "two_sided"_a = nb::none(),
+            "Change this object's light; parameters left as None keep their current values. Move or turn it "
+            "with position/rotation. A SceneGpu showing the scene picks the change up on the next frame.")
         .def_prop_ro(
             "animator",
             [](lr::SceneObject &object) -> lr::AnimatorComponent * {
@@ -1731,30 +1802,10 @@ void bindScene(nb::module_ &m)
             "add_light",
             [](lr::SceneAssets &assets, const std::string &type, std::array<float, 3> color, float intensity,
                std::array<float, 3> position, std::array<float, 4> rotation, std::array<float, 2> size,
-               float innerConeDegrees, float outerConeDegrees, const std::string &name) -> lr::SceneObject & {
-                const lr::BaseLight base{glm::vec3(color[0], color[1], color[2]), intensity};
-                lr::LightVariant    light;
-                if (type == "point")
-                {
-                    light = lr::PointLight{base};
-                } else if (type == "spot")
-                {
-                    light = lr::SpotLight{base, innerConeDegrees, outerConeDegrees};
-                } else if (type == "area")
-                {
-                    light = lr::AreaLight{base, glm::vec2(size[0], size[1])};
-                } else if (type == "directional")
-                {
-                    light = lr::DirectionalLight{base};
-                } else if (type == "image")
-                {
-                    light = lr::ImageLight{base};
-                } else
-                {
-                    throw std::invalid_argument(
-                        "add_light: type must be 'point', 'spot', 'area', 'directional' or 'image', not '" + type +
-                        "'");
-                }
+               float innerConeDegrees, float outerConeDegrees, bool twoSided,
+               const std::string &name) -> lr::SceneObject & {
+                const lr::LightVariant light = makeLight(
+                    "add_light", {type, color, intensity, innerConeDegrees, outerConeDegrees, size, twoSided});
                 lr::SceneObject &object = assets.scene.createSceneObject();
                 object.name             = name;
                 auto &transform =
@@ -1766,10 +1817,25 @@ void bindScene(nb::module_ &m)
             "type"_a, "color"_a = std::array<float, 3>{1.0f, 1.0f, 1.0f}, "intensity"_a = 1.0f,
             "position"_a = std::array<float, 3>{0.0f, 0.0f, 0.0f},
             "rotation"_a = std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}, "size"_a = std::array<float, 2>{1.0f, 1.0f},
-            "inner_cone_degrees"_a = 15.0f, "outer_cone_degrees"_a = 30.0f, "name"_a = "Light", ref,
+            "inner_cone_degrees"_a = 15.0f, "outer_cone_degrees"_a = 30.0f, "two_sided"_a = true, "name"_a = "Light",
+            ref,
             "Add a light object: 'point', 'spot', 'area', 'directional' or 'image' (environment lighting from an Ibl, "
-            "scaled by color * intensity). It shines along its rotation's forward axis (spot, area, directional). "
-            "Add lights before creating a SceneGpu for this scene.");
+            "scaled by color * intensity). It shines along its rotation's forward axis (spot, area, directional; "
+            "area lights shine from both faces unless two_sided=False). "
+            "A SceneGpu showing this scene picks it up on the next frame.")
+        .def(
+            "remove",
+            [](lr::SceneAssets &assets, lr::SceneObject &object) {
+                if (&object.scene() != &assets.scene)
+                {
+                    throw std::invalid_argument("remove: the object belongs to a different Scene");
+                }
+                assets.scene.destroySceneObject(object.id());
+            },
+            "object"_a,
+            "Remove an object and its descendants from the scene. A SceneGpu showing this scene stops drawing "
+            "them, and removed lights stop lighting it, from the next frame. The Python objects remain but no "
+            "longer appear in objects/roots.");
 
     m.def(
         "load_scene",
@@ -1982,9 +2048,36 @@ private:
     }
 };
 
+// A SceneGpu listener a block registers, removed with the block (the block keeps the SceneGpu alive, so
+// the SceneGpu outlives it).
+struct SceneGpuListener
+{
+    lr::SceneGpu            *gpu = nullptr;
+    lr::SceneGpu::ListenerId id  = 0;
+
+    SceneGpuListener() = default;
+    SceneGpuListener(lr::SceneGpu &sceneGpu, lr::SceneGpu::ListenerId listenerId) : gpu(&sceneGpu), id(listenerId) {}
+    SceneGpuListener(const SceneGpuListener &)            = delete;
+    SceneGpuListener &operator=(const SceneGpuListener &) = delete;
+    SceneGpuListener &operator=(SceneGpuListener &&other) noexcept
+    {
+        std::swap(gpu, other.gpu);
+        std::swap(id, other.id);
+        return *this;
+    }
+    ~SceneGpuListener()
+    {
+        if (gpu)
+        {
+            gpu->removeListener(id);
+        }
+    }
+};
+
 struct GeometryBlock : PassBlock
 {
     std::unique_ptr<lr::GeometryPass> pass;
+    SceneGpuListener                  geometryRebuilt; // refreshes the draw lists
 };
 
 struct AmbientOcclusionBlock : PassBlock
@@ -2003,6 +2096,7 @@ struct AmbientOcclusionBlock : PassBlock
 struct PbrBlock : PassBlock
 {
     std::unique_ptr<lr::PbrPass> pass;
+    SceneGpuListener             lightsUploaded; // keeps the light count current
 };
 
 struct CompositeBlock : PassBlock
@@ -2094,11 +2188,14 @@ void bindBuildingBlocks(nb::module_ &m)
             },
             "viewer"_a, "scene"_a, "camera"_a, nb::keep_alive<1, 2>(), nb::keep_alive<1, 3>(), nb::keep_alive<1, 4>(),
             "Upload `scene` (its meshes and lights as they are now) and keep it in sync with `camera`. Every light "
-            "also gets a quad mesh, drawn with the scene (bright for area lights, invisible otherwise).")
+            "also gets a quad mesh, drawn with the scene (bright for area lights, invisible otherwise). The quads "
+            "belong to the SceneGpu: `scene` itself isn't modified and can be shown again later.")
         .def_prop_ro("camera_buffer", &lr::SceneGpu::cameraBufferName,
                      "Camera UBO: mat4 view, proj, viewProj, invView, invProj; vec4 position (std140, 336 bytes).")
         .def_prop_ro("light_buffer", &lr::SceneGpu::lightBufferName, "Light SSBO, as pbr.frag reads it.")
-        .def_prop_ro("num_lights", &lr::SceneGpu::numLights)
+        .def_prop_ro("num_lights", &lr::SceneGpu::numLights, "Lights currently in the light buffer.")
+        .def_prop_ro("max_lights", &lr::SceneGpu::maxLights,
+                     "Most lights the light buffer holds; more raises an error on the next frame.")
         .def_prop_ro("mesh_count",
                      [](const lr::SceneGpu &gpu) {
                          return gpu.meshObjects().size();
@@ -2168,6 +2265,11 @@ void bindBuildingBlocks(nb::module_ &m)
                 self->declare(viewer.frameGraph(), [&](FrameGraph &fg) {
                     self->pass->build(fg, lr::conventions::geometryMeshLayout());
                 });
+                self->geometryRebuilt =
+                    SceneGpuListener(gpu, gpu.onGeometryRebuilt([pass = self->pass.get()](const lr::SceneGpu &rebuilt) {
+                        pass->setSceneGeometry(rebuilt.meshPositions(), rebuilt.indexBuffer(), rebuilt.meshTransforms(),
+                                               rebuilt.geometryObjects(), rebuilt.skinUploadResult().drawInfos);
+                    }));
                 holdWhileViewerRuns(viewer, self); // the pass's execute callback reads self->pass
             },
             "viewer"_a, "scene_gpu"_a, nb::keep_alive<1, 2>(), nb::keep_alive<1, 3>())
@@ -2271,6 +2373,11 @@ void bindBuildingBlocks(nb::module_ &m)
                 self->declare(viewer.frameGraph(), [&](FrameGraph &fg) {
                     self->pass->build(fg);
                 });
+                self->lightsUploaded =
+                    SceneGpuListener(gpu, gpu.onLightsUploaded([pass = self->pass.get()](uint32_t numLights) {
+                        pass->setNumLights(numLights);
+                    }));
+                holdWhileViewerRuns(viewer, self); // the pass's execute callback reads the light count from it
             },
             "viewer"_a, "scene_gpu"_a, "ibl"_a, nb::keep_alive<1, 2>(), nb::keep_alive<1, 3>());
 

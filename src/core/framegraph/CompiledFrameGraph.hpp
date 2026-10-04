@@ -106,6 +106,10 @@ private:
     framegraph::ExecutionPlan                      m_executionPlan;
     std::vector<CompiledPass>                      m_passes;
     std::vector<CompiledImageBarrier>              m_finalImageBarriers;
+    // Each image's layout once a recorded frame has run, written to the registry by execute() (not at
+    // compile time: a graph recompiled before this one ever executes must start from the images' real
+    // layouts, not from layouts this graph would have left them in).
+    std::unordered_map<std::string, VkImageLayout> m_finalImageLayouts;
 
     std::vector<VkImageMemoryBarrier2>     m_scratchImageBarriers;
     std::vector<VkBufferMemoryBarrier2>    m_scratchBufferBarriers;

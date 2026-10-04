@@ -26,6 +26,8 @@ struct SpotLight : public BaseLight
 struct AreaLight : public BaseLight
 {
     glm::vec2 size{1.0f, 1.0f}; // width and height in world units
+    // Emits from (and is visible from) both faces; otherwise only along its forward axis (local -Z).
+    bool twoSided = true;
 };
 
 struct DirectionalLight : public BaseLight
@@ -72,6 +74,7 @@ struct LightGUICallbacks
         changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 100.0f);
         changed |= ImGui::ColorEdit3("Light Color", &light.color.x);
         changed |= ImGui::DragFloat2("Size", &light.size.x, 0.1f);
+        changed |= ImGui::Checkbox("Two-Sided", &light.twoSided);
         return changed;
     }
 
@@ -89,6 +92,13 @@ struct Light : public Component
     LightVariant light;
 
     explicit Light(const LightVariant &lightVariant) : light(lightVariant), Component("Light") {}
+
+    // Replaces the light's parameters and flags it dirty, so SceneGpu re-uploads it (see flushDirty).
+    void set(const LightVariant &lightVariant)
+    {
+        light = lightVariant;
+        markDirty();
+    }
 
     void onGUIImpl() override
     {

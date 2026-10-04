@@ -20,6 +20,8 @@ public:
 
     explicit PbrPass(Config cfg);
 
+    // Takes effect from the next frame. The pass reads this object every frame, so it must outlive the
+    // frame graph's use of the pass.
     void setNumLights(uint32_t numLights) { m_cfg.numLights = numLights; }
 
     // Upload the LTC lookup tables used for area light shading (ltc1, ltc2).

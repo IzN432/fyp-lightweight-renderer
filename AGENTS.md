@@ -754,6 +754,85 @@ blocks, with a pass written in Python in the middle:
 - **Stubs:** 365 public names match; mypy clean.
 - **Stub fix:** `Light.color`/`area_size` now really return tuples, as the stubs said.
 
+**Review fix: `SceneGpu` no longer modifies the scene.**
+- **The problem:** it used to build light quads by adding a `MeshComponent` to each light object. The
+  scene stayed changed after the `SceneGpu` was gone:
+  - showing the same scene in a second Viewer threw "Component of this type already exists";
+  - each `SceneGpu` leaked one `MaterialStore` slot per light;
+  - `light.mesh` appeared in Python;
+  - in the C++ editor, lights passed `isEditable`, so a light's quad could become the edited mesh and
+    get vertex-edited.
+- **The fix:** `SceneGpu` now owns the quads (one heap-allocated `Mesh` per light) and their material
+  slots, and releases the slots when a light is removed and in its destructor. The light object stays
+  in the draw list as the quad's scene object, with an identity model matrix.
+- **Verification:**
+  - New test `test_a_scene_can_be_shown_again` (two Viewers in a row, `light.mesh` stays `None`). It
+    failed on the old build and passes now.
+  - `ctest` 24/24.
+  - `renderer.exe` log unchanged.
+  - A screenshot shows the area-light quad still rendering.
+- **Leftover:** the `MeshComponent` `hideFromGui` flag now has no users.
+
+**Follow-up: lights added, removed and edited while running** (`examples/python/light_editor.py`)
+
+**Demo:** an ImGui panel to add point/spot/area lights, remove the selected one, and edit it (type,
+colour, intensity, cones, area size, position, orbit). `--scripted` is the `python.light_editor` ctest:
+it adds, edits and removes lights and checks the GPU light buffer after each step.
+
+**API, all thin layers over existing engine pieces:**
+- `SceneObject.set_light(...)` uses the new `Light::set()`, which marks the light dirty so the existing
+  `flushDirty` path re-uploads it.
+- `Scene.remove(obj)` is `Scene::destroySceneObject`.
+- `SceneGpu.max_lights`.
+
+**Engine:**
+- `SceneGpu::flushDirty` notices lights added or removed and calls `syncLights()`, which builds and
+  drops quads, uploads the lights and rebuilds the geometry.
+- New listeners, `onGeometryRebuilt` and `onLightsUploaded`, keep `GeometryPass`'s draw lists and
+  `PbrPass`'s light count current. `main.cpp` registers them too, replacing its manual refresh calls.
+- `LightUploader` raises a clear error above 16 lights instead of overflowing its buffer.
+
+**Bugs found and fixed:**
+- **`PbrPass::setNumLights()` had no effect after `build()`.** The count was copied into the execute
+  callback once. So in the C++ editor, a deleted light kept lighting the scene.
+- **Use-after-free from the previous fix.** Removing a light freed its quad mesh while the geometry
+  list still pointed at it. Quads are now dropped only in `syncLights()`.
+- **Frame-graph layout bug (pre-existing):** the compiler wrote end-of-frame image layouts into the
+  registry *at compile time*. A recompile before the graph had ever executed (any change during frame
+  1 or before `run()`) therefore skipped the transitions out of `UNDEFINED`, causing validation errors.
+  Layouts are now recorded when `execute()` records a frame.
+
+**Tests:**
+- `test_bindings.test_recompile_before_the_first_frame_runs` (generic, no lights involved);
+- `test_blocks.test_lights_added_before_the_first_frame`;
+- `test_blocks.test_lights_added_and_removed_while_running_light_the_scene`: the centre pixel turns
+  red when a red light is added and returns to its original value when the light is removed.
+
+Each test failed with its bug temporarily restored. Results: `ctest` 25/25; `renderer.exe` log
+unchanged.
+
+**Area lights: facing fixed, and two-sided as an option** (reported from the light editor)
+
+**The bug:** area lights pointed backwards. Measured with one light between the camera and the bird
+and a black environment: aimed at the bird, it lit nothing and showed its bright face to the camera
+behind it. The emission (the corner order in `pbr.frag`) and the quad's triangle order were both
+wound for a +Z normal, while the light's forward axis is −Z, as for spot and directional lights.
+Both are reversed now.
+
+**The option:**
+- `AreaLight::twoSided` (default `true`), with a "Two-Sided" checkbox in the Light inspector.
+- **GPU side:** the light buffer entry grows from 64 to 80 bytes with a `flags` word, and
+  `CalcAreaLight` passes the flag to `LTC_Evaluate`.
+- **The quad** always has 8 vertices, a front face and a back face. A one-sided light collapses the
+  back face to a point, so switching sides at runtime changes only vertex data (SceneGpu re-uploads
+  vertices, not indices).
+- **Python:** `add_light(two_sided=True)`, `set_light(two_sided=...)`, `Light.two_sided`, and a
+  checkbox in the light editor.
+
+**Test:** `test_area_lights_face_forward_or_both_ways` uses one Viewer, switches the option and the
+aim while running, and samples both the bird and the quad. It fails with either winding restored.
+`ctest` 25/25; `renderer.exe` log unchanged.
+
 **Files:**
 - **Engine:** `core/scene/SceneGpu.{hpp,cpp}`; `SceneManager.{hpp,cpp}`; `EngineConventions.{hpp,cpp}`;
   `core/passes/composite/*`; `utility/tonemap.glslh`; `final.frag`; `ResourceRegistry::names()`;
@@ -761,7 +840,9 @@ blocks, with a pass written in Python in the middle:
 - **Bindings:** `LrModule.cpp`.
 - **Stubs:** `python/lr/__init__.pyi`.
 - **Docs:** `docs/python_building_blocks.md`.
-- **Demo:** `examples/python/deferred_blocks.py` + `shaders/fog.frag`.
+- **Demos:** `examples/python/deferred_blocks.py` + `shaders/fog.frag`; `examples/python/light_editor.py`.
+- **Light editing:** `Light.hpp` (`set`), `LightUploader`, `PbrPass`, `CompiledFrameGraph` +
+  `FrameGraphCompiler` (layout commit).
 - **Tests:** `tests/python/test_blocks.py`, `test_scene.py`.
 
 ## Step 6 — interaction from Python ☑️ (committed deb6235)

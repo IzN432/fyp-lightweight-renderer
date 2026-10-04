@@ -263,6 +263,19 @@ void CompiledFrameGraph::execute(CommandBuffer &cmd, const ExternalImageBindings
         }
     }
     submitResourceBarriers(cmd, m_finalImageBarriers, {}, externalImages);
+
+    // The recorded commands leave the images in these layouts, and anything recorded or compiled from
+    // now on runs after them.
+    for (const auto &[name, layout] : m_finalImageLayouts)
+    {
+        if (m_registry.hasImageArray(name))
+        {
+            m_registry.setImageArrayLayout(name, layout);
+        } else
+        {
+            m_registry.setImageLayout(name, layout);
+        }
+    }
 }
 
 void CompiledFrameGraph::setExternalImage(const std::string &name, VkImage image, VkImageView view)
