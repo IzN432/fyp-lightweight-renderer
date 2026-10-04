@@ -1,6 +1,6 @@
 #version 450
 
-// Vertex layout built in scene_viewer.py from lr.Mesh arrays (engine attribute names in comments).
+// Vertex layout built in scene_viewer.py from engine.Mesh arrays (engine attribute names in comments).
 layout(location = 0) in vec3 inPosition; // Mesh.positions
 layout(location = 1) in vec3 inNormal;   // Mesh.attribute("normal")
 layout(location = 2) in vec2 inUv;       // Mesh.attribute("uv")

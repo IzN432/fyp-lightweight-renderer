@@ -1,12 +1,12 @@
 """Deferred renderer from the engine's building blocks, with a pass of our own in the middle.
 
-  lr.SceneGpu              the scene's GPU buffers in the engine's layout (camera, lights, meshes, materials)
-  lr.Ibl                   image-based lighting precomputed from an HDR environment
-  lr.GeometryPass          -> gbufferAlbedo, gbufferNormal, gbufferMaterial, gbufferEmissive, gbufferDepth
-  lr.AmbientOcclusionPass  gbufferDepth -> hbao_ao
-  lr.PbrPass               G-buffer + hbao_ao + lights + IBL -> pbr (HDR)
+  engine.SceneGpu              the scene's GPU buffers in the engine's layout (camera, lights, meshes, materials)
+  engine.Ibl                   image-based lighting precomputed from an HDR environment
+  engine.GeometryPass          -> gbufferAlbedo, gbufferNormal, gbufferMaterial, gbufferEmissive, gbufferDepth
+  engine.AmbientOcclusionPass  gbufferDepth -> hbao_ao
+  engine.PbrPass               G-buffer + hbao_ao + lights + IBL -> pbr (HDR)
   fog (this file)          pbr + gbufferDepth -> fogged (HDR)
-  lr.CompositePass         fogged -> swapchain: Reinhard tone map, the environment as the sky
+  engine.CompositePass         fogged -> swapchain: Reinhard tone map, the environment as the sky
 
 Each block's inputs and outputs are printed at startup (and documented in docs/python_building_blocks.md).
 Middle-drag orbits, Shift + middle-drag pans, the scroll wheel zooms.
@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 
 import lr
+from lr import engine
 
 SHADERS = pathlib.Path(__file__).parent / "shaders"
 ASSETS = pathlib.Path(lr.ASSET_DIR) / "samples"
@@ -29,7 +30,7 @@ DEFAULT_MODEL = ASSETS / "models" / "bird_orange.glb"
 DEFAULT_HDRI = ASSETS / "environments" / "cedar_bridge_sunset_2_4k.hdr"
 
 
-def mesh_bounds(scene: lr.Scene) -> tuple[np.ndarray, np.ndarray]:
+def mesh_bounds(scene: engine.Scene) -> tuple[np.ndarray, np.ndarray]:
     lows, highs = [], []
     for obj in scene.objects:
         if obj.mesh is not None and obj.mesh.vertex_count:
@@ -46,7 +47,7 @@ def main():
     parser.add_argument("--frames", type=int, default=0, help="close after this many frames (0 = run until closed)")
     args = parser.parse_args()
 
-    scene = lr.load_scene(args.model)
+    scene = engine.load_scene(args.model)
     low, high = mesh_bounds(scene)  # before SceneGpu adds the light quads
     size = float(np.linalg.norm(high - low))
     scene.add_light("directional", intensity=2.0, rotation=(-0.3826834, 0.0, 0.0, 0.9238795))  # 45 deg down
@@ -61,11 +62,11 @@ def main():
     camera.elevation = 0.3
 
     # Small cubemaps keep startup quick; the engine's own renderer uses 2048.
-    ibl = lr.Ibl(viewer, hdri=args.hdri, env_res=512, pf_res=256, pf_mips=6)
-    gpu = lr.SceneGpu(viewer, scene, camera)
-    geometry = lr.GeometryPass(viewer, gpu)
-    ao = lr.AmbientOcclusionPass(viewer, gpu, sphere_radius=size * 0.02)
-    pbr = lr.PbrPass(viewer, gpu, ibl)
+    ibl = engine.Ibl(viewer, hdri=args.hdri, env_res=512, pf_res=256, pf_mips=6)
+    gpu = engine.SceneGpu(viewer, scene, camera)
+    geometry = engine.GeometryPass(viewer, gpu)
+    ao = engine.AmbientOcclusionPass(viewer, gpu, sphere_radius=size * 0.02)
+    pbr = engine.PbrPass(viewer, gpu, ibl)
 
     # Our own pass: reads two engine outputs, writes an image the composite reads instead of "pbr".
     fog = np.array([0.55, 0.6, 0.7, 0.0, 0.0], dtype=np.float32)  # vec4 colour, float density
@@ -87,7 +88,7 @@ def main():
         .color_attachment(fg.image("fogged"), lr.Format.R16G16B16A16_SFLOAT)
         .execute(draw_fog)
     )
-    composite = lr.CompositePass(viewer, gpu, input="fogged")
+    composite = engine.CompositePass(viewer, gpu, input="fogged")
 
     blocks = [ibl, geometry, ao, pbr, composite]
     for block in blocks:

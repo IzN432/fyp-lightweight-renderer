@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 
 import lr
+from lr import engine
 
 ASSETS = pathlib.Path(lr.ASSET_DIR) / "samples"
 DEFAULT_MODEL = ASSETS / "models" / "bird_orange.glb"
@@ -46,7 +47,7 @@ def look_rotation(direction) -> tuple[float, float, float, float]:
     return (x, y, z, w)
 
 
-def mesh_bounds(scene: lr.Scene) -> tuple[np.ndarray, np.ndarray]:
+def mesh_bounds(scene: engine.Scene) -> tuple[np.ndarray, np.ndarray]:
     lows, highs = [], []
     for obj in scene.objects:
         if obj.mesh is not None and obj.mesh.vertex_count:
@@ -57,22 +58,22 @@ def mesh_bounds(scene: lr.Scene) -> tuple[np.ndarray, np.ndarray]:
 
 
 class LightEditor:
-    def __init__(self, scene: lr.Scene, center: np.ndarray, size: float):
+    def __init__(self, scene: engine.Scene, center: np.ndarray, size: float):
         self.scene, self.center, self.size = scene, center, size
         self.selected = 0
         self.orbit = False
         self.added = 0
 
-    def lights(self) -> list[lr.SceneObject]:
+    def lights(self) -> list[engine.SceneObject]:
         return [obj for obj in self.scene.objects if obj.light is not None]
 
-    def place(self, obj: lr.SceneObject, angle: float, height: float = 0.6):
+    def place(self, obj: engine.SceneObject, angle: float, height: float = 0.6):
         radius = self.size * 0.9
         position = self.center + np.array([math.sin(angle) * radius, height * self.size, math.cos(angle) * radius])
         obj.position = tuple(position.tolist())
         obj.rotation = look_rotation(self.center - position)
 
-    def add(self, light_type: str, **parameters) -> lr.SceneObject:
+    def add(self, light_type: str, **parameters) -> engine.SceneObject:
         self.added += 1
         colors = [(1.0, 0.45, 0.2), (0.3, 0.6, 1.0), (0.5, 1.0, 0.4), (1.0, 0.9, 0.6)]
         parameters.setdefault("color", colors[self.added % len(colors)])
@@ -82,7 +83,7 @@ class LightEditor:
         self.place(obj, angle=self.added * 2.1)
         return obj
 
-    def gui(self, gpu: lr.SceneGpu):
+    def gui(self, gpu: engine.SceneGpu):
         lights = self.lights()
         with lr.gui.window("Lights", size=(400, 470), position=(20, 20)):
             lr.gui.text(f"{gpu.num_lights} / {gpu.max_lights} lights on the GPU")
@@ -103,7 +104,7 @@ class LightEditor:
             lr.gui.separator()
             self.edit(obj)
 
-    def edit(self, obj: lr.SceneObject):
+    def edit(self, obj: engine.SceneObject):
         light = obj.light
         assert light is not None
         if light.type == "image":
@@ -158,13 +159,13 @@ class LightEditor:
             self.place(obj, angle, height=offset[1] / self.size)
 
 
-def gpu_lights(viewer: lr.Viewer, gpu: lr.SceneGpu) -> np.ndarray:
+def gpu_lights(viewer: lr.Viewer, gpu: engine.SceneGpu) -> np.ndarray:
     """The light buffer as the GPU sees it: one row of 20 floats per light (see LightGpuData)."""
     data = viewer.resources.read_buffer(gpu.light_buffer).view(np.float32).reshape(-1, 20)
     return data[: gpu.num_lights]
 
 
-def scripted_check(frame: int, editor: LightEditor, viewer: lr.Viewer, gpu: lr.SceneGpu, state: dict[str, Any]):
+def scripted_check(frame: int, editor: LightEditor, viewer: lr.Viewer, gpu: engine.SceneGpu, state: dict[str, Any]):
     """Adds, edits and removes lights on a schedule, checking the GPU light buffer after each step."""
 
     def types():
@@ -208,7 +209,7 @@ def main():
     parser.add_argument("--scripted", action="store_true", help="run a self-checking sequence of edits, then exit")
     args = parser.parse_args()
 
-    scene = lr.load_scene(args.model)
+    scene = engine.load_scene(args.model)
     low, high = mesh_bounds(scene)
     center, size = (low + high) / 2, float(np.linalg.norm(high - low))
     scene.add_light("directional", intensity=0.6, rotation=look_rotation((-0.3, -1.0, -0.4)), name="Sun")
@@ -217,12 +218,12 @@ def main():
     viewer = lr.Viewer(title="lr - light editor (Python)", width=1280, height=720)
     camera = lr.OrbitCamera(viewer)
     camera.target, camera.radius, camera.elevation = tuple(center.tolist()), size * 1.6, 0.35
-    ibl = lr.Ibl(viewer, hdri=HDRI, env_res=512, pf_res=256, pf_mips=6)
-    gpu = lr.SceneGpu(viewer, scene, camera)
-    lr.GeometryPass(viewer, gpu)
-    lr.AmbientOcclusionPass(viewer, gpu, sphere_radius=size * 0.02)
-    lr.PbrPass(viewer, gpu, ibl)
-    lr.CompositePass(viewer, gpu)
+    ibl = engine.Ibl(viewer, hdri=HDRI, env_res=512, pf_res=256, pf_mips=6)
+    gpu = engine.SceneGpu(viewer, scene, camera)
+    engine.GeometryPass(viewer, gpu)
+    engine.AmbientOcclusionPass(viewer, gpu, sphere_radius=size * 0.02)
+    engine.PbrPass(viewer, gpu, ibl)
+    engine.CompositePass(viewer, gpu)
 
     editor = LightEditor(scene, center, size)
     if not args.scripted:

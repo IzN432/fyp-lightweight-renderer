@@ -12,6 +12,7 @@ import sys
 import numpy as np
 
 import lr
+from lr import engine
 
 BIRD = pathlib.Path(lr.ASSET_DIR) / "samples" / "models" / "bird_orange.glb"
 F = lr.Format
@@ -48,33 +49,33 @@ def probe_pass(viewer):
 
 @dataclasses.dataclass
 class Chain:
-    gpu_scene: lr.Scene
+    gpu_scene: engine.Scene
     viewer: lr.Viewer
     camera: lr.OrbitCamera
-    ibl: lr.Ibl
-    gpu: lr.SceneGpu
-    geometry: lr.GeometryPass
-    ao: lr.AmbientOcclusionPass
-    pbr: lr.PbrPass
-    composite: lr.CompositePass
+    ibl: engine.Ibl
+    gpu: engine.SceneGpu
+    geometry: engine.GeometryPass
+    ao: engine.AmbientOcclusionPass
+    pbr: engine.PbrPass
+    composite: engine.CompositePass
 
 
 def build(extra=None) -> Chain:
     """A viewer with the full engine chain over the bird. `extra(viewer)` adds passes before the composite."""
-    scene = lr.load_scene(BIRD)
+    scene = engine.load_scene(BIRD)
     scene.add_light("directional", intensity=2.0, rotation=(-0.3826834, 0.0, 0.0, 0.9238795))
     scene.add_light("image")
     viewer = lr.Viewer(title="lr building blocks test", width=320, height=240)
     camera = lr.OrbitCamera(viewer)
     camera.target, camera.radius, camera.elevation = (0.0, 0.5, 0.0), 2.5, 0.2
-    ibl = lr.Ibl(viewer, env_res=64, irr_res=16, pf_res=64, pf_mips=4)
-    gpu = lr.SceneGpu(viewer, scene, camera)
-    geometry = lr.GeometryPass(viewer, gpu)
-    ao = lr.AmbientOcclusionPass(viewer, gpu, sphere_radius=0.05)
-    pbr = lr.PbrPass(viewer, gpu, ibl)
+    ibl = engine.Ibl(viewer, env_res=64, irr_res=16, pf_res=64, pf_mips=4)
+    gpu = engine.SceneGpu(viewer, scene, camera)
+    geometry = engine.GeometryPass(viewer, gpu)
+    ao = engine.AmbientOcclusionPass(viewer, gpu, sphere_radius=0.05)
+    pbr = engine.PbrPass(viewer, gpu, ibl)
     if extra:
         extra(viewer)
-    composite = lr.CompositePass(viewer, gpu)
+    composite = engine.CompositePass(viewer, gpu)
     return Chain(scene, viewer, camera, ibl, gpu, geometry, ao, pbr, composite)
 
 
@@ -180,16 +181,16 @@ def test_area_lights_face_forward_or_both_ways():
     # Two-sided, the camera sees the quad too. Turned around, a one-sided light no longer lights the bird
     # and the camera sees its emitting face. (Both used to be reversed.)
     light_position = np.array([0.0, 1.0, 1.2])
-    scene = lr.load_scene(BIRD)  # no other lights; the environment is black
+    scene = engine.load_scene(BIRD)  # no other lights; the environment is black
     light = scene.add_light("area", intensity=10.0, size=(0.6, 0.6), position=tuple(light_position),
                             two_sided=False)
     viewer = lr.Viewer(title="lr building blocks test", width=320, height=240)
     camera = lr.OrbitCamera(viewer)
     camera.target, camera.radius, camera.elevation, camera.azimuth = (0.0, 0.5, 0.0), 4.0, 0.15, 0.0
-    gpu = lr.SceneGpu(viewer, scene, camera)
-    lr.GeometryPass(viewer, gpu)
-    lr.AmbientOcclusionPass(viewer, gpu, sphere_radius=0.05)
-    lr.PbrPass(viewer, gpu, lr.Ibl(viewer, env_res=64, irr_res=16, pf_res=64, pf_mips=4))
+    gpu = engine.SceneGpu(viewer, scene, camera)
+    engine.GeometryPass(viewer, gpu)
+    engine.AmbientOcclusionPass(viewer, gpu, sphere_radius=0.05)
+    engine.PbrPass(viewer, gpu, engine.Ibl(viewer, env_res=64, irr_res=16, pf_res=64, pf_mips=4))
     fg, res = viewer.frame_graph, viewer.resources
     res.register_static_buffer("probe", 32, lr.BufferUsage.STORAGE)
     uv = np.zeros(4, np.float32)  # bird centre, light centre
@@ -207,7 +208,7 @@ def test_area_lights_face_forward_or_both_ways():
         .push_constant_size(uv.nbytes, lr.Stage.COMPUTE)
         .execute(probe)
     )
-    lr.CompositePass(viewer, gpu)
+    engine.CompositePass(viewer, gpu)
     samples = {}
 
     def sample():
@@ -277,16 +278,16 @@ def test_misuse_is_reported():
     viewer = lr.Viewer(title="lr building blocks test", width=320, height=240)
     camera = lr.OrbitCamera(viewer)
     try:
-        lr.SceneGpu(viewer, lr.Scene(), camera)
+        engine.SceneGpu(viewer, engine.Scene(), camera)
     except ValueError as e:
         assert "no meshes" in str(e), e
     else:
         raise AssertionError("expected ValueError for an empty scene")
 
-    scene = lr.load_scene(BIRD)
-    lr.SceneGpu(viewer, scene, camera)
+    scene = engine.load_scene(BIRD)
+    engine.SceneGpu(viewer, scene, camera)
     try:
-        lr.SceneGpu(viewer, scene, camera)
+        engine.SceneGpu(viewer, scene, camera)
     except RuntimeError as e:
         assert "already" in str(e), e
     else:
@@ -302,15 +303,15 @@ def test_misuse_is_reported():
 
 def test_a_scene_can_be_shown_again():
     # SceneGpu draws each light as a quad it owns; the scene itself must come out unchanged.
-    scene = lr.load_scene(BIRD)
+    scene = engine.load_scene(BIRD)
     light = scene.add_light("area", size=(0.5, 0.5), position=(0.0, 1.5, 1.0))
     objects_before = [obj.id for obj in scene.objects]
     counts = []
     for _ in range(2):
         viewer = lr.Viewer(title="lr building blocks test", width=320, height=240)
         camera = lr.OrbitCamera(viewer)
-        gpu = lr.SceneGpu(viewer, scene, camera)
-        lr.GeometryPass(viewer, gpu)
+        gpu = engine.SceneGpu(viewer, scene, camera)
+        engine.GeometryPass(viewer, gpu)
         counts.append((gpu.mesh_count, gpu.num_lights))
         run_frames(viewer, 2)
         assert light.mesh is None, "the light's quad must not become a scene mesh"

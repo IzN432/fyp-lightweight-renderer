@@ -11,6 +11,7 @@ import tempfile
 import numpy as np
 
 import lr
+from lr import engine
 
 BIRD = pathlib.Path(lr.ASSET_DIR) / "samples" / "models" / "bird_orange.glb"
 CONVENTION_PARAMETERS = {"baseDiffuse", "baseEmissive", "baseRoughness", "baseMetallic"}
@@ -21,7 +22,7 @@ def mesh_objects(scene):
 
 
 def test_gltf_meshes_are_render_ready():
-    scene = lr.load_scene(BIRD)
+    scene = engine.load_scene(BIRD)
     (obj,) = mesh_objects(scene)
     mesh = obj.mesh
     assert mesh.attribute_names == ["normal", "tangent", "uv"] or set(mesh.attribute_names) >= {"normal", "uv"}
@@ -46,7 +47,7 @@ def test_gltf_meshes_are_render_ready():
 
 
 def test_materials_use_engine_conventions():
-    scene = lr.load_scene(BIRD)
+    scene = engine.load_scene(BIRD)
     (obj,) = mesh_objects(scene)
     handles = set(obj.mesh.face_materials.tolist())
     assert len(obj.mesh.face_materials) == obj.mesh.face_count
@@ -65,7 +66,7 @@ def test_materials_use_engine_conventions():
 
 
 def test_hierarchy_and_transforms():
-    scene = lr.load_scene(BIRD)
+    scene = engine.load_scene(BIRD)
     (root,) = scene.roots
     assert root.parent is None and root.children
     for obj in scene.objects:
@@ -85,7 +86,7 @@ def test_hierarchy_and_transforms():
 
 
 def test_animation_moves_joints():
-    scene = lr.load_scene(BIRD)
+    scene = engine.load_scene(BIRD)
     animators = [obj.animator for obj in scene.objects if obj.animator is not None]
     assert animators and animators[0].clip_names
     animators[0].play(0)
@@ -106,7 +107,7 @@ def test_multi_material_obj():
             "usemtl red\nf 1 2 3\nf 1 3 4\n"
             "usemtl green\nf 2 5 6\n"
         )
-        scene = lr.load_scene(folder / "two.obj")
+        scene = engine.load_scene(folder / "two.obj")
 
     (obj,) = mesh_objects(scene)
     face_materials = obj.mesh.face_materials
@@ -123,7 +124,7 @@ def test_multi_material_obj():
 
 
 def test_scene_without_viewer_and_multiple_loads():
-    scene = lr.Scene()
+    scene = engine.Scene()
     first = scene.load(BIRD)
     second = scene.load(BIRD)
     assert first.id != second.id and len(scene.roots) == 2
@@ -131,7 +132,7 @@ def test_scene_without_viewer_and_multiple_loads():
 
 
 def test_add_light():
-    scene = lr.Scene()
+    scene = engine.Scene()
     spot = scene.add_light("spot", color=(1, 0.5, 0), intensity=3.0, position=(1, 2, 3),
                            rotation=(0.0, 0.70710678, 0.0, 0.70710678), outer_cone_degrees=40.0, name="Spot")
     assert spot.name == "Spot" and spot.parent is None and spot.mesh is None
@@ -146,8 +147,17 @@ def test_add_light():
     assert len(scene.objects) == 3
 
 
+def test_engine_layer_is_its_own_submodule():
+    # The opinionated pieces live in lr.engine; lr itself is the general-purpose frame graph.
+    for name in engine.__all__:
+        assert hasattr(engine, name) and not hasattr(lr, name), name
+    for name in ("Viewer", "FrameGraph", "PassBuilder", "ResourceRegistry", "OrbitCamera"):
+        assert hasattr(lr, name) and not hasattr(engine, name), name
+
+
 def main():
     tests = [
+        test_engine_layer_is_its_own_submodule,
         test_add_light,
         test_gltf_meshes_are_render_ready,
         test_materials_use_engine_conventions,

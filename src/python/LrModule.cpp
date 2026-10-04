@@ -2757,8 +2757,12 @@ NB_MODULE(_lr, m)
     bindGui(m);
     bindViewer(m);
     bindCamera(m);
-    bindScene(m);
-    bindBuildingBlocks(m);
+    // lr.engine: the engine's own, opinionated renderer (its scene model and loaders, its GPU layout,
+    // its passes). Everything else in lr is the general-purpose frame graph it's built on.
+    nb::module_ engine = m.def_submodule(
+        "engine", "The engine's preassembled renderer: scenes, their GPU layout, IBL and the deferred passes.");
+    bindScene(engine);
+    bindBuildingBlocks(engine);
     bindTesting(m);
 
     m.def(

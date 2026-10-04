@@ -1,26 +1,36 @@
-# Engine building blocks for Python renderers
+# Engine building blocks for Python renderers (`lr.engine`)
 
-The `lr` module lets Python build its own renderer on the engine's frame graph. These building blocks
-are the C++ renderer's own pieces, usable from such a renderer:
+The `lr` module lets Python build its own renderer on the engine's frame graph. It is split in two:
 
-- **`lr.SceneGpu`** uploads a scene in the engine's GPU layout and keeps it in sync.
-- **The engine's passes** read and write named frame-graph resources. Your own passes can sit between
-  them, reading their outputs and producing inputs for the next block.
+- **`lr`** is the general-purpose frame graph: buffers, images, passes and shaders you write
+  yourself, with no opinion on scenes or shading. It also has helpers such as `lr.OrbitCamera`,
+  `lr.transforms` and `lr.gui`.
+- **`lr.engine`** is the engine's own, opinionated renderer, as building blocks: the C++ renderer's
+  scene model and loaders, its GPU layout, and its passes.
+
+The two mix freely. Engine passes are ordinary frame-graph passes, so your own passes can sit between
+them, reading their outputs and producing inputs for the next block.
+
+- **`engine.SceneGpu`** uploads a scene in the engine's GPU layout and keeps it in sync.
+- **The engine's passes** read and write named frame-graph resources.
 
 ```python
-scene = lr.load_scene("model.glb")
+import lr
+from lr import engine
+
+scene = engine.load_scene("model.glb")
 scene.add_light("directional", rotation=(-0.383, 0, 0, 0.924))
 scene.add_light("image")                        # ambient light from the Ibl
 
 viewer = lr.Viewer()
 camera = lr.OrbitCamera(viewer)
-ibl = lr.Ibl(viewer, hdri="sky.hdr")            # precomputed now
-gpu = lr.SceneGpu(viewer, scene, camera)        # scene -> GPU buffers, kept in sync
-lr.GeometryPass(viewer, gpu)                    # -> G-buffer
-lr.AmbientOcclusionPass(viewer, gpu)            # gbufferDepth -> hbao_ao
-lr.PbrPass(viewer, gpu, ibl)                    # G-buffer + lights + IBL + AO -> pbr
+ibl = engine.Ibl(viewer, hdri="sky.hdr")            # precomputed now
+gpu = engine.SceneGpu(viewer, scene, camera)        # scene -> GPU buffers, kept in sync
+engine.GeometryPass(viewer, gpu)                    # -> G-buffer
+engine.AmbientOcclusionPass(viewer, gpu)            # gbufferDepth -> hbao_ao
+engine.PbrPass(viewer, gpu, ibl)                    # G-buffer + lights + IBL + AO -> pbr
 # ... your passes: read "pbr", "gbufferDepth", ...; write e.g. "fogged"
-lr.CompositePass(viewer, gpu, input="fogged")   # HDR -> window
+engine.CompositePass(viewer, gpu, input="fogged")   # HDR -> window
 viewer.run()
 ```
 
@@ -36,7 +46,7 @@ inserts a fog pass, written in Python, between `PbrPass` and `CompositePass`.
   and writes its results under fixed names, listed below. To replace a block, write the names its
   consumers read. For example, any pass writing an R32F image called `hbao_ao` can stand in for
   `AmbientOcclusionPass`.
-- **Every block reports its contract.** `block.inputs` and `block.outputs` are lists of `lr.ResourceUse`
+- **Every block reports its contract.** `block.inputs` and `block.outputs` are lists of `engine.ResourceUse`
   (`name`, `kind`, `usage`, `format`), and `block.describe()` prints them. They come from the passes'
   actual declarations, not from this document, so they are always current.
   - **Inputs** are what something else must provide.
@@ -48,7 +58,7 @@ inserts a fog pass, written in Python, between `PbrPass` and `CompositePass`.
 Attachment images (the G-buffer, `pbr`, your own outputs) are created by the frame graph at window
 size, and resized with the window.
 
-## `lr.SceneGpu(viewer, scene, camera)`
+## `lr.engine.SceneGpu(viewer, scene, camera)`
 
 **What it does:** uploads every mesh and light in `scene`, and keeps the buffers current each frame:
 - the camera, from `camera` (an `lr.OrbitCamera`);
@@ -89,7 +99,7 @@ demonstrates all of these.
 - `material_tex_metallicRoughnessTexture` (G = roughness, B = metallic)
 - `material_tex_emissiveTexture` (sRGB)
 
-## `lr.Ibl(viewer, hdri=None, env_res=2048, irr_res=32, pf_res=2048, pf_mips=8)`
+## `lr.engine.Ibl(viewer, hdri=None, env_res=2048, irr_res=32, pf_res=2048, pf_mips=8)`
 
 Image-based lighting, precomputed once, when the block is constructed, in a separate frame graph.
 `hdri` is an equirectangular `.hdr` image; with `None`, the environment is black.
@@ -101,7 +111,7 @@ Image-based lighting, precomputed once, when the block is constructed, in a sepa
 | out | `ibl_prefiltered` | RGBA16F cubemap, `pf_res`², `pf_mips` mips | Specular radiance, one mip per roughness step |
 | out | `ibl_brdf_lut` | RGBA8 2D | Split-sum BRDF lookup table |
 
-## `lr.GeometryPass(viewer, scene_gpu)`
+## `lr.engine.GeometryPass(viewer, scene_gpu)`
 
 Draws every `SceneGpu` mesh with its material. For each pixel:
 - **albedo** = `baseColorTexture` × `baseDiffuse`;
@@ -119,7 +129,7 @@ Setting `.skinning = False` draws skinned meshes in their rest pose.
 | out | `gbufferEmissive` | RGBA16F | rgb = emissive radiance |
 | out | `gbufferDepth` | D32 | Hardware depth, cleared to 1.0 where nothing was drawn. View position = `invProj * vec4(uv * 2 - 1, depth, 1)`, divided by w |
 
-## `lr.AmbientOcclusionPass(viewer, scene_gpu, sphere_radius=0.5, num_steps=16, num_dirs=8, tan_angle_bias=0.364, ao_scalar=2.0)`
+## `lr.engine.AmbientOcclusionPass(viewer, scene_gpu, sphere_radius=0.5, num_steps=16, num_dirs=8, tan_angle_bias=0.364, ao_scalar=2.0)`
 
 Horizon-based ambient occlusion (HBAO) on deinterleaved quarter-resolution depth, followed by a
 depth-aware blur.
@@ -137,7 +147,7 @@ depth-aware blur.
 | in | `camera_cb` | | from SceneGpu |
 | out | `hbao_ao` | R32F | Occlusion: 0 = open, 1 = fully occluded |
 
-## `lr.PbrPass(viewer, scene_gpu, ibl)`
+## `lr.engine.PbrPass(viewer, scene_gpu, ibl)`
 
 Deferred lighting with a Cook-Torrance BRDF (GGX, Smith, Schlick):
 - **point, spot and directional lights** are evaluated as delta lights;
@@ -158,7 +168,7 @@ Emissive is added on top. Background pixels (depth 1) are black.
 | in | `camera_cb`, `lights_lb` | | from SceneGpu |
 | out | `pbr` | RGBA16F | Linear HDR radiance |
 
-## `lr.CompositePass(viewer, scene_gpu, input="pbr", output="swapchain", output_format=None, name="composite")`
+## `lr.engine.CompositePass(viewer, scene_gpu, input="pbr", output="swapchain", output_format=None, name="composite")`
 
 The engine's final image, without the editor overlays:
 - where `gbufferDepth` is 1, it shows the `ibl_env` sky;
@@ -189,7 +199,7 @@ fg.add_pass("fog")
   .sampled_depth(2, fg.image("gbufferDepth"), lr.Stage.FRAGMENT)
   .color_attachment(fg.image("fogged"), lr.Format.R16G16B16A16_SFLOAT)
   .execute(draw)
-lr.CompositePass(viewer, gpu, input="fogged")
+engine.CompositePass(viewer, gpu, input="fogged")
 ```
 
 **Checks:**

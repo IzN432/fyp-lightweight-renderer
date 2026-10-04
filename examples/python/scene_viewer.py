@@ -1,6 +1,6 @@
 """Scene viewer — a renderer written in Python, drawing a glTF/OBJ scene loaded with the engine's loaders.
 
-  lr.load_scene(path)       objects, hierarchy, world matrices, meshes and materials (numpy), on the CPU
+  engine.load_scene(path)       objects, hierarchy, world matrices, meshes and materials (numpy), on the CPU
   -> one vertex buffer      every mesh's positions + "normal" + "uv", concatenated
   -> one index buffer       each mesh's faces, sorted by material, so each (object, material) is one range
   -> a texture array        each material's baseColorTexture (white if it has none)
@@ -22,12 +22,13 @@ from typing import Any
 import numpy as np
 
 import lr
+from lr import engine
 
 SHADERS = pathlib.Path(__file__).parent / "shaders"
 DEFAULT_MODEL = pathlib.Path(lr.ASSET_DIR) / "samples" / "models" / "bird_orange.glb"
 
 
-def build_geometry(scene: lr.Scene):
+def build_geometry(scene: engine.Scene):
     """Concatenate every mesh into one vertex + one index buffer; return them with per-range draw records."""
     vertices, indices, draws = [], [], []
     materials: dict[int, int] = {}  # material handle -> texture array index
@@ -68,7 +69,7 @@ def build_geometry(scene: lr.Scene):
 WHITE = np.full((1, 1, 4), 255, dtype=np.uint8)
 
 
-def base_color(material: lr.Material) -> tuple[np.ndarray, np.ndarray]:
+def base_color(material: engine.Material) -> tuple[np.ndarray, np.ndarray]:
     """(texture, factor): albedo = texture * factor, as the engine's geometry.frag computes it."""
     texture = material.texture("baseColorTexture") if "baseColorTexture" in material.texture_names else WHITE
     factor = np.array(material.parameters.get("baseDiffuse", (1.0, 1.0, 1.0, 1.0)), dtype=np.float32)
@@ -91,7 +92,7 @@ def main():
     parser.add_argument("--frames", type=int, default=0, help="close after this many frames (0 = run until closed)")
     args = parser.parse_args()
 
-    scene = lr.load_scene(args.model)
+    scene = engine.load_scene(args.model)
     vertices, indices, draws, materials = build_geometry(scene)
 
     viewer = lr.Viewer(title=f"lr - {pathlib.Path(args.model).name} (Python)", width=1280, height=720)

@@ -904,6 +904,41 @@ uploads it to a dynamic storage buffer, and draws instanced billboards (`shaders
 - **Demo:** `examples/python/step_loop.py`, `shaders/particles.{vert,frag}`.
 - **Tests:** `tests/python/test_bindings.py`, `CMakeLists.txt`.
 
+## Split: `lr` (frame graph) vs `lr.engine` (the engine's renderer) ✅
+
+**Why:** so it's clear which parts are the general-purpose frame graph and which are the engine's own,
+opinionated renderer.
+
+**What lives where:**
+- **`lr`:** the frame graph and its tools, with no opinion on scenes or shading. Viewer, FrameGraph,
+  PassBuilder, ResourceRegistry, the enums, shader compilation, input, plus the helpers
+  `lr.OrbitCamera`, `lr.gui` and `lr.transforms`.
+- **`lr.engine`:**
+  - scenes: `load_scene`, `Scene`, `SceneObject`, `Mesh`, `Material`, `Light`, `Animator`;
+  - GPU layout: `SceneGpu`;
+  - passes: `Ibl`, `GeometryPass`, `AmbientOcclusionPass`, `PbrPass`, `CompositePass`, and their base
+    `EnginePass` / `ResourceUse`.
+- **`OrbitCamera` stays in `lr`.** It only turns input into view/projection matrices, and plain
+  frame-graph renderers (`spinning_torus`, `interactive`) use it.
+
+**How it's built:**
+- `LrModule.cpp` registers `bindScene` and `bindBuildingBlocks` on a native submodule,
+  `lr._lr.engine`.
+- [python/lr/engine.py](python/lr/engine.py) re-exports it by name, with a docstring describing the
+  layer. `lr/__init__.py` drops the native `engine` its star import picks up, so `lr.engine` is that
+  Python module.
+- **Stubs:** split into `__init__.pyi` and `engine.pyi`. `test_stubs.py` now runs stubgen recursively,
+  checks both files, and checks that `engine.py` exports every native name.
+  - **First attempt:** I relabelled the classes `lr.engine.X` (via `__module__`). That made stubgen
+    document them as imports, so the engine stubs were silently unchecked (1 reference name instead of
+    91). The classes therefore keep `lr._lr.engine`, like `lr._lr.Viewer`.
+- **Usages updated:** examples and tests now use `from lr import engine` / `engine.X`; the docs intro
+  explains the split.
+- `test_scene.test_engine_layer_is_its_own_submodule` keeps the names from drifting back.
+
+**Results:** `ctest` 26/26; stubs: 371 names (280 + 91). A renamed stub class and an unexported name
+each failed the stub check.
+
 ## Step 6 — interaction from Python ☑️ (committed deb6235)
 
 **Goal:** a Python renderer can be interactive:
