@@ -85,6 +85,7 @@ add_library(lr_core STATIC
     src/core/window/Window.cpp
 
     src/core/passes/ambientocclusion/AmbientOcclusionPass.cpp
+    src/core/passes/composite/CompositePass.cpp
     src/core/passes/final/FinalPass.cpp
     src/core/passes/geometry/GeometryPass.cpp
     src/core/passes/heatmap/HeatmapPass.cpp
@@ -105,6 +106,8 @@ add_library(lr_core STATIC
     src/core/scene/Scene.cpp
     src/core/scene/SceneObject.cpp
     src/core/scene/SceneManager.cpp
+    src/core/scene/SceneGpu.cpp
+    src/core/scene/EngineConventions.cpp
 
     src/core/loaders/ObjLoader.cpp
     src/core/loaders/GltfLoader.cpp
@@ -182,6 +185,7 @@ add_shaders(lr_core
     src/core/passes/ibl/irradiance.comp
     src/core/passes/ibl/prefilter.comp
     src/core/passes/final/final.frag
+    src/core/passes/composite/composite.frag
     src/core/passes/pbr/pbr.frag
     src/core/passes/ambientocclusion/deinterleave.comp
     src/core/passes/ambientocclusion/hbao.comp
@@ -261,7 +265,8 @@ if(LR_BUILD_PYTHON)
     else()
         set(LR_PYTHON_PACKAGE_DIR "${CMAKE_BINARY_DIR}/python/lr")
         nanobind_add_module(_lr src/python/LrModule.cpp)
-        target_link_libraries(_lr PRIVATE lr_core)
+        # The feature libraries SceneLoader (in lr_core) instantiates components from.
+        target_link_libraries(_lr PRIVATE lr_core lr_animation_feature lr_linear_blend_skinning_feature)
         # $<0:> keeps multi-config generators from appending a per-config subdirectory.
         set_target_properties(_lr PROPERTIES
             LIBRARY_OUTPUT_DIRECTORY "${LR_PYTHON_PACKAGE_DIR}$<0:>"
@@ -312,6 +317,28 @@ if(LR_BUILD_PYTHON)
                 ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
                 # nanobind prints leak reports to stderr without failing the process.
                 FAIL_REGULAR_EXPRESSION "nanobind: leaked|\\[error\\]")
+            # Scenes loaded with the engine's loaders, read from Python (CPU only).
+            add_test(NAME python.scene
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_scene.py")
+            set_tests_properties(python.scene PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python")
+            # A Python renderer drawing an engine-loaded glTF scene.
+            add_test(NAME python.scene_viewer
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/scene_viewer.py"
+                    --frames 120)
+            set_tests_properties(python.scene_viewer PROPERTIES
+                ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
+                FAIL_REGULAR_EXPRESSION "nanobind: leaked|\\[error\\]")
+            # The engine's passes as building blocks: contracts, rendering, camera sync, lifetimes; and a
+            # deferred renderer assembled from them with a Python pass in the middle.
+            add_test(NAME python.blocks
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_blocks.py")
+            add_test(NAME python.deferred_blocks
+                COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/examples/python/deferred_blocks.py"
+                    --frames 120)
+            set_tests_properties(python.blocks python.deferred_blocks PROPERTIES
+                ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python"
+                FAIL_REGULAR_EXPRESSION "nanobind: leaked|\\[error\\]")
+
             # The hand-written stubs must match the module (names, parameters) and type-check the examples.
             add_test(NAME python.stubs
                 COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_stubs.py")

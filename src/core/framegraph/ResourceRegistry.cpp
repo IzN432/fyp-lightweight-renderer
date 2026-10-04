@@ -471,6 +471,25 @@ void ResourceRegistry::setImageArrayLayout(const std::string &arrayName, VkImage
 
 bool ResourceRegistry::hasImageArray(const std::string &arrayName) const { return m_imageArrays.count(arrayName) > 0; }
 
+std::vector<std::string> ResourceRegistry::names() const
+{
+    std::vector<std::string> result;
+    result.reserve(m_images.size() + m_imageArrays.size() + m_buffers.size());
+    for (const auto &[name, entry] : m_images)
+    {
+        result.push_back(name);
+    }
+    for (const auto &[name, slots] : m_imageArrays)
+    {
+        result.push_back(name);
+    }
+    for (const auto &[name, entry] : m_buffers)
+    {
+        result.push_back(name);
+    }
+    return result;
+}
+
 void ResourceRegistry::rebuild(VkExtent2D newExtent)
 {
     m_defaultExtent = newExtent;

@@ -31,6 +31,7 @@
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/VertexManager.hpp"
 #include "core/editor/DefaultVertexDragHandler.hpp"
+#include "core/scene/EngineConventions.hpp"
 #include "core/scene/SceneManager.hpp"
 #include "core/scene/Scene.hpp"
 
@@ -93,50 +94,13 @@ try
 
     lr::Scene scene;
 
-    lr::GltfLoaderConfig config{
-        .normalAttributeName          = "normal",
-        .tangentAttributeName         = "tangent",
-        .uvAttributeName              = "uv",
-        .diffuseTextureName           = "baseColorTexture",
-        .normalTextureName            = "normalTexture",
-        .metallicRoughnessTextureName = "metallicRoughnessTexture",
-        .emissiveTextureName          = "emissiveTexture",
-        .baseDiffuseName              = "baseDiffuse",
-        .baseRoughnessName            = "baseRoughness",
-        .baseMetallicName             = "baseMetallic",
-        .baseEmissiveName             = "baseEmissive",
-    };
-    const lr::SceneLoaderConfig sceneLoadConfig{
-        .gltf = config,
-        .obj = {
-            .normalAttributeName  = config.normalAttributeName,
-            .tangentAttributeName = config.tangentAttributeName,
-            .uvAttributeName      = config.uvAttributeName,
-            .diffuseTextureName   = config.diffuseTextureName,
-            .normalTextureName    = config.normalTextureName,
-            .roughnessTextureName = config.metallicRoughnessTextureName,
-            .emissiveTextureName  = config.emissiveTextureName,
-            .baseDiffuseName      = config.baseDiffuseName,
-            .baseRoughnessName    = config.baseRoughnessName,
-            .baseMetallicName     = config.baseMetallicName,
-            .baseEmissiveName     = config.baseEmissiveName,
-        },
-    };
+    // Attribute/texture/parameter names shared by the loaders, GeometryPass and the Python module —
+    // see EngineConventions.hpp.
+    const lr::GltfLoaderConfig  config          = lr::conventions::gltfLoaderConfig();
+    const lr::SceneLoaderConfig sceneLoadConfig = lr::conventions::sceneLoaderConfig();
 
-    // Flat, up-front reservation for the MaterialStore's GPU-side buffer/texture-array capacity —
-    // growing this would mean rebuilding the frame graph's descriptor sets (see MaterialStore.hpp),
-    // so it's a generous constant rather than something computed tightly from scene content.
-    constexpr uint32_t kMaterialCapacity = 256;
-
-    lr::SceneManager sceneManager(viewer.resources(), kMaterialCapacity, [config]() {
-        lr::Material material;
-        material.name                                 = "Unused Material Slot";
-        material.parameters[config.baseDiffuseName]   = lr::MaterialParam::ColorRGBA{glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)};
-        material.parameters[config.baseEmissiveName]  = lr::MaterialParam::ColorRGB{glm::vec3(0.0f)};
-        material.parameters[config.baseRoughnessName] = lr::MaterialParam::NormalizedFloat{1.0f};
-        material.parameters[config.baseMetallicName]  = lr::MaterialParam::NormalizedFloat{0.0f};
-        return material;
-    });
+    lr::SceneManager sceneManager(viewer.resources(), lr::conventions::materialCapacity,
+                                  lr::conventions::defaultMaterial);
     sceneManager.setScene(scene);
 
     lr::SceneObject *camera = &scene.createSceneObject();
@@ -169,15 +133,7 @@ try
     // geometry rather than an overlay); its material lives in a MaterialStore slot acquired up front,
     // so switching a light's type at runtime (see Light::onGUIImpl) just rewrites that slot in place —
     // see SceneManager::updateLightVisuals.
-    const lr::AreaLightVisualConfig areaLightVisualConfig{
-        .normalAttributeName  = config.normalAttributeName,
-        .tangentAttributeName = config.tangentAttributeName,
-        .uvAttributeName      = config.uvAttributeName,
-        .baseDiffuseName      = config.baseDiffuseName,
-        .baseEmissiveName     = config.baseEmissiveName,
-        .baseRoughnessName    = config.baseRoughnessName,
-        .baseMetallicName     = config.baseMetallicName,
-    };
+    const lr::AreaLightVisualConfig areaLightVisualConfig = lr::conventions::areaLightVisualConfig();
 
     lr::SceneObject *meshObject = &sceneManager.selectedMeshObject();
     auto &meshComponent = meshObject->getComponent<lr::MeshComponent>();
@@ -244,22 +200,12 @@ try
     // -------------------------------------------------------------------------
 
     // This matches the expected layout in geometry.frag
-    lr::GpuMaterialLayout gpuMaterialLayout;
-    gpuMaterialLayout.setStride(48)
-        .addScalar(config.baseDiffuseName, 0, sizeof(glm::vec4))
-        .addScalar(config.baseEmissiveName, 16, sizeof(glm::vec3))
-        .addScalar(config.baseRoughnessName, 32, sizeof(float))
-        .addScalar(config.baseMetallicName, 36, sizeof(float))
-        .addTexture(config.diffuseTextureName, VK_FORMAT_R8G8B8A8_SRGB)
-        .addTexture(config.normalTextureName, VK_FORMAT_R8G8B8A8_UNORM)
-        .addTexture(config.metallicRoughnessTextureName, VK_FORMAT_R8G8B8A8_UNORM)
-        .addTexture(config.emissiveTextureName, VK_FORMAT_R8G8B8A8_SRGB);
+    const lr::GpuMaterialLayout gpuMaterialLayout = lr::conventions::materialLayout();
 
     // Builds light visuals, uploads the initial lights/mesh/material/camera buffers, and wires the
     // change listeners that keep the camera UBO and materials SSBO in sync afterward —
     // see SceneManager::initialize().
-    sceneManager.initialize(areaLightVisualConfig, gpuMaterialLayout,
-                            {config.normalAttributeName, config.tangentAttributeName, config.uvAttributeName},
+    sceneManager.initialize(areaLightVisualConfig, gpuMaterialLayout, lr::conventions::geometryVertexAttributes(),
                             viewer.input());
 
     // -------------------------------------------------------------------------
@@ -268,41 +214,10 @@ try
 
     const VkFormat swapchainFormat = viewer.frameGraph().resources().getImage("swapchain")->format;
 
-    lr::GeometryPass  geometryPass({
-         .cameraBufferResourceName    = sceneManager.cameraBufferName(),
-         .vertexBufferResourceNames   = {{0, sceneManager.meshPositionBufferName()},
-                                         {1, sceneManager.meshVertexBufferName()}},
-         .vertexBufferUploadResult    = sceneManager.meshPositions(),
-         .indexBufferUploadResult     = sceneManager.indexBuffer(),
-         .meshTransforms              = sceneManager.meshTransforms(),
-         .meshObjects                 = sceneManager.geometryObjects(),
-         .skinDrawInfos               = sceneManager.skinUploadResult().drawInfos,
-         .indexBufferResourceName     = sceneManager.meshIndexBufferName(),
-         .faceGroupBufferResourceName = sceneManager.meshFaceGroupBufferName(),
-         .diffuseTextureArrayResourceName =
-            sceneManager.materialUploadResult().textureNameMap.at(config.diffuseTextureName),
-         .normalTextureArrayResourceName =
-            sceneManager.materialUploadResult().textureNameMap.at(config.normalTextureName),
-         .metallicRoughnessTextureArrayResourceName =
-            sceneManager.materialUploadResult().textureNameMap.at(config.metallicRoughnessTextureName),
-         .emissiveTextureArrayResourceName =
-            sceneManager.materialUploadResult().textureNameMap.at(config.emissiveTextureName),
-         .materialBufferResourceName = sceneManager.materialUploadResult().materialInfoBufferName,
-         .skinInfluenceEntriesBufferResourceName = sceneManager.skinInfluenceEntriesBufferName(),
-         .skinInfluenceOffsetsBufferResourceName = sceneManager.skinInfluenceOffsetsBufferName(),
-         .skinPositionIndicesBufferResourceName = sceneManager.skinPositionIndicesBufferName(),
-         .skinJointMatricesBufferResourceName = sceneManager.skinJointMatricesBufferName(),
-
-         .materialCount = sceneManager.materialStore().capacity(),
-    });
-    lr::GpuMeshLayout gpuMeshLayout(meshComponent.mesh().layout());
-
-    gpuMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
-    gpuMeshLayout.map(config.normalAttributeName, 1, 1, VK_FORMAT_R32G32B32_SFLOAT);
-    gpuMeshLayout.map(config.tangentAttributeName, 1, 2, VK_FORMAT_R32G32B32A32_SFLOAT);
-    gpuMeshLayout.map(config.uvAttributeName, 1, 3, VK_FORMAT_R32G32_SFLOAT);
-
-    geometryPass.build(viewer.frameGraph(), gpuMeshLayout);
+    // Draws everything SceneGpu uploaded (see SceneGpu::geometryPassConfig) with the engine's vertex
+    // layout (conventions::geometryMeshLayout).
+    lr::GeometryPass geometryPass(sceneManager.gpu().geometryPassConfig());
+    geometryPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
 
     lr::HeatmapPass heatmapPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),

@@ -87,6 +87,9 @@ public:
     void                                setImageArrayLayout(const std::string &arrayName, VkImageLayout layout);
     bool                                hasImageArray(const std::string &arrayName) const;
 
+    // Every registered image, image array and buffer name (unordered).
+    std::vector<std::string> names() const;
+
     // Destroys and reallocates all transient images. Call on swapchain resize.
     void       rebuild(VkExtent2D newExtent);
     VkExtent2D getExtent() const { return m_defaultExtent; }

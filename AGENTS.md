@@ -498,7 +498,273 @@ frame 2; offsets seen: [1])`. Every frame with a successor read the successor's 
 **Other:** the example and test scripts got small annotations so mypy runs cleanly on them (e.g. `state:
 dict[str, Any]`).
 
-## Step 6 — interaction from Python ✅
+## Merge with main (1046d25) ✅
+
+Merged `main` (10 commits: ImGuizmo translate/rotate/scale gizmos, keyframe editing, Cornell box removal)
+into this branch. Only `SphericalCameraController` touched code on both sides, and it auto-merged
+correctly: main's `update(dt, gizmoCapturesPrimaryMouse)` overload is kept and still ends in this
+branch's `applyPose()`.
+
+Results:
+- full rebuild clean, `ctest` 20/20;
+- `renderer.exe` runs with the same 2 compiles and the single pre-existing warning;
+- every merged pass, including the restored overlay geometry stage and the gizmos, passes the shader
+  interface check.
+
+## Step 7 (proposal) — scene, scene manager and loaders from Python
+
+The question: can Python reuse the engine's `Scene` / `SceneManager` / loaders, or are they too
+editor-specific? Reading the code, the answer is "split at the right seam".
+
+**What's general and CPU-only (safe to expose as-is):**
+- **`Scene`:** a `SceneObject` graph with stable ids, parenting and components (`TransformComponent`,
+  `MeshComponent`, `Light`, `Camera`, `AnimatorComponent`, `SkinComponent`, colliders…). It carries some
+  editor UI (`onHierarchyGUI`, selection), but Python can simply not call that.
+- **`MeshStore`, `MaterialStore`:** plain containers (no `ResourceRegistry`).
+- **`SceneLoader::load(path, scene, meshStore, materialStore)`:** OBJ/glTF/GLB into those, including
+  hierarchy, materials, skins and animations. Also CPU-only.
+- **`Mesh`:** positions, topology, per-vertex/per-corner attributes and face groups → numpy.
+
+**What isn't general: `SceneManager`.** It mixes three jobs:
+1. **Owning the asset stores and `load()`.** General.
+2. **GPU sync:** packs everything into the fixed buffers `GeometryPass`/`PbrPass` expect
+   (`meshVertexBuffer`, `meshIndexBuffer`, materials SSBO + texture arrays with the 48-byte
+   `GpuMaterialLayout`, the lights buffer, the camera UBO, skin palettes), and `flushDirty()`. General
+   *for the engine's deferred pipeline*, but it hard-codes that pipeline's data contract.
+3. **Editor session:** `EditorMode`, `SelectionManager`, the "edited mesh", the points/heatmap buffers for
+   the vertex tools, and the light-visual quads. Editor-only.
+
+  Job 3 is why it doesn't feel general: `initialize()` requires a camera, at least one mesh, an input
+  handler, and builds a `SelectionManager`, none of which a Python renderer necessarily wants.
+
+**Proposed approach, in three steps, each useful on its own:**
+- **7a — CPU scene in Python (no `SceneManager`).**
+  - `lr.load_scene(path) -> lr.SceneAsset`, owning a `Scene` + `MeshStore` + `MaterialStore` filled by
+    `SceneLoader`.
+  - Python can walk objects and hierarchy and read world transforms. Meshes come out as numpy (vertex
+    and index arrays already flattened the way `MeshUploader` packs them, per face group with its
+    material); materials as parameters plus texture images as numpy; plus lights, cameras, and animation
+    playback via `AnimatorComponent`.
+  - A Python renderer then uploads whatever it needs with the existing `ResourceRegistry` API.
+  - Needs the `_lr` module to link the animation/skinning feature libraries, which `SceneLoader` already
+    depends on.
+- **7b — split `SceneManager` in C++.**
+  - **`SceneGpuSync`** (job 2): stores + uploaders + `flushDirty`, no editor state.
+  - **`EditorSession`** (job 3): selection, edit modes, vertex-tool buffers, light visuals.
+  - `main.cpp` keeps today's behaviour by owning both, so the C++ editor is unchanged. This is the
+    "move the glue out of `main.cpp`" item from the very first analysis.
+- **7c — engine passes as Python building blocks.** With `SceneGpuSync` exposed, Python can add the
+  engine's `GeometryPass` / `AmbientOcclusionPass` / `PbrPass` / `FinalPass` to its own frame graph and
+  insert its own passes between them, reading the G-buffer and lights. In effect it extends the real
+  renderer.
+
+**Decision (user, after the proposal):** Python builds its *own* renderers. The engine provides building
+blocks, including its existing passes, each with clear documentation of what it takes in and what it
+outputs. So all three parts are wanted, in order:
+- **7a** gives Python the scene data.
+- **7b** makes "scene → engine-standard GPU buffers" a reusable block, separate from the editor.
+- **7c** wraps each engine pass with a documented input/output contract.
+
+**7a, 7b, 7c — done ✅** (each one's details follow)
+
+**7a scope:**
+- **`lr::conventions`** (`core/scene/EngineConventions.hpp`): the attribute, texture and material-parameter
+  names the loaders write and `GeometryPass` reads, the default material and the material capacity. These
+  were literals in `main.cpp`; `main.cpp` now uses the header too, so C++ and Python can't disagree.
+- **`lr::SceneAssets`** (`core/scene/SceneAssets.hpp`): a `Scene` + `MeshStore` + `MaterialStore`
+  filled by `SceneLoader`. 7b's GPU-sync block will consume this.
+- **Python (CPU only):**
+  - `lr.load_scene(path)` / `lr.Scene().load(path)`.
+  - Scene objects with hierarchy, name, local and world transforms.
+  - Meshes as numpy: corner-domain `positions`, every per-vertex attribute, `indices`, per-face
+    `face_materials`, and the unique-position topology.
+  - Materials: parameters, plus textures as numpy.
+  - Lights, and animation playback (`scene.update(dt)`).
+
+**7a demo:**
+```
+PYTHONPATH=build/python python examples/python/scene_viewer.py [model.glb|.gltf|.obj]
+```
+[scene_viewer.py](examples/python/scene_viewer.py) is a renderer written in Python that draws any scene the
+engine can load:
+- **Geometry:** every mesh's `positions` + `normal` + `uv` go into one vertex buffer. Faces are sorted by
+  material into one index buffer, so each (object, material) pair is one `draw_indexed` range with a
+  vertex offset.
+- **Textures:** each material's `baseColorTexture` goes into a texture array (`upload_array_image` +
+  `sampled_image_array`, the same mechanism `GeometryPass` uses).
+- **Shading:** albedo = texture × `baseDiffuse`, as in `geometry.frag`. The fragment shader's array size
+  is filled in at load time (`#define MATERIAL_COUNT`).
+- **Camera:** the engine's `lr.OrbitCamera`, framed to the scene's world-space bounds.
+
+**7a results (2026-10-04):**
+- `ctest -C Debug` — 22/22 pass, with two new tests:
+  - **`python.scene`** (CPU only, no window), 6 cases:
+    - glTF meshes are render-ready (shapes and dtypes, unit normals, `positions ==
+      unique_positions[position_indices]`, `KeyError` listing the available attributes);
+    - materials carry the convention parameter and texture names;
+    - hierarchy is consistent, and moving the root moves descendants' world matrices;
+    - playing an animation moves joints;
+    - a two-material OBJ keeps per-face materials and their colours;
+    - several loads into one `Scene`, without a `Viewer`.
+  - **`python.scene_viewer`:** the demo, for 120 frames.
+- **Screenshots:**
+  - `bird_orange.glb` renders textured and lit, framed automatically;
+  - the lion head (47k triangles, 4k textures) loads and renders in about 5 s;
+  - a two-material OBJ renders red and green.
+- **Bug caught by that last check:** the OBJ first rendered both quads grey. The loader gives untextured
+  materials a white placeholder `baseColorTexture`, and the demo ignored `baseDiffuse`. It now multiplies
+  them as the engine does.
+- **`renderer.exe` with `lr::conventions` in `main.cpp`:** unchanged (2 compiles, the same single
+  warning).
+- **Stubs:** all 326 public names match; mypy clean.
+
+**7a notes:**
+- **Skinned meshes:** `Mesh` data is the rest pose. Animation playback moves joint objects, but deforming
+  the mesh needs the skin palettes; GPU skinning comes with 7b/7c through the engine's skin buffers.
+- **Array ownership:** mesh and material arrays are *copies* (numpy owns them), so they stay valid
+  however the scene changes. Owned arrays are returned as plain objects, because nanobind's property
+  default (`reference_internal`) can't apply to an array that owns its data.
+- **nanobind copy trait:** `SceneObject` needed a `nanobind::detail::is_copy_constructible` override.
+  Its components live in a `std::unordered_map` of `unique_ptr`, whose copy constructor isn't
+  constrained, so `std::is_copy_constructible` wrongly reports `true`.
+- **New Python API for per-draw textures:** `ResourceRegistry.upload_array_image()` and
+  `PassBuilder.sampled_image_array()`.
+- **Linking:** `_lr` now also links `lr_animation_feature` and `lr_linear_blend_skinning_feature`, which
+  `SceneLoader` already depends on.
+
+**Files:**
+- **Engine:** `core/scene/{EngineConventions.hpp/.cpp, SceneAssets.hpp}`; `main.cpp` uses
+  `lr::conventions`.
+- **Bindings:** `LrModule.cpp` (`bindScene`, array-image bindings).
+- **Stubs:** `python/lr/__init__.pyi`.
+- **Demo:** `examples/python/scene_viewer.py` + `shaders/scene.{vert,frag}`.
+- **Tests:** `tests/python/test_scene.py`.
+
+**7b — done ✅: `SceneManager` split; the GPU side is `lr::SceneGpu`**
+
+**What it is:** `core/scene/SceneGpu.{hpp,cpp}` turns a `Scene` (plus its `MeshStore`/`MaterialStore`)
+into the buffers the engine's passes read, and keeps them in sync.
+- **Construction:** `SceneGpu(registry, scene, meshStore, materialStore)`.
+- **Setup:** `addMeshObject`, `addLoaded(SceneLoadResult)`, `setCamera`, then
+  `initialize(areaLightConfig, materialLayout, vertexAttributes)`. All three arguments default to
+  `lr::conventions`.
+- **Per frame:** `registerCallbacks(viewer)` handles aspect ratio, animations, skins and `flushDirty()`.
+- **For GeometryPass:** `geometryPassConfig()` returns everything `GeometryPass` needs, and
+  `indexRange(mesh)` gives a mesh's range in the shared index buffer.
+- **No editor state.** The camera object can live outside the scene; `lr.OrbitCamera`'s does.
+
+**What changed in `SceneManager`:** it keeps only the editor (edited mesh, `SelectionManager`, editor mode,
+the points/heatmap buffers). It owns a `SceneGpu`, created in `setScene()`, and forwards its old GPU API to
+it, so `main.cpp`, ARAP and Laplace-Beltrami compile unchanged apart from the lines below.
+
+**New in `lr::conventions`** (replacing literals in `main.cpp`):
+- `materialLayout()`: the 48-byte material SSBO layout plus the four texture formats.
+- `geometryMeshLayout()`: GeometryPass's vertex input.
+- `geometryVertexAttributes()`.
+- `areaLightVisualConfig()`.
+
+`main.cpp` now builds `GeometryPass` from `sceneManager.gpu().geometryPassConfig()` and those helpers;
+about 50 lines of config are gone.
+
+**7b results:**
+- `renderer.exe` behaves as before: 2 compiles, the single pre-existing warning, and the screenshot
+  matches.
+- `ctest` stayed green.
+
+**7c — done ✅: the engine's passes as Python building blocks**
+
+**Demo:**
+```
+PYTHONPATH=build/python python examples/python/deferred_blocks.py [model.glb] [--hdri sky.hdr]
+```
+[deferred_blocks.py](examples/python/deferred_blocks.py) is a deferred renderer assembled from engine
+blocks, with a pass written in Python in the middle:
+
+`Ibl` → `SceneGpu` → `GeometryPass` → `AmbientOcclusionPass` → `PbrPass` → **fog (Python, reads `pbr` +
+`gbufferDepth`, writes `fogged`)** → `CompositePass(input="fogged")`
+
+- **Lights:** a directional light, plus an `image` light for ambient light from the HDRI.
+- **Live controls:** ImGui sliders change the fog density and the AO radius while it runs.
+- **Contracts:** at startup it prints every block's inputs and outputs, and asserts on them.
+- **Screenshot:** the bird, PBR-lit, in front of the HDRI sky, with visible fog; about 410 fps.
+
+**C++:**
+- **`CompositePass`** (`core/passes/composite/`): FinalPass without the editor overlays. It draws the
+  `ibl_env` sky where depth is 1 and the HDR input elsewhere, Reinhard tone mapped. The input and output
+  images are configurable.
+  - Its shader shares `utility/tonemap.glslh` with `final.frag`, which now uses that header too, with
+    the same maths.
+- **`ResourceRegistry::names()`**, used by the contract introspection.
+
+**Python** (`LrModule.cpp`, `bindBuildingBlocks`):
+- **`lr.SceneGpu(viewer, scene, camera)`:** uploads the scene, drives the camera UBO from an
+  `OrbitCamera`, and runs per-frame sync. `.buffers` gives the buffer names by role.
+- **`lr.Ibl(viewer, hdri, env_res, irr_res, pf_res, pf_mips)`:** IBL precompute, run immediately.
+- **Passes:**
+  - `lr.GeometryPass(viewer, gpu)`, with `.skinning`;
+  - `lr.AmbientOcclusionPass(viewer, gpu, ...)`, whose parameters are live properties;
+  - `lr.PbrPass(viewer, gpu, ibl)`;
+  - `lr.CompositePass(viewer, gpu, input, output, output_format, name)`.
+- **Shared base, `lr.EnginePass`:** `inputs`/`outputs` (`lr.ResourceUse`: name, kind, usage, format),
+  `passes`, `pass_names` and `describe()`.
+  - **Where the contracts come from:** the frame graph's pass declarations, plus a snapshot of the
+    registry taken before the block uploads its own data. Private data (HBAO params, LTC tables, the
+    HDRI) and intermediates between a block's own passes (HBAO's raw AO) are excluded, so the lists
+    match the docs. One exception: Ibl's `ibl_env` is consumed internally, so the block marks it as an
+    output explicitly.
+- **Scenes:** `Scene.add_light(type, color, intensity, position, rotation, size, cones, name)`, for
+  point, spot, area, directional and image lights. Two new `lr.Format` values: `R16G16_SFLOAT` and
+  `R16G16B16A16_UNORM`.
+
+**Docs:** [docs/python_building_blocks.md](docs/python_building_blocks.md) covers, for every block:
+- what it reads and writes, with names, formats and meaning (G-buffer encoding, AO polarity,
+  camera/light/material layouts);
+- how blocks connect;
+- how to write a pass between them.
+
+**Lifetimes:**
+- **Ownership:** the Viewer holds `SceneGpu` and the passes, which its frame loop calls into, the same
+  way it holds Python callbacks, so `lr.GeometryPass(viewer, gpu)` works without keeping a reference.
+  Each block keeps what it uses alive in turn: the Viewer, the scene and the camera.
+- **First attempt:** `keep_alive` pointing both ways made reference cycles. nanobind reported leaks.
+- **Second problem, found while proving the tests can fail:** a Viewer that never reached `run()` (an
+  exception first) stayed alive. The next `lr.Viewer` then aborted on ImGui's one-context assert. This
+  was already possible with plain callbacks; SceneGpu made it likely.
+- **Fix:** lr supports one Viewer at a time. Creating one now releases a stale Viewer's holds and
+  collects it, or raises a clear `RuntimeError` if that Viewer is still referenced.
+
+**7c results (2026-10-04):**
+- **`ctest -C Debug`:** 24/24 pass. New tests:
+  - **`python.blocks`**, 6 cases:
+    - the contracts, with exact formats;
+    - the scene renders: a custom compute pass samples `pbr` and `gbufferDepth` at the centre, and finds
+      depth in (0, 1) and a lit colour;
+    - after the orbit camera moves mid-run, the camera UBO read back equals `camera.view_matrix()`;
+    - AO parameter changes reach `hbao_params`;
+    - misuse raises (an empty scene, a second SceneGpu, an unknown light type);
+    - a never-run Viewer is released by the next.
+  - **`python.deferred_blocks`:** the demo, for 120 frames, under the leak/error regex.
+  - **`python.scene`** gained `test_add_light`.
+- **The tests can fail:** temporarily skipping the camera re-upload, GeometryPass's draws, and the AO
+  upload snapshot each failed its intended test, and the other tests still ran. All reverted, and no
+  `TEMPORARY` markers remain.
+- **Missing input:** `PbrPass` without an AO pass fails to compile with `image or image array 'hbao_ao'
+  not found`.
+- **`renderer.exe`** is unchanged after the `final.frag` refactor.
+- **Stubs:** 365 public names match; mypy clean.
+- **Stub fix:** `Light.color`/`area_size` now really return tuples, as the stubs said.
+
+**Files:**
+- **Engine:** `core/scene/SceneGpu.{hpp,cpp}`; `SceneManager.{hpp,cpp}`; `EngineConventions.{hpp,cpp}`;
+  `core/passes/composite/*`; `utility/tonemap.glslh`; `final.frag`; `ResourceRegistry::names()`;
+  `main.cpp`.
+- **Bindings:** `LrModule.cpp`.
+- **Stubs:** `python/lr/__init__.pyi`.
+- **Docs:** `docs/python_building_blocks.md`.
+- **Demo:** `examples/python/deferred_blocks.py` + `shaders/fog.frag`.
+- **Tests:** `tests/python/test_blocks.py`, `test_scene.py`.
+
+## Step 6 — interaction from Python ☑️ (committed deb6235)
 
 **Goal:** a Python renderer can be interactive:
 - read keyboard and mouse state (`viewer.input`);

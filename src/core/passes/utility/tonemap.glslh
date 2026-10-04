@@ -1,0 +1,30 @@
+#ifndef TONEMAP_GLSLH
+#define TONEMAP_GLSLH
+
+// Shared by final.frag and composite.frag: how the engine turns HDR colour and the environment cubemap
+// into the displayed image.
+
+// Reinhard tone mapping, HDR -> [0, 1).
+vec3 reinhard(vec3 hdr)
+{
+    return hdr / (hdr + vec3(1.0));
+}
+
+// True where nothing was drawn (depth still at the 1.0 clear value).
+bool isBackground(float depth)
+{
+    return 1.0 - depth < 1e-6;
+}
+
+// World-space direction through a fullscreen UV, for sampling the sky.
+vec3 viewRayWorld(vec2 uv, mat4 view, mat4 proj)
+{
+    vec2 ndc  = uv * 2.0 - 1.0;
+    vec4 clip = vec4(ndc, 1.0, 1.0);
+
+    vec4 viewPos = inverse(proj) * clip;
+    vec3 viewDir = normalize(viewPos.xyz / max(viewPos.w, 1e-6));
+    return normalize(mat3(inverse(view)) * viewDir);
+}
+
+#endif

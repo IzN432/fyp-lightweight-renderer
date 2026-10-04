@@ -1,5 +1,7 @@
 #version 450
 
+#include "../utility/tonemap.glslh"
+
 layout(location = 0) in vec2 inUV;
 
 layout(set = 0, binding = 0) uniform CameraUbo
@@ -33,17 +35,10 @@ void main()
     float depth = min(texture(gbufferDepth, inUV).r, texture(overlayDepth, inUV).r);
 
     vec3 baseColor;
-    if (1.0 - depth < 1e-6)
+    if (isBackground(depth))
     {
-        vec2 ndc = inUV * 2.0 - 1.0;
-        vec4 clip = vec4(ndc, 1.0, 1.0);
-
-        vec4 viewPos = inverse(cameraUbo.proj) * clip;
-        vec3 viewDir = normalize(viewPos.xyz / max(viewPos.w, 1e-6));
-        vec3 worldDir = normalize(mat3(inverse(cameraUbo.view)) * viewDir);
-
-        vec3 hdr = texture(skybox, worldDir).rgb;
-        baseColor = hdr / (hdr + vec3(1.0));
+        vec3 worldDir = viewRayWorld(inUV, cameraUbo.view, cameraUbo.proj);
+        baseColor = reinhard(texture(skybox, worldDir).rgb);
     }
     else
     {
@@ -52,7 +47,7 @@ void main()
         vec3 litColor = mix(pbrColor, heatmapSample.rgb, heatmapSample.a);
         vec4 overlaySample = texture(overlay, inUV);
         vec3 color = (1.0 - overlaySample.a) * litColor + overlaySample.a * overlaySample.rgb;
-        baseColor = color / (color + vec3(1.0));
+        baseColor = reinhard(color);
     }
 
     vec4 pointsSample = texture(overlayPoints, inUV);
