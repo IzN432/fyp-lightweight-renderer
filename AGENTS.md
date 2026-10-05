@@ -904,6 +904,38 @@ uploads it to a dynamic storage buffer, and draws instanced billboards (`shaders
 - **Demo:** `examples/python/step_loop.py`, `shaders/particles.{vert,frag}`.
 - **Tests:** `tests/python/test_bindings.py`, `CMakeLists.txt`.
 
+## Merge with main: revision-based mesh synchronization (f5dc03f) ✅
+
+**What `main` brought:**
+- `Mesh` revisions, with setters only.
+- `MeshBufferCache` stamps per GPU view and a shared `MeshBufferPacking`.
+- `MeshUploader::synchronize*()` in place of `update*()`.
+- The heatmap gathers unique-vertex colours at packing time.
+- Topology-preserving light-quad edits, and the camera-aspect re-upload on resize.
+- The `mesh.buffer_sync` test and the opt-in `mesh_gpu_sync_smoke` test.
+
+**How it was reconciled with this branch:**
+- **Shared geometry buffers:** synchronized at the end of `SceneGpu::flushDirty()`.
+  `SceneGpu::updatePositions()` is gone, and `updateLightVisuals()` only edits CPU data.
+- **Selected-mesh overlays** (points in Edit mode, heatmap in Analysis) stay in `SceneManager`. They
+  sync in its own late update, after SceneGpu's. After any rebuild, an `onGeometryRebuilt` listener
+  replaces them and rebinds the selection only if the selected mesh's topology changed.
+- **Camera aspect fix:** moved to `SceneGpu::setAspect`.
+- **`AreaLightVisual`:** the two-sided 8-vertex quad, plus main's topology-preserving `setPositions`
+  path. Switching one-/two-sided now changes positions only.
+- **`ResourceRegistry`:** kept this branch's version, which already drops superseded pending copies,
+  orders copies with barriers and clamps the copy size. Unlike main's version, it retires replaced
+  buffers instead of destroying them while frames may still read them.
+- **Docs:** `docs/mesh-synchronization.md` updated for SceneGpu, deferred retirement and per-frame
+  copies.
+
+**Merge hiccup:** the first attempt failed with "unable to unlink LaplaceBeltramiTool.cpp". The cause
+was an orphaned `cl.exe` from a timed-out background build. It was stopped, and the merge's five
+leftover files (identical to main's) were removed before retrying.
+
+**Results:** `ctest` 27/27, including `mesh.buffer_sync`; `mesh_gpu_sync_smoke` passes;
+`renderer.exe` log unchanged.
+
 ## Step 9 — remaining items from the original plan ✅
 
 **`lr.SWAPCHAIN`:** the frame-graph name of the window image, backed by `Viewer::kBackbufferName` in

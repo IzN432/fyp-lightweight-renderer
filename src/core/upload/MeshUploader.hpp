@@ -2,9 +2,9 @@
 
 #include "core/framegraph/ResourceRegistry.hpp"
 #include "core/scene/Mesh.hpp"
+#include "core/upload/MeshBufferCache.hpp"
 
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace lr
@@ -23,13 +23,6 @@ struct VertexBufferUploadPerMeshResult
 struct VertexBufferUploadResult
 {
     std::vector<VertexBufferUploadPerMeshResult> singleMeshResults; // details to separate the meshes up
-};
-
-struct VertexBufferUploadConfig
-{
-    std::string              vertexBufferName;
-    std::vector<std::string> vertexAttributeNames;
-    bool                     includePosition = false; // whether to include the position attribute
 };
 
 struct IndexBufferUploadPerMeshResult
@@ -54,9 +47,9 @@ struct FaceGroupBufferUploadConfig
 };
 
 /**
- * Uploads a Mesh to GPU buffers according to a provided GpuMeshLayout, along with the materials used by the mesh.
- * The data is stored in the ResourceRegistry provided at initialization. The returned MeshUploadResult contains
- * the names of the registered resources for use in frame graph passes.
+ * Materializes named GPU views of canonical mesh data. Each view tracks its own source
+ * revisions; ResourceRegistry owns allocations and transfer completion. Upload/replacement
+ * returns draw ranges, while synchronization preserves allocations and ranges.
  */
 class MeshUploader
 {
@@ -66,8 +59,9 @@ public:
     VertexBufferUploadResult uploadVertexBuffer(const std::vector<const Mesh *> &meshes,
                                                 const VertexBufferUploadConfig  &config);
 
-    // Re-pack and push new vertex data into a buffer previously uploaded with dynamic=true.
-    void updateVertexBuffer(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config);
+    // Poll source revisions. Pack/queue only when this representation is stale; repeated edits
+    // before this call collapse into one upload. Count/layout changes require replacement.
+    bool synchronizeVertexBuffer(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config);
 
     // Replaces an existing vertex buffer when the new mesh can have a different vertex count.
     VertexBufferUploadResult replaceVertexBuffer(const std::vector<const Mesh *> &meshes,
@@ -81,13 +75,12 @@ public:
     VertexBufferUploadResult uploadUniqueVertexBuffer(const std::vector<const Mesh *> &meshes,
                                                       const VertexBufferUploadConfig  &config);
 
-    // Re-pack and push new data into a buffer previously uploaded with uploadUniqueVertexBuffer().
-    void updateUniqueVertexBuffer(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config);
+    bool synchronizeUniqueVertexBuffer(const std::vector<const Mesh *> &meshes, const VertexBufferUploadConfig &config);
 
     // Like uploadUniqueVertexBuffer(), but for a buffer that already exists (see
     // ResourceRegistry::replaceUploadedBuffer()) — the new mesh list's total vertex count may
     // differ from what's currently allocated (e.g. the Scene Hierarchy selection switched to a
-    // mesh with a different vertex count), unlike updateUniqueVertexBuffer()'s fixed-size repack.
+    // mesh with a different vertex count), unlike synchronizeUniqueVertexBuffer().
     VertexBufferUploadResult replaceUniqueVertexBuffer(const std::vector<const Mesh *> &meshes,
                                                         const VertexBufferUploadConfig  &config);
 
@@ -95,13 +88,16 @@ public:
                                               const IndexBufferUploadConfig   &config);
     IndexBufferUploadResult replaceIndexBuffer(const std::vector<const Mesh *> &meshes,
                                                const IndexBufferUploadConfig   &config);
+    bool synchronizeIndexBuffer(const std::vector<const Mesh *> &meshes, const IndexBufferUploadConfig &config);
 
     void uploadFaceGroupBuffer(const std::vector<const Mesh *> &meshes, const FaceGroupBufferUploadConfig &config);
     void replaceFaceGroupBuffer(const std::vector<const Mesh *> &meshes,
                                 const FaceGroupBufferUploadConfig &config);
+    bool synchronizeFaceGroupBuffer(const std::vector<const Mesh *> &meshes, const FaceGroupBufferUploadConfig &config);
 
 private:
     ResourceRegistry &m_registry;
+    MeshBufferCache m_bufferCache;
 };
 
 } // namespace lr

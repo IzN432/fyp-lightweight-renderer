@@ -317,8 +317,6 @@ void SceneGpu::uploadLights()
     }
 }
 
-void SceneGpu::updatePositions() { m_meshUploader.updateVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig); }
-
 void SceneGpu::updateMaterials()
 {
     m_materialUploader.update(m_materialStore.snapshot(), m_materialLayout, m_materialUploadResult);
@@ -380,8 +378,8 @@ void SceneGpu::updateLightVisuals()
         m_materialStore.get(visual.material) = buildAreaLightMaterial(lightData, m_areaLightVisualConfig);
     }
 
-    m_meshUploader.updateVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
-    m_meshUploader.updateVertexBuffer(m_geometryMeshes, m_meshAttributeUploadConfig);
+    // The quads' new positions/attributes reach the GPU through synchronizeMeshes() at the end of
+    // flushDirty().
     updateMaterials();
 }
 
@@ -389,11 +387,12 @@ void SceneGpu::flushDirty()
 {
     auto &cameraComponent = m_camera->getComponent<Camera>();
     auto &cameraTransform = m_camera->getComponent<TransformComponent>();
-    if (cameraComponent.isDirty() || cameraTransform.isDirty())
+    if (cameraComponent.isDirty() || cameraTransform.isDirty() || m_cameraAspectDirty)
     {
         updateCamera();
         cameraComponent.clearDirty();
         cameraTransform.clearDirty();
+        m_cameraAspectDirty = false;
     }
 
     // Lights added or removed since the last frame: new quads, a rebuilt geometry and a re-uploaded light
@@ -438,6 +437,16 @@ void SceneGpu::flushDirty()
     {
         updateMaterials();
     }
+
+    synchronizeMeshes();
+}
+
+void SceneGpu::synchronizeMeshes()
+{
+    m_meshUploader.synchronizeVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
+    m_meshUploader.synchronizeVertexBuffer(m_geometryMeshes, m_meshAttributeUploadConfig);
+    m_meshUploader.synchronizeIndexBuffer(m_geometryMeshes, {.indexBufferName = m_meshIndexBufferName});
+    m_meshUploader.synchronizeFaceGroupBuffer(m_geometryMeshes, {.faceGroupBufferName = m_meshFaceGroupBufferName});
 }
 
 const IndexBufferUploadPerMeshResult &SceneGpu::indexRange(const Mesh &mesh) const

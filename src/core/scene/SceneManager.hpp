@@ -60,7 +60,8 @@ public:
     SceneObject &load(const std::filesystem::path &path, const SceneLoaderConfig &config = {});
 
     // Registers renderable scene geometry (see SceneGpu::addMeshObject). The first registered object
-    // becomes the initial edited mesh; load() registers imported meshes automatically.
+    // becomes the initial edited mesh; load() registers imported meshes automatically. Later
+    // position/attribute edits are detected from the mesh's revisions.
     void         addMeshObject(SceneObject &object);
     SceneObject *removeSceneObjects(std::span<const SceneObjectId> ids);
 
@@ -100,13 +101,15 @@ public:
     void initialize(const AreaLightVisualConfig &areaLightVisualConfig, const GpuMaterialLayout &materialLayout,
                     const std::vector<std::string> &vertexAttributeNames, InputHandler &input);
 
-    // Registers SceneGpu's per-frame callbacks (aspect ratio, animations, skins, flushDirty()) plus an
-    // onUpdate that drives the SelectionManager's mouse/drag handling.
+    // Registers SceneGpu's per-frame callbacks (aspect ratio, animations, skins, flushDirty()), an
+    // onUpdate that drives the SelectionManager's mouse/drag handling, and an onLateUpdate that
+    // synchronizes the selected-mesh overlay buffers (see synchronizeSelectedMeshBuffers()).
     void registerCallbacks(Viewer &viewer);
 
     // Selection over the selected mesh's deduped-position space — constructed by initialize(), so only
-    // valid to call after it. Highlight changes are wired internally to push the highlighted-vertex
-    // colors to the GPU; the caller still owns wiring up a SelectionTool
+    // valid to call after it. Highlight changes are wired internally to store the highlighted-vertex
+    // colors in the mesh's CPU data; late synchronization updates the GPU. The caller still owns wiring up
+    // a SelectionTool
     // (setSelectTool), the mouse click handoff with gizmos, and reading getSelectedIndices()/
     // getHighlightedIndices() for its own UI (translate gizmo placement, etc.).
     SelectionManager &selectionManager() { return *m_selectionManager; }
@@ -119,9 +122,15 @@ public:
     void setEditorMode(EditorMode mode);
     void registerEditorModeChangedCallback(std::function<void(EditorMode)> callback);
 
+    // SceneGpu::flushDirty() (component edits and the shared mesh buffers), then the selected-mesh
+    // overlays. Mesh edits never upload directly; call once per frame, after every other update.
+    void flushDirty();
+
     // GPU sync, forwarded to gpu() — see SceneGpu.
-    void flushDirty() { gpu().flushDirty(); }
     void createLightVisuals(const AreaLightVisualConfig &config) { gpu().createLightVisuals(config); }
+    // Re-packs all render geometry after runtime imports/deletions. Also replaces the selected-mesh
+    // overlays, and rebinds the selection if the selected mesh's topology changed (the caller rebinds
+    // its own tools). Passes registered with SceneGpu::onGeometryRebuilt are refreshed.
     void rebuildGeometry() { gpu().rebuildGeometry(); }
     void uploadLights() { gpu().uploadLights(); }
     void updateMaterials() { gpu().updateMaterials(); }
@@ -132,10 +141,6 @@ public:
 
     // SceneGpu::uploadMeshes plus the selected mesh's points/heatmap buffers.
     void uploadMeshes(const GpuMaterialLayout &materialLayout, const std::vector<std::string> &vertexAttributeNames);
-
-    // Repacks the GBuffer position buffer plus the selected mesh's points/heatmap buffers — for edits
-    // that only move vertices (vertex-drag editing).
-    void updateSelectedMeshPositions();
 
     // Replaces the analysis colors used by HeatmapPass without touching the selection-highlight
     // colors used by the points overlay. Colors are indexed by mesh.positions().
@@ -158,7 +163,8 @@ public:
     // buffer, which is deduped) — for HeatmapPass, which needs the
     // color Gouraud-interpolated across the same triangles GeometryPass draws, so it must share
     // GeometryPass's corner-indexed topology rather than the
-    // deduped-position space the points overlay uses.
+    // deduped-position space the points overlay uses. The colors themselves stay per unique
+    // position; packing gathers them through positionIndices.
     const std::string &selectedMeshHeatmapBufferName() const { return m_selectedMeshHeatmapBufferName; }
 
     const VertexBufferUploadResult &meshPositions() const { return gpu().meshPositions(); }
@@ -182,24 +188,18 @@ private:
     void uploadSelectedMeshBuffers();
 
     // Rebuilds the selected mesh's "color" per-unique-vertex attribute from the SelectionManager's
-    // current highlighted indices and pushes it to the GPU. Wired as m_selectionManager's
-    // highlight-changed callback in initialize().
+    // current highlighted indices. Wired as m_selectionManager's highlight-changed callback in
+    // initialize().
     void updateSelectedMeshHighlightColors();
 
-    // Repacks and re-uploads the deduped position+color buffer from the selected mesh's current
-    // positions/"color" attribute. Shared by position and highlight changes since both fields live in
-    // the same interleaved buffer.
-    void updateSelectedMeshPointsBuffer();
+    // Uploads the overlay of the current editor mode if its source revisions changed (points in Edit,
+    // heatmap in Analysis). Inactive overlays keep their own stamps and catch up when next active.
+    void synchronizeSelectedMeshBuffers();
 
-    // Expands the selected mesh's per-unique-vertex "heatmapColors" attribute to the corner domain
-    // (via positionIndices) and registers the matching per-vertex attribute on the same Mesh, ready
-    // for packing into the selected heatmap buffer. Returns the mutable mesh reference so callers
-    // can pack/upload it (initial upload vs. re-upload need different MeshUploader calls).
-    Mesh &syncSelectedMeshCornerHeatmapColors();
+    // After SceneGpu re-packs geometry: replaces the overlays, and rebinds the selection if the
+    // selected mesh's topology changed (importing unrelated assets keeps the current selection).
+    void onGeometryRebuilt();
 
-    // Repacks and re-uploads the selected heatmap buffer. Called when positions or independently
-    // stored analysis colors change.
-    void updateSelectedMeshHeatmapBuffer();
     void ensureSelectedMeshAttributes(Mesh &mesh);
 
     ResourceRegistry &m_registry;
@@ -213,20 +213,23 @@ private:
     EditorMode                                   m_editorMode = EditorMode::View;
     std::vector<std::function<void(EditorMode)>> m_editorModeChangedCallbacks;
 
-    SceneObject *m_editedMeshObject = nullptr;
+    SceneObject   *m_editedMeshObject         = nullptr;
+    Mesh::Revision m_selectedTopologyRevision = 0;
 
     const std::string m_selectedMeshPointsBufferName  = "meshPointsBuffer";
     const std::string m_selectedMeshHeatmapBufferName = "meshHeatmapBuffer";
 
-    // Config for the deduped position+color buffer above, cached so position/highlight updates
-    // both repack it identically.
+    // Config for the deduped position+color buffer above. Its stamp observes both position and
+    // highlight revisions.
     VertexBufferUploadConfig m_selectedMeshPointsUploadConfig = {
         .vertexBufferName = m_selectedMeshPointsBufferName, .vertexAttributeNames = {"color"}, .includePosition = true};
 
-    // Config for the corner-domain position+heatmapColors buffer.
+    // Config for the corner-domain position+heatmapColors buffer; the unique-position colors are
+    // gathered through positionIndices while packing.
     VertexBufferUploadConfig m_selectedMeshHeatmapUploadConfig = {.vertexBufferName = m_selectedMeshHeatmapBufferName,
                                                                   .vertexAttributeNames = {"heatmapColors"},
-                                                                  .includePosition      = true};
+                                                                  .includePosition      = true,
+                                                                  .expandUniqueVertexAttributes = true};
 
     VertexBufferUploadResult m_selectedMeshPoints;
     VertexBufferUploadResult m_selectedMeshHeatmap;

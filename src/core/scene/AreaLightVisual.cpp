@@ -23,8 +23,7 @@ void buildAreaLightQuadMesh(Mesh &mesh, const TransformComponent &transform, con
     // Vertices 0-3: the front face, wound so it is visible (front-facing) from the `forward` side, the
     // side the light emits towards (see CalcAreaLight in pbr.frag), under GeometryPass's backface
     // culling. Vertices 4-7: the back face, wound the other way, for two-sided lights. A one-sided
-    // light collapses it to a point instead of dropping it, so switching sides at runtime changes only
-    // vertex data (SceneGpu::updateLightVisuals re-uploads vertices, not indices).
+    // light collapses it to a point instead of dropping it, so switching sides changes only vertex data.
     std::vector<glm::vec3> positions(corners.begin(), corners.end());
     for (const glm::vec3 &corner : corners)
     {
@@ -32,7 +31,16 @@ void buildAreaLightQuadMesh(Mesh &mesh, const TransformComponent &transform, con
     }
     std::vector<uint32_t>   positionIndices = {0, 1, 2, 3, 4, 5, 6, 7};
     std::vector<glm::uvec3> faces           = {{0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}};
-    mesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
+    // Once established, moving/resizing a light (or switching sides) changes vertex values, not
+    // connectivity, so topology consumers (indices, skin position mappings) stay valid.
+    if (mesh.positionIndices() == positionIndices && mesh.faces() == faces &&
+        mesh.uniquePositionCount() == positions.size())
+    {
+        mesh.setPositions(positions);
+    } else
+    {
+        mesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
+    }
 
     std::vector<glm::vec3> normals(4, forward);
     normals.insert(normals.end(), 4, -forward);

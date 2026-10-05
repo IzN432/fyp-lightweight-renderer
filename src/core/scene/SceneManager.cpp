@@ -102,11 +102,16 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
 
     gpu().initialize(areaLightVisualConfig, materialLayout, vertexAttributeNames);
     uploadSelectedMeshBuffers();
+    // Imports and light changes re-pack the shared geometry; the overlays follow (the GPU-side
+    // SceneGpu is owned by this SceneManager, so the listener can't outlive it).
+    gpu().onGeometryRebuilt([this](const SceneGpu &) {
+        onGeometryRebuilt();
+    });
 
     // Constructed here rather than as a SceneManager member-initializer since it operates on the
     // selected mesh's Mesh/TransformComponent, which only exist once the meshes are uploaded. The
-    // highlight-changed callback keeps the GPU color buffer in sync with selection state — the
-    // caller (main.cpp) still owns wiring up a SelectionTool and its own UI on top of it.
+    // highlight-changed callback updates the CPU color attribute; late synchronization updates the
+    // GPU. The caller (main.cpp) still owns wiring up a SelectionTool and its own UI on top of it.
     auto &selectedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
     m_selectionManager = std::make_unique<SelectionManager>(
         selectedMesh.positions(), m_editedMeshObject->getComponent<TransformComponent>(), input);
@@ -122,6 +127,17 @@ void SceneManager::registerCallbacks(Viewer &viewer)
     viewer.onUpdate([this](float dt, VkExtent2D extent) {
         m_selectionManager->updateCallback(dt, extent);
     });
+
+    // After SceneGpu's own late update (skins, flushDirty), which this registers after.
+    viewer.onLateUpdate([this](float, VkExtent2D) {
+        synchronizeSelectedMeshBuffers();
+    });
+}
+
+void SceneManager::flushDirty()
+{
+    gpu().flushDirty();
+    synchronizeSelectedMeshBuffers();
 }
 
 void SceneManager::uploadMeshes(const GpuMaterialLayout        &materialLayout,
@@ -141,23 +157,44 @@ void SceneManager::uploadSelectedMeshBuffers()
     ensureSelectedMeshAttributes(selectedMesh);
     m_selectedMeshPoints = m_meshUploader.uploadUniqueVertexBuffer({&selectedMesh}, m_selectedMeshPointsUploadConfig);
 
-    // Seeds the corner-domain heatmap attribute from the per-unique-vertex analysis colors the
-    // selected mesh, then uploads the heatmap buffer from it.
-    m_selectedMeshHeatmap =
-        m_meshUploader.uploadVertexBuffer({&syncSelectedMeshCornerHeatmapColors()}, m_selectedMeshHeatmapUploadConfig);
+    m_selectedMeshHeatmap      = m_meshUploader.uploadVertexBuffer({&selectedMesh}, m_selectedMeshHeatmapUploadConfig);
+    m_selectedTopologyRevision = selectedMesh.topologyRevision();
 }
 
-void SceneManager::updateSelectedMeshPositions()
+void SceneManager::synchronizeSelectedMeshBuffers()
 {
-    gpu().updatePositions();
-    updateSelectedMeshPointsBuffer();
-    updateSelectedMeshHeatmapBuffer();
+    if (!m_editedMeshObject || !m_selectionManager)
+    {
+        return;
+    }
+    const Mesh &mesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
+    // Inactive overlays catch up on their next use from their own retained stamps.
+    if (m_editorMode == EditorMode::Edit)
+    {
+        m_meshUploader.synchronizeUniqueVertexBuffer({&mesh}, m_selectedMeshPointsUploadConfig);
+    }
+    if (m_editorMode == EditorMode::Analysis)
+    {
+        m_meshUploader.synchronizeVertexBuffer({&mesh}, m_selectedMeshHeatmapUploadConfig);
+    }
 }
 
-void SceneManager::updateSelectedMeshPointsBuffer()
+void SceneManager::onGeometryRebuilt()
 {
-    const auto &editedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
-    m_meshUploader.updateUniqueVertexBuffer({&editedMesh}, m_selectedMeshPointsUploadConfig);
+    if (!m_editedMeshObject)
+    {
+        return;
+    }
+    Mesh &mesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
+    ensureSelectedMeshAttributes(mesh);
+    m_selectedMeshPoints  = m_meshUploader.replaceUniqueVertexBuffer({&mesh}, m_selectedMeshPointsUploadConfig);
+    m_selectedMeshHeatmap = m_meshUploader.replaceVertexBuffer({&mesh}, m_selectedMeshHeatmapUploadConfig);
+    // Importing unrelated assets must not clear the current vertex selection.
+    if (m_selectionManager && m_selectedTopologyRevision != mesh.topologyRevision())
+    {
+        m_selectionManager->rebind(mesh.positions(), m_editedMeshObject->getComponent<TransformComponent>());
+    }
+    m_selectedTopologyRevision = mesh.topologyRevision();
 }
 
 bool SceneManager::isEditable(const SceneObject &object)
@@ -182,9 +219,9 @@ void SceneManager::setEditedMeshObject(SceneObject &object)
 
     ensureSelectedMeshAttributes(mesh);
     m_selectedMeshPoints = m_meshUploader.replaceUniqueVertexBuffer({&mesh}, m_selectedMeshPointsUploadConfig);
-    m_selectedMeshHeatmap =
-        m_meshUploader.replaceVertexBuffer({&syncSelectedMeshCornerHeatmapColors()}, m_selectedMeshHeatmapUploadConfig);
+    m_selectedMeshHeatmap = m_meshUploader.replaceVertexBuffer({&mesh}, m_selectedMeshHeatmapUploadConfig);
     m_selectionManager->rebind(mesh.positions(), object.getComponent<TransformComponent>());
+    m_selectedTopologyRevision = mesh.topologyRevision();
 }
 
 void SceneManager::ensureSelectedMeshAttributes(Mesh &mesh)
@@ -201,29 +238,10 @@ void SceneManager::ensureSelectedMeshAttributes(Mesh &mesh)
     }
 }
 
-Mesh &SceneManager::syncSelectedMeshCornerHeatmapColors()
-{
-    auto                  &selectedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
-    const auto             uniqueColor  = selectedMesh.getPerUniqueVertexArray<glm::vec3>("heatmapColors");
-    std::vector<glm::vec3> cornerColor(selectedMesh.vertexCount());
-    for (uint32_t v = 0; v < selectedMesh.vertexCount(); ++v)
-    {
-        cornerColor[v] = uniqueColor[selectedMesh.positionIndices()[v]];
-    }
-    selectedMesh.setPerVertexArray<glm::vec3>("heatmapColors", std::span<const glm::vec3>(cornerColor));
-    return selectedMesh;
-}
-
-void SceneManager::updateSelectedMeshHeatmapBuffer()
-{
-    m_meshUploader.updateVertexBuffer({&syncSelectedMeshCornerHeatmapColors()}, m_selectedMeshHeatmapUploadConfig);
-}
-
 void SceneManager::setSelectedMeshHeatmapColors(std::span<const glm::vec3> colors)
 {
     auto &selectedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
     selectedMesh.setPerUniqueVertexArray("heatmapColors", colors);
-    updateSelectedMeshHeatmapBuffer();
 }
 
 void SceneManager::updateSelectedMeshHighlightColors()
@@ -233,12 +251,11 @@ void SceneManager::updateSelectedMeshHighlightColors()
         return;
     }
     // SelectionManager owns the coloring itself (persistent buffer, tool-customizable highlight
-    // color) — this just pushes its result to the currently edited Mesh + GPU (see
+    // color) — this just stores its result on the currently edited Mesh (see
     // setEditedMeshObject(); SelectionManager::rebind() keeps its color buffer sized to whichever
     // mesh that currently is).
     auto &editedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
     editedMesh.setPerUniqueVertexArray("color", std::span<const glm::vec3>(m_selectionManager->getColors()));
-    updateSelectedMeshPointsBuffer();
 }
 
 const IndexBufferUploadPerMeshResult &SceneManager::selectedMeshIndexRange() const

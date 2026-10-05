@@ -230,7 +230,7 @@ try
 
     lr::GpuMeshLayout heatmapMeshLayout(meshComponent.mesh().layout());
     heatmapMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
-    heatmapMeshLayout.map("heatmapColors", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
+    heatmapMeshLayout.mapUniqueVertex("heatmapColors", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
 
     heatmapPass.build(viewer.frameGraph(), heatmapMeshLayout);
 
@@ -312,9 +312,6 @@ try
     applyEditorMode(sceneManager.editorMode());
 
     lr::VertexManager vertexManager(meshComponent.mesh());
-    vertexManager.registerUpdateCallback([&]() {
-        sceneManager.updateSelectedMeshPositions();
-    });
 
     lr::CommandManager commandManager;
 
@@ -343,7 +340,7 @@ try
     lr::ArapTool arapTool(selectionManager, vertexManager, commandManager, meshComponent.mesh(), defaultHandler,
                           translateGizmo);
 
-    lr::LaplaceBeltramiTool laplaceBeltramiTool(meshComponent.mesh(), sceneManager, vertexManager);
+    lr::LaplaceBeltramiTool laplaceBeltramiTool(meshComponent.mesh(), sceneManager);
 
     // Ties vertex editing (SelectionManager, VertexManager, ArapTool, the vertex-picking points
     // overlay) to whatever's selected in the Scene Hierarchy. ARAP, Laplace-Beltrami analysis,

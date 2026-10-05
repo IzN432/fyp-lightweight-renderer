@@ -77,8 +77,16 @@ public:
     void         setCamera(SceneObject &camera) { m_camera = &camera; }
     SceneObject *camera() const { return m_camera; }
 
-    // Aspect ratio for the camera's projection; read by the next updateCamera().
-    void setAspect(float aspect) { m_aspect = aspect; }
+    // Aspect ratio for the camera's projection. A change re-uploads the camera on the next flushDirty(),
+    // even if the camera itself didn't move (e.g. the window was resized).
+    void setAspect(float aspect)
+    {
+        if (m_aspect != aspect)
+        {
+            m_aspect            = aspect;
+            m_cameraAspectDirty = true;
+        }
+    }
 
     // One-time setup: builds light visuals, then uploads lights, geometry, materials and the camera.
     // Requires at least one registered mesh and a camera.
@@ -92,7 +100,10 @@ public:
     void registerCallbacks(Viewer &viewer);
 
     // Re-uploads whatever the camera, light and mesh components have marked dirty since the last call,
-    // and clears their flags. Also calls syncLights() if lights were added to or removed from the scene.
+    // and clears their flags. Also calls syncLights() if lights were added to or removed from the scene,
+    // then synchronizes the shared mesh buffers from the meshes' revisions: mesh edits (positions,
+    // attributes, face groups, same-size topology) never upload directly, and several edits in a frame
+    // collapse into one upload per stale buffer (see docs/mesh-synchronization.md).
     void flushDirty();
 
     // Brings the light visuals and the light buffer in line with the lights now in the scene: drops the
@@ -117,8 +128,6 @@ public:
     void rebuildGeometry();
 
     void uploadLights();
-    // Re-uploads positions only, for edits that move vertices without changing topology.
-    void updatePositions();
     void updateMaterials();
     void updateLightVisuals();
     void updateCamera();
@@ -166,6 +175,8 @@ private:
 
     void gatherGeometry(const std::vector<std::string> &vertexAttributeNames);
     void releaseLightVisuals();
+    // Uploads whichever shared mesh buffers' source revisions changed (see flushDirty()).
+    void synchronizeMeshes();
     // Whether `object` is a light still in the scene.
     bool isLiveLight(const SceneObject &object) const;
     // True if lights were added to or removed from the scene since the visuals were built.
@@ -196,6 +207,7 @@ private:
     // Matches Viewer::Config's default window size until setAspect() is called with the real
     // swapchain extent.
     float                      m_aspect      = 1600.0f / 900.0f;
+    bool                       m_cameraAspectDirty = false;
     bool                       m_initialized = false;
     std::vector<SceneObject *> m_meshObjects;
     std::vector<LightVisual>   m_lightVisuals;

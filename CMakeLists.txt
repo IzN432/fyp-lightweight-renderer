@@ -366,6 +366,20 @@ if(LR_BUILD_PYTHON)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(mesh_buffer_sync_tests
+        tests/upload/MeshBufferSyncTests.cpp
+        src/core/scene/Mesh.cpp
+        src/core/editor/VertexManager.cpp
+    )
+    target_include_directories(mesh_buffer_sync_tests PRIVATE src)
+    target_link_libraries(mesh_buffer_sync_tests PRIVATE Vulkan::Vulkan glm::glm)
+    add_test(NAME mesh.buffer_sync COMMAND mesh_buffer_sync_tests)
+
+    # Opt-in headless Vulkan check: build/run explicitly on a machine with a Vulkan device.
+    # Keep hardware requirements out of the ordinary CPU-only CTest suite.
+    add_executable(mesh_gpu_sync_smoke EXCLUDE_FROM_ALL tests/upload/MeshGpuSyncSmoke.cpp)
+    target_link_libraries(mesh_gpu_sync_smoke PRIVATE lr_core)
+
     add_executable(scene_hierarchy_tests
         tests/scene/SceneHierarchyTests.cpp
     )

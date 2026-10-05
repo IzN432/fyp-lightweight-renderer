@@ -138,6 +138,16 @@ SkinUploadResult SkinUploader::upload(const std::vector<const Mesh *> &meshes,
     }
 
     result.jointMatrixCount = totalJointCount;
+    m_staticMeshSources.clear();
+    for (size_t i = 0; i < meshes.size(); ++i)
+    {
+        const Mesh &mesh = *meshes[i];
+        m_staticMeshSources.push_back({.mesh = &mesh, .skin = skins[i],
+                                       .uniquePositionCount = mesh.uniquePositionCount(),
+                                       .vertexCount = mesh.vertexCount(),
+                                       .topologyRevision = mesh.topologyRevision(),
+                                       .groupsRevision = mesh.vertexGroupsRevision()});
+    }
     m_uploaded              = true;
     updateJointMatrices(skins);
     return result;
@@ -158,6 +168,16 @@ void SkinUploader::updateJointMatrices(const std::vector<Skin *> &skins)
     matrices.reserve(m_jointMatrixCapacity);
     for (size_t i = 0; i < skins.size(); ++i)
     {
+        // Influence CSR and render-to-position mappings are rebuilt explicitly, not by the
+        // palette update. Reject stale structural data instead of rendering with old weights.
+        const auto &source = m_staticMeshSources[i];
+        if (source.skin != skins[i] || source.uniquePositionCount != source.mesh->uniquePositionCount() ||
+            source.vertexCount != source.mesh->vertexCount() ||
+            (skins[i] && (source.topologyRevision != source.mesh->topologyRevision() ||
+                          source.groupsRevision != source.mesh->vertexGroupsRevision())))
+        {
+            throw std::logic_error("SkinUploader: mesh/skin structure changed; rebuild geometry before updating palettes");
+        }
         if (!skins[i])
         {
             if (m_expectedJointCounts[i] != 0)
