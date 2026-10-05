@@ -109,7 +109,6 @@ add_library(lr_core STATIC
     src/core/scene/SceneManager.cpp
     src/core/scene/SceneGpu.cpp
     src/core/scene/EngineConventions.cpp
-    src/core/scene/SceneSerializer.cpp
 
     src/core/loaders/ObjLoader.cpp
     src/core/loaders/GltfLoader.cpp
@@ -166,7 +165,6 @@ target_link_libraries(lr_core PUBLIC
     imgui
     imguizmo
     mikktspace::mikktspace
-    nlohmann_json::nlohmann_json
 )
 target_link_libraries(lr_core PRIVATE
     glslang::glslang
@@ -247,10 +245,20 @@ add_library(lr_rigid_body_feature STATIC
 target_include_directories(lr_rigid_body_feature PUBLIC src)
 target_link_libraries(lr_rigid_body_feature PUBLIC lr_core glm::glm ReactPhysics3D::ReactPhysics3D)
 
+# Native scene persistence spans the core scene model and optional component feature libraries, so
+# keep it above those libraries rather than making lr_core depend back on its own features.
+add_library(lr_scene_serialization STATIC
+    src/core/scene/SceneSerializer.cpp
+)
+target_include_directories(lr_scene_serialization PUBLIC src)
+target_link_libraries(lr_scene_serialization PUBLIC lr_core lr_animation_feature
+    lr_linear_blend_skinning_feature lr_rigid_body_feature nlohmann_json::nlohmann_json)
+
 # Application executable
 add_executable(renderer src/main.cpp)
 target_link_libraries(renderer PRIVATE lr_core lr_arap_feature lr_laplace_beltrami_feature
-    lr_linear_blend_skinning_feature lr_animation_feature lr_rigid_body_feature imguiFileDialog)
+    lr_linear_blend_skinning_feature lr_animation_feature lr_rigid_body_feature lr_scene_serialization
+    imguiFileDialog)
 
 # Python module — `lr` package assembled in build/python/lr (run scripts with PYTHONPATH=build/python).
 # Needs a Python interpreter with nanobind installed (pip install nanobind); skipped otherwise.
@@ -392,7 +400,7 @@ if(BUILD_TESTING)
     add_executable(scene_serialization_tests
         tests/scene/SceneSerializationTests.cpp
     )
-    target_link_libraries(scene_serialization_tests PRIVATE lr_core)
+    target_link_libraries(scene_serialization_tests PRIVATE lr_scene_serialization)
     add_test(NAME scene.serialization COMMAND scene_serialization_tests)
 
     add_executable(linear_blend_skinning_joint_tests

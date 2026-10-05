@@ -4,6 +4,10 @@
 #include "core/scene/SceneAssets.hpp"
 #include "core/scene/SceneSerializer.hpp"
 #include "core/scene/TransformComponent.hpp"
+#include "features/animation/AnimatorComponent.hpp"
+#include "features/linear_blend_skinning/SkinComponent.hpp"
+#include "features/rigid_body/ColliderComponent.hpp"
+#include "features/rigid_body/RigidBodyComponent.hpp"
 
 #include <glm/gtc/epsilon.hpp>
 
@@ -84,6 +88,34 @@ int main()
         object.name = "Shared mesh " + std::to_string(i);
         object.addComponent<lr::MeshComponent>(meshHandle, source.meshes, std::vector{materialHandle}, source.materials);
     }
+    lr::TranslationTrack translation(6, lr::AnimationInterpolation::CubicSpline);
+    translation.setKeyframe({0.0f, {1, 2, 3}, {4, 5, 6}, {7, 8, 9}});
+    translation.setKeyframe({2.0f, {10, 11, 12}, {13, 14, 15}, {16, 17, 18}});
+    lr::RotationTrack rotation(7, lr::AnimationInterpolation::Step);
+    rotation.setKeyframe(0.0f, glm::quat(1, 0, 0, 0));
+    auto &animator = root.addComponent<lr::AnimatorComponent>(
+        std::vector<lr::AnimationClip>{lr::AnimationClip("Edited", {translation, rotation})});
+    animator.setLoop(false);
+    animator.setSpeedMultiplier(1.5f);
+
+    auto &skinnedObject = source.scene.getSceneObject(6);
+    skinnedObject.addComponent<lr::SkinComponent>(lr::Skin(source.scene, {
+        {root.id(), glm::mat4(1.0f)}, {source.scene.getSceneObject(1).id(), glm::mat4(2.0f)}}));
+    auto &body = skinnedObject.addComponent<lr::RigidBodyComponent>(7.0f, lr::RigidBodyType::Dynamic);
+    body.setInertiaDiagonal({2, 3, 4});
+    body.setLinearDrag(0.2f);
+    body.setAngularDrag(0.4f);
+    body.setLinearVelocity({5, 6, 7});
+    body.setAngularVelocity({8, 9, 10});
+    lr::Collider sphere;
+    sphere.shape = lr::SphereCollider{1.25f};
+    sphere.localPosition = {1, 2, 3};
+    sphere.material = {0.7f, 0.8f};
+    lr::Collider plane;
+    plane.shape = lr::PlaneCollider{0.5f, {3, 4}};
+    lr::Collider box;
+    box.shape = lr::BoxCollider{{5, 6, 7}};
+    skinnedObject.addComponent<lr::ColliderComponent>(std::vector{sphere, plane, box});
 
     TempScene temporary;
     lr::SceneSerializer::save(source, temporary.path);
@@ -118,6 +150,25 @@ int main()
     assert(roundTripMaterial.name == "Complete material");
     assert(std::get<lr::MaterialParam::RangedFloat>(roundTripMaterial.parameters.at("ranged")).ceiling == 5.0f);
     assert(roundTripMaterial.textures.at("albedo").pixels == std::vector<uint8_t>({1, 2, 3, 4, 5, 6, 7, 8}));
+    const auto &roundTripAnimator = loadedRoot.getComponent<lr::AnimatorComponent>();
+    assert(!roundTripAnimator.loop() && roundTripAnimator.speedMultiplier() == 1.5f);
+    assert(!roundTripAnimator.isPlaying() && !roundTripAnimator.activeClipIndex());
+    assert(roundTripAnimator.clips().size() == 1 && roundTripAnimator.clips()[0].tracks().size() == 2);
+    const auto &roundTripTranslation = std::get<lr::TranslationTrack>(roundTripAnimator.clips()[0].tracks()[0]);
+    assert(roundTripTranslation.target() == 6 && roundTripTranslation.interpolation() == lr::AnimationInterpolation::CubicSpline);
+    assert(roundTripTranslation.keyframes()[1].outgoingTangent == glm::vec3(16, 17, 18));
+    const auto &roundTripSkin = loaded->scene.getSceneObject(6).getComponent<lr::SkinComponent>().skin();
+    assert(roundTripSkin.joints().size() == 2 && roundTripSkin.joints()[0].sceneObject == loadedRoot.id());
+    assert(roundTripSkin.joints()[1].inverseBindMatrix == glm::mat4(2.0f));
+    const auto &roundTripBody = loaded->scene.getSceneObject(6).getComponent<lr::RigidBodyComponent>();
+    assert(roundTripBody.mass() == 7.0f && roundTripBody.inertiaDiagonal() == glm::vec3(2, 3, 4));
+    assert(roundTripBody.linearVelocity() == glm::vec3(5, 6, 7) && roundTripBody.angularVelocity() == glm::vec3(8, 9, 10));
+    assert(roundTripBody.accumulatedForce() == glm::vec3(0) && roundTripBody.accumulatedTorque() == glm::vec3(0));
+    const auto &roundTripColliders = loaded->scene.getSceneObject(6).getComponent<lr::ColliderComponent>().colliders();
+    assert(roundTripColliders.size() == 3);
+    assert(std::get<lr::SphereCollider>(roundTripColliders[0].shape).radius == 1.25f);
+    assert(std::get<lr::PlaneCollider>(roundTripColliders[1].shape).halfExtents == glm::vec2(3, 4));
+    assert(std::get<lr::BoxCollider>(roundTripColliders[2].shape).halfExtents == glm::vec3(5, 6, 7));
 
     // Loading is transactional: malformed input never mutates an existing SceneAssets instance.
     TempScene invalid;
