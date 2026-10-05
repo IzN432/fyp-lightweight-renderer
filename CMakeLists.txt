@@ -39,6 +39,7 @@ find_package(spdlog CONFIG REQUIRED)
 find_package(tinyobjloader CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(mikktspace CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h" REQUIRED)
 find_package(libigl CONFIG REQUIRED)
 find_package(ReactPhysics3D REQUIRED)
@@ -108,6 +109,7 @@ add_library(lr_core STATIC
     src/core/scene/SceneManager.cpp
     src/core/scene/SceneGpu.cpp
     src/core/scene/EngineConventions.cpp
+    src/core/scene/SceneSerializer.cpp
 
     src/core/loaders/ObjLoader.cpp
     src/core/loaders/GltfLoader.cpp
@@ -164,6 +166,7 @@ target_link_libraries(lr_core PUBLIC
     imgui
     imguizmo
     mikktspace::mikktspace
+    nlohmann_json::nlohmann_json
 )
 target_link_libraries(lr_core PRIVATE
     glslang::glslang
@@ -385,6 +388,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(scene_hierarchy_tests PRIVATE lr_core)
     add_test(NAME scene.hierarchy COMMAND scene_hierarchy_tests)
+
+    add_executable(scene_serialization_tests
+        tests/scene/SceneSerializationTests.cpp
+    )
+    target_link_libraries(scene_serialization_tests PRIVATE lr_core)
+    add_test(NAME scene.serialization COMMAND scene_serialization_tests)
 
     add_executable(linear_blend_skinning_joint_tests
         tests/linear_blend_skinning/JointTests.cpp

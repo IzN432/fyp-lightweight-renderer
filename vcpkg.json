@@ -9,6 +9,7 @@
         "tinyobjloader",
         "vulkan-memory-allocator",
         "mikktspace",
+        "nlohmann-json",
         "libigl",
         "reactphysics3d",
         "glslang",

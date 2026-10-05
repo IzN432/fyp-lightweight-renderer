@@ -72,6 +72,19 @@ public:
 
     template <typename T> bool hasComponent() const { return components.contains(std::type_index(typeid(T))); };
 
+    // Runtime component types, primarily for persistence/diagnostics. Components remain owned and
+    // accessed through the typed API above.
+    std::vector<std::type_index> componentTypes() const
+    {
+        std::vector<std::type_index> result;
+        result.reserve(components.size());
+        for (const auto &[type, component] : components)
+        {
+            result.push_back(type);
+        }
+        return result;
+    }
+
     void onGUI(EditorContext &context)
     {
         int  id = 0;
