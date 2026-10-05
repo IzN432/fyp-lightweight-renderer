@@ -42,6 +42,13 @@ find_package(mikktspace CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h" REQUIRED)
 find_package(libigl CONFIG REQUIRED)
+# ARAP keeps libigl's geometry assembly but can use oneMKL PARDISO for its sparse global solve.
+# Keep indices compatible with the engine's 32-bit mesh indices and avoid an OpenMP runtime in the
+# interactive renderer; these variables are inputs to Intel's MKLConfig.cmake.
+set(MKL_INTERFACE lp64)
+set(MKL_THREADING sequential)
+set(MKL_LINK dynamic)
+find_package(MKL CONFIG REQUIRED)
 find_package(ReactPhysics3D REQUIRED)
 find_package(glslang CONFIG REQUIRED)
 find_package(unofficial-spirv-reflect CONFIG REQUIRED)
@@ -211,7 +218,7 @@ add_library(lr_arap_feature STATIC
     src/features/arap/ArapTool.cpp
 )
 target_include_directories(lr_arap_feature PUBLIC src)
-target_link_libraries(lr_arap_feature PUBLIC lr_core igl::igl_core)
+target_link_libraries(lr_arap_feature PUBLIC lr_core igl::igl_core PRIVATE MKL::MKL)
 
 # Laplace-Beltrami analysis feature. Core owns only the generic heatmap rendering/buffer path;
 # this target owns the mesh operator, color generation, GUI, and stale-result tracking.

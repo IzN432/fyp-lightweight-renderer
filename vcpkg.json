@@ -11,6 +11,7 @@
         "mikktspace",
         "nlohmann-json",
         "libigl",
+        "intel-mkl",
         "reactphysics3d",
         "glslang",
         "spirv-reflect"
