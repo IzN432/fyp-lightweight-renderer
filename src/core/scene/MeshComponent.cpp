@@ -46,19 +46,13 @@ struct MaterialGUICallbacks
 } // namespace
 
 MeshComponent::MeshComponent(MeshHandle meshHandle, MeshStore &meshStore,
-                             std::vector<MaterialHandle> materialHandles, MaterialStore &materialStore,
-                             bool hideFromGui)
+                             std::vector<MaterialHandle> materialHandles, MaterialStore &materialStore)
     : Component("MeshComponent"), m_meshHandle(meshHandle), m_meshStore(&meshStore),
-      m_materialHandles(std::move(materialHandles)), m_materialStore(&materialStore), m_hideFromGui(hideFromGui)
+      m_materialHandles(std::move(materialHandles)), m_materialStore(&materialStore)
 {}
 
 void MeshComponent::onGUIImpl()
 {
-    if (m_hideFromGui)
-    {
-        return;
-    }
-
     const Mesh &mesh = m_meshStore->get(m_meshHandle);
     ImGui::Text("Mesh: %u vertices, %u faces", mesh.vertexCount(), mesh.faceCount());
 

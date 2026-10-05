@@ -10,8 +10,9 @@ namespace lr
 {
 
 // Names of the mesh attributes / material parameters the area light visual must line up with,
-// so it packs into the same shared vertex buffer and Materials SSBO as the rest of the scene
-// (see GeometryPass — everything drawn in that pass shares one vertex layout and one material array).
+// so it packs into the same shared vertex buffer and Materials SSBO as the rest of the scene.
+// SceneGpu owns these generated meshes/materials in LightVisual records; they are not MeshComponents
+// and are not part of the authored Scene or its serialized representation.
 struct AreaLightVisualConfig
 {
     std::string normalAttributeName;

@@ -19,15 +19,10 @@ private:
     // referenced so onGUIImpl can offer them up for editing.
     std::vector<MaterialHandle> m_materialHandles;
     MaterialStore              *m_materialStore;
-    // Set for meshes that are an implementation detail of another component (e.g. a light's visual
-    // quad, whose mesh/material are derived from that light and overwritten on every update) rather
-    // than user-editable scene content — keeps them out of the Scene Hierarchy.
-    bool m_hideFromGui;
 
 public:
     explicit MeshComponent(MeshHandle meshHandle, MeshStore &meshStore,
-                           std::vector<MaterialHandle> materialHandles, MaterialStore &materialStore,
-                           bool hideFromGui = false);
+                           std::vector<MaterialHandle> materialHandles, MaterialStore &materialStore);
 
     void onGUIImpl() override;
 

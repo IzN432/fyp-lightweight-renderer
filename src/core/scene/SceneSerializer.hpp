@@ -8,9 +8,8 @@ namespace lr
 
 class SceneAssets;
 
-// Versioned, CPU-only scene persistence. Checkpoint 1 stores hierarchy, transforms, cameras and
-// lights in <path>/scene.json. Asset-bearing components are deliberately rejected until the binary
-// asset portion of the format is implemented.
+// Versioned, CPU-only scene persistence. Metadata lives in <path>/scene.json and bulk mesh/texture
+// data in <path>/assets.bin. Runtime object, mesh and material handles are remapped to file-local IDs.
 class SceneSerializer
 {
 public:

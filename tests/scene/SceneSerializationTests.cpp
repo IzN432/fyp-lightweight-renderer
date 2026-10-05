@@ -1,5 +1,6 @@
 #include "core/scene/Camera.hpp"
 #include "core/scene/Light.hpp"
+#include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneAssets.hpp"
 #include "core/scene/SceneSerializer.hpp"
 #include "core/scene/TransformComponent.hpp"
@@ -49,10 +50,45 @@ int main()
         source.scene.setParent(object.id(), root.id());
     }
 
+    lr::Material material;
+    material.name = "Complete material";
+    material.parameters["rgba"] = lr::MaterialParam::ColorRGBA{{0.1f, 0.2f, 0.3f, 0.4f}};
+    material.parameters["rgb"] = lr::MaterialParam::ColorRGB{{0.5f, 0.6f, 0.7f}};
+    material.parameters["normalized"] = lr::MaterialParam::NormalizedFloat{0.8f};
+    material.parameters["ranged"] = lr::MaterialParam::RangedFloat{3.0f, 1.0f, 5.0f};
+    material.textures["albedo"] = {"checker", {1, 2, 3, 4, 5, 6, 7, 8}, 2, 1};
+    const lr::MaterialHandle materialHandle = source.materials.acquire(std::move(material));
+
+    lr::Mesh mesh;
+    mesh.setTopology({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}}, {0, 1, 2}, {{0, 1, 2}});
+    mesh.setFaceGroups({0});
+    mesh.setFaceGroupCount(1);
+    mesh.setPerVertexArray<glm::vec2>("uv", std::vector<glm::vec2>{{0, 0}, {1, 0}, {0, 1}});
+    mesh.setPerVertexArray<glm::vec3>("normal", std::vector<glm::vec3>(3, {0, 0, 1}));
+    mesh.setPerVertexArray<glm::vec4>("tangent", std::vector<glm::vec4>(3, {1, 0, 0, 1}));
+    mesh.setPerUniqueVertexArray<glm::vec3>("color", std::vector<glm::vec3>{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}});
+    mesh.setPerFaceArray<uint32_t>("tag", std::vector<uint32_t>{17});
+    mesh.setFaceGroupAttributeArray<float>("weight", std::vector<float>{0.75f});
+    mesh.enableVertexGroups();
+    mesh.setVertexGroupCount(2);
+    const lr::VertexGroupEntry groups0[] = {{0, 0.25f}, {1, 0.75f}};
+    mesh.setVertexGroups(0, groups0);
+    mesh.setVertexGroups(1, std::span<const lr::VertexGroupEntry>{});
+    const lr::VertexGroupEntry groups2[] = {{1, 1.0f}};
+    mesh.setVertexGroups(2, groups2);
+    mesh.setVertexGroupAttributeArray<float>("joint_data", std::vector<float>{10, 20});
+    const lr::MeshHandle meshHandle = source.meshes.add(std::move(mesh));
+    for (int i = 0; i < 2; ++i)
+    {
+        auto &object = source.scene.createSceneObject();
+        object.name = "Shared mesh " + std::to_string(i);
+        object.addComponent<lr::MeshComponent>(meshHandle, source.meshes, std::vector{materialHandle}, source.materials);
+    }
+
     TempScene temporary;
     lr::SceneSerializer::save(source, temporary.path);
     auto loaded = lr::SceneSerializer::load(temporary.path);
-    assert(loaded->scene.sceneObjects().size() == 6);
+    assert(loaded->scene.sceneObjects().size() == 8);
     const auto &loadedRoot = loaded->scene.getSceneObject(0);
     assert(loadedRoot.name == root.name && loadedRoot.children().size() == 5);
     const auto &loadedTransform = loadedRoot.getComponent<lr::TransformComponent>().transform();
@@ -66,6 +102,22 @@ int main()
         assert(object.parent() == loadedRoot.id());
         assert(object.getComponent<lr::Light>().light.index() == lights[i].index());
     }
+    const auto &meshA = loaded->scene.getSceneObject(6).getComponent<lr::MeshComponent>();
+    const auto &meshB = loaded->scene.getSceneObject(7).getComponent<lr::MeshComponent>();
+    assert(meshA.meshHandle() == meshB.meshHandle());
+    assert(meshA.materialHandles() == meshB.materialHandles());
+    const lr::Mesh &roundTripMesh = meshA.mesh();
+    assert(roundTripMesh.positions().size() == 3 && roundTripMesh.faces().size() == 1);
+    assert(roundTripMesh.getPerVertexArray<glm::vec2>("uv").size() == 3);
+    assert(roundTripMesh.getPerVertexArray<glm::vec3>("normal")[0] == glm::vec3(0, 0, 1));
+    assert(roundTripMesh.getPerFaceArray<uint32_t>("tag")[0] == 17);
+    assert(roundTripMesh.getFaceGroupAttributeArray<float>("weight")[0] == 0.75f);
+    assert(roundTripMesh.getVertexGroups(0).size() == 2 && roundTripMesh.getVertexGroups(2)[0].weight == 1.0f);
+    assert(roundTripMesh.getVertexGroupAttributeArray<float>("joint_data")[1] == 20);
+    const lr::Material &roundTripMaterial = loaded->materials.get(meshA.materialHandles()[0]);
+    assert(roundTripMaterial.name == "Complete material");
+    assert(std::get<lr::MaterialParam::RangedFloat>(roundTripMaterial.parameters.at("ranged")).ceiling == 5.0f);
+    assert(roundTripMaterial.textures.at("albedo").pixels == std::vector<uint8_t>({1, 2, 3, 4, 5, 6, 7, 8}));
 
     // Loading is transactional: malformed input never mutates an existing SceneAssets instance.
     TempScene invalid;
