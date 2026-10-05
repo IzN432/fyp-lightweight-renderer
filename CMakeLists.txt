@@ -433,6 +433,14 @@ if(BUILD_TESTING)
     target_link_libraries(rigid_body_collider_tests PRIVATE lr_rigid_body_feature)
     add_test(NAME rigid_body.collider COMMAND rigid_body_collider_tests)
 
+    # Opt-in CPU benchmark for comparing ARAP solver implementations. It deliberately is not a
+    # CTest: wall-clock performance is machine-dependent and should be run explicitly in Release.
+    add_executable(arap_profile EXCLUDE_FROM_ALL tests/arap/ArapProfile.cpp)
+    target_link_libraries(arap_profile PRIVATE lr_arap_feature)
+    target_compile_definitions(arap_profile PRIVATE
+        LR_SAMPLE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/samples/models/"
+    )
+
     add_executable(shader_compiler_tests
         tests/vulkan/ShaderCompilerTests.cpp
     )
