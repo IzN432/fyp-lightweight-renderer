@@ -628,6 +628,13 @@ void ResourceRegistry::replaceUploadedBuffer(const std::string &name, const void
                                  "' is not a static buffer created via uploadBuffer()");
     }
 
+    // Pending copies resolve their destination by name at flush time. They belong to the
+    // old allocation and must not be replayed into a potentially smaller replacement.
+    std::erase_if(m_pendingUploads, [&](PendingUpload &upload) {
+        if (upload.type != PendingUpload::Type::Buffer || upload.resourceName != name) return false;
+        m_allocator.destroy(upload.staging);
+        return true;
+    });
     m_allocator.destroy(it->second.buffer);
 
     BufferEntry entry{};
@@ -714,9 +721,33 @@ void ResourceRegistry::flushUploads()
             if (upload.type == PendingUpload::Type::Buffer)
             {
                 AllocatedBuffer *dest = getBuffer(upload.resourceName);
+                // Shared static buffers may still be read by earlier submissions on this queue.
+                // Queue submission order alone is not a memory/execution dependency.
+                VkBufferMemoryBarrier2 barrier{};
+                barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+                barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                barrier.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+                barrier.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+                barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.buffer = dest->buffer;
+                barrier.size = upload.staging.size;
+                VkDependencyInfo dependency{};
+                dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                dependency.bufferMemoryBarrierCount = 1;
+                dependency.pBufferMemoryBarriers = &barrier;
+                vkCmdPipelineBarrier2(cmd, &dependency);
+
                 VkBufferCopy     region{};
-                region.size = dest->size;
+                region.size = upload.staging.size;
                 vkCmdCopyBuffer(cmd, upload.staging.buffer, dest->buffer, 1, &region);
+
+                barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+                barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+                vkCmdPipelineBarrier2(cmd, &dependency);
             } else
             {
                 AllocatedImage *img    = getImage(upload.resourceName);

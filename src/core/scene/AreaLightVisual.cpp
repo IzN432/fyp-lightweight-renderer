@@ -22,7 +22,13 @@ void buildAreaLightQuadMesh(Mesh &mesh, const TransformComponent &transform, con
     // Wound so the quad is visible (front-facing) from the `forward` side, matching the pass's
     // CCW-front backface culling.
     std::vector<glm::uvec3> faces = {{0, 1, 2}, {0, 2, 3}};
-    mesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
+    // Once established, resizing/moving a light changes vertex values, not connectivity.
+    // Keep topology consumers (indices and skin position mappings) valid across these edits.
+    if (mesh.positionIndices() == positionIndices && mesh.faces() == faces &&
+        mesh.uniquePositionCount() == positions.size())
+        mesh.setPositions(positions);
+    else
+        mesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
     mesh.setPerVertexArray<glm::vec3>(config.normalAttributeName, std::vector<glm::vec3>(4, forward));
     // Tangent = local right axis; w = +1 (no bitangent mirroring) matches geometry.frag's TBN build.
     mesh.setPerVertexArray<glm::vec4>(config.tangentAttributeName,

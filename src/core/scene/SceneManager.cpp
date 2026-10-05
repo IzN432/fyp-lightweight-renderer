@@ -117,7 +117,7 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
 
     // Constructed here rather than as a SceneManager member-initializer since it operates on the
     // selected mesh's Mesh/TransformComponent, which only exist once uploadMeshes() above has run. The
-    // highlight-changed callback keeps the GPU color buffer in sync with selection state — the
+    // highlight-changed callback updates the CPU color attribute; late synchronization updates the GPU.
     // caller (main.cpp) still owns wiring up a SelectionTool and its own UI on top of it.
     auto &selectedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
     m_selectionManager =
@@ -237,10 +237,8 @@ void SceneManager::uploadMeshes(const GpuMaterialLayout        &materialLayout,
     m_selectedMeshPoints =
         m_meshUploader.uploadUniqueVertexBuffer({&selectedMesh}, m_selectedMeshPointsUploadConfig);
 
-    // Seeds the corner-domain heatmap attribute from the per-unique-vertex analysis colors the
-    // selected mesh, then uploads the heatmap buffer from it.
-    m_selectedMeshHeatmap = m_meshUploader.uploadVertexBuffer(
-        {&syncSelectedMeshCornerHeatmapColors()}, m_selectedMeshHeatmapUploadConfig);
+    m_selectedMeshHeatmap = m_meshUploader.uploadVertexBuffer({&selectedMesh}, m_selectedMeshHeatmapUploadConfig);
+    m_selectedTopologyRevision = selectedMesh.topologyRevision();
 
     m_indexBuffer = m_meshUploader.uploadIndexBuffer(m_geometryMeshes, {.indexBufferName = m_meshIndexBufferName});
     m_meshUploader.uploadFaceGroupBuffer(m_geometryMeshes, {.faceGroupBufferName = m_meshFaceGroupBufferName});
@@ -266,6 +264,17 @@ void SceneManager::rebuildGeometry()
         m_geometryMeshes, {.faceGroupBufferName = m_meshFaceGroupBufferName});
     m_skinUploadResult = m_skinUploader.upload(m_geometryMeshes, m_meshSkins);
     updateMaterials();
+    if (m_editedMeshObject)
+    {
+        Mesh &mesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
+        ensureSelectedMeshAttributes(mesh);
+        m_selectedMeshPoints = m_meshUploader.replaceUniqueVertexBuffer({&mesh}, m_selectedMeshPointsUploadConfig);
+        m_selectedMeshHeatmap = m_meshUploader.replaceVertexBuffer({&mesh}, m_selectedMeshHeatmapUploadConfig);
+        // Importing unrelated assets must not clear the current vertex selection.
+        if (m_selectedTopologyRevision != mesh.topologyRevision())
+            m_selectionManager->rebind(mesh.positions(), m_editedMeshObject->getComponent<TransformComponent>());
+        m_selectedTopologyRevision = mesh.topologyRevision();
+    }
     if (!m_pendingTextureUpdates.empty())
     {
         std::ranges::sort(m_pendingTextureUpdates);
@@ -291,17 +300,20 @@ void SceneManager::uploadLights()
     m_lightUploader.upload(lights);
 }
 
-void SceneManager::updateSelectedMeshPositions()
+void SceneManager::synchronizeMeshes()
 {
-    m_meshUploader.updateVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
-    updateSelectedMeshPointsBuffer();
-    updateSelectedMeshHeatmapBuffer();
-}
+    m_meshUploader.synchronizeVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
+    m_meshUploader.synchronizeVertexBuffer(m_geometryMeshes, m_meshAttributeUploadConfig);
+    m_meshUploader.synchronizeIndexBuffer(m_geometryMeshes, {.indexBufferName = m_meshIndexBufferName});
+    m_meshUploader.synchronizeFaceGroupBuffer(m_geometryMeshes, {.faceGroupBufferName = m_meshFaceGroupBufferName});
 
-void SceneManager::updateSelectedMeshPointsBuffer()
-{
-    const auto &editedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
-    m_meshUploader.updateUniqueVertexBuffer({&editedMesh}, m_selectedMeshPointsUploadConfig);
+    if (!m_editedMeshObject) return;
+    const auto &mesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
+    // Inactive overlays catch up on their next use using their own retained stamps.
+    if (m_editorMode == EditorMode::Edit)
+        m_meshUploader.synchronizeUniqueVertexBuffer({&mesh}, m_selectedMeshPointsUploadConfig);
+    if (m_editorMode == EditorMode::Analysis)
+        m_meshUploader.synchronizeVertexBuffer({&mesh}, m_selectedMeshHeatmapUploadConfig);
 }
 
 bool SceneManager::isEditable(const SceneObject &object)
@@ -328,8 +340,9 @@ void SceneManager::setEditedMeshObject(SceneObject &object)
     m_selectedMeshPoints =
         m_meshUploader.replaceUniqueVertexBuffer({&mesh}, m_selectedMeshPointsUploadConfig);
     m_selectedMeshHeatmap = m_meshUploader.replaceVertexBuffer(
-        {&syncSelectedMeshCornerHeatmapColors()}, m_selectedMeshHeatmapUploadConfig);
+        {&mesh}, m_selectedMeshHeatmapUploadConfig);
     m_selectionManager->rebind(mesh.positions(), object.getComponent<TransformComponent>());
+    m_selectedTopologyRevision = mesh.topologyRevision();
 }
 
 void SceneManager::ensureSelectedMeshAttributes(Mesh &mesh)
@@ -346,29 +359,10 @@ void SceneManager::ensureSelectedMeshAttributes(Mesh &mesh)
     }
 }
 
-Mesh &SceneManager::syncSelectedMeshCornerHeatmapColors()
-{
-    auto                  &selectedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
-    const auto             uniqueColor  = selectedMesh.getPerUniqueVertexArray<glm::vec3>("heatmapColors");
-    std::vector<glm::vec3> cornerColor(selectedMesh.vertexCount());
-    for (uint32_t v = 0; v < selectedMesh.vertexCount(); ++v)
-    {
-        cornerColor[v] = uniqueColor[selectedMesh.positionIndices()[v]];
-    }
-    selectedMesh.setPerVertexArray<glm::vec3>("heatmapColors", std::span<const glm::vec3>(cornerColor));
-    return selectedMesh;
-}
-
-void SceneManager::updateSelectedMeshHeatmapBuffer()
-{
-    m_meshUploader.updateVertexBuffer({&syncSelectedMeshCornerHeatmapColors()}, m_selectedMeshHeatmapUploadConfig);
-}
-
 void SceneManager::setSelectedMeshHeatmapColors(std::span<const glm::vec3> colors)
 {
     auto &selectedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
     selectedMesh.setPerUniqueVertexArray("heatmapColors", colors);
-    updateSelectedMeshHeatmapBuffer();
 }
 
 void SceneManager::updateSelectedMeshHighlightColors()
@@ -378,12 +372,11 @@ void SceneManager::updateSelectedMeshHighlightColors()
         return;
     }
     // SelectionManager owns the coloring itself (persistent buffer, tool-customizable highlight
-    // color) — this just pushes its result to the currently edited Mesh + GPU (see
+    // color) — this just stores its result on the currently edited Mesh (see
     // setEditedMeshObject(); SelectionManager::rebind() keeps its color buffer sized to whichever
     // mesh that currently is).
     auto &editedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
     editedMesh.setPerUniqueVertexArray("color", std::span<const glm::vec3>(m_selectionManager->getColors()));
-    updateSelectedMeshPointsBuffer();
 }
 
 const IndexBufferUploadPerMeshResult &SceneManager::selectedMeshIndexRange() const
@@ -475,8 +468,6 @@ void SceneManager::updateLightVisuals()
         m_materialStore.get(handle) = buildAreaLightMaterial(lightData, m_areaLightVisualConfig);
     }
 
-    m_meshUploader.updateVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
-    m_meshUploader.updateVertexBuffer(m_geometryMeshes, m_meshAttributeUploadConfig);
     updateMaterials();
 }
 
@@ -484,15 +475,16 @@ void SceneManager::flushDirty()
 {
     auto &cameraComponent = m_defaultCamera->getComponent<Camera>();
     auto &cameraTransform = m_defaultCamera->getComponent<TransformComponent>();
-    if (cameraComponent.isDirty() || cameraTransform.isDirty())
+    if (cameraComponent.isDirty() || cameraTransform.isDirty() || m_cameraAspectDirty)
     {
         updateCamera();
         cameraComponent.clearDirty();
         cameraTransform.clearDirty();
+        m_cameraAspectDirty = false;
     }
 
-    // Any single light visual going dirty rebuilds every light visual, since updateLightVisuals()
-    // repacks the shared vertex/attribute buffers for all of them at once — including switching a
+    // Any single light visual going dirty refreshes every light visual's CPU representation,
+    // which late synchronization projects into shared buffers — including switching a
     // light to a different type at runtime (see Light::onGUIImpl's type combo), at which point its
     // quad collapses to (or springs from) the hidden zero-sized state.
     bool anyLightVisualDirty = false;
@@ -527,6 +519,7 @@ void SceneManager::flushDirty()
     {
         updateMaterials();
     }
+    synchronizeMeshes();
 }
 
 } // namespace lr

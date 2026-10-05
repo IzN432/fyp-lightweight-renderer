@@ -64,7 +64,7 @@ public:
     // AreaLightVisual.cpp for the pattern: build a Mesh, acquire a MaterialHandle, setFaceGroups,
     // then addComponent<MeshComponent>()). Its TransformComponent is applied as its model matrix at
     // draw time. Must be called before initialize()/uploadMeshes().
-    // so edits made after the initial upload won't reach the GPU.
+    // Subsequent position/attribute edits are detected from the mesh's revisions.
     void addMeshObject(SceneObject &object);
     SceneObject *removeSceneObjects(std::span<const SceneObjectId> ids);
 
@@ -95,7 +95,14 @@ public:
 
     // Updated once per frame from the current swapchain extent (window resize) — read by
     // updateCamera() the next time it runs, so there's no need to force a re-upload here.
-    void setAspect(float aspect) { m_aspect = aspect; }
+    void setAspect(float aspect)
+    {
+        if (m_aspect != aspect)
+        {
+            m_aspect = aspect;
+            m_cameraAspectDirty = true;
+        }
+    }
 
     // Performs all one-time scene setup that would otherwise have to be manually sequenced by the
     // caller: builds light visuals, uploads the initial lights/mesh/material/camera buffers, and
@@ -112,7 +119,7 @@ public:
 
     // Selection over the selected mesh's deduped-position space — constructed by initialize(), so only
     // valid to call after it. Highlight changes are wired internally to push the highlighted-vertex
-    // colors to the GPU; the caller still owns wiring up a SelectionTool
+    // colors into mesh CPU data; late synchronization maintains GPU views. The caller still wires a SelectionTool
     // (setSelectTool), the mouse click handoff with gizmos, and reading getSelectedIndices()/
     // getHighlightedIndices() for its own UI (translate gizmo placement, etc.).
     SelectionManager &selectionManager() { return *m_selectionManager; }
@@ -125,10 +132,9 @@ public:
     void setEditorMode(EditorMode mode);
     void registerEditorModeChangedCallback(std::function<void(EditorMode)> callback);
 
-    // Polls the camera, light visual, and rendered mesh components for the dirty flag their setters/
-    // onGUIImpl set via Component::markDirty(), re-uploads whatever's dirty (at most once per
-    // resource, however many times it changed this frame), and clears the flags. Call once per
-    // frame, after every other update callback has had a chance to mutate the scene — see
+    // Flushes component edits, then synchronizes materialized mesh buffers from independent
+    // per-representation revision stamps. Position/attribute mutations never upload directly.
+    // Call once per frame, after every other update callback has had a chance to mutate the scene — see
     // Viewer::onLateUpdate.
     void flushDirty();
 
@@ -143,14 +149,11 @@ public:
     void uploadMeshes(const GpuMaterialLayout &materialLayout, const std::vector<std::string> &vertexAttributeNames);
 
     // Re-packs all render geometry after runtime imports/deletions. The caller must wait for the
-    // GPU before calling and refresh pass draw metadata afterward.
+    // GPU before calling and refresh pass draw metadata/descriptors afterward. Also replaces
+    // selected overlays; a selected topology change rebinds selection (caller rebinds its tools).
     void rebuildGeometry();
 
     void uploadLights();
-
-    // Repacks the GBuffer position buffer plus the deduped position+color buffer (see
-    // selected points buffer — for edits that only move vertices (vertex-drag editing).
-    void updateSelectedMeshPositions();
 
     // Replaces the analysis colors used by HeatmapPass without touching the selection-highlight
     // colors used by the points overlay. Colors are indexed by mesh.positions().
@@ -161,8 +164,8 @@ public:
     // see MeshComponent::onGUIImpl), so the edit reaches the GPU.
     void updateMaterials();
 
-    // Rebuilds every light visual's quad geometry + MaterialStore slot from its current Light/
-    // TransformComponent state, then re-uploads (positions, attributes, materials). Called by flushDirty()
+    // Rebuilds every light visual's CPU quad geometry + MaterialStore slot from its Light/
+    // TransformComponent state. Mesh synchronization uploads changed geometry afterward. Called by flushDirty()
     // when any light-visual object's Light or TransformComponent is dirty.
     void updateLightVisuals();
 
@@ -224,24 +227,11 @@ private:
     void gatherGeometry(const std::vector<std::string> &vertexAttributeNames);
 
     // Rebuilds the selected mesh's "color" per-unique-vertex attribute from the SelectionManager's
-    // current highlighted indices and pushes it to the GPU. Wired as m_selectionManager's
+    // current highlighted indices. Wired as m_selectionManager's
     // highlight-changed callback in initialize().
     void updateSelectedMeshHighlightColors();
 
-    // Repacks and re-uploads the deduped position+color buffer from the selected mesh's current
-    // positions/"color" attribute. Shared by position and highlight changes since both fields live in
-    // the same interleaved buffer.
-    void updateSelectedMeshPointsBuffer();
-
-    // Expands the selected mesh's per-unique-vertex "heatmapColors" attribute to the corner domain
-    // (via positionIndices) and registers the matching per-vertex attribute on the same Mesh, ready
-    // for packing into the selected heatmap buffer. Returns the mutable mesh reference so callers
-    // can pack/upload it (initial upload vs. re-upload need different MeshUploader calls).
-    Mesh &syncSelectedMeshCornerHeatmapColors();
-
-    // Repacks and re-uploads the selected heatmap buffer. Called when positions or independently
-    // stored analysis colors change.
-    void updateSelectedMeshHeatmapBuffer();
+    void synchronizeMeshes();
     void ensureSelectedMeshAttributes(Mesh &mesh);
 
     Scene            *m_scene = nullptr;
@@ -262,13 +252,15 @@ private:
     SceneObject *m_defaultCamera  = nullptr;
     std::vector<SceneObject *> m_meshObjects;
     SceneObject *m_editedMeshObject = nullptr;
+    Mesh::Revision m_selectedTopologyRevision = 0;
     // Matches Viewer::Config's default window size until setAspect() is called with the real
     // swapchain extent.
     float                      m_aspect = 1600.0f / 900.0f;
+    bool                       m_cameraAspectDirty = false;
     std::vector<SceneObject *> m_lightVisualObjects;
     AreaLightVisualConfig m_areaLightVisualConfig;
 
-    // Cached once in uploadMeshes(), reused by position/light-visual updates so
+    // Established by uploadMeshes()/rebuildGeometry(), polled during late synchronization so
     // every repack targets the same combined mesh list / buffer configs.
     std::vector<const Mesh *>      m_geometryMeshes;
     std::vector<const TransformComponent *> m_meshTransforms;
@@ -288,8 +280,7 @@ private:
     const std::string m_selectedMeshHeatmapBufferName  = "meshHeatmapBuffer";
 
     // Config for the deduped position+color buffer above — same shape as m_meshPositionUploadConfig/
-    // m_meshAttributeUploadConfig, cached so position/highlight updates
-    // both repack it identically.
+    // m_meshAttributeUploadConfig. Its stamp observes both position and highlight revisions.
     VertexBufferUploadConfig m_selectedMeshPointsUploadConfig = {
         .vertexBufferName = m_selectedMeshPointsBufferName, .vertexAttributeNames = {"color"}, .includePosition = true};
 
@@ -297,7 +288,8 @@ private:
     VertexBufferUploadConfig m_selectedMeshHeatmapUploadConfig = {
         .vertexBufferName = m_selectedMeshHeatmapBufferName,
         .vertexAttributeNames = {"heatmapColors"},
-        .includePosition = true};
+        .includePosition = true,
+        .expandUniqueVertexAttributes = true};
 
     VertexBufferUploadResult m_meshPositions;
     VertexBufferUploadResult m_selectedMeshPoints;

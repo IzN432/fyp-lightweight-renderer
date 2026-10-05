@@ -1,5 +1,6 @@
 #include "core/scene/Mesh.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -116,8 +117,8 @@ std::vector<VkVertexInputBindingDescription> GpuMeshLayout::bindingDescriptions(
 std::vector<VkVertexInputAttributeDescription> GpuMeshLayout::attributeDescriptions() const
 {
     // Offsets within each binding are accumulated in declaration order within each of
-    // m_mappings/m_uniqueVertexMappings — safe since a single binding is always fed from one
-    // vertex buffer and never mixes position/per-vertex attributes with per-unique-vertex ones.
+    // m_mappings/m_uniqueVertexMappings. For mixed bindings, the packer must put position/
+    // per-vertex fields before fields gathered from the unique-position domain (e.g. heatmaps).
     std::unordered_map<uint32_t, uint32_t> bindingOffsets;
 
     std::vector<VkVertexInputAttributeDescription> result;
@@ -195,6 +196,7 @@ void Mesh::allocateDomain(std::unordered_map<std::string, AttributeStore> &store
         store.stride = desc.stride;
         store.count  = count;
         store.data.assign(count * desc.stride, std::byte{0});
+        store.revision = ++m_revision;
     }
 }
 
@@ -242,6 +244,9 @@ void Mesh::setTopology(std::vector<glm::vec3> positions, std::vector<uint32_t> p
     m_faces           = std::move(faces);
     m_faceGroups.clear();
     m_topologySet = true;
+    m_topologyRevision = ++m_revision;
+    m_positionsRevision = ++m_revision;
+    m_faceGroupsRevision = ++m_revision;
 
     const uint32_t renderVertexCount = vertexCount();
     const uint32_t positionCount     = uniquePositionCount();
@@ -255,7 +260,50 @@ void Mesh::setTopology(std::vector<glm::vec3> positions, std::vector<uint32_t> p
         m_pendingGroupEntries.clear();
         m_pendingGroupEntries.resize(positionCount);
         m_csrDirty = true;
+        m_vertexGroupsRevision = ++m_revision;
     }
+}
+
+void Mesh::setPositionAt(uint32_t index, const glm::vec3 &position)
+{
+    auto &stored = m_positions.at(index);
+    if (stored == position) return;
+    stored = position;
+    m_positionsRevision = ++m_revision;
+}
+
+void Mesh::setPositions(std::span<const glm::vec3> positions)
+{
+    if (!m_topologySet || positions.size() != m_positions.size())
+    {
+        throw std::invalid_argument("Mesh: position-only edits must preserve the position count");
+    }
+    if (std::equal(positions.begin(), positions.end(), m_positions.begin())) return;
+    std::copy(positions.begin(), positions.end(), m_positions.begin());
+    m_positionsRevision = ++m_revision;
+}
+
+void Mesh::setPositions(std::span<const uint32_t> indices, std::span<const glm::vec3> positions)
+{
+    if (indices.size() != positions.size())
+    {
+        throw std::invalid_argument("Mesh: position indices and values must have matching sizes");
+    }
+    for (uint32_t index : indices)
+    {
+        if (index >= m_positions.size()) throw std::out_of_range("Mesh: position index out of range");
+    }
+    // Values may be a span of this mesh's positions, including a reordered batch.
+    // Snapshot before writing so an early write cannot change a later input value.
+    const std::vector<glm::vec3> values(positions.begin(), positions.end());
+    bool changed = false;
+    for (size_t i = 0; i < indices.size(); ++i)
+    {
+        auto &stored = m_positions[indices[i]];
+        changed |= stored != values[i];
+        stored = values[i];
+    }
+    if (changed) m_positionsRevision = ++m_revision;
 }
 
 void Mesh::setFaceGroups(std::vector<uint32_t> faceGroups)
@@ -269,6 +317,7 @@ void Mesh::setFaceGroups(std::vector<uint32_t> faceGroups)
         throw std::invalid_argument("Mesh: face-group count must match face count");
     }
     m_faceGroups = std::move(faceGroups);
+    m_faceGroupsRevision = ++m_revision;
 }
 
 void Mesh::enableVertexGroups()
@@ -276,6 +325,7 @@ void Mesh::enableVertexGroups()
     m_layout.enableVertexGroups();
     m_pendingGroupEntries.resize(uniquePositionCount());
     m_csrDirty = true;
+    m_vertexGroupsRevision = ++m_revision;
 }
 
 void Mesh::setFaceGroupCount(uint32_t count)
@@ -321,6 +371,7 @@ void Mesh::setVertexGroups(uint32_t vertexIndex, std::span<const VertexGroupEntr
 
     m_pendingGroupEntries[vertexIndex].assign(entries.begin(), entries.end());
     m_csrDirty = true;
+    m_vertexGroupsRevision = ++m_revision;
 }
 
 std::span<const VertexGroupEntry> Mesh::getVertexGroups(uint32_t vertexIndex) const

@@ -1,7 +1,6 @@
 #include "LaplaceBeltramiTool.hpp"
 
 #include "LaplaceBeltramiOperator.hpp"
-#include "core/editor/VertexManager.hpp"
 #include "core/utility/HeatmapColors.hpp"
 
 #include <imgui.h>
@@ -9,43 +8,32 @@
 namespace lr
 {
 
-LaplaceBeltramiTool::LaplaceBeltramiTool(const Mesh &mesh, SceneManager &sceneManager, VertexManager &vertexManager)
+LaplaceBeltramiTool::LaplaceBeltramiTool(const Mesh &mesh, SceneManager &sceneManager)
     : m_sceneManager(sceneManager)
 {
     rebind(mesh);
-    vertexManager.registerUpdateCallback([this]() {
-        invalidate();
-    });
 }
 
 void LaplaceBeltramiTool::rebind(const Mesh &mesh)
 {
-    m_positions = mesh.positions();
-    m_triangles.clear();
-    m_triangles.reserve(mesh.faces().size());
-    for (const glm::uvec3 &face : mesh.faces())
-    {
-        m_triangles.push_back({mesh.positionIndices()[face.x], mesh.positionIndices()[face.y],
-                               mesh.positionIndices()[face.z]});
-    }
+    m_mesh = &mesh;
     m_hasResult = false;
-    m_isStale   = false;
 }
 
 void LaplaceBeltramiTool::calculate()
 {
-    const auto magnitudes = LaplaceBeltramiOperator::calculateMagnitude(m_positions, m_triangles);
+    std::vector<glm::uvec3> triangles;
+    triangles.reserve(m_mesh->faces().size());
+    for (const glm::uvec3 &face : m_mesh->faces())
+    {
+        triangles.push_back({m_mesh->positionIndices()[face.x], m_mesh->positionIndices()[face.y],
+                             m_mesh->positionIndices()[face.z]});
+    }
+    const auto magnitudes = LaplaceBeltramiOperator::calculateMagnitude(m_mesh->positions(), triangles);
     m_sceneManager.setSelectedMeshHeatmapColors(makeHeatmapColors(magnitudes));
     m_hasResult = true;
-    m_isStale   = false;
-}
-
-void LaplaceBeltramiTool::invalidate()
-{
-    if (m_hasResult)
-    {
-        m_isStale = true;
-    }
+    m_resultPositionsRevision = m_mesh->positionsRevision();
+    m_resultTopologyRevision = m_mesh->topologyRevision();
 }
 
 void LaplaceBeltramiTool::onGui()
@@ -72,7 +60,8 @@ void LaplaceBeltramiTool::onGui()
     if (!m_hasResult)
     {
         ImGui::TextDisabled("Calculate the operator to generate the heatmap.");
-    } else if (m_isStale)
+    } else if (m_resultPositionsRevision != m_mesh->positionsRevision() ||
+               m_resultTopologyRevision != m_mesh->topologyRevision())
     {
         ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.15f, 1.0f),
                            "Mesh geometry changed. Heatmap values are out of date.");

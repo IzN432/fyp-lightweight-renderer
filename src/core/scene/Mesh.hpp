@@ -163,9 +163,24 @@ public:
     const std::vector<glm::uvec3> &faces() const { return m_faces; }
     const std::vector<uint32_t>   &faceGroups() const { return m_faceGroups; }
 
+    // All mutation goes through setters so independent consumers can observe revisions.
     // Position-only editing preserves topology and all attribute-domain sizes.
-    glm::vec3       &positionAt(uint32_t index) { return m_positions.at(index); }
     const glm::vec3 &positionAt(uint32_t index) const { return m_positions.at(index); }
+    void setPositionAt(uint32_t index, const glm::vec3 &position);
+    void setPositions(std::span<const glm::vec3> positions);
+    // Validates the complete batch before writing; publishes one revision for the batch.
+    void setPositions(std::span<const uint32_t> indices, std::span<const glm::vec3> positions);
+
+    using Revision = uint64_t;
+    Revision positionsRevision() const { return m_positionsRevision; }
+    Revision topologyRevision() const { return m_topologyRevision; }
+    Revision faceGroupsRevision() const { return m_faceGroupsRevision; }
+    Revision vertexGroupsRevision() const { return m_vertexGroupsRevision; }
+    Revision perVertexRevision(const std::string &name) const { return getStore(m_perVertex, name).revision; }
+    Revision perUniqueVertexRevision(const std::string &name) const { return getStore(m_perUniqueVertex, name).revision; }
+    Revision perFaceRevision(const std::string &name) const { return getStore(m_perFace, name).revision; }
+    Revision faceGroupAttributeRevision(const std::string &name) const { return getStore(m_faceGroup, name).revision; }
+    Revision vertexGroupAttributeRevision(const std::string &name) const { return getStore(m_vertexGroup, name).revision; }
 
     // -------------------------------------------------------------------------
     // Count management
@@ -192,8 +207,6 @@ public:
 
     template <typename T> std::span<const T> getPerVertexArray(const std::string &name) const;
 
-    template <typename T> T &perVertexAt(const std::string &name, uint32_t index);
-
     template <typename T> const T &perVertexAt(const std::string &name, uint32_t index) const;
 
     // -------------------------------------------------------------------------
@@ -208,8 +221,6 @@ public:
 
     template <typename T> std::span<const T> getPerUniqueVertexArray(const std::string &name) const;
 
-    template <typename T> T &perUniqueVertexAt(const std::string &name, uint32_t index);
-
     template <typename T> const T &perUniqueVertexAt(const std::string &name, uint32_t index) const;
 
     // -------------------------------------------------------------------------
@@ -222,8 +233,6 @@ public:
 
     template <typename T> std::span<const T> getPerFaceArray(const std::string &name) const;
 
-    template <typename T> T &perFaceAt(const std::string &name, uint32_t index);
-
     template <typename T> const T &perFaceAt(const std::string &name, uint32_t index) const;
 
     // -------------------------------------------------------------------------
@@ -235,8 +244,6 @@ public:
     template <typename T> void setFaceGroupAttributeAt(const std::string &name, uint32_t groupIndex, const T &value);
 
     template <typename T> std::span<const T> getFaceGroupAttributeArray(const std::string &name) const;
-
-    template <typename T> T &getFaceGroupAttributeAt(const std::string &name, uint32_t groupIndex);
 
     template <typename T> const T &getFaceGroupAttributeAt(const std::string &name, uint32_t groupIndex) const;
 
@@ -260,8 +267,6 @@ public:
     template <typename T> void setVertexGroupAttributeAt(const std::string &name, uint32_t groupIndex, const T &value);
 
     template <typename T> std::span<const T> getVertexGroupAttributeArray(const std::string &name) const;
-
-    template <typename T> T &getVertexGroupAttributeAt(const std::string &name, uint32_t groupIndex);
 
     template <typename T> const T &getVertexGroupAttributeAt(const std::string &name, uint32_t groupIndex) const;
 
@@ -291,6 +296,7 @@ private:
         size_t                 stride = 0;
         std::vector<std::byte> data;
         uint32_t               count = 0;
+        Revision               revision = 0;
     };
 
     // Look up or create a store for a named attribute.
@@ -323,10 +329,16 @@ private:
     std::span<const T> implGetArray(const std::unordered_map<std::string, AttributeStore> &stores,
                                     const std::string                                     &name) const;
 
-    // Generic mutable ref
+    // Read-only element access. Writable references would bypass revision tracking.
     template <typename T>
-    T &implGetAt(std::unordered_map<std::string, AttributeStore> &stores,
-                 const std::vector<MeshLayout::AttributeDesc> &descs, const std::string &name, uint32_t index);
+    const T &implGetAt(const std::unordered_map<std::string, AttributeStore> &stores,
+                      const std::string &name, uint32_t index) const;
+
+    Revision m_revision = 0;
+    Revision m_positionsRevision = 0;
+    Revision m_topologyRevision = 0;
+    Revision m_faceGroupsRevision = 0;
+    Revision m_vertexGroupsRevision = 0;
 
     MeshLayout m_layout;
 
@@ -433,7 +445,11 @@ void Mesh::implSetArray(std::unordered_map<std::string, AttributeStore> &stores,
     }
     store.count = domainCount;
     store.data.resize(domainCount * sizeof(T));
-    std::memcpy(store.data.data(), data.data(), store.data.size());
+    if (!store.data.empty())
+    {
+        std::memmove(store.data.data(), data.data(), store.data.size());
+    }
+    store.revision = ++m_revision;
 }
 
 template <typename T>
@@ -448,6 +464,7 @@ void Mesh::implSetAt(std::unordered_map<std::string, AttributeStore> &stores,
         throw std::out_of_range("Mesh: attribute index out of range");
     }
     std::memcpy(store.data.data() + index * sizeof(T), &value, sizeof(T));
+    store.revision = ++m_revision;
 }
 
 template <typename T>
@@ -460,16 +477,16 @@ std::span<const T> Mesh::implGetArray(const std::unordered_map<std::string, Attr
 }
 
 template <typename T>
-T &Mesh::implGetAt(std::unordered_map<std::string, AttributeStore> &stores,
-                   const std::vector<MeshLayout::AttributeDesc> &descs, const std::string &name, uint32_t index)
+const T &Mesh::implGetAt(const std::unordered_map<std::string, AttributeStore> &stores,
+                         const std::string &name, uint32_t index) const
 {
-    auto &store = requireStore(stores, descs, name);
+    const auto &store = getStore(stores, name);
     checkType<T>(store);
     if (index >= store.count || store.data.empty())
     {
         throw std::out_of_range("Mesh: attribute index out of range");
     }
-    return *reinterpret_cast<T *>(store.data.data() + index * sizeof(T));
+    return *reinterpret_cast<const T *>(store.data.data() + index * sizeof(T));
 }
 
 // --- Per-vertex ---
@@ -499,15 +516,9 @@ template <typename T> std::span<const T> Mesh::getPerVertexArray(const std::stri
     return implGetArray<T>(m_perVertex, n);
 }
 
-template <typename T> T &Mesh::perVertexAt(const std::string &n, uint32_t i)
-{
-    return implGetAt<T>(m_perVertex, m_layout.perVertexAttrs(), n, i);
-}
-
 template <typename T> const T &Mesh::perVertexAt(const std::string &n, uint32_t i) const
 {
-    return implGetAt<T>(const_cast<std::unordered_map<std::string, AttributeStore> &>(m_perVertex),
-                        m_layout.perVertexAttrs(), n, i);
+    return implGetAt<T>(m_perVertex, n, i);
 }
 
 // --- Per-unique-vertex ---
@@ -539,15 +550,9 @@ template <typename T> std::span<const T> Mesh::getPerUniqueVertexArray(const std
     return implGetArray<T>(m_perUniqueVertex, n);
 }
 
-template <typename T> T &Mesh::perUniqueVertexAt(const std::string &n, uint32_t i)
-{
-    return implGetAt<T>(m_perUniqueVertex, m_layout.perUniqueVertexAttrs(), n, i);
-}
-
 template <typename T> const T &Mesh::perUniqueVertexAt(const std::string &n, uint32_t i) const
 {
-    return implGetAt<T>(const_cast<std::unordered_map<std::string, AttributeStore> &>(m_perUniqueVertex),
-                        m_layout.perUniqueVertexAttrs(), n, i);
+    return implGetAt<T>(m_perUniqueVertex, n, i);
 }
 
 // --- Per-face ---
@@ -577,15 +582,9 @@ template <typename T> std::span<const T> Mesh::getPerFaceArray(const std::string
     return implGetArray<T>(m_perFace, n);
 }
 
-template <typename T> T &Mesh::perFaceAt(const std::string &n, uint32_t i)
-{
-    return implGetAt<T>(m_perFace, m_layout.perFaceAttrs(), n, i);
-}
-
 template <typename T> const T &Mesh::perFaceAt(const std::string &n, uint32_t i) const
 {
-    return implGetAt<T>(const_cast<std::unordered_map<std::string, AttributeStore> &>(m_perFace),
-                        m_layout.perFaceAttrs(), n, i);
+    return implGetAt<T>(m_perFace, n, i);
 }
 
 // --- Per-face-group ---
@@ -609,15 +608,9 @@ template <typename T> std::span<const T> Mesh::getFaceGroupAttributeArray(const 
     return implGetArray<T>(m_faceGroup, n);
 }
 
-template <typename T> T &Mesh::getFaceGroupAttributeAt(const std::string &n, uint32_t i)
-{
-    return implGetAt<T>(m_faceGroup, m_layout.faceGroupAttrs(), n, i);
-}
-
 template <typename T> const T &Mesh::getFaceGroupAttributeAt(const std::string &n, uint32_t i) const
 {
-    return implGetAt<T>(const_cast<std::unordered_map<std::string, AttributeStore> &>(m_faceGroup),
-                        m_layout.faceGroupAttrs(), n, i);
+    return implGetAt<T>(m_faceGroup, n, i);
 }
 
 // --- Per-vertex-group ---
@@ -641,15 +634,9 @@ template <typename T> std::span<const T> Mesh::getVertexGroupAttributeArray(cons
     return implGetArray<T>(m_vertexGroup, n);
 }
 
-template <typename T> T &Mesh::getVertexGroupAttributeAt(const std::string &n, uint32_t i)
-{
-    return implGetAt<T>(m_vertexGroup, m_layout.vertexGroupAttrs(), n, i);
-}
-
 template <typename T> const T &Mesh::getVertexGroupAttributeAt(const std::string &n, uint32_t i) const
 {
-    return implGetAt<T>(const_cast<std::unordered_map<std::string, AttributeStore> &>(m_vertexGroup),
-                        m_layout.vertexGroupAttrs(), n, i);
+    return implGetAt<T>(m_vertexGroup, n, i);
 }
 
 } // namespace lr

@@ -38,6 +38,7 @@ public:
     SkinUploadResult upload(const std::vector<const Mesh *> &meshes, const std::vector<Skin *> &skins);
 
     // Re-packs the current matrices from the same palette ordering established by upload().
+    // Structural topology/influence/binding changes require upload() after GPU synchronization.
     void updateJointMatrices(const std::vector<Skin *> &skins);
 
     const std::string &influenceEntriesBufferName() const { return m_influenceEntriesBufferName; }
@@ -46,6 +47,16 @@ public:
     const std::string &jointMatricesBufferName() const { return m_jointMatricesBufferName; }
 
 private:
+    struct StaticMeshSource
+    {
+        const Mesh *mesh = nullptr;
+        const Skin *skin = nullptr;
+        uint32_t uniquePositionCount = 0;
+        uint32_t vertexCount = 0;
+        uint64_t topologyRevision = 0;
+        uint64_t groupsRevision = 0;
+    };
+
     ResourceRegistry &m_registry;
 
     std::string m_influenceEntriesBufferName;
@@ -54,6 +65,7 @@ private:
     std::string m_jointMatricesBufferName;
 
     std::vector<uint32_t> m_expectedJointCounts;
+    std::vector<StaticMeshSource> m_staticMeshSources;
     uint32_t              m_jointMatrixCapacity = 0;
     bool                  m_uploaded            = false;
 };
