@@ -11,6 +11,7 @@
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/Scene.hpp"
 #include "core/scene/SceneAssets.hpp"
+#include "core/scene/SceneSerializer.hpp"
 #include "core/scene/SceneGpu.hpp"
 #include "core/scene/TransformComponent.hpp"
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
@@ -1741,6 +1742,8 @@ void bindScene(nb::module_ &m)
                                 "A scene loaded with the engine's loaders: objects, meshes and materials, on the CPU. "
                                 "Build GPU buffers from it with ResourceRegistry.upload_buffer()/upload_image().")
         .def(nb::init<>())
+        .def("save", &lr::SceneSerializer::save, "path"_a,
+             "Save this complete scene to an .lrscene directory (scene.json plus assets.bin).")
         .def(
             "load",
             [](lr::SceneAssets &assets, const fs::path &path) -> lr::SceneObject & {
@@ -1845,11 +1848,18 @@ void bindScene(nb::module_ &m)
     m.def(
         "load_scene",
         [](const fs::path &path) {
+            std::string extension = path.extension().string();
+            std::ranges::transform(extension, extension.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (extension == ".lrscene" || (fs::is_directory(path) && fs::exists(path / "scene.json")))
+            {
+                return lr::SceneSerializer::load(path);
+            }
             auto scene = std::make_unique<lr::SceneAssets>();
             scene->load(path);
             return scene;
         },
-        "path"_a, "Load an OBJ, glTF or GLB file into a new Scene.");
+        "path"_a, "Load an .lrscene directory, OBJ, glTF or GLB file into a new Scene.");
 }
 
 // ---------------------------------------------------------------------------------------------

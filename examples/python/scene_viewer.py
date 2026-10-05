@@ -1,4 +1,4 @@
-"""Scene viewer — a renderer written in Python, drawing a glTF/OBJ scene loaded with the engine's loaders.
+"""Scene viewer — a renderer written in Python, drawing a native, glTF or OBJ scene.
 
   engine.load_scene(path)       objects, hierarchy, world matrices, meshes and materials (numpy), on the CPU
   -> one vertex buffer      every mesh's positions + "normal" + "uv", concatenated
@@ -88,7 +88,7 @@ def world_bounds(draws) -> tuple[np.ndarray, np.ndarray]:
 
 def main():
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
-    parser.add_argument("model", nargs="?", default=str(DEFAULT_MODEL), help="OBJ, glTF or GLB file")
+    parser.add_argument("model", nargs="?", default=str(DEFAULT_MODEL), help=".lrscene directory, OBJ, glTF or GLB file")
     parser.add_argument("--frames", type=int, default=0, help="close after this many frames (0 = run until closed)")
     args = parser.parse_args()
 

@@ -183,6 +183,9 @@ class Scene:
     buffers from it with ResourceRegistry.upload_buffer()/upload_image()."""
 
     def __init__(self) -> None: ...
+    def save(self, path: str | os.PathLike[str]) -> None:
+        """Save this complete scene to an .lrscene directory (scene.json plus assets.bin)."""
+        ...
     def load(self, path: str | os.PathLike[str]) -> SceneObject:
         """Load an OBJ, glTF or GLB file into this scene; returns the new root object it was placed under."""
         ...
@@ -228,7 +231,7 @@ class Scene:
         ...
 
 def load_scene(path: str | os.PathLike[str]) -> Scene:
-    """Load an OBJ, glTF or GLB file into a new Scene."""
+    """Load an .lrscene directory, OBJ, glTF or GLB file into a new Scene."""
     ...
 
 # ---------------------------------------------------------------------------

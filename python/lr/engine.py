@@ -5,7 +5,7 @@ yourself, with no opinion on what a scene is or how it is lit. ``lr.engine`` is 
 layer on top of it — the same pieces the C++ renderer is made of:
 
   Scenes          load_scene, Scene, SceneObject, Mesh, Material, Light, Animator
-                  the engine's scene model and loaders (OBJ, glTF, GLB), on the CPU
+                  the engine's scene model, native .lrscene persistence and asset loaders, on the CPU
   GPU layout      SceneGpu
                   a scene uploaded in the engine's buffer layout and kept in sync every frame
   Passes          Ibl, GeometryPass, AmbientOcclusionPass, PbrPass, CompositePass

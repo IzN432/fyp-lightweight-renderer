@@ -205,7 +205,7 @@ def scripted_check(frame: int, editor: LightEditor, viewer: lr.Viewer, gpu: engi
 
 def main():
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
-    parser.add_argument("model", nargs="?", default=str(DEFAULT_MODEL), help="OBJ, glTF or GLB file")
+    parser.add_argument("model", nargs="?", default=str(DEFAULT_MODEL), help=".lrscene directory, OBJ, glTF or GLB file")
     parser.add_argument("--scripted", action="store_true", help="run a self-checking sequence of edits, then exit")
     args = parser.parse_args()
 

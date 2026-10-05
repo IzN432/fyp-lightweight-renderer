@@ -277,7 +277,8 @@ if(LR_BUILD_PYTHON)
         set(LR_PYTHON_PACKAGE_DIR "${CMAKE_BINARY_DIR}/python/lr")
         nanobind_add_module(_lr src/python/LrModule.cpp)
         # The feature libraries SceneLoader (in lr_core) instantiates components from.
-        target_link_libraries(_lr PRIVATE lr_core lr_animation_feature lr_linear_blend_skinning_feature)
+        target_link_libraries(_lr PRIVATE lr_core lr_animation_feature lr_linear_blend_skinning_feature
+            lr_rigid_body_feature lr_scene_serialization)
         # $<0:> keeps multi-config generators from appending a per-config subdirectory.
         set_target_properties(_lr PROPERTIES
             LIBRARY_OUTPUT_DIRECTORY "${LR_PYTHON_PACKAGE_DIR}$<0:>"

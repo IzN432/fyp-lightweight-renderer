@@ -131,6 +131,21 @@ def test_scene_without_viewer_and_multiple_loads():
     assert len(mesh_objects(scene)) == 2
 
 
+def test_native_scene_round_trip():
+    scene = engine.load_scene(BIRD)
+    scene.add_light("area", color=(0.2, 0.4, 0.6), intensity=7.0, size=(2.0, 3.0), name="Saved light")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "bird.lrscene"
+        scene.save(path)
+        loaded = engine.load_scene(path)
+    assert len(loaded.objects) == len(scene.objects)
+    assert len(mesh_objects(loaded)) == len(mesh_objects(scene))
+    saved_light = loaded.find("Saved light")
+    assert saved_light is not None and saved_light.light is not None
+    assert saved_light.light.type == "area" and saved_light.light.area_size == (2.0, 3.0)
+    assert any(obj.animator is not None for obj in loaded.objects)
+
+
 def test_add_light():
     scene = engine.Scene()
     spot = scene.add_light("spot", color=(1, 0.5, 0), intensity=3.0, position=(1, 2, 3),
@@ -165,6 +180,7 @@ def main():
         test_animation_moves_joints,
         test_multi_material_obj,
         test_scene_without_viewer_and_multiple_loads,
+        test_native_scene_round_trip,
     ]
     failures = 0
     for test in tests:
