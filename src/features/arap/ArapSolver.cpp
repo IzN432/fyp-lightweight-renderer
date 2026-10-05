@@ -1,4 +1,5 @@
 #include "ArapSolver.hpp"
+#include "ArapBackend.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -6,6 +7,10 @@
 
 namespace lr
 {
+
+ArapSolver::ArapSolver() : m_backend(createArapBackend()) {}
+
+ArapSolver::~ArapSolver() = default;
 
 bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &anchorIndices,
                             const std::vector<uint32_t> &handleIndices)
@@ -57,7 +62,7 @@ bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &ancho
     }
 
     const auto solverStart = std::chrono::steady_clock::now();
-    const bool ok          = igl::arap_precomputation(V, F, 3, b, m_data);
+    const bool ok          = m_backend->precompute(V, F, b);
     m_stats.solverPrecomputeMs = std::chrono::duration<double, std::milli>(
                                      std::chrono::steady_clock::now() - solverStart)
                                      .count();
@@ -107,9 +112,8 @@ std::vector<glm::vec3> ArapSolver::solve(const std::unordered_map<uint32_t, glm:
         U.row(i) << warmStart[i].x, warmStart[i].y, warmStart[i].z;
     }
 
-    m_data.max_iter = iterations;
     const auto solveStart = std::chrono::steady_clock::now();
-    igl::arap_solve(bc, m_data, U);
+    m_backend->solve(bc, U, iterations);
     const double solveMs = std::chrono::duration<double, std::milli>(
                                std::chrono::steady_clock::now() - solveStart)
                                .count();

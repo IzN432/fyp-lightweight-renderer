@@ -169,9 +169,10 @@ try
 
     std::vector<double> samples;
     samples.reserve(static_cast<size_t>(options.trials));
+    std::vector<glm::vec3> lastResult;
     for (int trial = 0; trial < options.trials; ++trial)
     {
-        (void)solver.solve(targets, restPositions, options.iterations);
+        lastResult = solver.solve(targets, restPositions, options.iterations);
         const double milliseconds = solver.performanceStats().lastSolveMs;
         samples.push_back(milliseconds);
         std::cout << "trial " << std::setw(2) << trial + 1 << ": " << std::fixed << std::setprecision(3)
@@ -181,6 +182,14 @@ try
     const auto [minimum, maximum] = std::minmax_element(samples.begin(), samples.end());
     const double mean = std::accumulate(samples.begin(), samples.end(), 0.0) /
                         static_cast<double>(samples.size());
+    glm::dvec3 positionSum(0.0);
+    double displacementSquared = 0.0;
+    for (size_t i = 0; i < lastResult.size(); ++i)
+    {
+        positionSum += glm::dvec3(lastResult[i]);
+        const glm::dvec3 displacement = glm::dvec3(lastResult[i]) - glm::dvec3(restPositions[i]);
+        displacementSquared += glm::dot(displacement, displacement);
+    }
 
     std::cout << "\nlion ARAP profile\n"
               << "  vertices:       " << mesh.positions().size() << '\n'
@@ -195,7 +204,10 @@ try
               << "  solve mean:     " << mean << " ms total\n"
               << "  solve range:    " << *minimum << " .. " << *maximum << " ms\n"
               << "  worst case framerate: " << 1000.0 / *maximum << " fps\n"
-              << "  median/iter:    " << median(samples) / static_cast<double>(options.iterations) << " ms\n";
+              << "  median/iter:    " << median(samples) / static_cast<double>(options.iterations) << " ms\n"
+              << std::setprecision(12)
+              << "  position sum:   " << positionSum.x << ", " << positionSum.y << ", " << positionSum.z << '\n'
+              << "  displacement²:  " << displacementSquared << '\n';
     return 0;
 } catch (const std::exception &error)
 {

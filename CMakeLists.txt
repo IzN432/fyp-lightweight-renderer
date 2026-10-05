@@ -211,7 +211,11 @@ add_shaders(lr_core
 )
 
 # ARAP editor feature — physically separate from lr_core and linked by the application.
+set(LR_ARAP_BACKEND "libigl" CACHE STRING "ARAP backend (currently: libigl)")
+set_property(CACHE LR_ARAP_BACKEND PROPERTY STRINGS libigl)
+
 add_library(lr_arap_feature STATIC
+    src/features/arap/ArapBackend.cpp
     src/features/arap/ArapSolver.cpp
     src/features/arap/ArapDragHandler.cpp
     src/features/arap/ArapDeformCommand.cpp
@@ -219,6 +223,13 @@ add_library(lr_arap_feature STATIC
 )
 target_include_directories(lr_arap_feature PUBLIC src)
 target_link_libraries(lr_arap_feature PUBLIC lr_core igl::igl_core PRIVATE MKL::MKL)
+
+if(LR_ARAP_BACKEND STREQUAL "libigl")
+    target_sources(lr_arap_feature PRIVATE src/features/arap/LibiglArapBackend.cpp)
+    target_compile_definitions(lr_arap_feature PRIVATE LR_ARAP_BACKEND_LIBIGL=1)
+else()
+    message(FATAL_ERROR "LR_ARAP_BACKEND must be 'libigl' until the PARDISO backend is added")
+endif()
 
 # Laplace-Beltrami analysis feature. Core owns only the generic heatmap rendering/buffer path;
 # this target owns the mesh operator, color generation, GUI, and stale-result tracking.
