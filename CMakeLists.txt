@@ -45,9 +45,10 @@ find_package(libigl CONFIG REQUIRED)
 # ARAP keeps libigl's geometry assembly but can use oneMKL PARDISO for its sparse global solve.
 # Keep indices compatible with the engine's 32-bit mesh indices and avoid an OpenMP runtime in the
 # interactive renderer; these variables are inputs to Intel's MKLConfig.cmake.
-set(MKL_INTERFACE lp64)
-set(MKL_THREADING sequential)
-set(MKL_LINK dynamic)
+set(MKL_INTERFACE lp64 CACHE STRING "oneMKL integer interface")
+set(MKL_THREADING sequential CACHE STRING "oneMKL threading layer")
+set_property(CACHE MKL_THREADING PROPERTY STRINGS sequential intel_thread)
+set(MKL_LINK dynamic CACHE STRING "oneMKL linkage")
 find_package(MKL CONFIG REQUIRED)
 find_package(ReactPhysics3D REQUIRED)
 find_package(glslang CONFIG REQUIRED)
@@ -211,8 +212,8 @@ add_shaders(lr_core
 )
 
 # ARAP editor feature — physically separate from lr_core and linked by the application.
-set(LR_ARAP_BACKEND "libigl" CACHE STRING "ARAP backend (currently: libigl)")
-set_property(CACHE LR_ARAP_BACKEND PROPERTY STRINGS libigl)
+set(LR_ARAP_BACKEND "libigl" CACHE STRING "ARAP backend: libigl or pardiso")
+set_property(CACHE LR_ARAP_BACKEND PROPERTY STRINGS libigl pardiso)
 
 add_library(lr_arap_feature STATIC
     src/features/arap/ArapBackend.cpp
@@ -222,13 +223,36 @@ add_library(lr_arap_feature STATIC
     src/features/arap/ArapTool.cpp
 )
 target_include_directories(lr_arap_feature PUBLIC src)
-target_link_libraries(lr_arap_feature PUBLIC lr_core igl::igl_core PRIVATE MKL::MKL)
+target_link_libraries(lr_arap_feature PUBLIC lr_core igl::igl_core)
 
 if(LR_ARAP_BACKEND STREQUAL "libigl")
     target_sources(lr_arap_feature PRIVATE src/features/arap/LibiglArapBackend.cpp)
     target_compile_definitions(lr_arap_feature PRIVATE LR_ARAP_BACKEND_LIBIGL=1)
+elseif(LR_ARAP_BACKEND STREQUAL "pardiso")
+    target_sources(lr_arap_feature PRIVATE
+        src/features/arap/PardisoArapBackend.cpp
+        src/features/arap/PardisoFactorization.cpp
+    )
+    target_link_libraries(lr_arap_feature PRIVATE MKL::MKL)
+    target_compile_definitions(lr_arap_feature PRIVATE LR_ARAP_BACKEND_PARDISO=1)
+
+    # mkl_core delay-loads this computational DLL, so TARGET_RUNTIME_DLLS does not discover it.
+    # Copy it explicitly beside each executable that consumes the static ARAP feature library.
+    file(GLOB LR_MKL_DISPATCH_DLL CONFIGURE_DEPENDS "${MKL_ROOT}/bin/mkl_def*.dll")
+    if(NOT LR_MKL_DISPATCH_DLL)
+        message(FATAL_ERROR "Could not find the oneMKL dispatch runtime under ${MKL_ROOT}/bin")
+    endif()
+    function(lr_copy_mkl_dispatch_runtime TARGET)
+        if(WIN32)
+            add_custom_command(TARGET ${TARGET} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${LR_MKL_DISPATCH_DLL} "$<TARGET_FILE_DIR:${TARGET}>"
+                COMMAND_EXPAND_LISTS
+            )
+        endif()
+    endfunction()
 else()
-    message(FATAL_ERROR "LR_ARAP_BACKEND must be 'libigl' until the PARDISO backend is added")
+    message(FATAL_ERROR "LR_ARAP_BACKEND must be 'libigl' or 'pardiso'")
 endif()
 
 # Laplace-Beltrami analysis feature. Core owns only the generic heatmap rendering/buffer path;
@@ -277,6 +301,9 @@ add_executable(renderer src/main.cpp)
 target_link_libraries(renderer PRIVATE lr_core lr_arap_feature lr_laplace_beltrami_feature
     lr_linear_blend_skinning_feature lr_animation_feature lr_rigid_body_feature lr_scene_serialization
     imguiFileDialog)
+if(LR_ARAP_BACKEND STREQUAL "pardiso")
+    lr_copy_mkl_dispatch_runtime(renderer)
+endif()
 
 # Python module — `lr` package assembled in build/python/lr (run scripts with PYTHONPATH=build/python).
 # Needs a Python interpreter with nanobind installed (pip install nanobind); skipped otherwise.
@@ -458,6 +485,9 @@ if(BUILD_TESTING)
     target_compile_definitions(arap_profile PRIVATE
         LR_SAMPLE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/samples/models/"
     )
+    if(LR_ARAP_BACKEND STREQUAL "pardiso")
+        lr_copy_mkl_dispatch_runtime(arap_profile)
+    endif()
 
     add_executable(shader_compiler_tests
         tests/vulkan/ShaderCompilerTests.cpp

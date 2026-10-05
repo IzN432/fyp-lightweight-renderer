@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 
 #include <memory>
+#include <string_view>
 
 namespace lr
 {
@@ -14,6 +15,7 @@ class ArapBackend
 public:
     virtual ~ArapBackend() = default;
 
+    virtual std::string_view name() const = 0;
     virtual bool precompute(const Eigen::MatrixXd &restPositions, const Eigen::MatrixXi &faces,
                             const Eigen::VectorXi &constrainedIndices) = 0;
     virtual bool solve(const Eigen::MatrixXd &constraintTargets, Eigen::MatrixXd &positions,

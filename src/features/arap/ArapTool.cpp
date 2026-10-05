@@ -135,10 +135,10 @@ void ArapTool::onGui(const glm::mat4 &viewProj, VkExtent2D extent, const glm::ve
 
     const ArapPerformanceStats &stats = m_solver.performanceStats();
     ImGui::SeparatorText("Performance");
-    ImGui::TextUnformatted("Solver: libigl / Eigen");
+    ImGui::Text("Solver: %.*s", static_cast<int>(m_solver.backendName().size()), m_solver.backendName().data());
     ImGui::Text("Mesh: %zu vertices, %zu triangles", stats.vertexCount, stats.triangleCount);
     ImGui::Text("Constraints: %zu", stats.constraintCount);
-    ImGui::Text("Precompute: %.3f ms (libigl: %.3f ms)", stats.precomputeMs, stats.solverPrecomputeMs);
+    ImGui::Text("Precompute: %.3f ms (backend: %.3f ms)", stats.precomputeMs, stats.solverPrecomputeMs);
     if (stats.solveCount > 0)
     {
         ImGui::Text("Last solve: %.3f ms (%d iteration%s)", stats.lastSolveMs, stats.lastIterations,

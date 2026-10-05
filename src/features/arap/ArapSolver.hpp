@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 #include <glm/vec3.hpp>
@@ -50,6 +51,7 @@ public:
                     const std::vector<uint32_t> &handleIndices);
 
     bool isPrecomputed() const { return m_precomputed; }
+    std::string_view backendName() const;
     void invalidate() { m_precomputed = false; }
     const ArapPerformanceStats &performanceStats() const { return m_stats; }
     void recordInteraction(double elapsedMs, bool release);

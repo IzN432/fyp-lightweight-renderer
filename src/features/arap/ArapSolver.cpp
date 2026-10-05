@@ -12,6 +12,11 @@ ArapSolver::ArapSolver() : m_backend(createArapBackend()) {}
 
 ArapSolver::~ArapSolver() = default;
 
+std::string_view ArapSolver::backendName() const
+{
+    return m_backend->name();
+}
+
 bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &anchorIndices,
                             const std::vector<uint32_t> &handleIndices)
 {
@@ -113,7 +118,7 @@ std::vector<glm::vec3> ArapSolver::solve(const std::unordered_map<uint32_t, glm:
     }
 
     const auto solveStart = std::chrono::steady_clock::now();
-    m_backend->solve(bc, U, iterations);
+    const bool solveOk = m_backend->solve(bc, U, iterations);
     const double solveMs = std::chrono::duration<double, std::milli>(
                                std::chrono::steady_clock::now() - solveStart)
                                .count();
@@ -130,6 +135,10 @@ std::vector<glm::vec3> ArapSolver::solve(const std::unordered_map<uint32_t, glm:
     {
         m_stats.minSolveMs = std::min(m_stats.minSolveMs, solveMs);
         m_stats.maxSolveMs = std::max(m_stats.maxSolveMs, solveMs);
+    }
+    if (!solveOk)
+    {
+        return warmStart;
     }
 
     std::vector<glm::vec3> result(warmStart.size());
