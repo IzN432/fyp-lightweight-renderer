@@ -78,6 +78,8 @@ std::vector<MaterialHandle> extractMaterials(const tinyobj::ObjReader    &reader
         mat.parameters[config.shininessName]     = MaterialParam::RangedFloat{m.shininess, 0.0f, 128.0f};
         mat.parameters[config.baseRoughnessName] = MaterialParam::NormalizedFloat{m.roughness};
         mat.parameters[config.baseMetallicName]  = MaterialParam::NormalizedFloat{m.metallic};
+        mat.parameters[config.alphaCutoffName]  = MaterialParam::NormalizedFloat{0.0f};
+        mat.parameters[config.doubleSidedName]  = MaterialParam::NormalizedFloat{0.0f};
         mat.parameters[config.baseEmissiveName] =
             MaterialParam::ColorRGB{glm::vec3(m.emission[0], m.emission[1], m.emission[2])};
         mat.textures[config.diffuseTextureName]   = loadMaterialImage(objDirectoryPath, m.diffuse_texname);

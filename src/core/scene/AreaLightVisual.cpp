@@ -63,6 +63,8 @@ Material buildAreaLightMaterial(const AreaLight &light, const AreaLightVisualCon
     material.parameters[config.baseEmissiveName]  = MaterialParam::ColorRGB{light.color * light.intensity};
     material.parameters[config.baseRoughnessName] = MaterialParam::NormalizedFloat{1.0f};
     material.parameters[config.baseMetallicName]  = MaterialParam::NormalizedFloat{0.0f};
+    material.parameters[config.alphaCutoffName]   = MaterialParam::NormalizedFloat{0.0f};
+    material.parameters[config.doubleSidedName]   = MaterialParam::NormalizedFloat{0.0f};
     return material;
 }
 

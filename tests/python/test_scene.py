@@ -14,7 +14,9 @@ import lr
 from lr import engine
 
 BIRD = pathlib.Path(lr.ASSET_DIR) / "samples" / "models" / "bird_orange.glb"
-CONVENTION_PARAMETERS = {"baseDiffuse", "baseEmissive", "baseRoughness", "baseMetallic"}
+CONVENTION_PARAMETERS = {
+    "baseDiffuse", "baseEmissive", "baseRoughness", "baseMetallic", "alphaCutoff", "doubleSided"
+}
 
 
 def mesh_objects(scene):

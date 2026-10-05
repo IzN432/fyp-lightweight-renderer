@@ -254,6 +254,9 @@ std::vector<MaterialHandle> extractMaterials(const tinygltf::Model &model, const
         material.parameters[config.baseMetallicName] =
             MaterialParam::NormalizedFloat{static_cast<float>(m.pbrMetallicRoughness.metallicFactor)};
         material.parameters[config.baseEmissiveName] = MaterialParam::ColorRGB{toVec3(m.emissiveFactor)};
+        material.parameters[config.alphaCutoffName] = MaterialParam::NormalizedFloat{
+            m.alphaMode == "MASK" ? static_cast<float>(m.alphaCutoff) : 0.0f};
+        material.parameters[config.doubleSidedName] = MaterialParam::NormalizedFloat{m.doubleSided ? 1.0f : 0.0f};
 
         // The textures are stored in the material as tinygltf::TextureInfo, which contains a pointer to the actual
         // texture

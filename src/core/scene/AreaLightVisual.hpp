@@ -23,6 +23,8 @@ struct AreaLightVisualConfig
     std::string baseEmissiveName;
     std::string baseRoughnessName;
     std::string baseMetallicName;
+    std::string alphaCutoffName;
+    std::string doubleSidedName;
 };
 
 // (Re)builds `mesh` as a single flat quad standing in for an area light: centered on the light's

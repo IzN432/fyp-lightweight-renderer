@@ -10,6 +10,8 @@ struct MaterialData
     vec4  emissiveFactor;
     float roughnessFactor;
     float metallicFactor;
+    float alphaCutoff;
+    float doubleSided;
     float _pad[2];
 };
 
@@ -62,8 +64,15 @@ void main()
 {
 	uint faceGroupIndex = faceGroupIndices.values[pc.primitiveIdOffset + gl_PrimitiveID];
 	MaterialData mat = materials.data[faceGroupIndex];
+	vec4 baseColor = texture(diffuseTex[nonuniformEXT(faceGroupIndex)], inUv) * mat.baseColorFactor;
 
-	vec3 albedo = texture(diffuseTex[nonuniformEXT(faceGroupIndex)], inUv).rgb * mat.baseColorFactor.rgb;
+	// glTF MASK materials are still opaque: rejected texels write neither the G-buffer nor depth.
+	if (baseColor.a < mat.alphaCutoff || (!gl_FrontFacing && mat.doubleSided < 0.5))
+	{
+		discard;
+	}
+
+	vec3 albedo = baseColor.rgb;
 	float roughness = texture(metallicRoughnessTex[nonuniformEXT(faceGroupIndex)], inUv).g * mat.roughnessFactor;
 	float metallic = texture(metallicRoughnessTex[nonuniformEXT(faceGroupIndex)],  inUv).b * mat.metallicFactor;
 	vec3 emissive = texture(emissiveTex[nonuniformEXT(faceGroupIndex)], inUv).rgb * mat.emissiveFactor.rgb;
@@ -72,6 +81,10 @@ void main()
 
 	vec3 N = normalize(inNormal); // Geometric world-space normal
 	vec3 T = normalize(inTangent.xyz);
+	if (!gl_FrontFacing)
+	{
+		N = -N;
+	}
 	T = normalize(T - dot(T, N) * N); // Gram-Schmidt orthogonalization to ensure T is orthogonal to N
 	vec3 B = cross(N, T) * inTangent.w; // inTangent.w is the handedness, which can be used to determine the direction of the bitangent
 	mat3 TBN = mat3(T, B, N);

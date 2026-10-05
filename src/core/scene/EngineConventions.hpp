@@ -32,6 +32,8 @@ inline constexpr const char *baseDiffuse   = "baseDiffuse";   // RGBA colour
 inline constexpr const char *baseEmissive  = "baseEmissive";  // RGB colour
 inline constexpr const char *baseRoughness = "baseRoughness"; // [0, 1]
 inline constexpr const char *baseMetallic  = "baseMetallic";  // [0, 1]
+inline constexpr const char *alphaCutoff   = "alphaCutoff";   // glTF MASK threshold; 0 disables masking
+inline constexpr const char *doubleSided   = "doubleSided";   // 0 or 1
 
 // MaterialStore slots reserved up front: growing it would mean resizing the GPU material buffer and
 // texture arrays, i.e. rebuilding descriptor sets (see MaterialStore.hpp).
@@ -52,8 +54,9 @@ std::vector<std::string> geometryVertexAttributes();
 // vec3), tangent (binding 1, location 2, vec4) and uv (binding 1, location 3, vec2).
 GpuMeshLayout geometryMeshLayout();
 
-// The materials SSBO layout geometry.frag reads (48-byte stride): baseDiffuse vec4 @0, baseEmissive vec3
-// @16, baseRoughness float @32, baseMetallic float @36; plus one texture array per texture name above.
+// The materials SSBO layout geometry.frag reads (64-byte stride): baseDiffuse vec4 @0, baseEmissive vec3
+// @16, baseRoughness float @32, baseMetallic float @36, alphaCutoff float @40, doubleSided float @44;
+// plus one texture array per texture name above.
 GpuMaterialLayout materialLayout();
 
 // Names the light-visual quads (see AreaLightVisual.hpp) are built with, so they pack into the same

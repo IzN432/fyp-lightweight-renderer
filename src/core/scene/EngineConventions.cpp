@@ -17,6 +17,8 @@ GltfLoaderConfig gltfLoaderConfig()
         .baseRoughnessName            = baseRoughness,
         .baseMetallicName             = baseMetallic,
         .baseEmissiveName             = baseEmissive,
+        .alphaCutoffName              = alphaCutoff,
+        .doubleSidedName              = doubleSided,
     };
 }
 
@@ -37,6 +39,8 @@ SceneLoaderConfig sceneLoaderConfig()
                 .baseRoughnessName    = baseRoughness,
                 .baseMetallicName     = baseMetallic,
                 .baseEmissiveName     = baseEmissive,
+                .alphaCutoffName      = alphaCutoff,
+                .doubleSidedName      = doubleSided,
             },
     };
 }
@@ -49,6 +53,8 @@ Material defaultMaterial()
     material.parameters[baseEmissive]  = MaterialParam::ColorRGB{glm::vec3(0.0f)};
     material.parameters[baseRoughness] = MaterialParam::NormalizedFloat{1.0f};
     material.parameters[baseMetallic]  = MaterialParam::NormalizedFloat{0.0f};
+    material.parameters[alphaCutoff]   = MaterialParam::NormalizedFloat{0.0f};
+    material.parameters[doubleSided]   = MaterialParam::NormalizedFloat{0.0f};
     return material;
 }
 
@@ -72,11 +78,13 @@ GpuMeshLayout geometryMeshLayout()
 GpuMaterialLayout materialLayout()
 {
     GpuMaterialLayout layout;
-    layout.setStride(48)
+    layout.setStride(64)
         .addScalar(baseDiffuse, 0, sizeof(glm::vec4))
         .addScalar(baseEmissive, 16, sizeof(glm::vec3))
         .addScalar(baseRoughness, 32, sizeof(float))
         .addScalar(baseMetallic, 36, sizeof(float))
+        .addScalar(alphaCutoff, 40, sizeof(float))
+        .addScalar(doubleSided, 44, sizeof(float))
         .addTexture(baseColorTexture, VK_FORMAT_R8G8B8A8_SRGB)
         .addTexture(normalTexture, VK_FORMAT_R8G8B8A8_UNORM)
         .addTexture(metallicRoughnessTexture, VK_FORMAT_R8G8B8A8_UNORM)
@@ -94,6 +102,8 @@ AreaLightVisualConfig areaLightVisualConfig()
         .baseEmissiveName     = baseEmissive,
         .baseRoughnessName    = baseRoughness,
         .baseMetallicName     = baseMetallic,
+        .alphaCutoffName      = alphaCutoff,
+        .doubleSidedName      = doubleSided,
     };
 }
 

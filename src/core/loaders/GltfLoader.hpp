@@ -26,6 +26,8 @@ struct GltfLoaderConfig
     std::string baseRoughnessName = "baseRoughness";
     std::string baseMetallicName  = "baseMetallic";
     std::string baseEmissiveName  = "baseEmissive";
+    std::string alphaCutoffName   = "alphaCutoff";
+    std::string doubleSidedName   = "doubleSided";
 };
 
 /**
@@ -45,6 +47,8 @@ struct GltfLoaderConfig
  *   - baseRoughness  (float)  from roughnessFactor
  *   - baseMetallic   (float)  from metallicFactor
  *   - baseEmissive   (vec3)   from emissiveFactor
+ *   - alphaCutoff    (float)  from alphaCutoff for MASK materials; zero otherwise
+ *   - doubleSided    (float)  one for double-sided materials; zero otherwise
  *
  * Material textures:
  *   - diffuseTexture           from baseColorTexture

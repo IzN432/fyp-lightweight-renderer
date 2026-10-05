@@ -31,6 +31,8 @@ struct ObjLoaderConfig
     std::string baseRoughnessName = "baseRoughness";
     std::string baseMetallicName  = "baseMetallic";
     std::string baseEmissiveName  = "baseEmissive";
+    std::string alphaCutoffName   = "alphaCutoff";
+    std::string doubleSidedName   = "doubleSided";
 };
 
 class ObjLoader
