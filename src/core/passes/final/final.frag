@@ -30,6 +30,12 @@ layout(set = 0, binding = 8) uniform sampler2D hbaoAo;
 
 layout(location = 0) out vec4 outColor;
 
+layout(push_constant) uniform FinalPC
+{
+    vec4 backgroundColor;
+    uint showEnvironmentBackground;
+} pc;
+
 void main()
 {
     float depth = min(texture(gbufferDepth, inUV).r, texture(overlayDepth, inUV).r);
@@ -37,8 +43,15 @@ void main()
     vec3 baseColor;
     if (isBackground(depth))
     {
-        vec3 worldDir = viewRayWorld(inUV, cameraUbo.view, cameraUbo.proj);
-        baseColor = reinhard(texture(skybox, worldDir).rgb);
+        if (pc.showEnvironmentBackground != 0u)
+        {
+            vec3 worldDir = viewRayWorld(inUV, cameraUbo.view, cameraUbo.proj);
+            baseColor = reinhard(texture(skybox, worldDir).rgb);
+        }
+        else
+        {
+            baseColor = pc.backgroundColor.rgb;
+        }
     }
     else
     {

@@ -6,6 +6,15 @@
 namespace lr
 {
 
+namespace
+{
+struct FinalPC
+{
+    glm::vec4 backgroundColor;
+    uint32_t  showEnvironmentBackground;
+};
+} // namespace
+
 FinalPass::FinalPass(Config cfg) : m_cfg(std::move(cfg)) {}
 
 void FinalPass::build(FrameGraph &fg) const
@@ -14,6 +23,7 @@ void FinalPass::build(FrameGraph &fg) const
         .type(PassType::Fullscreen)
         .vertShader((paths::shaderDir / "fullscreen.vert.spv").string())
         .fragShader((paths::shaderDir / "final.frag.spv").string())
+        .pushConstantSize(sizeof(FinalPC), VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(1, fg.image("ibl_env"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledDepth(2, fg.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
@@ -23,7 +33,12 @@ void FinalPass::build(FrameGraph &fg) const
         .sampledImage(6, fg.image("overlayPoints"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(7, fg.image("heatmap"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .colorAttachment(fg.image("swapchain"), m_cfg.swapchainFormat)
-        .execute([](PassContext &ctx) {
+        .execute([this](PassContext &ctx) {
+            const FinalPC pc{
+                .backgroundColor          = m_cfg.backgroundColor,
+                .showEnvironmentBackground = m_cfg.showEnvironmentBackground ? 1u : 0u,
+            };
+            ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_FRAGMENT_BIT, pc);
             ctx.cmd().draw(3);
         });
 }

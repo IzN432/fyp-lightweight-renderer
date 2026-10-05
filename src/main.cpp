@@ -296,6 +296,7 @@ try
     lr::FinalPass finalPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
         .swapchainFormat          = swapchainFormat,
+        .showEnvironmentBackground = false,
     });
     finalPass.build(viewer.frameGraph());
 
@@ -496,6 +497,7 @@ try
     // -------------------------------------------------------------------------
 
     std::optional<fs::path> environmentHdriPath;
+    glm::vec3               environmentBackgroundColor(0.0f);
     std::string             environmentLoadError;
     bool                    environmentDirty = false;
     std::string             sceneImportError;
@@ -521,7 +523,7 @@ try
 
         ImGui::SetNextWindowPos(bottomLeft, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
-        ImGui::Begin("Environment");
+        ImGui::Begin("Settings");
 
         if (ImGui::CollapsingHeader("Environment", ImGuiTreeNodeFlags_DefaultOpen))
         {
@@ -534,7 +536,7 @@ try
                 ImGui::TextWrapped("%s", environmentHdriPath->filename().string().c_str());
             } else
             {
-                ImGui::TextDisabled("None (black environment)");
+                ImGui::TextDisabled("None (background color)");
             }
 
             if (ImGui::Button("Load HDRI..."))
@@ -556,6 +558,18 @@ try
                 environmentDirty = true;
             }
             ImGui::EndDisabled();
+
+            ImGui::Spacing();
+            ImGui::BeginDisabled(environmentHdriPath.has_value());
+            if (ImGui::ColorEdit3("Background color", &environmentBackgroundColor.x))
+            {
+                finalPass.setBackground(glm::vec4(environmentBackgroundColor, 1.0f), false);
+            }
+            ImGui::EndDisabled();
+            if (environmentHdriPath && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGui::SetTooltip("Clear the HDRI to use the background color");
+            }
 
             ImGui::Spacing();
             ImGui::TextDisabled("Supported format: Radiance HDR (.hdr)");
@@ -714,6 +728,9 @@ try
                 {"ibl_irradiance", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {"ibl_prefiltered", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             });
+
+            finalPass.setBackground(glm::vec4(environmentBackgroundColor, 1.0f),
+                                    environmentHdriPath.has_value());
 
             environmentLoadError.clear();
         } catch (const std::exception &e)
