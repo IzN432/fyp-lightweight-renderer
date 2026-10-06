@@ -313,8 +313,11 @@ vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, fl
     vec3 Diffuse = kD * irradiance * albedo;
 
     vec3 prefilteredColor = textureLod(prefilterMap, R_world, roughness * float(pc.pfMips - 1u)).rgb;
-    vec2 envBRDF = texture(brdfLut, vec2(N_dot_V, roughness)).rg;
-    vec3 Specular = prefilteredColor * (F * envBRDF.x + envBRDF.y);
+    // brdf_lut.png stores roughness 0 in its top row, but loadImageFromFile flips images vertically,
+    // so on the GPU v = 0 is roughness 1.
+    vec2 envBRDF = texture(brdfLut, vec2(N_dot_V, 1.0 - roughness)).rg;
+    // Split-sum scale/bias already integrate Fresnel over the lobe, so they take F0, not F.
+    vec3 Specular = prefilteredColor * (F0 * envBRDF.x + envBRDF.y);
 
     // ao is an occlusion amount (0 = fully lit, 1 = fully occluded — see hbao.comp), so the
     // visibility multiplier applied to ambient light is its complement.
