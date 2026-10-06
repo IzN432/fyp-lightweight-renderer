@@ -629,6 +629,22 @@ try
             ImGuiFileDialog::Instance()->OpenDialog("ImportScene", "Import Mesh or Animated Mesh",
                                                      ".obj,.gltf,.glb", dialogConfig);
         }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(sceneManager.numLights() >= sceneManager.gpu().maxLights());
+        if (ImGui::Button("Add Light"))
+        {
+            lr::SceneObject &lightObject = scene.createSceneObject();
+            lightObject.name             = "Light";
+            lightObject.addComponent<lr::TransformComponent>();
+            lightObject.addComponent<lr::Light>(lr::PointLight{});
+        }
+        ImGui::EndDisabled();
+        if (sceneManager.numLights() >= sceneManager.gpu().maxLights() &&
+            ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip("The scene already contains the maximum of %u lights",
+                              sceneManager.gpu().maxLights());
+        }
         if (!sceneImportError.empty())
         {
             ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Import failed: %s", sceneImportError.c_str());
