@@ -3,6 +3,7 @@
 #include "core/vulkan/VkFormatUtils.hpp"
 
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <tuple>
 
@@ -299,8 +300,13 @@ VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, const Res
 {
     struct TrackedState
     {
+        // Accesses since the last barrier: the source of the next one.
         VulkanResourceState state;
         bool                writes = false;
+        // What produced the current contents (the last write or layout transition), as a barrier source.
+        // A read the last barrier's destination didn't cover (another stage or access type) still has to
+        // wait for it. Unset until the frame writes or transitions the resource.
+        std::optional<VulkanResourceState> producer;
     };
     std::map<ResourceKey, TrackedState> states;
     VulkanBarrierPlan                   plan;
@@ -349,9 +355,26 @@ VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, const Res
             if (layoutChanged || current.writes || required.writes)
             {
                 plan.beforePass[passIndex].push_back({key.kind, key.name, current.state, required.state});
-                current = {.state = required.state, .writes = required.writes};
+                std::optional<VulkanResourceState> producer = current.producer;
+                if (current.writes || layoutChanged)
+                {
+                    // Waiting on the writer's stages and on this barrier's destination stages chains a later
+                    // reader after both the write and the layout transition.
+                    producer = VulkanResourceState{.stages = current.state.stages | required.state.stages,
+                                                   .access = current.writes ? current.state.access : VK_ACCESS_2_NONE,
+                                                   .layout = required.state.layout};
+                }
+                current = {.state = required.state, .writes = required.writes, .producer = producer};
             } else
             {
+                // Same layout, no writes: only a reader the earlier barrier didn't make the contents visible
+                // to needs one — e.g. a depth test after a shader sampled the same depth.
+                const bool uncovered = (required.state.stages & ~current.state.stages) != 0 ||
+                                       (required.state.access & ~current.state.access) != 0;
+                if (current.producer && uncovered)
+                {
+                    plan.beforePass[passIndex].push_back({key.kind, key.name, *current.producer, required.state});
+                }
                 current.state.stages |= required.state.stages;
                 current.state.access |= required.state.access;
                 current.state.layout = required.state.layout;

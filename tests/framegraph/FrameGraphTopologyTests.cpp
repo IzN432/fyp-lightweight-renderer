@@ -352,7 +352,17 @@ void readOnlyDepthSharesLayoutWithSampling()
     require(plan.beforePass[1].size() == 1 &&
                 plan.beforePass[1][0].destination.layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
             "sampling should transition the depth to read-only");
-    require(plan.beforePass[2].empty(), "a read-only depth attachment after sampling needs no barrier");
+    // Same layout, so no transition, but the sampling barrier only made the depth visible to shader reads:
+    // the depth test still has to wait for the original write.
+    require(plan.beforePass[2].size() == 1, "a depth test after sampling needs its own visibility barrier");
+    const auto &tested = plan.beforePass[2][0];
+    require(tested.source.layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL &&
+                tested.destination.layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+            "the visibility barrier should not change the layout");
+    require((tested.source.access & VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT) != 0 &&
+                (tested.destination.access & VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT) != 0 &&
+                (tested.destination.stages & VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT) != 0,
+            "the depth test should wait for the depth write");
     require(plan.finalImageLayouts.at("depth") == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
             "the read-only depth attachment should leave the image read-only");
 }
@@ -409,9 +419,13 @@ void msaaPassesShareMultisampleDepth()
     require(!findBarrier(plan.beforePass[1], Kind::Image, "depth"),
             "sampler2DMS must not touch the public resolve image");
 
-    require(!findBarrier(plan.beforePass[2], Kind::MultisampleImage, "depth") &&
-                !findBarrier(plan.beforePass[2], Kind::Image, "depth"),
-            "read-only depth testing after sampler2DMS should need no depth barrier and no resolve");
+    const auto *tested = findBarrier(plan.beforePass[2], Kind::MultisampleImage, "depth");
+    require(tested && tested->source.layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL &&
+                tested->destination.layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL &&
+                (tested->destination.stages & VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT) != 0,
+            "depth testing after sampler2DMS should only add visibility for the depth test, in place");
+    require(!findBarrier(plan.beforePass[2], Kind::Image, "depth"),
+            "read-only depth testing should not resolve into the public depth");
     require(plan.finalImageLayouts.contains("depth") && !plan.finalImageLayouts.contains("__msaa_depth"),
             "private images must not be exported to the registry");
 }
@@ -557,6 +571,25 @@ void readOnlyImageAccessesCoalesce()
             "compatible read-only accesses should not emit barriers");
 }
 
+void coveredReadsAfterAWriteCoalesce()
+{
+    lr::FrameGraphDefinition definition;
+    const auto               image = definition.image("color");
+    builder(definition, definition.addPass("writer")).colorAttachment(image, VK_FORMAT_R16G16B16A16_SFLOAT);
+    builder(definition, definition.addPass("first")).sampledImage(0, image, VK_SHADER_STAGE_FRAGMENT_BIT);
+    builder(definition, definition.addPass("second")).sampledImage(0, image, VK_SHADER_STAGE_FRAGMENT_BIT);
+    builder(definition, definition.addPass("compute")).sampledImage(0, image, VK_SHADER_STAGE_COMPUTE_BIT);
+
+    const auto order = sort(definition);
+    const auto plan  = lr::framegraph::planVulkanBarriers(definition.passes(), definition.resources(), order);
+    require(plan.beforePass[1].size() == 1, "the first reader should wait for the write");
+    require(plan.beforePass[2].empty(), "a reader the previous barrier already covers needs no barrier");
+    require(plan.beforePass[3].size() == 1 &&
+                (plan.beforePass[3][0].source.access & VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT) != 0 &&
+                plan.beforePass[3][0].destination.stages == VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            "a reader in a stage the earlier barrier didn't cover should still wait for the write");
+}
+
 void sameLayoutStorageHazard()
 {
     lr::FrameGraphDefinition definition;
@@ -680,6 +713,7 @@ int main()
         {"backbuffer presentation contract", backbufferContractPlansPresentationTransitions},
         {"external binding ownership", externalBindingsEnforceHandleOwnership},
         {"read-only image coalescing", readOnlyImageAccessesCoalesce},
+        {"covered reads coalesce after a write", coveredReadsAfterAWriteCoalesce},
         {"same-layout storage hazard", sameLayoutStorageHazard},
         {"buffer RAW hazard", bufferRawHazard},
         {"vertex shader stage", vertexShaderStageMapping},
