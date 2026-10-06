@@ -65,7 +65,8 @@ enum class BlendMode
 struct GraphicsState
 {
     // Number of coverage samples evaluated by rasterization. The public images remain single-sampled:
-    // the compiled graph creates private multisample attachments and resolves them after the pass.
+    // the compiled graph keeps one private multisample image per attachment name, shared by every MSAA
+    // pass that renders to it (so a later MSAA pass can LOAD it), and resolves into the public image.
     VkSampleCountFlagBits          samples     = VK_SAMPLE_COUNT_1_BIT;
     BlendMode                      blend       = BlendMode::Opaque;
     VkPolygonMode                  polygonMode = VK_POLYGON_MODE_FILL;
@@ -110,6 +111,10 @@ struct ImageUse
 
     bool isDescriptor() const { return binding != noDescriptorBinding; }
     bool isAttachment() const { return usage == ImageUsage::ColorAttachment || usage == ImageUsage::DepthAttachment; }
+    // A LOADed depth attachment in a pass with depth writes disabled (see PassBuilder::depth). It is bound
+    // in DEPTH_STENCIL_READ_ONLY_OPTIMAL, stored with STORE_OP_NONE and never resolved, so it can be
+    // tested against while other passes sample the same image.
+    bool isReadOnlyDepth() const { return usage == ImageUsage::DepthAttachment && access == AccessMode::Read; }
 };
 
 struct BufferUse

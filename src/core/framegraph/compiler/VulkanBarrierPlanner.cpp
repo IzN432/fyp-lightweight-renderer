@@ -1,5 +1,7 @@
 #include "VulkanBarrierPlanner.hpp"
 
+#include "core/vulkan/VkFormatUtils.hpp"
+
 #include <map>
 #include <stdexcept>
 #include <tuple>
@@ -59,6 +61,8 @@ struct RequiredAccess
     BarrierResourceKind kind;
     VulkanResourceState state;
     bool                writes = false;
+    // Multisample images only: the pass needs contents an earlier pass rendered this frame.
+    bool loads = false;
 };
 
 RequiredAccess accessForImage(const ImageUse &use)
@@ -100,6 +104,13 @@ RequiredAccess accessForImage(const ImageUse &use)
                     true};
         }
         case ImageUsage::DepthAttachment: {
+            if (use.isReadOnlyDepth())
+            {
+                return {BarrierResourceKind::Image,
+                        {VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
+                         VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL}};
+            }
             VkAccessFlags2 access = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
             if (reads)
             {
@@ -170,22 +181,104 @@ void mergeAccess(std::map<ResourceKey, RequiredAccess> &accesses, const std::str
         return;
     }
     RequiredAccess &existing = it->second;
-    if (incoming.kind == BarrierResourceKind::Image && existing.state.layout != incoming.state.layout)
+    if (incoming.kind != BarrierResourceKind::Buffer && existing.state.layout != incoming.state.layout)
     {
         throw std::runtime_error("FrameGraph: pass uses image '" + name + "' with incompatible usages");
     }
     existing.state.stages |= incoming.state.stages;
     existing.state.access |= incoming.state.access;
     existing.writes |= incoming.writes;
+    existing.loads |= incoming.loads;
+}
+
+using MultisampleFormats = std::map<std::string, VkFormat>;
+
+// Formats of the attachments that MSAA passes render, i.e. of every private multisample image.
+MultisampleFormats collectMultisampleFormats(std::span<const lr::PassDesc>     passes,
+                                             const lr::ResourceHandleRegistry &resources)
+{
+    MultisampleFormats formats;
+    for (const lr::PassDesc &pass : passes)
+    {
+        if (pass.graphics.samples == VK_SAMPLE_COUNT_1_BIT)
+        {
+            continue;
+        }
+        for (const ImageUse &use : pass.imageUses)
+        {
+            if (use.isAttachment())
+            {
+                formats.emplace(resources.name(use.image), use.format);
+            }
+        }
+    }
+    return formats;
 }
 
 std::map<ResourceKey, RequiredAccess> collectPassAccesses(const lr::PassDesc               &pass,
-                                                          const lr::ResourceHandleRegistry &resources)
+                                                          const lr::ResourceHandleRegistry &resources,
+                                                          const MultisampleFormats         &multisampleFormats)
 {
+    const bool                            multisampled = pass.graphics.samples != VK_SAMPLE_COUNT_1_BIT;
     std::map<ResourceKey, RequiredAccess> accesses;
     for (const ImageUse &use : pass.imageUses)
     {
-        mergeAccess(accesses, resources.name(use.image), accessForImage(use));
+        const std::string &name   = resources.name(use.image);
+        RequiredAccess     access = accessForImage(use);
+
+        if (use.usage == ImageUsage::SampledMultisample)
+        {
+            // sampler2DMS reads the private image, never the public resolve destination.
+            const auto format = multisampleFormats.find(name);
+            if (format == multisampleFormats.end())
+            {
+                throw std::runtime_error("FrameGraph: pass '" + pass.name + "' samples unresolved image '" + name +
+                                         "' without an MSAA producer");
+            }
+            access.kind  = BarrierResourceKind::MultisampleImage;
+            access.loads = true;
+            if (lr::isDepthFormat(format->second))
+            {
+                access.state.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+            }
+            mergeAccess(accesses, name, access);
+            continue;
+        }
+        if (!multisampled || !use.isAttachment())
+        {
+            mergeAccess(accesses, name, access);
+            continue;
+        }
+
+        // An MSAA pass renders into the private image...
+        RequiredAccess target = access;
+        target.kind           = BarrierResourceKind::MultisampleImage;
+        target.loads          = use.loadOp == VK_ATTACHMENT_LOAD_OP_LOAD;
+        if (use.isReadOnlyDepth())
+        {
+            mergeAccess(accesses, name, target);
+            continue;
+        }
+
+        // ...and resolves it into the public image at vkCmdEndRendering. The spec places resolves in
+        // COLOR_ATTACHMENT_OUTPUT with color-attachment access for depth attachments too; depth also keeps
+        // its fragment-test scope so the resolve destination is covered however the driver models it.
+        target.state.stages |= VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        target.state.access |= VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT;
+        mergeAccess(accesses, name, target);
+
+        const bool     depth = use.usage == ImageUsage::DepthAttachment;
+        RequiredAccess resolve{BarrierResourceKind::Image,
+                               {VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                                access.state.layout},
+                               true};
+        if (depth)
+        {
+            resolve.state.stages |=
+                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+            resolve.state.access |= VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        }
+        mergeAccess(accesses, name, resolve);
     }
     for (const BufferUse &use : pass.bufferUses)
     {
@@ -212,6 +305,7 @@ VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, const Res
     std::map<ResourceKey, TrackedState> states;
     VulkanBarrierPlan                   plan;
     plan.beforePass.resize(passes.size());
+    const MultisampleFormats multisampleFormats = collectMultisampleFormats(passes, resources);
 
     for (size_t passIndex : sortedPassIndices)
     {
@@ -219,13 +313,28 @@ VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, const Res
         {
             throw std::out_of_range("FrameGraph: barrier plan contains invalid pass index");
         }
-        for (const auto &[key, required] : collectPassAccesses(passes[passIndex], resources))
+        for (const auto &[key, required] : collectPassAccesses(passes[passIndex], resources, multisampleFormats))
         {
             auto stateIt = states.find(key);
             if (stateIt == states.end())
             {
-                VulkanResourceState initial{};
-                if (key.kind == BarrierResourceKind::Image)
+                // Every resource is reused by successive submissions (the previous frame may still be on
+                // the GPU), and the compiled barriers are recorded unchanged every frame. A barrier at the
+                // first use therefore waits for all earlier queue work, which also chains it after the
+                // swapchain-acquire semaphore wait. Read-only first uses emit no barrier, so this costs
+                // nothing for resources a frame never writes or transitions.
+                VulkanResourceState initial{.stages = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                            .access = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
+                if (key.kind == BarrierResourceKind::MultisampleImage)
+                {
+                    // Private images keep nothing between frames, so each frame starts from UNDEFINED.
+                    if (required.loads)
+                    {
+                        throw std::runtime_error("FrameGraph: pass '" + passes[passIndex].name +
+                                                 "' reads the multisample contents of '" + key.name +
+                                                 "' before any MSAA pass renders them this frame");
+                    }
+                } else if (key.kind == BarrierResourceKind::Image)
                 {
                     if (const auto it = initialImageLayouts.find(key.name); it != initialImageLayouts.end())
                     {
@@ -236,7 +345,7 @@ VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, const Res
             }
             TrackedState &current = stateIt->second;
             const bool    layoutChanged =
-                key.kind == BarrierResourceKind::Image && current.state.layout != required.state.layout;
+                key.kind != BarrierResourceKind::Buffer && current.state.layout != required.state.layout;
             if (layoutChanged || current.writes || required.writes)
             {
                 plan.beforePass[passIndex].push_back({key.kind, key.name, current.state, required.state});
@@ -259,8 +368,11 @@ VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, const Res
         }
         if (current->second.state.layout != requiredLayout)
         {
+            // ALL_COMMANDS rather than NONE: the transition must happen-before whatever follows the graph
+            // (e.g. the submit's signal semaphore that presentation waits on), and an empty destination
+            // scope would not chain into it.
             const VulkanResourceState destination{
-                .stages = VK_PIPELINE_STAGE_2_NONE, .access = VK_ACCESS_2_NONE, .layout = requiredLayout};
+                .stages = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, .access = VK_ACCESS_2_NONE, .layout = requiredLayout};
             plan.afterGraph.push_back({BarrierResourceKind::Image, name, current->second.state, destination});
             current->second = {.state = destination, .writes = false};
         }

@@ -288,6 +288,182 @@ void blendingReadsColorAttachments()
     }
 }
 
+const lr::framegraph::PlannedBarrier *findBarrier(const std::vector<lr::framegraph::PlannedBarrier> &barriers,
+                                                  lr::framegraph::BarrierResourceKind kind, const std::string &name)
+{
+    for (const auto &barrier : barriers)
+    {
+        if (barrier.kind == kind && barrier.resourceName == name)
+        {
+            return &barrier;
+        }
+    }
+    return nullptr;
+}
+
+void depthWriteDisabledLoadIsReadOnly()
+{
+    // depth() may come before or after depthAttachment(); only LOAD with writes disabled is read-only.
+    for (const bool depthFirst : {true, false})
+    {
+        lr::FrameGraphDefinition definition;
+        const auto               depth = definition.image("depth");
+        auto                     pass  = builder(definition, definition.addPass("test"));
+        if (depthFirst)
+        {
+            pass.depth(true, false).depthAttachment(depth, VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD);
+        } else
+        {
+            pass.depthAttachment(depth, VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD).depth(true, false);
+        }
+        require(definition.passes()[0].imageUses[0].isReadOnlyDepth(),
+                std::string("LOAD with depth writes disabled should be read-only (depth() ") +
+                    (depthFirst ? "before" : "after") + " depthAttachment)");
+    }
+
+    lr::FrameGraphDefinition definition;
+    builder(definition, definition.addPass("clear"))
+        .depth(true, false)
+        .depthAttachment(definition.image("depth"), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR);
+    builder(definition, definition.addPass("load"))
+        .depthAttachment(definition.image("depth"), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD);
+    require(definition.passes()[0].imageUses[0].access == lr::AccessMode::Write,
+            "CLEAR writes the attachment even with depth writes disabled");
+    require(definition.passes()[1].imageUses[0].access == lr::AccessMode::ReadWrite,
+            "LOAD without disabling depth writes stays read-write");
+
+    const auto order = sort(definition);
+    const auto plan  = lr::framegraph::planVulkanBarriers(definition.passes(), definition.resources(), order);
+    require(plan.beforePass[1].size() == 1, "the second pass should wait for the clear");
+}
+
+void readOnlyDepthSharesLayoutWithSampling()
+{
+    lr::FrameGraphDefinition definition;
+    const auto               depth = definition.image("depth");
+    builder(definition, definition.addPass("opaque")).depthAttachment(depth, VK_FORMAT_D32_SFLOAT);
+    builder(definition, definition.addPass("sampler")).sampledDepth(0, depth, VK_SHADER_STAGE_FRAGMENT_BIT);
+    builder(definition, definition.addPass("tested"))
+        .depth(true, false)
+        .depthAttachment(depth, VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD);
+
+    const auto order = sort(definition);
+    const auto plan  = lr::framegraph::planVulkanBarriers(definition.passes(), definition.resources(), order);
+    require(plan.beforePass[1].size() == 1 &&
+                plan.beforePass[1][0].destination.layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+            "sampling should transition the depth to read-only");
+    require(plan.beforePass[2].empty(), "a read-only depth attachment after sampling needs no barrier");
+    require(plan.finalImageLayouts.at("depth") == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+            "the read-only depth attachment should leave the image read-only");
+}
+
+void msaaPassesShareMultisampleDepth()
+{
+    using Kind = lr::framegraph::BarrierResourceKind;
+
+    // The deferred layout: geometry renders 4x depth, lighting reads its samples, and a forward pass
+    // depth-tests against the same samples without writing them.
+    lr::FrameGraphDefinition definition;
+    const auto               depth  = definition.image("depth");
+    const auto               albedo = definition.image("albedo");
+    const auto               lit    = definition.image("lit");
+    const auto               layer  = definition.image("layer");
+    builder(definition, definition.addPass("geometry"))
+        .type(lr::PassType::Geometry)
+        .samples(VK_SAMPLE_COUNT_4_BIT)
+        .colorAttachment(albedo, VK_FORMAT_R16G16B16A16_SFLOAT)
+        .depthAttachment(depth, VK_FORMAT_D32_SFLOAT);
+    builder(definition, definition.addPass("lighting"))
+        .sampledMultisampleImage(0, depth, VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledMultisampleImage(1, albedo, VK_SHADER_STAGE_FRAGMENT_BIT)
+        .colorAttachment(lit, VK_FORMAT_R16G16B16A16_SFLOAT);
+    builder(definition, definition.addPass("transparent"))
+        .type(lr::PassType::Geometry)
+        .samples(VK_SAMPLE_COUNT_4_BIT)
+        .blend(lr::BlendMode::PremultipliedAlpha)
+        .depth(true, false)
+        .colorAttachment(layer, VK_FORMAT_R16G16B16A16_SFLOAT)
+        .depthAttachment(depth, VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD);
+
+    const auto order = sort(definition);
+    require(order == std::vector<size_t>({0, 1, 2}), "both depth readers should follow geometry");
+    const auto plan = lr::framegraph::planVulkanBarriers(definition.passes(), definition.resources(), order);
+
+    const auto *first = findBarrier(plan.beforePass[0], Kind::MultisampleImage, "depth");
+    require(first && first->source.layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+                first->source.stages == VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT &&
+                first->destination.layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            "the first MSAA use should discard last frame's samples after all earlier work");
+    const auto *resolve = findBarrier(plan.beforePass[0], Kind::Image, "depth");
+    require(resolve && (resolve->destination.access & VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT) != 0 &&
+                (resolve->destination.stages & VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT) != 0,
+            "the public depth should be synchronized as a resolve destination");
+
+    const auto *sampled = findBarrier(plan.beforePass[1], Kind::MultisampleImage, "depth");
+    require(sampled && sampled->destination.layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL &&
+                (sampled->source.access & VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT) != 0,
+            "sampler2DMS should wait for the geometry depth writes");
+    const auto *sampledColor = findBarrier(plan.beforePass[1], Kind::MultisampleImage, "albedo");
+    require(sampledColor && sampledColor->destination.layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            "multisample color should be sampled in SHADER_READ_ONLY");
+    require(!findBarrier(plan.beforePass[1], Kind::Image, "depth"),
+            "sampler2DMS must not touch the public resolve image");
+
+    require(!findBarrier(plan.beforePass[2], Kind::MultisampleImage, "depth") &&
+                !findBarrier(plan.beforePass[2], Kind::Image, "depth"),
+            "read-only depth testing after sampler2DMS should need no depth barrier and no resolve");
+    require(plan.finalImageLayouts.contains("depth") && !plan.finalImageLayouts.contains("__msaa_depth"),
+            "private images must not be exported to the registry");
+}
+
+void msaaLoadOfSharedColorSynchronizes()
+{
+    using Kind = lr::framegraph::BarrierResourceKind;
+
+    lr::FrameGraphDefinition definition;
+    const auto               color = definition.image("color");
+    builder(definition, definition.addPass("first"))
+        .samples(VK_SAMPLE_COUNT_4_BIT)
+        .colorAttachment(color, VK_FORMAT_R16G16B16A16_SFLOAT);
+    builder(definition, definition.addPass("second"))
+        .samples(VK_SAMPLE_COUNT_4_BIT)
+        .colorAttachment(color, VK_FORMAT_R16G16B16A16_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD);
+
+    const auto  order   = sort(definition);
+    const auto  plan    = lr::framegraph::planVulkanBarriers(definition.passes(), definition.resources(), order);
+    const auto *samples = findBarrier(plan.beforePass[1], Kind::MultisampleImage, "color");
+    require(samples && samples->source.layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
+                samples->destination.layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
+                (samples->destination.access & VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT) != 0,
+            "LOAD should wait for the earlier MSAA pass's samples in place");
+    require(findBarrier(plan.beforePass[1], Kind::Image, "color") != nullptr,
+            "the second resolve should wait for the first");
+}
+
+void msaaReadsRequireAnEarlierProducer()
+{
+    lr::FrameGraphDefinition loading;
+    builder(loading, loading.addPass("load"))
+        .samples(VK_SAMPLE_COUNT_4_BIT)
+        .colorAttachment(loading.image("color"), VK_FORMAT_R16G16B16A16_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD);
+    requireThrowsContaining(
+        [&] {
+            (void)lr::framegraph::planVulkanBarriers(loading.passes(), loading.resources(), sort(loading));
+        },
+        "before any MSAA pass renders them");
+
+    // A single-sample producer does not count: its pixels never reach the private image.
+    lr::FrameGraphDefinition sampling;
+    const auto               color = sampling.image("color");
+    builder(sampling, sampling.addPass("single")).colorAttachment(color, VK_FORMAT_R16G16B16A16_SFLOAT);
+    builder(sampling, sampling.addPass("reader")).sampledMultisampleImage(0, color, VK_SHADER_STAGE_FRAGMENT_BIT);
+    requireThrowsContaining(
+        [&] {
+            (void)lr::framegraph::planVulkanBarriers(sampling.passes(), sampling.resources(), sort(sampling));
+        },
+        "without an MSAA producer");
+}
+
 void runsLastOrdersAfterLaterDeclaredPasses()
 {
     // An overlay declared early (like the Viewer's ImGui pass) must still follow a pass added later that
@@ -494,6 +670,11 @@ int main()
         {"whole-resource barriers", barriersRemainWholeResource},
         {"same-layout attachment hazard", sameLayoutAttachmentHazard},
         {"blending reads color attachments", blendingReadsColorAttachments},
+        {"read-only depth attachments", depthWriteDisabledLoadIsReadOnly},
+        {"read-only depth shares sampling layout", readOnlyDepthSharesLayoutWithSampling},
+        {"MSAA passes share multisample depth", msaaPassesShareMultisampleDepth},
+        {"MSAA LOAD of shared color", msaaLoadOfSharedColorSynchronizes},
+        {"MSAA reads require a producer", msaaReadsRequireAnEarlierProducer},
         {"runsLast orders after later-declared passes", runsLastOrdersAfterLaterDeclaredPasses},
         {"definition revision tracks changes", definitionRevisionTracksChanges},
         {"backbuffer presentation contract", backbufferContractPlansPresentationTransitions},

@@ -16,6 +16,17 @@ void requireShaderStages(VkShaderStageFlags stages, const char *declaration)
     }
 }
 
+// A depth attachment is only read when its contents are loaded and the pass never writes depth; CLEAR
+// and DONT_CARE always produce new contents.
+lr::AccessMode depthAttachmentAccess(VkAttachmentLoadOp loadOp, std::optional<bool> depthWrite)
+{
+    if (loadOp != VK_ATTACHMENT_LOAD_OP_LOAD)
+    {
+        return lr::AccessMode::Write;
+    }
+    return depthWrite == false ? lr::AccessMode::Read : lr::AccessMode::ReadWrite;
+}
+
 } // namespace
 
 namespace lr
@@ -134,6 +145,14 @@ PassBuilder &PassBuilder::depth(bool test, bool write, VkCompareOp compare)
     desc().graphics.depthTest    = test;
     desc().graphics.depthWrite   = write;
     desc().graphics.depthCompare = compare;
+    // depth() may come before or after depthAttachment(); either way the attachment's access follows it.
+    for (ImageUse &use : desc().imageUses)
+    {
+        if (use.usage == ImageUsage::DepthAttachment)
+        {
+            use.access = depthAttachmentAccess(use.loadOp, write);
+        }
+    }
     return *this;
 }
 PassBuilder &PassBuilder::depthBias(float constant, float slope)
@@ -295,14 +314,13 @@ PassBuilder &PassBuilder::colorAttachment(ImageHandle image, VkFormat format, Vk
 PassBuilder &PassBuilder::depthAttachment(ImageHandle image, VkFormat format, VkAttachmentLoadOp loadOp,
                                           VkClearValue clearValue, ExtentSpec extent)
 {
-    desc().imageUses.push_back(
-        {.image      = image,
-         .usage      = ImageUsage::DepthAttachment,
-         .access     = loadOp == VK_ATTACHMENT_LOAD_OP_LOAD ? AccessMode::ReadWrite : AccessMode::Write,
-         .format     = format,
-         .extent     = extent,
-         .loadOp     = loadOp,
-         .clearValue = clearValue});
+    desc().imageUses.push_back({.image      = image,
+                                .usage      = ImageUsage::DepthAttachment,
+                                .access     = depthAttachmentAccess(loadOp, desc().graphics.depthWrite),
+                                .format     = format,
+                                .extent     = extent,
+                                .loadOp     = loadOp,
+                                .clearValue = clearValue});
     return *this;
 }
 

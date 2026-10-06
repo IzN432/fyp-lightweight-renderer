@@ -32,10 +32,17 @@ CompiledFrameGraph::~CompiledFrameGraph()
 {
     // FrameGraph waits for the device before replacing a compiled graph, so its private attachments
     // cannot still be referenced by submitted command buffers here.
-    for (CompiledPass &pass : m_passes)
-        for (AllocatedImage &image : pass.multisampleAttachments)
-            m_registry.allocator().destroy(image);
+    for (auto &[name, image] : m_multisampleImages)
+    {
+        m_registry.allocator().destroy(image);
+    }
     vkDestroySampler(m_ctx.getDevice(), m_defaultSampler, nullptr);
+}
+
+const AllocatedImage *CompiledFrameGraph::multisampleImage(const std::string &name) const
+{
+    const auto found = m_multisampleImages.find(name);
+    return found == m_multisampleImages.end() ? nullptr : &found->second;
 }
 
 std::array<float, 4> CompiledFrameGraph::debugLabelColor(PassType type)
@@ -106,14 +113,13 @@ void CompiledFrameGraph::submitResourceBarriers(CommandBuffer                   
     vkCmdPipelineBarrier2(cmd.get(), &dependency);
 }
 
-VkRenderingInfo CompiledFrameGraph::prepareRenderingInfo(size_t passIndex, const PassDesc &pass, VkExtent2D extent,
+VkRenderingInfo CompiledFrameGraph::prepareRenderingInfo(const PassDesc &pass, VkExtent2D extent,
                                                          const ExternalImageBindings &externalImages)
 {
     m_scratchColorAttachments.clear();
     m_scratchDepthAttachment = {};
     bool hasDepth            = false;
 
-    size_t attachmentIndex = 0;
     for (const ImageUse &use : pass.imageUses)
     {
         if (!use.isAttachment())
@@ -138,33 +144,40 @@ VkRenderingInfo CompiledFrameGraph::prepareRenderingInfo(size_t passIndex, const
         }
 
         VkRenderingAttachmentInfo attachment{};
-        attachment.sType      = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        attachment.imageView  = view;
-        attachment.loadOp     = use.loadOp;
-        attachment.storeOp    = use.storeOp;
+        attachment.sType     = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        attachment.imageView = view;
+        attachment.loadOp    = use.loadOp;
+        // Read-only depth must not store: STORE counts as a depth write, which would race other readers.
+        attachment.storeOp    = use.isReadOnlyDepth() ? VK_ATTACHMENT_STORE_OP_NONE : use.storeOp;
         attachment.clearValue = use.clearValue;
 
         if (pass.graphics.samples != VK_SAMPLE_COUNT_1_BIT)
         {
-            // Dynamic rendering performs the resolve at vkCmdEndRendering. The public image is the
-            // resolve destination; the private image is the actual multisampled render target.
-            attachment.resolveImageView   = view;
-            attachment.resolveImageLayout = use.usage == ImageUsage::DepthAttachment
-                                                ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                                                : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            attachment.imageView = m_passes[passIndex].multisampleAttachments.at(attachmentIndex).view;
-            // STORE keeps per-sample values available to a later sampler2DMS consumer. The ordinary
-            // resolve destination is written at the same time for single-sample consumers.
-            attachment.storeOp   = VK_ATTACHMENT_STORE_OP_STORE;
-            attachment.resolveMode = use.usage == ImageUsage::DepthAttachment
-                                         ? m_ctx.depthResolveMode()
-                                         : VK_RESOLVE_MODE_AVERAGE_BIT;
+            const AllocatedImage *multisample = multisampleImage(name);
+            if (!multisample)
+            {
+                throw std::runtime_error("CompiledFrameGraph: multisample attachment '" + name + "' is unavailable");
+            }
+            // The private image is the actual multisampled render target, shared with every other MSAA
+            // pass rendering this name. STORE keeps per-sample values for a later LOAD or sampler2DMS.
+            attachment.imageView = multisample->view;
+            if (!use.isReadOnlyDepth())
+            {
+                attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                // Dynamic rendering performs the resolve at vkCmdEndRendering, into the public image.
+                attachment.resolveImageView   = view;
+                attachment.resolveImageLayout = use.usage == ImageUsage::DepthAttachment
+                                                    ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                                                    : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                attachment.resolveMode =
+                    use.usage == ImageUsage::DepthAttachment ? m_ctx.depthResolveMode() : VK_RESOLVE_MODE_AVERAGE_BIT;
+            }
         }
-        ++attachmentIndex;
 
         if (use.usage == ImageUsage::DepthAttachment)
         {
-            attachment.imageLayout   = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            attachment.imageLayout   = use.isReadOnlyDepth() ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                                             : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
             m_scratchDepthAttachment = attachment;
             hasDepth                 = true;
         } else
@@ -271,43 +284,9 @@ void CompiledFrameGraph::execute(CommandBuffer &cmd, const ExternalImageBindings
             }
         } else
         {
-            // Private MSAA images have no inter-pass contents. Discarding their previous contents via
-            // UNDEFINED is valid each frame and gives the new render pass the required attachment layout.
-            if (!compiled.multisampleAttachments.empty())
-            {
-                std::vector<VkImageMemoryBarrier2> barriers;
-                for (const AllocatedImage &image : compiled.multisampleAttachments)
-                {
-                    VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-                    // The same private image is reused by successive submissions. UNDEFINED discards
-                    // its pixels, while this source scope still waits for the previous frame's reads
-                    // before rasterization overwrites the allocation.
-                    barrier.srcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-                    barrier.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
-                    barrier.dstStageMask  = isDepthFormat(image.format)
-                                                ? VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                                                      VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
-                                                : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-                    barrier.dstAccessMask = isDepthFormat(image.format)
-                                                ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
-                                                : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-                    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-                    barrier.newLayout = isDepthFormat(image.format)
-                                            ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                                            : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-                    barrier.image = image.image;
-                    const VkImageAspectFlags aspect = isDepthFormat(image.format)
-                                                          ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                          : VK_IMAGE_ASPECT_COLOR_BIT;
-                    barrier.subresourceRange = {aspect, 0, 1, 0, 1};
-                    barriers.push_back(barrier);
-                }
-                VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-                dependency.imageMemoryBarrierCount = static_cast<uint32_t>(barriers.size());
-                dependency.pImageMemoryBarriers    = barriers.data();
-                vkCmdPipelineBarrier2(cmd.get(), &dependency);
-            }
-            VkRenderingInfo rendering = prepareRenderingInfo(index, pass, compiled.renderingExtent, externalImages);
+            // Private MSAA images are transitioned by the planned barriers above (from UNDEFINED at their
+            // first use each frame — see planVulkanBarriers).
+            VkRenderingInfo rendering = prepareRenderingInfo(pass, compiled.renderingExtent, externalImages);
             vkCmdBeginRendering(cmd.get(), &rendering);
             cmd.setViewport(0.0f, 0.0f, static_cast<float>(compiled.renderingExtent.width),
                             static_cast<float>(compiled.renderingExtent.height));

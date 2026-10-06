@@ -83,10 +83,10 @@ private:
         VkExtent2D                         renderingExtent{};
         std::vector<CompiledImageBarrier>  imageBarriers;
         std::vector<CompiledBufferBarrier> bufferBarriers;
-        // One private multisample image per declared attachment. Rendering resolves these into the
-        // ordinary single-sample frame-graph images, so later passes need no MSAA-specific handling.
-        std::vector<AllocatedImage>        multisampleAttachments;
     };
+
+    // The private multisample image rendered for an attachment name, or null if no MSAA pass renders it.
+    const AllocatedImage *multisampleImage(const std::string &name) const;
 
     static std::array<float, 4> debugLabelColor(PassType type);
     void submitResourceBarriers(CommandBuffer &cmd, const std::vector<CompiledImageBarrier> &imageBarriers,
@@ -95,7 +95,7 @@ private:
     const ExternalImageBinding &requireExternalImage(ImageHandle                  image,
                                                      const ExternalImageBindings &externalImages) const;
     void                        bindVertexAndIndexBuffers(CommandBuffer &cmd, const PassDesc &pass);
-    VkRenderingInfo             prepareRenderingInfo(size_t passIndex, const PassDesc &pass, VkExtent2D extent,
+    VkRenderingInfo             prepareRenderingInfo(const PassDesc &pass, VkExtent2D extent,
                                                      const ExternalImageBindings &externalImages);
 
     const VulkanContext       &m_ctx;
@@ -108,9 +108,11 @@ private:
     std::vector<size_t>                            m_sortedIndices;
     framegraph::ExecutionPlan                      m_executionPlan;
     std::vector<CompiledPass>                      m_passes;
-    // Logical attachment name -> unresolved multisample image produced for it.
-    std::unordered_map<std::string, AllocatedImage *> m_multisampleImages;
-    std::vector<CompiledImageBarrier>              m_finalImageBarriers;
+    // Logical attachment name -> the private multisample image every MSAA pass rendering that name shares.
+    // Rendering resolves it into the ordinary single-sample frame-graph image, so passes that bind the
+    // public image need no MSAA-specific handling.
+    std::unordered_map<std::string, AllocatedImage> m_multisampleImages;
+    std::vector<CompiledImageBarrier>               m_finalImageBarriers;
     // Each image's layout once a recorded frame has run, written to the registry by execute() (not at
     // compile time: a graph recompiled before this one ever executes must start from the images' real
     // layouts, not from layouts this graph would have left them in).

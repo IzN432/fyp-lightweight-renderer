@@ -78,56 +78,50 @@ void FrameGraphCompiler::allocateResources(CompiledFrameGraph &graph) const
         graph.m_passes[passIndex].renderingExtent = renderingExtents[passIndex];
     }
 
-    // Create private multisample render targets. Public graph images stay single-sampled and become
-    // resolve destinations, so all later descriptor bindings continue to work unchanged.
+    // Create private multisample render targets, one per attachment name. Public graph images stay
+    // single-sampled and become resolve destinations, so ordinary sampler2D bindings work unchanged;
+    // sampler2DMS bindings and later MSAA passes (e.g. one that LOADs the depth) select the private image.
+    // planAttachmentImages already rejects conflicting formats and extents for one name.
     const auto passes = graph.m_definition.passes();
     for (size_t passIndex = 0; passIndex < passes.size(); ++passIndex)
     {
         const PassDesc &pass = passes[passIndex];
         if (pass.graphics.samples == VK_SAMPLE_COUNT_1_BIT)
+        {
             continue;
+        }
         for (const ImageUse &use : pass.imageUses)
         {
             if (!use.isAttachment())
+            {
                 continue;
-            if (use.loadOp == VK_ATTACHMENT_LOAD_OP_LOAD)
-                throw std::runtime_error("FrameGraph: pass '" + pass.name +
-                                         "' uses MSAA with LOAD; clear or discard the attachment instead");
-            const bool depth = use.usage == ImageUsage::DepthAttachment;
+            }
+            const std::string &name = graph.m_definition.name(use.image);
+            if (const auto existing = graph.m_multisampleImages.find(name); existing != graph.m_multisampleImages.end())
+            {
+                if (existing->second.samples != pass.graphics.samples)
+                {
+                    throw std::runtime_error("FrameGraph: pass '" + pass.name + "' renders attachment '" + name +
+                                             "' with a different MSAA sample count than an earlier pass");
+                }
+                continue;
+            }
+            const bool               depth     = use.usage == ImageUsage::DepthAttachment;
             const VkSampleCountFlags supported = depth ? m_ctx.depthSampleCounts() : m_ctx.colorSampleCounts();
             if (!(supported & pass.graphics.samples))
-                throw std::runtime_error("FrameGraph: pass '" + pass.name + "' requests an unsupported MSAA "
+            {
+                throw std::runtime_error("FrameGraph: pass '" + pass.name +
+                                         "' requests an unsupported MSAA "
                                          "sample count for one of its attachments");
+            }
             ImageConfig config{};
-            config.extent  = {renderingExtents[passIndex].width, renderingExtents[passIndex].height, 1};
-            config.format  = use.format;
-            config.usage   = (depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
-                                    : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) |
+            config.extent = {renderingExtents[passIndex].width, renderingExtents[passIndex].height, 1};
+            config.format = use.format;
+            config.usage = (depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) |
                            VK_IMAGE_USAGE_SAMPLED_BIT;
             config.aspect  = depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
             config.samples = pass.graphics.samples;
-            graph.m_passes[passIndex].multisampleAttachments.push_back(
-                m_registry.allocator().createImage(config));
-        }
-    }
-
-    // Publish private attachments by their logical names. A later sampler2DMS declaration selects
-    // these unresolved images; ordinary sampler2D declarations continue selecting the resolve image.
-    for (size_t passIndex = 0; passIndex < passes.size(); ++passIndex)
-    {
-        size_t attachmentIndex = 0;
-        for (const ImageUse &use : passes[passIndex].imageUses)
-        {
-            if (!use.isAttachment())
-                continue;
-            if (passes[passIndex].graphics.samples != VK_SAMPLE_COUNT_1_BIT)
-            {
-                const std::string &name = graph.m_definition.name(use.image);
-                if (!graph.m_multisampleImages.emplace(
-                        name, &graph.m_passes[passIndex].multisampleAttachments.at(attachmentIndex)).second)
-                    throw std::runtime_error("FrameGraph: multiple MSAA passes produce attachment '" + name + "'");
-            }
-            ++attachmentIndex;
+            graph.m_multisampleImages.emplace(name, m_registry.allocator().createImage(config));
         }
     }
 
@@ -258,9 +252,8 @@ void FrameGraphCompiler::buildDescriptorSets(CompiledFrameGraph &graph) const
                     continue;
                 }
 
-                const bool multisample = use.usage == ImageUsage::SampledMultisample;
-                const AllocatedImage *image = multisample ? graph.m_multisampleImages[name]
-                                                         : m_registry.getImage(name);
+                const bool            multisample = use.usage == ImageUsage::SampledMultisample;
+                const AllocatedImage *image = multisample ? graph.multisampleImage(name) : m_registry.getImage(name);
                 if (!image)
                 {
                     throw std::runtime_error("FrameGraph: pass '" + pass.name + "' binds " +
@@ -282,7 +275,7 @@ void FrameGraphCompiler::buildDescriptorSets(CompiledFrameGraph &graph) const
                     }
                     view = image->mipViews[use.boundMip];
                 }
-                // Must match the layout buildBarriers gives the private MSAA image.
+                // Must match the layout planVulkanBarriers gives the private MSAA image.
                 const VkImageLayout boundLayout = multisample && isDepthFormat(image->format)
                                                       ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
                                                       : layout;
@@ -430,10 +423,17 @@ void FrameGraphCompiler::buildBarriers(CompiledFrameGraph &graph) const
         auto &compiled = graph.m_passes[passIndex];
         for (const framegraph::PlannedBarrier &planned : plan.beforePass[passIndex])
         {
-            if (planned.kind == framegraph::BarrierResourceKind::Image)
+            if (planned.kind != framegraph::BarrierResourceKind::Buffer)
             {
+                const bool multisample = planned.kind == framegraph::BarrierResourceKind::MultisampleImage;
                 std::vector<const AllocatedImage *> images;
-                if (const AllocatedImage *image = m_registry.getImage(planned.resourceName))
+                if (multisample)
+                {
+                    if (const AllocatedImage *image = graph.multisampleImage(planned.resourceName))
+                    {
+                        images.push_back(image);
+                    }
+                } else if (const AllocatedImage *image = m_registry.getImage(planned.resourceName))
                 {
                     images.push_back(image);
                 } else
@@ -465,7 +465,9 @@ void FrameGraphCompiler::buildBarriers(CompiledFrameGraph &graph) const
                     const VkImageAspectFlags aspect =
                         isDepthFormat(image->format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
                     barrier.subresourceRange = {aspect, 0, image->mipLevels, 0, image->arrayLayers};
-                    compiled.imageBarriers.push_back({barrier, planned.resourceName});
+                    // The prefix keeps a private image from matching an external image of the same name.
+                    compiled.imageBarriers.push_back(
+                        {barrier, multisample ? "__msaa_" + planned.resourceName : planned.resourceName});
                 }
             } else
             {
@@ -488,43 +490,6 @@ void FrameGraphCompiler::buildBarriers(CompiledFrameGraph &graph) const
                 barrier.size                = VK_WHOLE_SIZE;
                 compiled.bufferBarriers.push_back({barrier, planned.resourceName});
             }
-        }
-    }
-
-    // The topology above synchronizes the public resolve image. sampler2DMS reads the private source
-    // instead, so give that image its own attachment-write -> shader-read transition at the consumer.
-    for (size_t passIndex = 0; passIndex < passes.size(); ++passIndex)
-    {
-        for (const ImageUse &use : passes[passIndex].imageUses)
-        {
-            if (use.usage != ImageUsage::SampledMultisample)
-                continue;
-            const std::string &name = graph.m_definition.name(use.image);
-            const auto found = graph.m_multisampleImages.find(name);
-            if (found == graph.m_multisampleImages.end() || !found->second)
-                throw std::runtime_error("FrameGraph: pass '" + passes[passIndex].name +
-                                         "' samples unresolved image '" + name + "' without an MSAA producer");
-
-            const AllocatedImage &image = *found->second;
-            const bool depth = isDepthFormat(image.format);
-            VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-            barrier.srcStageMask  = depth ? VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                                                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
-                                          : VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-            barrier.srcAccessMask = depth ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
-                                          : VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-            barrier.dstStageMask  = framegraph::stagesForShader(use.stages);
-            barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-            barrier.oldLayout = depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                                      : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            barrier.newLayout = depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
-                                      : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barrier.image = image.image;
-            const VkImageAspectFlags aspect = depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-            barrier.subresourceRange = {aspect, 0, 1, 0, 1};
-            graph.m_passes[passIndex].imageBarriers.push_back({barrier, "__msaa_" + name});
         }
     }
 
