@@ -4,6 +4,8 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
+
 namespace lr
 {
 
@@ -47,7 +49,7 @@ void SphericalCameraController::update(float dt, bool gizmoCapturesPrimaryMouse)
         if (scroll != 0.0)
         {
             m_orbitRadius *= std::pow(1.0f / 1.1f, (float)scroll);
-            m_orbitRadius = glm::clamp(m_orbitRadius, 0.01f, 1000.0f);
+            m_orbitRadius = std::max(m_orbitRadius, 0.01f);
         }
     }
 
@@ -57,7 +59,7 @@ void SphericalCameraController::update(float dt, bool gizmoCapturesPrimaryMouse)
 void SphericalCameraController::setOrbitState(const OrbitState &state)
 {
     m_orbitTarget    = state.target;
-    m_orbitRadius    = glm::clamp(state.radius, 0.01f, 1000.0f);
+    m_orbitRadius    = std::max(state.radius, 0.01f);
     m_orbitAzimuth   = state.azimuth;
     m_orbitElevation = glm::clamp(state.elevation, glm::radians(-89.0f), glm::radians(89.0f));
     applyPose();
