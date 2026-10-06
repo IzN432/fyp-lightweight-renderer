@@ -23,7 +23,7 @@ bool near(const glm::vec3 &a, const glm::vec3 &b) { return glm::all(glm::epsilon
 struct TempScene
 {
     std::filesystem::path path = std::filesystem::temp_directory_path() /
-        ("lr-scene-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ("lr-scene-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".lrscene");
     ~TempScene() { std::filesystem::remove_all(path); }
 };
 }
@@ -172,8 +172,7 @@ int main()
 
     // Loading is transactional: malformed input never mutates an existing SceneAssets instance.
     TempScene invalid;
-    std::filesystem::create_directories(invalid.path);
-    std::ofstream(invalid.path / "scene.json") << R"({"format":"lr.scene","version":99,"objects":[]})";
+    std::ofstream(invalid.path, std::ios::binary) << R"({"format":"lr.scene","version":99,"objects":[]})";
     bool rejected = false;
     try { (void)lr::SceneSerializer::load(invalid.path); }
     catch (const std::runtime_error &) { rejected = true; }

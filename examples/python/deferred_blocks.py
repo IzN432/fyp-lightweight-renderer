@@ -42,7 +42,7 @@ def mesh_bounds(scene: engine.Scene) -> tuple[np.ndarray, np.ndarray]:
 
 def main():
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
-    parser.add_argument("model", nargs="?", default=str(DEFAULT_MODEL), help=".lrscene directory, OBJ, glTF or GLB file")
+    parser.add_argument("model", nargs="?", default=str(DEFAULT_MODEL), help=".lrscene, OBJ, glTF or GLB file")
     parser.add_argument("--hdri", default=str(DEFAULT_HDRI), help="equirectangular .hdr environment")
     parser.add_argument("--frames", type=int, default=0, help="close after this many frames (0 = run until closed)")
     args = parser.parse_args()

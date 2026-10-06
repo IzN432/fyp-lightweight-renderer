@@ -22,6 +22,7 @@ public:
     const Mesh &get(MeshHandle handle) const;
 
     uint32_t size() const { return static_cast<uint32_t>(m_meshes.size()); }
+    void clear() { m_meshes.clear(); }
 
 private:
     std::vector<std::unique_ptr<Mesh>> m_meshes;

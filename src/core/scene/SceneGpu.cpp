@@ -66,6 +66,26 @@ void SceneGpu::addLoaded(const SceneLoadResult &result)
                                    result.materialHandles.end());
 }
 
+void SceneGpu::queueMaterialTextures(std::span<const MaterialHandle> handles)
+{
+    m_pendingTextureUpdates.insert(m_pendingTextureUpdates.end(), handles.begin(), handles.end());
+}
+
+void SceneGpu::clearSceneResources()
+{
+    releaseLightVisuals();
+    m_meshObjects.clear();
+    m_geometryMeshes.clear();
+    m_meshTransforms.clear();
+    m_meshSkins.clear();
+    m_geometryObjects.clear();
+    m_pendingTextureUpdates.clear();
+    // Keep SkinUploader's structural expectations synchronized with the cleared scene. Without an
+    // explicit empty upload it still expects the previous scene's skin list and the next per-frame
+    // palette update fails before (or when) replacement geometry is installed.
+    m_skinUploadResult = m_skinUploader.upload({}, {});
+}
+
 void SceneGpu::removeSceneObjects(std::span<const SceneObjectId> ids)
 {
     const auto removed = [&](const SceneObject *object) {

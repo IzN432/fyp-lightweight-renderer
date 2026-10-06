@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <bit>
 #include <cstring>
@@ -28,9 +29,7 @@ namespace
 using json = nlohmann::json;
 
 constexpr int kFormatVersion = 1;
-
-std::filesystem::path manifestPath(const std::filesystem::path &path) { return path / "scene.json"; }
-std::filesystem::path assetPath(const std::filesystem::path &path) { return path / "assets.bin"; }
+constexpr std::array<char, 8> kFileMagic{'L', 'R', 'S', 'C', 'E', 'N', 'E', '\0'};
 const json &required(const json &object, const char *key, const std::string &where);
 
 class BinaryWriter
@@ -50,13 +49,7 @@ public:
         m_bytes.insert(m_bytes.end(), values.begin(), values.end());
         return {{"offset", offset}, {"bytes", values.size()}};
     }
-    void write(const std::filesystem::path &path) const
-    {
-        std::ofstream output(path, std::ios::binary | std::ios::trunc);
-        if (!output) throw std::runtime_error("SceneSerializer: cannot open '" + path.string() + "' for writing");
-        output.write(reinterpret_cast<const char *>(m_bytes.data()), static_cast<std::streamsize>(m_bytes.size()));
-        if (!output) throw std::runtime_error("SceneSerializer: failed while writing '" + path.string() + "'");
-    }
+    std::span<const std::byte> bytes() const { return m_bytes; }
 private:
     std::vector<std::byte> m_bytes;
 };
@@ -64,16 +57,19 @@ private:
 class BinaryReader
 {
 public:
-    explicit BinaryReader(const std::filesystem::path &path)
+    explicit BinaryReader(const std::filesystem::path &path, std::streamoff offset)
     {
         std::ifstream input(path, std::ios::binary | std::ios::ate);
         if (!input) throw std::runtime_error("SceneSerializer: cannot open '" + path.string() + "'");
         const auto size = input.tellg();
         if (size < 0) throw std::runtime_error("SceneSerializer: cannot determine size of '" + path.string() + "'");
-        m_bytes.resize(static_cast<size_t>(size));
-        input.seekg(0);
-        input.read(reinterpret_cast<char *>(m_bytes.data()), size);
-        if (!input && size != 0) throw std::runtime_error("SceneSerializer: failed while reading '" + path.string() + "'");
+        if (offset < 0 || offset > size)
+            throw std::runtime_error("SceneSerializer: invalid asset offset in '" + path.string() + "'");
+        const auto payloadSize = size - offset;
+        m_bytes.resize(static_cast<size_t>(payloadSize));
+        input.seekg(offset);
+        input.read(reinterpret_cast<char *>(m_bytes.data()), payloadSize);
+        if (!input && payloadSize != 0) throw std::runtime_error("SceneSerializer: failed while reading '" + path.string() + "'");
     }
     std::span<const std::byte> read(const json &view, const std::string &where) const
     {
@@ -465,15 +461,21 @@ Collider deserializeCollider(const json &value, const std::string &where)
 
 void SceneSerializer::save(const SceneAssets &assets, const std::filesystem::path &path)
 {
+    save(assets.scene, assets.meshes, assets.materials, path);
+}
+
+void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
+                           const MaterialStore &materialStore, const std::filesystem::path &path)
+{
     if constexpr (std::endian::native != std::endian::little)
         throw std::runtime_error("SceneSerializer: only little-endian hosts are currently supported");
 
     BinaryWriter binary;
     std::unordered_map<MeshHandle, uint32_t> meshIds;
     std::unordered_map<MaterialHandle, uint32_t> materialIds;
-    for (const auto &objectPointer : assets.scene.sceneObjects())
+    for (const auto &objectPointer : scene.sceneObjects())
     {
-        if (!assets.scene.contains(objectPointer->id()) || !objectPointer->hasComponent<MeshComponent>()) continue;
+        if (!scene.contains(objectPointer->id()) || !objectPointer->hasComponent<MeshComponent>()) continue;
         const MeshComponent &component = objectPointer->getComponent<MeshComponent>();
         meshIds.try_emplace(component.meshHandle(), static_cast<uint32_t>(meshIds.size()));
         for (MaterialHandle handle : component.materialHandles())
@@ -485,7 +487,7 @@ void SceneSerializer::save(const SceneAssets &assets, const std::filesystem::pat
     std::ranges::sort(orderedMaterials, {}, &std::pair<MaterialHandle, uint32_t>::second);
     for (const auto &[handle, id] : orderedMaterials)
     {
-        json item = serializeMaterial(assets.materials.get(handle), binary);
+        json item = serializeMaterial(materialStore.get(handle), binary);
         item["id"] = id;
         materials.push_back(std::move(item));
     }
@@ -495,7 +497,7 @@ void SceneSerializer::save(const SceneAssets &assets, const std::filesystem::pat
     std::ranges::sort(orderedMeshes, {}, &std::pair<MeshHandle, uint32_t>::second);
     for (const auto &[handle, id] : orderedMeshes)
     {
-        const Mesh &mesh = assets.meshes.get(handle);
+        const Mesh &mesh = meshStore.get(handle);
         json item{{"id", id}, {"positions", binary.append(std::span(mesh.positions()))},
                   {"position_indices", binary.append(std::span(mesh.positionIndices()))},
                   {"faces", binary.append(std::span(mesh.faces()))},
@@ -512,10 +514,10 @@ void SceneSerializer::save(const SceneAssets &assets, const std::filesystem::pat
     }
 
     json objects = json::array();
-    for (const auto &objectPointer : assets.scene.sceneObjects())
+    for (const auto &objectPointer : scene.sceneObjects())
     {
         const SceneObject &object = *objectPointer;
-        if (!assets.scene.contains(object.id())) continue;
+        if (!scene.contains(object.id())) continue;
         for (const std::type_index type : object.componentTypes())
         {
             if (type != typeid(TransformComponent) && type != typeid(Camera) && type != typeid(Light) &&
@@ -587,30 +589,50 @@ void SceneSerializer::save(const SceneAssets &assets, const std::filesystem::pat
     }
 
     const json document{{"format", "lr.scene"}, {"version", kFormatVersion}, {"objects", std::move(objects)},
-                        {"meshes", std::move(meshes)}, {"materials", std::move(materials)},
-                        {"binary", "assets.bin"}};
-    std::filesystem::create_directories(path);
-    binary.write(assetPath(path));
-    const auto outputPath = manifestPath(path);
-    std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
-    if (!output) throw std::runtime_error("SceneSerializer: cannot open '" + outputPath.string() + "' for writing");
-    output << document.dump(2) << '\n';
-    if (!output) throw std::runtime_error("SceneSerializer: failed while writing '" + outputPath.string() + "'");
+                        {"meshes", std::move(meshes)}, {"materials", std::move(materials)}};
+    const std::string manifest = document.dump();
+    const uint64_t manifestBytes = static_cast<uint64_t>(manifest.size());
+    if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) throw std::runtime_error("SceneSerializer: cannot open '" + path.string() + "' for writing");
+    output.write(kFileMagic.data(), static_cast<std::streamsize>(kFileMagic.size()));
+    output.write(reinterpret_cast<const char *>(&manifestBytes), sizeof(manifestBytes));
+    output.write(manifest.data(), static_cast<std::streamsize>(manifest.size()));
+    const auto payload = binary.bytes();
+    output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+    if (!output) throw std::runtime_error("SceneSerializer: failed while writing '" + path.string() + "'");
 }
 
 std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &path)
 {
+    auto result = std::make_unique<SceneAssets>();
+    load(path, result->scene, result->meshes, result->materials);
+    return result;
+}
+
+void SceneSerializer::load(const std::filesystem::path &path, Scene &scene, MeshStore &meshStore,
+                           MaterialStore &materialStore)
+{
     if constexpr (std::endian::native != std::endian::little)
         throw std::runtime_error("SceneSerializer: only little-endian hosts are currently supported");
-    const auto inputPath = manifestPath(path);
-    std::ifstream input(inputPath, std::ios::binary);
-    if (!input) throw std::runtime_error("SceneSerializer: cannot open '" + inputPath.string() + "'");
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw std::runtime_error("SceneSerializer: cannot open '" + path.string() + "'");
+
+    std::array<char, kFileMagic.size()> magic{};
+    uint64_t manifestBytes = 0;
+    input.read(magic.data(), static_cast<std::streamsize>(magic.size()));
+    input.read(reinterpret_cast<char *>(&manifestBytes), sizeof(manifestBytes));
+    if (!input || magic != kFileMagic)
+        throw std::runtime_error("SceneSerializer: '" + path.string() + "' is not an lrscene file");
+    std::string manifest(static_cast<size_t>(manifestBytes), '\0');
+    input.read(manifest.data(), static_cast<std::streamsize>(manifest.size()));
+    if (!input) throw std::runtime_error("SceneSerializer: truncated manifest in '" + path.string() + "'");
 
     json document;
-    try { input >> document; }
+    try { document = json::parse(manifest); }
     catch (const json::exception &error)
     {
-        throw std::runtime_error("SceneSerializer: invalid JSON in '" + inputPath.string() + "': " + error.what());
+        throw std::runtime_error("SceneSerializer: invalid manifest in '" + path.string() + "': " + error.what());
     }
     if (required(document, "format", "root").get<std::string>() != "lr.scene")
         throw std::runtime_error("SceneSerializer: root.format must be 'lr.scene'");
@@ -620,8 +642,8 @@ std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &
     const json &objects = required(document, "objects", "root");
     if (!objects.is_array()) throw std::runtime_error("SceneSerializer: root.objects must be an array");
 
-    auto result = std::make_unique<SceneAssets>();
-    const BinaryReader binary(path / required(document, "binary", "root").get<std::string>());
+    const std::streamoff payloadOffset = static_cast<std::streamoff>(kFileMagic.size() + sizeof(manifestBytes) + manifestBytes);
+    const BinaryReader binary(path, payloadOffset);
 
     std::unordered_map<uint32_t, MaterialHandle> materialHandles;
     const json &materials = required(document, "materials", "root");
@@ -631,7 +653,7 @@ std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &
         const std::string where = "materials[" + std::to_string(index) + "]";
         const uint32_t id = required(materials[index], "id", where).get<uint32_t>();
         if (materialHandles.contains(id)) throw std::runtime_error("SceneSerializer: duplicate material id " + std::to_string(id));
-        materialHandles.emplace(id, result->materials.acquire(deserializeMaterial(materials[index], where, binary)));
+        materialHandles.emplace(id, materialStore.acquire(deserializeMaterial(materials[index], where, binary)));
     }
 
     std::unordered_map<uint32_t, MeshHandle> meshHandles;
@@ -687,7 +709,7 @@ std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &
         loadDomain("vertex_group_attributes", [&]<typename T>(const std::string &name, std::span<const std::byte> bytes) {
             mesh.setVertexGroupAttributeArray<T>(name, typedBytes<T>(bytes, where + ".vertex_group_attributes." + name));
         });
-        meshHandles.emplace(id, result->meshes.add(std::move(mesh)));
+        meshHandles.emplace(id, meshStore.add(std::move(mesh)));
     }
 
     std::unordered_map<SceneObjectId, SceneObjectId> ids;
@@ -697,7 +719,7 @@ std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &
         const std::string where = "objects[" + std::to_string(index) + "]";
         const SceneObjectId fileId = required(value, "id", where).get<SceneObjectId>();
         if (ids.contains(fileId)) throw std::runtime_error("SceneSerializer: duplicate object id " + std::to_string(fileId));
-        SceneObject &object = result->scene.createSceneObject();
+        SceneObject &object = scene.createSceneObject();
         object.name = required(value, "name", where).get<std::string>();
         ids.emplace(fileId, object.id());
     }
@@ -707,7 +729,7 @@ std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &
         const json &value = objects[index];
         const std::string where = "objects[" + std::to_string(index) + "]";
         const SceneObjectId fileId = required(value, "id", where).get<SceneObjectId>();
-        SceneObject &object = result->scene.getSceneObject(ids.at(fileId));
+        SceneObject &object = scene.getSceneObject(ids.at(fileId));
         const json &components = required(value, "components", where);
         if (!components.is_object()) throw std::runtime_error("SceneSerializer: " + where + ".components must be an object");
         for (const auto &[name, ignored] : components.items())
@@ -754,8 +776,8 @@ std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &
                 if (foundMaterial == materialHandles.end()) throw std::runtime_error("SceneSerializer: missing material " + std::to_string(materialId) + " at " + where);
                 objectMaterials.push_back(foundMaterial->second);
             }
-            object.addComponent<MeshComponent>(foundMesh->second, result->meshes, std::move(objectMaterials),
-                                               result->materials);
+            object.addComponent<MeshComponent>(foundMesh->second, meshStore, std::move(objectMaterials),
+                                               materialStore);
         }
         if (components.contains("animator"))
         {
@@ -777,7 +799,7 @@ std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &
                 if (found == ids.end()) throw std::runtime_error("SceneSerializer: missing skin joint object " + std::to_string(fileObject) + " at " + where);
                 joints.push_back({found->second, readMat4(required(joint, "inverse_bind_matrix", where), where + ".inverse_bind_matrix")});
             }
-            object.addComponent<SkinComponent>(Skin(result->scene, std::move(joints)));
+            object.addComponent<SkinComponent>(Skin(scene, std::move(joints)));
         }
         if (components.contains("rigid_body"))
         {
@@ -809,10 +831,9 @@ std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &
             const SceneObjectId parentFileId = parent.get<SceneObjectId>();
             const auto found = ids.find(parentFileId);
             if (found == ids.end()) throw std::runtime_error("SceneSerializer: missing parent object " + std::to_string(parentFileId) + " at " + where);
-            result->scene.setParent(object.id(), found->second);
+            scene.setParent(object.id(), found->second);
         }
     }
-    return result;
 }
 
 } // namespace lr

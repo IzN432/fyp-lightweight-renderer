@@ -59,6 +59,12 @@ public:
     // stores. Returns an identity-transform container for the imported asset.
     SceneObject &load(const std::filesystem::path &path, const SceneLoaderConfig &config = {});
 
+    // Appends a native .lrscene and registers its renderable objects. Returns the IDs added.
+    std::vector<SceneObjectId> loadScene(const std::filesystem::path &path);
+
+    // Saves the complete authored scene and its referenced assets as a single .lrscene file.
+    void save(const std::filesystem::path &path) const;
+
     // Registers renderable scene geometry (see SceneGpu::addMeshObject). The first registered object
     // becomes the initial edited mesh; load() registers imported meshes automatically. Later
     // position/attribute edits are detected from the mesh's revisions.

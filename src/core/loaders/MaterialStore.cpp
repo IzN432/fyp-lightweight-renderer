@@ -63,4 +63,15 @@ std::vector<const Material *> MaterialStore::snapshot() const
     return result;
 }
 
+void MaterialStore::clear()
+{
+    for (Material &material : m_materials) material = m_defaultMaterialFactory();
+    m_defaultMaterialHandle = 0;
+    m_freeList.clear();
+    for (uint32_t i = static_cast<uint32_t>(m_materials.size()); i-- > 1;)
+    {
+        m_freeList.push_back(i);
+    }
+}
+
 } // namespace lr

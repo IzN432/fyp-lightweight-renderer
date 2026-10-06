@@ -55,8 +55,11 @@ public:
     SceneGpu &operator=(const SceneGpu &) = delete;
 
     Scene         &scene() { return m_scene; }
+    const Scene   &scene() const { return m_scene; }
     MeshStore     &meshStore() { return m_meshStore; }
+    const MeshStore &meshStore() const { return m_meshStore; }
     MaterialStore &materialStore() { return m_materialStore; }
+    const MaterialStore &materialStore() const { return m_materialStore; }
 
     // Registers renderable geometry: `object` needs a TransformComponent and a MeshComponent, applied as
     // its model matrix at draw time. Register before initialize(), or call rebuildGeometry() afterwards.
@@ -65,6 +68,12 @@ public:
     // Registers every mesh a SceneLoader::load() call created, and queues its material textures for
     // upload by the next rebuildGeometry() (initialize() uploads every texture anyway).
     void addLoaded(const SceneLoadResult &result);
+
+    // Marks newly acquired material slots whose texture descriptors must be refreshed on rebuild.
+    void queueMaterialTextures(std::span<const MaterialHandle> handles);
+
+    // Drops all authored-scene registrations before their CPU asset stores are cleared.
+    void clearSceneResources();
 
     // Forgets removed mesh objects. Call rebuildGeometry() afterwards. (Removed lights need nothing:
     // flushDirty() notices them, see syncLights().)

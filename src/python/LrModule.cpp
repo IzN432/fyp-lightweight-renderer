@@ -1758,8 +1758,10 @@ void bindScene(nb::module_ &m)
                                 "A scene loaded with the engine's loaders: objects, meshes and materials, on the CPU. "
                                 "Build GPU buffers from it with ResourceRegistry.upload_buffer()/upload_image().")
         .def(nb::init<>())
-        .def("save", &lr::SceneSerializer::save, "path"_a,
-             "Save this complete scene to an .lrscene directory (scene.json plus assets.bin).")
+        .def("save", [](const lr::SceneAssets &assets, const fs::path &path) {
+                 lr::SceneSerializer::save(assets, path);
+             }, "path"_a,
+             "Save this complete scene to a single .lrscene file.")
         .def(
             "load",
             [](lr::SceneAssets &assets, const fs::path &path) -> lr::SceneObject & {
@@ -1867,7 +1869,7 @@ void bindScene(nb::module_ &m)
             std::string extension = path.extension().string();
             std::ranges::transform(extension, extension.begin(),
                                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (extension == ".lrscene" || (fs::is_directory(path) && fs::exists(path / "scene.json")))
+            if (extension == ".lrscene")
             {
                 return lr::SceneSerializer::load(path);
             }
@@ -1875,7 +1877,7 @@ void bindScene(nb::module_ &m)
             scene->load(path);
             return scene;
         },
-        "path"_a, "Load an .lrscene directory, OBJ, glTF or GLB file into a new Scene.");
+        "path"_a, "Load an .lrscene file, OBJ, glTF or GLB file into a new Scene.");
 }
 
 // ---------------------------------------------------------------------------------------------

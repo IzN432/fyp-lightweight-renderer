@@ -34,6 +34,7 @@
 #include "core/scene/EngineConventions.hpp"
 #include "core/scene/SceneManager.hpp"
 #include "core/scene/Scene.hpp"
+#include "core/scene/SceneSerializer.hpp"
 
 #include "features/arap/ArapTool.hpp"
 #include "features/laplace_beltrami/LaplaceBeltramiTool.hpp"
@@ -110,22 +111,11 @@ try
     sceneManager.setDefaultCamera(*camera);
     scene.protectSceneObject(camera->id());
 
-    // LIGHT
-    {
-        lr::DirectionalLight light;
-        light.color     = glm::vec3(1.0f, 1.0f, 1.0f);
-        light.intensity = 1.0f;
-
-        lr::SceneObject &lightObject = scene.createSceneObject();
-        lightObject.addComponent<lr::TransformComponent>();
-        lightObject.addComponent<lr::Light>(light);
-        lightObject.name = "Light";
-    }
-
-    // MESH
+    // The editor pipeline currently needs one mesh while its GPU buffers and mesh-editing tools are
+    // constructed. This bootstrap asset is retired before the frame loop, leaving only Main Camera
+    // in the initial scene hierarchy.
     const fs::path meshPath = lr::paths::assetDir / "samples/models/bird_orange.glb";
-
-    sceneManager.load(meshPath, sceneLoadConfig);
+    lr::SceneObject &bootstrapRoot = sceneManager.load(meshPath, sceneLoadConfig);
 
     // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets a quad mesh owned by
     // SceneGpu (not a component on the light, so it isn't selectable or editable). The quad still draws
@@ -160,36 +150,6 @@ try
         collider.localPosition = (boundsMin + boundsMax) * 0.5f;
         meshObject->addComponent<lr::ColliderComponent>(std::move(collider));
         meshObject->addComponent<lr::RigidBodyComponent>();
-
-        // TEST OBJECT — a free-floating sphere collider hovering above the lion, for exercising
-        // collision detection against the mesh's box collider once that lands.
-        constexpr float kTestSphereRadius = 0.3f;
-        lr::SceneObject &testSphereObject = scene.createSceneObject();
-        testSphereObject.name             = "Test Sphere";
-        testSphereObject.addComponent<lr::TransformComponent>(
-            glm::vec3((boundsMin.x + boundsMax.x) * 0.5f, boundsMax.y + kTestSphereRadius * 4.0f,
-                     (boundsMin.z + boundsMax.z) * 0.5f));
-
-        lr::Collider testSphereCollider;
-        testSphereCollider.shape = lr::SphereCollider{kTestSphereRadius};
-        testSphereObject.addComponent<lr::ColliderComponent>(std::move(testSphereCollider));
-        testSphereObject.addComponent<lr::RigidBodyComponent>();
-
-        // TEST OBJECT — a static ground plane collider below the lion, for exercising collision
-        // detection against the mesh's box collider once that lands.
-        lr::SceneObject &testPlaneObject = scene.createSceneObject();
-        testPlaneObject.name             = "Test Ground Plane";
-        testPlaneObject.addComponent<lr::TransformComponent>(
-            glm::vec3((boundsMin.x + boundsMax.x) * 0.5f, boundsMin.y, (boundsMin.z + boundsMax.z) * 0.5f));
-
-        lr::Collider testPlaneCollider;
-        const glm::vec3 extents = boundsMax - boundsMin;
-        testPlaneCollider.shape = lr::PlaneCollider{
-            .offset      = 0.0f,
-            .halfExtents = glm::vec2(std::max(extents.x, extents.z), std::max(extents.x, extents.z)),
-        };
-        testPlaneObject.addComponent<lr::ColliderComponent>(std::move(testPlaneCollider));
-        testPlaneObject.addComponent<lr::RigidBodyComponent>(1.0f, lr::RigidBodyType::Static);
 
     }
 
@@ -382,6 +342,9 @@ try
 
     scene.registerObjectsDestroyedCallback([&](std::span<const lr::SceneObjectId> ids) {
         viewer.context().waitIdle();
+        const lr::SceneObject *previousEditedMesh = sceneManager.editedMeshObject();
+        const bool editedMeshDestroyed = previousEditedMesh &&
+            std::ranges::find(ids, previousEditedMesh->id()) != ids.end();
         if (transformController.target() &&
             std::ranges::find(ids, transformController.target()->id()) != ids.end())
         {
@@ -392,6 +355,10 @@ try
         lr::SceneObject *replacement = sceneManager.removeSceneObjects(ids);
         sceneManager.uploadLights();
         physicsWorld.onSceneChanged();
+        if (!editedMeshDestroyed)
+        {
+            return;
+        }
         if (!replacement)
         {
             sceneManager.setEditorMode(lr::EditorMode::View);
@@ -501,6 +468,8 @@ try
     std::string             environmentLoadError;
     bool                    environmentDirty = false;
     std::string             sceneImportError;
+    std::optional<fs::path> sceneDocumentPath;
+    std::string             scenePersistenceError;
 
     viewer.onGui([&]() {
         const ImGuiViewport *viewport = ImGui::GetMainViewport();
@@ -619,6 +588,48 @@ try
         ImGui::SetNextWindowPos(topRight, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
         ImGui::Begin("Scene Hierarchy");
+        if (ImGui::Button("Load Scene..."))
+        {
+            IGFD::FileDialogConfig dialogConfig;
+            dialogConfig.path = sceneDocumentPath ? sceneDocumentPath->parent_path().string() : ".";
+            dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
+                                 ImGuiFileDialogFlags_ShowDevicesButton;
+            ImGuiFileDialog::Instance()->OpenDialog("LoadNativeScene", "Load Scene", ".lrscene", dialogConfig);
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!sceneDocumentPath.has_value());
+        if (ImGui::Button("Save"))
+        {
+            try
+            {
+                sceneManager.save(*sceneDocumentPath);
+                scenePersistenceError.clear();
+            }
+            catch (const std::exception &e)
+            {
+                scenePersistenceError = e.what();
+                spdlog::error("Failed to save scene: {}", e.what());
+            }
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Save As..."))
+        {
+            IGFD::FileDialogConfig dialogConfig;
+            dialogConfig.path = sceneDocumentPath ? sceneDocumentPath->parent_path().string() : ".";
+            dialogConfig.fileName = sceneDocumentPath ? sceneDocumentPath->filename().string() : "scene.lrscene";
+            dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_ConfirmOverwrite |
+                                 ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
+                                 ImGuiFileDialogFlags_ShowDevicesButton;
+            ImGuiFileDialog::Instance()->OpenDialog("SaveNativeScene", "Save Scene As", ".lrscene",
+                                                     dialogConfig);
+        }
+        if (!scenePersistenceError.empty())
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Scene file error: %s",
+                               scenePersistenceError.c_str());
+        }
+        ImGui::Separator();
         if (ImGui::Button("Import..."))
         {
             IGFD::FileDialogConfig dialogConfig;
@@ -652,6 +663,67 @@ try
         ImGui::Separator();
         scene.onHierarchyGUI();
         ImGui::End();
+
+        if (ImGuiFileDialog::Instance()->Display("LoadNativeScene", ImGuiWindowFlags_NoCollapse,
+                                                  ImVec2(640.0f, 360.0f)))
+        {
+            if (ImGuiFileDialog::Instance()->IsOk())
+            {
+                try
+                {
+                    fs::path selectedPath(ImGuiFileDialog::Instance()->GetFilePathName());
+                    const fs::path scenePath = selectedPath;
+                    viewer.context().waitIdle();
+                    sceneManager.loadScene(scenePath);
+                    sceneManager.rebuildGeometry();
+                    if (lr::SceneObject *loadedMesh = sceneManager.editedMeshObject())
+                    {
+                        meshObject = loadedMesh;
+                        lr::Mesh &mesh = loadedMesh->getComponent<lr::MeshComponent>().mesh();
+                        vertexManager.rebind(mesh);
+                        arapTool.rebind(mesh);
+                        laplaceBeltramiTool.rebind(mesh);
+                        heatmapPass.setMeshSource(sceneManager.selectedMeshHeatmap(),
+                                                  sceneManager.selectedMeshIndexRange(),
+                                                  loadedMesh->getComponent<lr::TransformComponent>());
+                        overlayPointsPass.setPointsSource(sceneManager.selectedMeshPoints(), mesh.uniquePositionCount(),
+                                                          loadedMesh->getComponent<lr::TransformComponent>());
+                    }
+                    physicsWorld.onSceneChanged();
+                    viewer.frameGraph().compile();
+                    sceneDocumentPath = scenePath;
+                    scenePersistenceError.clear();
+                }
+                catch (const std::exception &e)
+                {
+                    scenePersistenceError = e.what();
+                    spdlog::error("Failed to load scene: {}", e.what());
+                }
+            }
+            ImGuiFileDialog::Instance()->Close();
+        }
+
+        if (ImGuiFileDialog::Instance()->Display("SaveNativeScene", ImGuiWindowFlags_NoCollapse,
+                                                  ImVec2(640.0f, 360.0f)))
+        {
+            if (ImGuiFileDialog::Instance()->IsOk())
+            {
+                try
+                {
+                    fs::path selectedPath(ImGuiFileDialog::Instance()->GetFilePathName());
+                    if (selectedPath.extension() != ".lrscene") selectedPath += ".lrscene";
+                    sceneManager.save(selectedPath);
+                    sceneDocumentPath = std::move(selectedPath);
+                    scenePersistenceError.clear();
+                }
+                catch (const std::exception &e)
+                {
+                    scenePersistenceError = e.what();
+                    spdlog::error("Failed to save scene: {}", e.what());
+                }
+            }
+            ImGuiFileDialog::Instance()->Close();
+        }
 
         if (ImGuiFileDialog::Instance()->Display("ImportScene", ImGuiWindowFlags_NoCollapse,
                                                   ImVec2(640.0f, 360.0f)))
@@ -878,6 +950,11 @@ try
     // controller / gizmo / GUI edits and does at most one GPU re-upload per dirtied resource
     // rather than one per individual mutation) callbacks — see SceneManager::registerCallbacks.
     sceneManager.registerCallbacks(viewer);
+
+    // Start with no authored scene objects. Retirement keeps the bootstrap allocations alive long
+    // enough for dormant editor references to remain safe until loadScene() clears the asset stores
+    // and rebinds every mesh-editing tool to the loaded scene.
+    scene.destroySceneObject(bootstrapRoot.id());
 
     viewer.addImguiPass();
     viewer.run();

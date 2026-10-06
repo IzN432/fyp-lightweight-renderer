@@ -1,7 +1,9 @@
 #include "SceneManager.hpp"
 
 #include "MeshComponent.hpp"
+#include "Camera.hpp"
 #include "TransformComponent.hpp"
+#include "SceneSerializer.hpp"
 
 #include "core/app/Viewer.hpp"
 
@@ -60,6 +62,88 @@ SceneObject &SceneManager::load(const std::filesystem::path &path, const SceneLo
         m_editedMeshObject = gpu().meshObjects().front();
     }
     return target.getSceneObject(imported.rootObject);
+}
+
+void SceneManager::save(const std::filesystem::path &path) const
+{
+    SceneSerializer::save(gpu().scene(), m_meshStore, m_materialStore, path);
+}
+
+std::vector<SceneObjectId> SceneManager::loadScene(const std::filesystem::path &path)
+{
+    Scene &target = scene();
+    std::vector<SceneObjectId> previousObjects;
+    for (const auto &object : target.sceneObjects())
+    {
+        if (object && target.contains(object->id())) previousObjects.push_back(object->id());
+    }
+    // Clear first by design: a failed load leaves an empty authored scene. Protected application-owned
+    // objects (notably the live editor camera) remain because the Viewer holds references to them.
+    for (SceneObjectId id : previousObjects)
+    {
+        if (target.contains(id) && target.canDestroySceneObject(id)) target.destroySceneObject(id);
+    }
+    gpu().clearSceneResources();
+    m_editedMeshObject = nullptr;
+    m_meshStore.clear();
+    m_materialStore.clear();
+
+    const size_t firstObject = target.sceneObjects().size();
+    SceneSerializer::load(path, target, m_meshStore, m_materialStore);
+
+    std::vector<SceneObjectId> added;
+    std::vector<MaterialHandle> loadedMaterials;
+    std::vector<SceneObjectId> legacyEditorCameras;
+    for (size_t i = firstObject; i < target.sceneObjects().size(); ++i)
+    {
+        SceneObject &object = *target.sceneObjects()[i];
+        if (!target.contains(object.id())) continue;
+        // Preserve the live camera object's identity (Viewer/input systems reference it), but restore
+        // all authored camera state from the serialized copy before retiring that temporary object.
+        if (object.name == "Main Camera" && object.hasComponent<Camera>())
+        {
+            SceneObject *liveCamera = gpu().camera();
+            if (liveCamera)
+            {
+                const Camera &loadedCamera = object.getComponent<Camera>();
+                Camera &camera = liveCamera->getComponent<Camera>();
+                camera.projectionType = loadedCamera.projectionType;
+                camera.fovYDegrees    = loadedCamera.fovYDegrees;
+                camera.nearPlane      = loadedCamera.nearPlane;
+                camera.farPlane       = loadedCamera.farPlane;
+                camera.orthoHeight    = loadedCamera.orthoHeight;
+
+                if (object.hasComponent<TransformComponent>() &&
+                    liveCamera->hasComponent<TransformComponent>())
+                {
+                    const Transform &loadedTransform = object.getComponent<TransformComponent>().transform();
+                    auto &cameraTransform = liveCamera->getComponent<TransformComponent>();
+                    cameraTransform.setPosition(loadedTransform.position());
+                    cameraTransform.setRotation(loadedTransform.rotation());
+                    cameraTransform.setScale(loadedTransform.scale());
+                }
+            }
+            legacyEditorCameras.push_back(object.id());
+            continue;
+        }
+        added.push_back(object.id());
+        if (object.hasComponent<MeshComponent>())
+        {
+            const auto &materials = object.getComponent<MeshComponent>().materialHandles();
+            loadedMaterials.insert(loadedMaterials.end(), materials.begin(), materials.end());
+            addMeshObject(object);
+        }
+    }
+    for (SceneObjectId id : legacyEditorCameras)
+    {
+        if (!target.contains(id)) continue;
+        const std::vector<SceneObjectId> children = target.getSceneObject(id).children();
+        for (SceneObjectId child : children) target.setParent(child, std::nullopt);
+        if (target.canDestroySceneObject(id)) target.destroySceneObject(id);
+    }
+    gpu().updateCamera();
+    gpu().queueMaterialTextures(loadedMaterials);
+    return added;
 }
 
 void SceneManager::addMeshObject(SceneObject &object)

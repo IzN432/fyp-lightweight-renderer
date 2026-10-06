@@ -33,6 +33,8 @@ public:
     MaterialHandle defaultMaterialHandle() const { return m_defaultMaterialHandle; }
 
     uint32_t capacity() const { return static_cast<uint32_t>(m_materials.size()); }
+    // Restores every slot to its default value and makes all non-default handles available again.
+    void clear();
 
     // Capacity-length, in handle order — feeds MaterialUploader::upload()/update() directly.
     std::vector<const Material *> snapshot() const;
