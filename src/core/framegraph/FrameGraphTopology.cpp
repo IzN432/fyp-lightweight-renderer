@@ -94,6 +94,7 @@ std::vector<PlannedImage> planAttachmentImages(std::span<const PassDesc>        
             {
                 case ImageUsage::Sampled:
                 case ImageUsage::SampledDepth:
+                case ImageUsage::SampledMultisample:
                 case ImageUsage::SampledArray:
                     entry.image.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
                     break;

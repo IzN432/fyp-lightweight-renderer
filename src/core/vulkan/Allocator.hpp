@@ -28,6 +28,7 @@ struct AllocatedImage
     VkFormat                 format      = VK_FORMAT_UNDEFINED;
     uint32_t                 mipLevels   = 1;
     uint32_t                 arrayLayers = 1;
+    VkSampleCountFlagBits    samples     = VK_SAMPLE_COUNT_1_BIT;
 };
 
 // Full image creation config. Use the convenience overload for simple 2D images.
@@ -42,6 +43,7 @@ struct ImageConfig
     VkImageCreateFlags flags         = 0; // e.g. VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
     VkImageViewType    viewType      = VK_IMAGE_VIEW_TYPE_2D;
     VkImageLayout      initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkSampleCountFlagBits samples     = VK_SAMPLE_COUNT_1_BIT;
 };
 
 class Allocator

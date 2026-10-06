@@ -29,11 +29,12 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
-    vec3  lit = texture(litColor, inUV).rgb;
+    vec4  lit = texture(litColor, inUV);
     float d   = texture(depth, inUV).r;
 
     vec4 viewPos  = camera.invProj * vec4(inUV * 2.0 - 1.0, d, 1.0);
     float dist    = length(viewPos.xyz / viewPos.w);
     float amount  = 1.0 - exp(-fog.density * dist);
-    outColor = vec4(mix(lit, fog.color.rgb, amount), 1.0);
+    // Pass PbrPass's MSAA coverage through so CompositePass can anti-alias silhouettes against the sky.
+    outColor = vec4(mix(lit.rgb, fog.color.rgb, amount), lit.a);
 }

@@ -38,29 +38,32 @@ layout(push_constant) uniform FinalPC
 
 void main()
 {
-    float depth = min(texture(gbufferDepth, inUV).r, texture(overlayDepth, inUV).r);
+    float sceneDepth = texture(gbufferDepth, inUV).r;
+    float depth = min(sceneDepth, texture(overlayDepth, inUV).r);
 
-    vec3 baseColor;
-    if (isBackground(depth))
+    vec3 background;
+    if (pc.showEnvironmentBackground != 0u)
     {
-        if (pc.showEnvironmentBackground != 0u)
-        {
-            vec3 worldDir = viewRayWorld(inUV, cameraUbo.view, cameraUbo.proj);
-            baseColor = reinhard(texture(skybox, worldDir).rgb);
-        }
-        else
-        {
-            baseColor = pc.backgroundColor.rgb;
-        }
+        vec3 worldDir = viewRayWorld(inUV, cameraUbo.view, cameraUbo.proj);
+        background = reinhard(texture(skybox, worldDir).rgb);
     }
     else
     {
-        vec3 pbrColor = texture(pbr, inUV).rgb;
+        background = pc.backgroundColor.rgb;
+    }
+
+    vec3 baseColor = background;
+    if (!isBackground(depth))
+    {
+        vec4 pbrSample = texture(pbr, inUV);
         vec4 heatmapSample = texture(heatmap, inUV);
-        vec3 litColor = mix(pbrColor, heatmapSample.rgb, heatmapSample.a);
+        vec3 litColor = mix(pbrSample.rgb, heatmapSample.rgb, heatmapSample.a);
+        // pbr alpha is the fraction of MSAA samples covered by geometry; blending in display space keeps
+        // bright silhouettes from staying stair-stepped after tone mapping.
+        float coverage = isBackground(sceneDepth) ? 0.0 : pbrSample.a;
+        vec3 sceneColor = mix(background, reinhard(litColor), coverage);
         vec4 overlaySample = texture(overlay, inUV);
-        vec3 color = (1.0 - overlaySample.a) * litColor + overlaySample.a * overlaySample.rgb;
-        baseColor = reinhard(color);
+        baseColor = mix(sceneColor, reinhard(overlaySample.rgb), overlaySample.a);
     }
 
     vec4 pointsSample = texture(overlayPoints, inUV);

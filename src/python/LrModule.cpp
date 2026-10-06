@@ -710,6 +710,22 @@ void bindPasses(nb::module_ &m)
         .def("blend", &PassBuilder::blend, "mode"_a, ref,
              "Blend mode for all color attachments. Blending reads them, so this pass also runs after "
              "whatever wrote them earlier (use load_op=LOAD to blend over that content).")
+        .def(
+            "samples",
+            [](PassBuilder &b, uint32_t count) -> PassBuilder & {
+                switch (count)
+                {
+                    case 1: return b.samples(VK_SAMPLE_COUNT_1_BIT);
+                    case 2: return b.samples(VK_SAMPLE_COUNT_2_BIT);
+                    case 4: return b.samples(VK_SAMPLE_COUNT_4_BIT);
+                    case 8: return b.samples(VK_SAMPLE_COUNT_8_BIT);
+                    case 16: return b.samples(VK_SAMPLE_COUNT_16_BIT);
+                    case 32: return b.samples(VK_SAMPLE_COUNT_32_BIT);
+                    case 64: return b.samples(VK_SAMPLE_COUNT_64_BIT);
+                    default: throw std::invalid_argument("samples: count must be 1, 2, 4, 8, 16, 32, or 64");
+                }
+            },
+            "count"_a, ref, "Enable MSAA for this pass; attachments are resolved automatically.")
         .def("polygon_mode", &PassBuilder::polygonMode, "mode"_a, ref, "FILL (default), LINE (wireframe) or POINT.")
         .def("cull", &PassBuilder::cull, "mode"_a, "front_face"_a = VK_FRONT_FACE_COUNTER_CLOCKWISE, ref,
              "Default: BACK for geometry passes, NONE for fullscreen ones.")
@@ -1900,6 +1916,8 @@ const char *usageName(lr::ImageUsage usage)
             return "sampled";
         case lr::ImageUsage::SampledDepth:
             return "sampled_depth";
+        case lr::ImageUsage::SampledMultisample:
+            return "sampled_multisample";
         case lr::ImageUsage::SampledArray:
             return "sampled_array";
         case lr::ImageUsage::Storage:

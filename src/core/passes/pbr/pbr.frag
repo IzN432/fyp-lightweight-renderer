@@ -39,11 +39,13 @@ layout(set = 0, binding = 2) uniform samplerCube prefilterMap;
 layout(set = 0, binding = 3) uniform sampler2D brdfLut;
 layout(set = 0, binding = 4) uniform sampler2D ltc1; // inverse M for area light cosine warp
 layout(set = 0, binding = 5) uniform sampler2D ltc2; // GGX norm, fresnel, unused, horizon-clip
-layout(set = 0, binding = 6) uniform sampler2D gbufferDepth;
-layout(set = 0, binding = 7) uniform sampler2D gbufferAlbedo;
-layout(set = 0, binding = 8) uniform sampler2D gbufferNormal;
-layout(set = 0, binding = 9) uniform sampler2D gbufferRoughnessMetallic;
-layout(set = 0, binding = 10) uniform sampler2D gbufferEmissive;
+// These are the unresolved images from GeometryPass. sampler2DMS deliberately has no filtering or
+// normalized coordinates: texelFetch selects one exact coverage sample from the current pixel.
+layout(set = 0, binding = 6) uniform sampler2DMS gbufferDepth;
+layout(set = 0, binding = 7) uniform sampler2DMS gbufferAlbedo;
+layout(set = 0, binding = 8) uniform sampler2DMS gbufferNormal;
+layout(set = 0, binding = 9) uniform sampler2DMS gbufferRoughnessMetallic;
+layout(set = 0, binding = 10) uniform sampler2DMS gbufferEmissive;
 layout(set = 0, binding = 11) readonly buffer LightBuffer
 {
     LightData lights[];
@@ -87,19 +89,22 @@ vec3 IntegrateEdgeVec(vec3 v1, vec3 v2);
 void ClipQuadToHorizon(inout vec3 L[5], out int n);
 vec3 LTC_Evaluate(vec3 N, vec3 V, vec3 P, mat3 Minv, vec3 points[4], bool twoSided);
 
-void main()
+vec3 ShadeSample(ivec2 pixel, int sampleIndex, out bool covered)
 {
-    // Screen space UV coordinates for sampling G-buffer textures
-    vec3 albedo = texture(gbufferAlbedo, inUV).rgb;
-    vec3 normal = unpackViewNormal(texture(gbufferNormal, inUV).rg);
-    float roughness = max(texture(gbufferRoughnessMetallic, inUV).r, 0.045);
-    float metallic = texture(gbufferRoughnessMetallic, inUV).g;
-    float depth = texture(gbufferDepth, inUV).r;
+    // Fetch a coherent set of attributes from the same coverage sample. Resolving attributes first
+    // would mix foreground material values with clear values at silhouettes and then light the mix.
+    vec3 albedo = texelFetch(gbufferAlbedo, pixel, sampleIndex).rgb;
+    vec3 normal = unpackViewNormal(texelFetch(gbufferNormal, pixel, sampleIndex).rg);
+    vec2 material = texelFetch(gbufferRoughnessMetallic, pixel, sampleIndex).rg;
+    float roughness = max(material.r, 0.045);
+    float metallic = material.g;
+    float depth = texelFetch(gbufferDepth, pixel, sampleIndex).r;
 
     if (depth >= 1.0) {
-        outColor = vec4(0.0, 0.0, 0.0, 1.0);
-        return;
+        covered = false;
+        return vec3(0.0);
     }
+    covered = true;
     
     vec3 position = depthToViewPosition(depth, inUV, cameraUbo.invProj);
 
@@ -129,9 +134,34 @@ void main()
 
     // Emissive is a direct, unlit contribution (e.g. the visual quad representing an area light) —
     // it doesn't go through the light loop above.
-    color += texture(gbufferEmissive, inUV).rgb;
+    color += texelFetch(gbufferEmissive, pixel, sampleIndex).rgb;
 
-    outColor = vec4(color, 1.0);
+    return color;
+}
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    int sampleCount = textureSamples(gbufferDepth);
+    vec3 accumulated = vec3(0.0);
+    int coveredSamples = 0;
+
+    // Shade every covered sample, then average only the lit samples. Coverage is carried in alpha so
+    // the final/composite pass can blend the shaded surface with the background at polygon edges.
+    for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex)
+    {
+        bool covered;
+        vec3 sampleColor = ShadeSample(pixel, sampleIndex, covered);
+        if (covered)
+        {
+            accumulated += sampleColor;
+            ++coveredSamples;
+        }
+    }
+
+    float coverage = float(coveredSamples) / float(sampleCount);
+    vec3 color = coveredSamples > 0 ? accumulated / float(coveredSamples) : vec3(0.0);
+    outColor = vec4(color, coverage);
 }
 
 vec3 CalcPointLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic)

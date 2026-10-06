@@ -3,8 +3,9 @@
 #include "../utility/tonemap.glslh"
 
 // CompositePass: the engine's final image without the editor overlays. Where GeometryPass drew nothing
-// (gbufferDepth == 1) shows the environment cubemap; elsewhere the HDR input image. Both are Reinhard
-// tone mapped — the same as final.frag (see tonemap.glslh).
+// (gbufferDepth == 1) shows the environment cubemap; elsewhere the HDR input image, blended over the sky
+// by the input's alpha (PbrPass writes MSAA coverage there). Both are Reinhard tone mapped before the
+// blend — the same as final.frag (see tonemap.glslh).
 
 layout(location = 0) in vec2 inUV;
 
@@ -26,14 +27,9 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
-    vec3 hdr;
-    if (isBackground(texture(gbufferDepth, inUV).r))
-    {
-        hdr = texture(skybox, viewRayWorld(inUV, cameraUbo.view, cameraUbo.proj)).rgb;
-    }
-    else
-    {
-        hdr = texture(hdrInput, inUV).rgb;
-    }
-    outColor = vec4(reinhard(hdr), 1.0);
+    vec3 sky = reinhard(texture(skybox, viewRayWorld(inUV, cameraUbo.view, cameraUbo.proj)).rgb);
+    vec4 hdr = texture(hdrInput, inUV);
+    // The depth test still decides "nothing drawn", so inputs that write alpha = 1 everywhere keep working.
+    float coverage = isBackground(texture(gbufferDepth, inUV).r) ? 0.0 : hdr.a;
+    outColor = vec4(mix(sky, reinhard(hdr.rgb), coverage), 1.0);
 }

@@ -19,6 +19,9 @@ namespace lr
 class ResourceRegistry
 {
 public:
+    // Compiled graphs use the same allocator for private implementation images such as MSAA targets.
+    // These images are deliberately not registered by name: user-facing resources stay single-sampled.
+    Allocator &allocator() { return m_allocator; }
     ResourceRegistry(const VulkanContext &ctx, Allocator &allocator, VkExtent2D defaultExtent);
     ~ResourceRegistry();
 

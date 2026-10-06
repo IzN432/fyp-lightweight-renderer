@@ -25,6 +25,7 @@ public:
         PassType                                       passType = PassType::Fullscreen;
         VkPrimitiveTopology                            topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         GraphicsState                                  state;
+        VkSampleCountFlagBits                          samples = VK_SAMPLE_COUNT_1_BIT;
         std::vector<VkFormat>                          colorAttachmentFormats;
         VkFormat                                       depthAttachmentFormat = VK_FORMAT_UNDEFINED;
         VkPipelineLayout                               layout = VK_NULL_HANDLE; // set by DescriptorAllocator

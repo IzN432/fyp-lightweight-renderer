@@ -85,7 +85,7 @@ AllocatedImage Allocator::createImage(const ImageConfig &cfg)
     imageCI.extent        = cfg.extent;
     imageCI.mipLevels     = cfg.mipLevels;
     imageCI.arrayLayers   = cfg.arrayLayers;
-    imageCI.samples       = VK_SAMPLE_COUNT_1_BIT;
+    imageCI.samples       = cfg.samples;
     imageCI.tiling        = VK_IMAGE_TILING_OPTIMAL;
     imageCI.usage         = cfg.usage;
     imageCI.initialLayout = cfg.initialLayout;
@@ -99,6 +99,7 @@ AllocatedImage Allocator::createImage(const ImageConfig &cfg)
     result.format      = cfg.format;
     result.mipLevels   = cfg.mipLevels;
     result.arrayLayers = cfg.arrayLayers;
+    result.samples     = cfg.samples;
 
     checkVk(vmaCreateImage(m_allocator, &imageCI, &allocCI, &result.image, &result.allocation, nullptr),
             "Allocator: vmaCreateImage");
@@ -215,6 +216,7 @@ void Allocator::destroy(AllocatedImage &image)
     image.format      = VK_FORMAT_UNDEFINED;
     image.mipLevels   = 1;
     image.arrayLayers = 1;
+    image.samples     = VK_SAMPLE_COUNT_1_BIT;
 }
 
 } // namespace lr

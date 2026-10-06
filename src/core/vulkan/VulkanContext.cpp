@@ -397,10 +397,15 @@ void VulkanContext::pickPhysicalDevice(VkSurfaceKHR surface)
     // Query properties via pNext chain
     m_deviceProperties11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES;
     m_deviceProperties12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES;
-    m_deviceProperties12.pNext = &m_deviceProperties11;
+    m_depthResolveProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES;
+    m_deviceProperties12.pNext = &m_depthResolveProperties;
+    m_depthResolveProperties.pNext = &m_deviceProperties11;
     m_deviceProperties2.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     m_deviceProperties2.pNext  = &m_deviceProperties12;
     vkGetPhysicalDeviceProperties2(m_physicalDevice, &m_deviceProperties2);
+    // MIN preserves the nearest visible surface at polygon edges. SAMPLE_ZERO is the portable fallback.
+    if (m_depthResolveProperties.supportedDepthResolveModes & VK_RESOLVE_MODE_MIN_BIT)
+        m_depthResolveMode = VK_RESOLVE_MODE_MIN_BIT;
 
     // Query features via pNext chain
     m_deviceFeatures13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;

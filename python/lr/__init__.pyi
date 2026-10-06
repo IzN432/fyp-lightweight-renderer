@@ -386,6 +386,10 @@ class PassBuilder:
         """Blend mode for all color attachments."""
         ...
 
+    def samples(self, count: int) -> PassBuilder:
+        """Enable MSAA for this pass (typically 4); attachments are resolved automatically."""
+        ...
+
     def polygon_mode(self, mode: PolygonMode) -> PassBuilder:
         """FILL (default), LINE (wireframe) or POINT."""
         ...

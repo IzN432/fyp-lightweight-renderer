@@ -35,6 +35,7 @@ enum class ImageUsage
 {
     Sampled,
     SampledDepth,
+    SampledMultisample,
     SampledArray,
     Storage,
     ColorAttachment,
@@ -63,6 +64,9 @@ enum class BlendMode
 // write exactly when the pass has a depth attachment.
 struct GraphicsState
 {
+    // Number of coverage samples evaluated by rasterization. The public images remain single-sampled:
+    // the compiled graph creates private multisample attachments and resolves them after the pass.
+    VkSampleCountFlagBits          samples     = VK_SAMPLE_COUNT_1_BIT;
     BlendMode                      blend       = BlendMode::Opaque;
     VkPolygonMode                  polygonMode = VK_POLYGON_MODE_FILL;
     std::optional<VkCullModeFlags> cullMode;

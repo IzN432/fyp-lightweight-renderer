@@ -10,10 +10,11 @@ namespace lr
 {
 
 // The engine's final image without the editor overlays FinalPass blends in: the environment cubemap
-// where GeometryPass drew nothing, the HDR input image elsewhere, Reinhard tone mapped.
+// where GeometryPass drew nothing, the HDR input image elsewhere, Reinhard tone mapped. The input's
+// alpha is its edge coverage and blends it over the sky; write 1 for a hard edge.
 //
 // Reads:  cameraBufferResourceName (CameraGpuData UBO), "ibl_env" (cubemap, from IBLPass),
-//         "gbufferDepth" (D32, from GeometryPass), inputImage (HDR colour, default "pbr").
+//         "gbufferDepth" (D32, from GeometryPass), inputImage (HDR colour + coverage, default "pbr").
 // Writes: outputImage (default "swapchain") in outputFormat.
 class CompositePass
 {

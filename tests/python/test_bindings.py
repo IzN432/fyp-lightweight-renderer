@@ -131,7 +131,9 @@ def test_resource_errors_raise_immediately():
 
 def test_pipeline_state_runs():
     def configure(builder):
-        builder.blend(lr.BlendMode.ADDITIVE).cull(lr.CullMode.NONE)
+        # This exercises the complete MSAA path: private 4-sample target, dynamic-rendering resolve,
+        # and the normal single-sample swapchain image consumed by presentation.
+        builder.samples(4).blend(lr.BlendMode.ADDITIVE).cull(lr.CullMode.NONE)
 
     viewer = make_viewer(configure=configure)
     frames = []

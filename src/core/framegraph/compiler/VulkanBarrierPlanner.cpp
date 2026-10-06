@@ -4,18 +4,7 @@
 #include <stdexcept>
 #include <tuple>
 
-namespace
-{
-
-using lr::AccessMode;
-using lr::BufferUsage;
-using lr::BufferUse;
-using lr::ImageUsage;
-using lr::ImageUse;
-using lr::framegraph::BarrierResourceKind;
-using lr::framegraph::VulkanResourceState;
-
-VkPipelineStageFlags2 stagesForShader(VkShaderStageFlags stages)
+VkPipelineStageFlags2 lr::framegraph::stagesForShader(VkShaderStageFlags stages)
 {
     if (stages == VK_SHADER_STAGE_ALL)
     {
@@ -53,6 +42,18 @@ VkPipelineStageFlags2 stagesForShader(VkShaderStageFlags stages)
     return result == VK_PIPELINE_STAGE_2_NONE ? VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT : result;
 }
 
+namespace
+{
+
+using lr::AccessMode;
+using lr::BufferUsage;
+using lr::BufferUse;
+using lr::ImageUsage;
+using lr::ImageUse;
+using lr::framegraph::BarrierResourceKind;
+using lr::framegraph::stagesForShader;
+using lr::framegraph::VulkanResourceState;
+
 struct RequiredAccess
 {
     BarrierResourceKind kind;
@@ -67,6 +68,7 @@ RequiredAccess accessForImage(const ImageUse &use)
     switch (use.usage)
     {
         case ImageUsage::Sampled:
+        case ImageUsage::SampledMultisample:
         case ImageUsage::SampledArray:
             return {
                 BarrierResourceKind::Image,

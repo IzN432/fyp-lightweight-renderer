@@ -98,6 +98,26 @@ PassBuilder &PassBuilder::blend(BlendMode mode)
     }
     return *this;
 }
+
+PassBuilder &PassBuilder::samples(VkSampleCountFlagBits samples)
+{
+    // Keep invalid values out of the graph definition. Device-specific support is checked later by
+    // FrameGraphCompiler, where the selected physical device is available.
+    switch (samples)
+    {
+        case VK_SAMPLE_COUNT_1_BIT:
+        case VK_SAMPLE_COUNT_2_BIT:
+        case VK_SAMPLE_COUNT_4_BIT:
+        case VK_SAMPLE_COUNT_8_BIT:
+        case VK_SAMPLE_COUNT_16_BIT:
+        case VK_SAMPLE_COUNT_32_BIT:
+        case VK_SAMPLE_COUNT_64_BIT:
+            desc().graphics.samples = samples;
+            return *this;
+        default:
+            throw std::invalid_argument("PassBuilder::samples: expected a Vulkan sample-count bit");
+    }
+}
 PassBuilder &PassBuilder::polygonMode(VkPolygonMode mode)
 {
     desc().graphics.polygonMode = mode;
@@ -139,6 +159,17 @@ PassBuilder &PassBuilder::sampledDepth(uint32_t binding, ImageHandle image, VkSh
     requireShaderStages(stages, "sampled depth image");
     desc().imageUses.push_back({.image   = image,
                                 .usage   = ImageUsage::SampledDepth,
+                                .access  = AccessMode::Read,
+                                .binding = binding,
+                                .stages  = stages});
+    return *this;
+}
+
+PassBuilder &PassBuilder::sampledMultisampleImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages)
+{
+    requireShaderStages(stages, "sampled multisample image");
+    desc().imageUses.push_back({.image   = image,
+                                .usage   = ImageUsage::SampledMultisample,
                                 .access  = AccessMode::Read,
                                 .binding = binding,
                                 .stages  = stages});

@@ -39,6 +39,9 @@ struct VulkanBarrierPlan
     std::unordered_map<std::string, VkImageLayout> finalImageLayouts;
 };
 
+// Shader stages that touch a resource -> the pipeline stages a barrier must name for them.
+VkPipelineStageFlags2 stagesForShader(VkShaderStageFlags stages);
+
 // Converts the current Vulkan-facing PassDesc frontend into synchronization
 // barriers. Resource ordering is supplied by GraphCompiler's execution plan.
 VulkanBarrierPlan planVulkanBarriers(std::span<const PassDesc> passes, const ResourceHandleRegistry &resources,

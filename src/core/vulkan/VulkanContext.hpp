@@ -69,6 +69,15 @@ public:
     uint32_t                                getApiVersion() const { return m_apiVersion; }
     // Optional features — enabled when the device supports them.
     bool supportsWireframe() const { return m_fillModeNonSolid; }
+    VkSampleCountFlags colorSampleCounts() const
+    {
+        return m_deviceProperties2.properties.limits.framebufferColorSampleCounts;
+    }
+    VkSampleCountFlags depthSampleCounts() const
+    {
+        return m_deviceProperties2.properties.limits.framebufferDepthSampleCounts;
+    }
+    VkResolveModeFlagBits depthResolveMode() const { return m_depthResolveMode; }
 
     // Called with every validation-layer message of error severity (in addition to logging it), on
     // the thread that made the offending Vulkan call. Only fires when validation is enabled.
@@ -123,6 +132,7 @@ private:
     int     m_transferQueueFamily  = -1;
     bool    m_hasDedicatedTransfer = false;
     bool    m_fillModeNonSolid     = false;
+    VkResolveModeFlagBits m_depthResolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
 
     std::function<void(std::string_view)> m_validationErrorHandler;
 
@@ -130,6 +140,7 @@ private:
     VkPhysicalDeviceProperties2        m_deviceProperties2{};
     VkPhysicalDeviceVulkan11Properties m_deviceProperties11{};
     VkPhysicalDeviceVulkan12Properties m_deviceProperties12{};
+    VkPhysicalDeviceDepthStencilResolveProperties m_depthResolveProperties{};
     VkPhysicalDeviceFeatures2          m_deviceFeatures2{};
     VkPhysicalDeviceVulkan12Features   m_deviceFeatures12{};
     VkPhysicalDeviceVulkan13Features   m_deviceFeatures13{};

@@ -74,6 +74,9 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         .storageBufferRead(9, fg.buffer(m_cfg.skinPositionIndicesBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
         .storageBufferRead(10, fg.buffer(m_cfg.skinJointMatricesBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
         .colorAttachment(fg.image("gbufferAlbedo"), VK_FORMAT_R16G16B16A16_SFLOAT)
+        // Four coverage samples smooth polygon silhouettes. PbrPass shades the unresolved samples; the
+        // single-sample G-buffer images receive a resolve for every other reader (HBAO, overlays, final).
+        .samples(VK_SAMPLE_COUNT_4_BIT)
         .colorAttachment(fg.image("gbufferNormal"), VK_FORMAT_R16G16_SFLOAT)
         .colorAttachment(fg.image("gbufferMaterial"), VK_FORMAT_R16G16B16A16_UNORM)
         .colorAttachment(fg.image("gbufferEmissive"), VK_FORMAT_R16G16B16A16_SFLOAT)

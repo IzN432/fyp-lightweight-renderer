@@ -42,11 +42,13 @@ void PbrPass::build(FrameGraph &fg) const
         .sampledImage(3, fg.image("ibl_brdf_lut"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(4, fg.image("ltc1"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(5, fg.image("ltc2"), VK_SHADER_STAGE_FRAGMENT_BIT)
-        .sampledDepth(6, fg.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
-        .sampledImage(7, fg.image("gbufferAlbedo"), VK_SHADER_STAGE_FRAGMENT_BIT)
-        .sampledImage(8, fg.image("gbufferNormal"), VK_SHADER_STAGE_FRAGMENT_BIT)
-        .sampledImage(9, fg.image("gbufferMaterial"), VK_SHADER_STAGE_FRAGMENT_BIT)
-        .sampledImage(10, fg.image("gbufferEmissive"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        // PBR shades each G-buffer coverage sample independently. Reading the unresolved attachments
+        // avoids lighting material values that were incorrectly averaged across a triangle edge.
+        .sampledMultisampleImage(6, fg.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledMultisampleImage(7, fg.image("gbufferAlbedo"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledMultisampleImage(8, fg.image("gbufferNormal"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledMultisampleImage(9, fg.image("gbufferMaterial"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledMultisampleImage(10, fg.image("gbufferEmissive"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(11, fg.buffer(m_cfg.lightBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(12, fg.image("hbao_ao"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .colorAttachment(fg.image("pbr"), VK_FORMAT_R16G16B16A16_SFLOAT)

@@ -41,6 +41,7 @@ lr::framegraph::ResourceUsage imageUsage(lr::ImageUsage usage)
     {
         case lr::ImageUsage::Sampled:
         case lr::ImageUsage::SampledDepth:
+        case lr::ImageUsage::SampledMultisample:
         case lr::ImageUsage::SampledArray:
             return U::SampledImage;
         case lr::ImageUsage::Storage:

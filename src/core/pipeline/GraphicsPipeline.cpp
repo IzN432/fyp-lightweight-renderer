@@ -75,7 +75,8 @@ GraphicsPipeline::GraphicsPipeline(const VulkanContext &ctx, const Config &confi
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    // Pipeline sample count must exactly match every attachment used by dynamic rendering.
+    multisampling.rasterizationSamples = config.samples;
 
     bool                                  hasDepth = (config.depthAttachmentFormat != VK_FORMAT_UNDEFINED);
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
