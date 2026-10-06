@@ -1,3 +1,6 @@
+#ifndef QUATERNION_GLSLH
+#define QUATERNION_GLSLH
+
 /**
  * Quaternion utility functions for shader code.
  */
@@ -28,3 +31,5 @@ vec3 quaternionToUpVector(vec4 q)
 
     return v + cross(2 * u, (cross(u, v) + w * v));
 }
+
+#endif

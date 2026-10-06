@@ -34,6 +34,7 @@ inline constexpr const char *baseRoughness = "baseRoughness"; // [0, 1]
 inline constexpr const char *baseMetallic  = "baseMetallic";  // [0, 1]
 inline constexpr const char *alphaCutoff   = "alphaCutoff";   // glTF MASK threshold; 0 disables masking
 inline constexpr const char *doubleSided   = "doubleSided";   // 0 or 1
+inline constexpr const char *alphaBlend    = "alphaBlend";    // 1 = glTF BLEND (TransparentPass draws it)
 
 // MaterialStore slots reserved up front: growing it would mean resizing the GPU material buffer and
 // texture arrays, i.e. rebuilding descriptor sets (see MaterialStore.hpp).
@@ -55,8 +56,8 @@ std::vector<std::string> geometryVertexAttributes();
 GpuMeshLayout geometryMeshLayout();
 
 // The materials SSBO layout geometry.frag reads (64-byte stride): baseDiffuse vec4 @0, baseEmissive vec3
-// @16, baseRoughness float @32, baseMetallic float @36, alphaCutoff float @40, doubleSided float @44;
-// plus one texture array per texture name above.
+// @16, baseRoughness float @32, baseMetallic float @36, alphaCutoff float @40, doubleSided float @44,
+// alphaBlend float @48 (see utility/material.glslh); plus one texture array per texture name above.
 GpuMaterialLayout materialLayout();
 
 // Names the light-visual quads (see AreaLightVisual.hpp) are built with, so they pack into the same

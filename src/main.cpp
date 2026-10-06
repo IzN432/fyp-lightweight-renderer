@@ -8,6 +8,7 @@
 #include "core/passes/heatmap/HeatmapPass.hpp"
 #include "core/passes/ibl/IblPass.hpp"
 #include "core/passes/pbr/PbrPass.hpp"
+#include "core/passes/transparent/TransparentPass.hpp"
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
 #include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
 #include "core/passes/overlaylines/OverlayLinesPass.hpp"
@@ -214,14 +215,46 @@ try
     pbrPass.uploadResources(viewer.resources());
     pbrPass.build(viewer.frameGraph());
 
+    // glTF BLEND materials: GeometryPass discards them, and this pass shades them back to front into the
+    // "transparent" layer FinalPass composites over the lit scene.
+    lr::MaterialStore  &materialStore = sceneManager.materialStore();
+    lr::TransparentPass transparentPass({
+        .geometry                = sceneManager.gpu().geometryPassConfig(),
+        .lightBufferResourceName = sceneManager.lightBufferName(),
+        .numLights               = sceneManager.numLights(),
+        .pfMips                  = 8,
+        .eyePosition =
+            [&sceneManager] {
+                const lr::Camera &camera = sceneManager.gpu().camera()->getComponent<lr::Camera>();
+                return glm::vec3(glm::inverse(camera.viewMatrix())[3]);
+            },
+        .isBlendMaterial =
+            [&materialStore](lr::MaterialHandle handle) {
+                const auto &parameters = materialStore.get(handle).parameters;
+                const auto  found      = parameters.find(lr::conventions::alphaBlend);
+                const auto *flag       = found == parameters.end()
+                                             ? nullptr
+                                             : std::get_if<lr::MaterialParam::NormalizedFloat>(&found->second);
+                return flag && flag->value > 0.5f;
+            },
+    });
+    const auto          setTransparentGeometry = [&](const lr::SceneGpu &gpu) {
+        transparentPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
+                                         gpu.geometryObjects(), gpu.skinUploadResult().drawInfos, gpu.geometryMeshes());
+    };
+    setTransparentGeometry(sceneManager.gpu());
+    transparentPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
+
     // Whenever SceneGpu re-packs geometry (an import, lights added or removed) or re-uploads the lights,
     // keep the passes' draw lists and light count in step.
     sceneManager.gpu().onGeometryRebuilt([&](const lr::SceneGpu &gpu) {
         geometryPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
                                       gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
+        setTransparentGeometry(gpu);
     });
     sceneManager.gpu().onLightsUploaded([&](uint32_t numLights) {
         pbrPass.setNumLights(numLights);
+        transparentPass.setNumLights(numLights);
     });
 
     // Keep the geometry overlay stage alive even when it has no instances. Besides remaining
@@ -266,6 +299,7 @@ try
 
     const auto applyEditorMode = [&](lr::EditorMode mode) {
         geometryPass.setSkinningEnabled(mode == lr::EditorMode::View);
+        transparentPass.setSkinningEnabled(mode == lr::EditorMode::View);
         overlayPointsPass.setEnabled(mode == lr::EditorMode::Edit);
         heatmapPass.setEnabled(mode == lr::EditorMode::Analysis);
     };

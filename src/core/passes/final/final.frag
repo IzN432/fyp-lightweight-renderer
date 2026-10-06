@@ -28,6 +28,9 @@ layout(set = 0, binding = 7) uniform sampler2D heatmap;
 
 layout(set = 0, binding = 8) uniform sampler2D hbaoAo;
 
+// TransparentPass's layer: premultiplied HDR colour, alpha = accumulated opacity.
+layout(set = 0, binding = 9) uniform sampler2D transparent;
+
 layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform FinalPC
@@ -53,17 +56,28 @@ void main()
     }
 
     vec3 baseColor = background;
-    if (!isBackground(depth))
+    if (!isBackground(sceneDepth))
     {
         vec4 pbrSample = texture(pbr, inUV);
         vec4 heatmapSample = texture(heatmap, inUV);
         vec3 litColor = mix(pbrSample.rgb, heatmapSample.rgb, heatmapSample.a);
         // pbr alpha is the fraction of MSAA samples covered by geometry; blending in display space keeps
         // bright silhouettes from staying stair-stepped after tone mapping.
-        float coverage = isBackground(sceneDepth) ? 0.0 : pbrSample.a;
-        vec3 sceneColor = mix(background, reinhard(litColor), coverage);
+        baseColor = mix(background, reinhard(litColor), pbrSample.a);
+    }
+
+    // Transparent surfaces go over the opaque scene (and the sky — they don't write depth), and under
+    // the editor overlays. Like the layers above, the blend happens after tone mapping each layer.
+    vec4 transparentSample = texture(transparent, inUV);
+    if (transparentSample.a > 0.0)
+    {
+        baseColor = mix(baseColor, reinhard(transparentSample.rgb / transparentSample.a), transparentSample.a);
+    }
+
+    if (!isBackground(depth))
+    {
         vec4 overlaySample = texture(overlay, inUV);
-        baseColor = mix(sceneColor, reinhard(overlaySample.rgb), overlaySample.a);
+        baseColor = mix(baseColor, reinhard(overlaySample.rgb), overlaySample.a);
     }
 
     vec4 pointsSample = texture(overlayPoints, inUV);

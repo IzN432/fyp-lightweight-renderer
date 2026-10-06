@@ -257,6 +257,8 @@ std::vector<MaterialHandle> extractMaterials(const tinygltf::Model &model, const
         material.parameters[config.alphaCutoffName] = MaterialParam::NormalizedFloat{
             m.alphaMode == "MASK" ? static_cast<float>(m.alphaCutoff) : 0.0f};
         material.parameters[config.doubleSidedName] = MaterialParam::NormalizedFloat{m.doubleSided ? 1.0f : 0.0f};
+        material.parameters[config.alphaBlendName] =
+            MaterialParam::NormalizedFloat{m.alphaMode == "BLEND" ? 1.0f : 0.0f};
 
         // The textures are stored in the material as tinygltf::TextureInfo, which contains a pointer to the actual
         // texture

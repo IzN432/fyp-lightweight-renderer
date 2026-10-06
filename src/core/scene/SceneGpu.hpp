@@ -170,6 +170,7 @@ public:
     const IndexBufferUploadResult                 &indexBuffer() const { return m_indexBuffer; }
     const std::vector<const TransformComponent *> &meshTransforms() const { return m_meshTransforms; }
     const std::vector<SceneObject *>              &geometryObjects() const { return m_geometryObjects; }
+    const std::vector<const Mesh *>               &geometryMeshes() const { return m_geometryMeshes; }
     const MaterialUploadResult                    &materialUploadResult() const { return m_materialUploadResult; }
 
 private:

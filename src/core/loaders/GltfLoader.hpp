@@ -28,6 +28,7 @@ struct GltfLoaderConfig
     std::string baseEmissiveName  = "baseEmissive";
     std::string alphaCutoffName   = "alphaCutoff";
     std::string doubleSidedName   = "doubleSided";
+    std::string alphaBlendName    = "alphaBlend";
 };
 
 /**
@@ -49,6 +50,7 @@ struct GltfLoaderConfig
  *   - baseEmissive   (vec3)   from emissiveFactor
  *   - alphaCutoff    (float)  from alphaCutoff for MASK materials; zero otherwise
  *   - doubleSided    (float)  one for double-sided materials; zero otherwise
+ *   - alphaBlend     (float)  one for BLEND materials; zero otherwise
  *
  * Material textures:
  *   - diffuseTexture           from baseColorTexture

@@ -105,6 +105,7 @@ add_library(lr_core STATIC
 
     src/core/passes/ibl/IblPass.cpp
     src/core/passes/pbr/PbrPass.cpp
+    src/core/passes/transparent/TransparentPass.cpp
     src/core/passes/imgui/ImguiPass.cpp
 
     src/core/scene/Mesh.cpp
@@ -197,6 +198,7 @@ add_shaders(lr_core
     src/core/passes/final/final.frag
     src/core/passes/composite/composite.frag
     src/core/passes/pbr/pbr.frag
+    src/core/passes/transparent/transparent.frag
     src/core/passes/ambientocclusion/deinterleave.comp
     src/core/passes/ambientocclusion/hbao.comp
     src/core/passes/ambientocclusion/interleave.comp

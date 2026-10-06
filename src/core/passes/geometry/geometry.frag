@@ -3,17 +3,7 @@
 #extension GL_EXT_nonuniform_qualifier : require
 
 #include "../utility/geometry.glslh"
-
-struct MaterialData
-{
-    vec4  baseColorFactor;
-    vec4  emissiveFactor;
-    float roughnessFactor;
-    float metallicFactor;
-    float alphaCutoff;
-    float doubleSided;
-    float _pad[2];
-};
+#include "../utility/material.glslh"
 
 layout(location = 0) in vec3 inWorldPos;
 layout(location = 1) in vec3 inNormal;
@@ -64,6 +54,12 @@ void main()
 {
 	uint faceGroupIndex = faceGroupIndices.values[pc.primitiveIdOffset + gl_PrimitiveID];
 	MaterialData mat = materials.data[faceGroupIndex];
+	// BLEND surfaces are shaded and composited by TransparentPass; keeping them out of the G-buffer
+	// leaves what is behind them visible there.
+	if (mat.alphaBlend > 0.5)
+	{
+		discard;
+	}
 	vec4 baseColor = texture(diffuseTex[nonuniformEXT(faceGroupIndex)], inUv) * mat.baseColorFactor;
 
 	// glTF MASK materials are still opaque: rejected texels write neither the G-buffer nor depth.

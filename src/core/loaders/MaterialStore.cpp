@@ -37,6 +37,13 @@ MaterialHandle MaterialStore::acquire(Material material)
         throw std::runtime_error("MaterialStore: capacity exhausted");
     }
 
+    // Producers that predate a parameter (OBJ files, light visuals, scenes saved before it existed)
+    // don't write it; the default material's value fills the gap, so the GPU upload finds every scalar.
+    for (auto &[name, value] : m_defaultMaterialFactory().parameters)
+    {
+        material.parameters.try_emplace(name, std::move(value));
+    }
+
     MaterialHandle handle = m_freeList.back();
     m_freeList.pop_back();
     m_materials[handle] = std::move(material);

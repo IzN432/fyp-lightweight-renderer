@@ -1,0 +1,17 @@
+#ifndef MATERIAL_GLSLH
+#define MATERIAL_GLSLH
+
+// One entry of the materials SSBO — must match conventions::materialLayout() (64-byte stride).
+struct MaterialData
+{
+    vec4  baseColorFactor;
+    vec4  emissiveFactor;
+    float roughnessFactor;
+    float metallicFactor;
+    float alphaCutoff; // glTF MASK threshold; 0 disables masking
+    float doubleSided; // 0 or 1
+    float alphaBlend;  // 1 = glTF BLEND: shaded by TransparentPass, discarded by GeometryPass
+    float _pad[3];
+};
+
+#endif

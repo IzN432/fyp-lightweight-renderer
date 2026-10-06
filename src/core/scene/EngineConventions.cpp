@@ -19,6 +19,7 @@ GltfLoaderConfig gltfLoaderConfig()
         .baseEmissiveName             = baseEmissive,
         .alphaCutoffName              = alphaCutoff,
         .doubleSidedName              = doubleSided,
+        .alphaBlendName               = alphaBlend,
     };
 }
 
@@ -55,6 +56,7 @@ Material defaultMaterial()
     material.parameters[baseMetallic]  = MaterialParam::NormalizedFloat{0.0f};
     material.parameters[alphaCutoff]   = MaterialParam::NormalizedFloat{0.0f};
     material.parameters[doubleSided]   = MaterialParam::NormalizedFloat{0.0f};
+    material.parameters[alphaBlend]    = MaterialParam::NormalizedFloat{0.0f};
     return material;
 }
 
@@ -85,6 +87,7 @@ GpuMaterialLayout materialLayout()
         .addScalar(baseMetallic, 36, sizeof(float))
         .addScalar(alphaCutoff, 40, sizeof(float))
         .addScalar(doubleSided, 44, sizeof(float))
+        .addScalar(alphaBlend, 48, sizeof(float))
         .addTexture(baseColorTexture, VK_FORMAT_R8G8B8A8_SRGB)
         .addTexture(normalTexture, VK_FORMAT_R8G8B8A8_UNORM)
         .addTexture(metallicRoughnessTexture, VK_FORMAT_R8G8B8A8_UNORM)
@@ -104,6 +107,7 @@ AreaLightVisualConfig areaLightVisualConfig()
         .baseMetallicName     = baseMetallic,
         .alphaCutoffName      = alphaCutoff,
         .doubleSidedName      = doubleSided,
+        .alphaBlendName       = alphaBlend,
     };
 }
 

@@ -21,6 +21,7 @@ class MaterialStore
 public:
     MaterialStore(uint32_t capacity, std::function<Material()> defaultMaterialFactory);
 
+    // Parameters the material lacks are filled in from the default material.
     MaterialHandle acquire(Material material);
     void           release(MaterialHandle handle);
 
