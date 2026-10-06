@@ -110,6 +110,7 @@ add_library(lr_core STATIC
     src/core/scene/Mesh.cpp
     src/core/scene/MeshComponent.cpp
     src/core/scene/MeshStore.cpp
+    src/core/scene/Light.cpp
     src/core/scene/TransformComponent.cpp
     src/core/scene/AreaLightVisual.cpp
     src/core/scene/Scene.cpp
@@ -477,6 +478,10 @@ if(BUILD_TESTING)
     )
     target_link_libraries(rigid_body_collider_tests PRIVATE lr_rigid_body_feature)
     add_test(NAME rigid_body.collider COMMAND rigid_body_collider_tests)
+
+    add_executable(selection_gizmo_tests tests/overlay/SelectionGizmoTests.cpp)
+    target_link_libraries(selection_gizmo_tests PRIVATE lr_core)
+    add_test(NAME overlay.selection_gizmos COMMAND selection_gizmo_tests)
 
     # Opt-in CPU benchmark for comparing ARAP solver implementations. It deliberately is not a
     # CTest: wall-clock performance is machine-dependent and should be run explicitly in Release.

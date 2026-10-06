@@ -1,5 +1,7 @@
 #pragma once
 
+#include <glm/glm.hpp>
+
 #include <string>
 #include <imgui.h>
 
@@ -7,6 +9,16 @@ namespace lr
 {
 
 struct EditorContext;
+class SceneObject;
+class OverlayLineBuilder;
+
+struct SelectionGizmoContext
+{
+    OverlayLineBuilder &lines;
+    glm::vec3           cameraPosition{0.0f};
+    glm::vec3           cameraForward{0.0f, 0.0f, -1.0f};
+    bool                orthographic = false;
+};
 
 class Component
 {
@@ -40,6 +52,10 @@ public:
     }
 
     virtual void onGUIImpl() {}
+
+    // Appends editor-only geometry when this component's owning object is selected.
+    // Components without a selection visualization keep the default no-op.
+    virtual void onSelectGizmo(SelectionGizmoContext &) const {}
 
     bool isDirty() const { return m_dirty; }
     void clearDirty() { m_dirty = false; }

@@ -3,6 +3,7 @@
 #include "core/scene/TransformComponent.hpp"
 #include "core/scene/Component.hpp"
 
+#include <algorithm>
 #include <variant>
 
 namespace lr
@@ -63,8 +64,13 @@ struct LightGUICallbacks
         bool changed = false;
         changed |= ImGui::SliderFloat("Light Intensity", &light.intensity, 0.0f, 100.0f);
         changed |= ImGui::ColorEdit3("Light Color", &light.color.x);
-        changed |= ImGui::SliderFloat("Inner Cone Angle", &light.innerConeAngleDegrees, 0.0f, 90.0f);
-        changed |= ImGui::SliderFloat("Outer Cone Angle", &light.outerConeAngleDegrees, 0.0f, 90.0f);
+        const bool innerChanged = ImGui::SliderFloat("Inner Cone Angle", &light.innerConeAngleDegrees, 0.0f, 90.0f);
+        if (innerChanged && light.innerConeAngleDegrees > light.outerConeAngleDegrees)
+            light.outerConeAngleDegrees = light.innerConeAngleDegrees;
+        const bool outerChanged = ImGui::SliderFloat("Outer Cone Angle", &light.outerConeAngleDegrees, 0.0f, 90.0f);
+        if (outerChanged && light.outerConeAngleDegrees < light.innerConeAngleDegrees)
+            light.innerConeAngleDegrees = light.outerConeAngleDegrees;
+        changed |= innerChanged || outerChanged;
         return changed;
     }
 
@@ -91,12 +97,16 @@ struct Light : public Component
 {
     LightVariant light;
 
-    explicit Light(const LightVariant &lightVariant) : light(lightVariant), Component("Light") {}
+    explicit Light(const LightVariant &lightVariant) : light(lightVariant), Component("Light")
+    {
+        enforceConeAngles(light);
+    }
 
     // Replaces the light's parameters and flags it dirty, so SceneGpu re-uploads it (see flushDirty).
     void set(const LightVariant &lightVariant)
     {
         light = lightVariant;
+        enforceConeAngles(light);
         markDirty();
     }
 
@@ -143,6 +153,19 @@ struct Light : public Component
         if (changed)
         {
             markDirty();
+        }
+    }
+
+    void onSelectGizmo(SelectionGizmoContext &context) const override;
+
+private:
+    static void enforceConeAngles(LightVariant &variant)
+    {
+        if (auto *spot = std::get_if<SpotLight>(&variant))
+        {
+            spot->outerConeAngleDegrees = std::clamp(spot->outerConeAngleDegrees, 0.0f, 90.0f);
+            spot->innerConeAngleDegrees = std::clamp(spot->innerConeAngleDegrees, 0.0f,
+                                                     spot->outerConeAngleDegrees);
         }
     }
 };

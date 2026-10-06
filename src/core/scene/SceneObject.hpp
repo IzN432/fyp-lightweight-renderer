@@ -19,6 +19,7 @@ namespace lr
 {
 
 class Scene;
+class OverlayLineBuilder;
 
 class SceneObject
 {
@@ -99,6 +100,15 @@ public:
             ImGui::PushID(id++);
             component->onGUI(context);
             ImGui::PopID();
+        }
+    }
+
+    // Gives every component an opportunity to visualize itself when this object is selected.
+    void onSelectGizmo(SelectionGizmoContext &context) const
+    {
+        for (const auto &[type, component] : components)
+        {
+            component->onSelectGizmo(context);
         }
     }
 };

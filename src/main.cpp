@@ -856,7 +856,21 @@ try
                         cameraComponent.projectionType == lr::ProjectionType::Orthographic, extent,
                         objectScaleActive ? sceneObjectScaleHandler.target()->worldMatrix() : glm::mat4(1.0f),
                         objectScaleActive);
-        overlayLinesPass.setLines(lr::buildColliderOverlayLines(scene));
+        std::vector<lr::OverlayLine> overlayLines = lr::buildColliderOverlayLines(scene);
+        if (const std::optional<lr::SceneObjectId> selected = scene.selectedObject())
+        {
+            lr::OverlayLineBuilder selectionGizmo;
+            lr::SelectionGizmoContext selectionGizmoContext{
+                .lines          = selectionGizmo,
+                .cameraPosition = glm::vec3(camera->worldMatrix()[3]),
+                .cameraForward  = camera->worldRotation() * glm::vec3(0.0f, 0.0f, -1.0f),
+                .orthographic   = cameraComponent.projectionType == lr::ProjectionType::Orthographic,
+            };
+            scene.getSceneObject(*selected).onSelectGizmo(selectionGizmoContext);
+            std::vector<lr::OverlayLine> selectionLines = selectionGizmo.takeLines();
+            overlayLines.insert(overlayLines.end(), selectionLines.begin(), selectionLines.end());
+        }
+        overlayLinesPass.setLines(overlayLines);
     });
 
     // Registers SceneManager's own onUpdate (aspect tracking) and onLateUpdate (flushDirty —
