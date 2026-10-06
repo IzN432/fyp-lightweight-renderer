@@ -240,8 +240,8 @@ vec3 CalcSpotLight(LightData light, vec3 position, vec3 normal, vec3 albedo, flo
     vec3 Dir = normalize((cameraUbo.view * vec4(quaternionToForwardVector(light.rotation), 0.0)).xyz);
     float L_dot_Dir = dot(-L, Dir);
 
-    float cosOuter = cos(radians(light.outerConeAngle));
-    float cosInner = cos(radians(light.innerConeAngle));
+    float cosOuter = cos(light.outerConeAngle);
+    float cosInner = cos(light.innerConeAngle);
 
     float spotlightIntensity = smoothstep(cosOuter, cosInner, L_dot_Dir);
 
