@@ -1,18 +1,34 @@
 #include "core/scene/MeshComponent.hpp"
 
 #include "core/loaders/Material.hpp"
+#include "core/scene/EngineConventions.hpp"
 
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
+#include <string_view>
 #include <variant>
+#include <vector>
 
 namespace lr
 {
 namespace
 {
+
+constexpr std::array<std::string_view, 7> materialParameterOrder = {
+    conventions::baseDiffuse,   conventions::baseEmissive, conventions::baseRoughness,
+    conventions::baseMetallic,  conventions::alphaCutoff,  conventions::alphaBlend,
+    conventions::doubleSided,
+};
+
+size_t materialParameterRank(const std::string_view name)
+{
+    const auto found = std::ranges::find(materialParameterOrder, name);
+    return static_cast<size_t>(std::distance(materialParameterOrder.begin(), found));
+}
 
 struct MaterialGUICallbacks
 {
@@ -37,6 +53,18 @@ struct MaterialGUICallbacks
 
     bool operator()(MaterialParam::NormalizedFloat &param) const
     {
+        if (materialName == conventions::alphaBlend || materialName == conventions::doubleSided)
+        {
+            bool enabled = param.value >= 0.5f;
+            if (!ImGui::Checkbox(materialName.c_str(), &enabled))
+            {
+                return false;
+            }
+
+            param.value = enabled ? 1.0f : 0.0f;
+            return true;
+        }
+
         return ImGui::DragFloat(materialName.c_str(), &param.value, 0.01f, 0.0f, 1.0f);
     }
 
@@ -73,11 +101,22 @@ void MeshComponent::onGUIImpl()
         ImGui::PushID(materialId++);
         ImGui::Text("Material: %s", material.name.c_str());
 
-        int parameterId = 0;
-        for (auto &[name, value] : material.parameters)
+        std::vector<std::string> parameterNames;
+        parameterNames.reserve(material.parameters.size());
+        for (const auto &[name, value] : material.parameters)
         {
-            ImGui::PushID(parameterId++);
-            changed |= std::visit(MaterialGUICallbacks{name}, value);
+            parameterNames.push_back(name);
+        }
+        std::ranges::sort(parameterNames, [](const std::string &left, const std::string &right) {
+            const size_t leftRank  = materialParameterRank(left);
+            const size_t rightRank = materialParameterRank(right);
+            return leftRank != rightRank ? leftRank < rightRank : left < right;
+        });
+
+        for (const std::string &name : parameterNames)
+        {
+            ImGui::PushID(name.c_str());
+            changed |= std::visit(MaterialGUICallbacks{name}, material.parameters.at(name));
             ImGui::PopID();
         }
         ImGui::PopID();
