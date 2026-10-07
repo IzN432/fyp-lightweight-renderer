@@ -307,6 +307,12 @@ target_link_libraries(lr_rigid_body_feature PUBLIC lr_core glm::glm ReactPhysics
 # keep it above those libraries rather than making lr_core depend back on its own features.
 add_library(lr_scene_serialization STATIC
     src/core/scene/SceneSerializer.cpp
+    src/core/scene/serialization/ComponentCodec.cpp
+    src/core/scene/serialization/CoreComponentCodecs.cpp
+    src/core/scene/serialization/JsonUtils.cpp
+    src/features/animation/AnimatorComponentCodec.cpp
+    src/features/linear_blend_skinning/SkinComponentCodec.cpp
+    src/features/rigid_body/RigidBodyComponentCodecs.cpp
 )
 target_include_directories(lr_scene_serialization PUBLIC src)
 target_link_libraries(lr_scene_serialization PUBLIC lr_core lr_animation_feature

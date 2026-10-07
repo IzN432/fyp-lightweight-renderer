@@ -1,15 +1,8 @@
 #include "SceneSerializer.hpp"
 
-#include "Camera.hpp"
-#include "Light.hpp"
 #include "MeshComponent.hpp"
 #include "SceneAssets.hpp"
-#include "TransformComponent.hpp"
-#include "core/editor/camera/SphericalCameraController.hpp"
-#include "features/animation/AnimatorComponent.hpp"
-#include "features/linear_blend_skinning/SkinComponent.hpp"
-#include "features/rigid_body/ColliderComponent.hpp"
-#include "features/rigid_body/RigidBodyComponent.hpp"
+#include "core/scene/serialization/ComponentCodec.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -94,32 +87,7 @@ private:
     std::vector<std::byte> m_bytes;
 };
 
-json vec2(const glm::vec2 &value) { return {value.x, value.y}; }
 json vec3(const glm::vec3 &value) { return {value.x, value.y, value.z}; }
-json quat(const glm::quat &value) { return {value.x, value.y, value.z, value.w}; }
-json mat4(const glm::mat4 &value)
-{
-    json result = json::array();
-    for (int column = 0; column < 4; ++column)
-        for (int row = 0; row < 4; ++row) result.push_back(value[column][row]);
-    return result;
-}
-
-glm::mat4 readMat4(const json &value, const std::string &where)
-{
-    if (!value.is_array() || value.size() != 16)
-        throw std::runtime_error("SceneSerializer: " + where + " must be a 16-number column-major matrix");
-    glm::mat4 result(1.0f);
-    for (int column = 0; column < 4; ++column)
-        for (int row = 0; row < 4; ++row)
-        {
-            const json &entry = value[column * 4 + row];
-            if (!entry.is_number()) throw std::runtime_error("SceneSerializer: " + where + " must contain only numbers");
-            result[column][row] = entry.get<float>();
-        }
-    return result;
-}
-
 template <glm::length_t N, typename T, glm::qualifier Q>
 glm::vec<N, T, Q> readVector(const json &value, const std::string &where)
 {
@@ -165,57 +133,6 @@ Uuid readId(const json &value, const std::string &where)
     {
         throw std::runtime_error("SceneSerializer: " + where + ": " + error.what());
     }
-}
-
-json serializeLight(const LightVariant &variant)
-{
-    return std::visit(
-        [](const auto &light) {
-            json result{{"color", vec3(light.color)}, {"intensity", light.intensity}};
-            using T = std::decay_t<decltype(light)>;
-            if constexpr (std::is_same_v<T, PointLight>) result["type"] = "point";
-            else if constexpr (std::is_same_v<T, SpotLight>)
-            {
-                result["type"] = "spot";
-                result["inner_cone_degrees"] = light.innerConeAngleDegrees;
-                result["outer_cone_degrees"] = light.outerConeAngleDegrees;
-            }
-            else if constexpr (std::is_same_v<T, AreaLight>)
-            {
-                result["type"] = "area";
-                result["size"] = vec2(light.size);
-                result["two_sided"] = light.twoSided;
-            }
-            else if constexpr (std::is_same_v<T, DirectionalLight>) result["type"] = "directional";
-            else result["type"] = "image";
-            return result;
-        },
-        variant);
-}
-
-LightVariant deserializeLight(const json &value, const std::string &where)
-{
-    const std::string type = required(value, "type", where).get<std::string>();
-    const glm::vec3 color = readVector<3, float, glm::defaultp>(required(value, "color", where), where + ".color");
-    const float intensity = required(value, "intensity", where).get<float>();
-    if (type == "point") return PointLight{{color, intensity}};
-    if (type == "directional") return DirectionalLight{{color, intensity}};
-    if (type == "image") return ImageLight{{color, intensity}};
-    if (type == "spot")
-    {
-        SpotLight result{{color, intensity}};
-        result.innerConeAngleDegrees = required(value, "inner_cone_degrees", where).get<float>();
-        result.outerConeAngleDegrees = required(value, "outer_cone_degrees", where).get<float>();
-        return result;
-    }
-    if (type == "area")
-    {
-        AreaLight result{{color, intensity}};
-        result.size = readVector<2, float, glm::defaultp>(required(value, "size", where), where + ".size");
-        result.twoSided = required(value, "two_sided", where).get<bool>();
-        return result;
-    }
-    throw std::runtime_error("SceneSerializer: unknown light type '" + type + "' at " + where + ".type");
 }
 
 std::string attributeType(const MeshLayout::AttributeDesc &attribute)
@@ -323,159 +240,6 @@ Material deserializeMaterial(const json &value, const std::string &where, const 
     return material;
 }
 
-const char *interpolationName(AnimationInterpolation interpolation)
-{
-    switch (interpolation)
-    {
-        case AnimationInterpolation::Linear: return "linear";
-        case AnimationInterpolation::Step: return "step";
-        case AnimationInterpolation::CubicSpline: return "cubic_spline";
-    }
-    return "linear";
-}
-
-AnimationInterpolation readInterpolation(const json &value, const std::string &where)
-{
-    const std::string name = value.get<std::string>();
-    if (name == "linear") return AnimationInterpolation::Linear;
-    if (name == "step") return AnimationInterpolation::Step;
-    if (name == "cubic_spline") return AnimationInterpolation::CubicSpline;
-    throw std::runtime_error("SceneSerializer: invalid animation interpolation '" + name + "' at " + where);
-}
-
-json serializeAnimator(const AnimatorComponent &animator)
-{
-    json clips = json::array();
-    for (const AnimationClip &clip : animator.clips())
-    {
-        json tracks = json::array();
-        for (const AnimationChannel &channel : clip.tracks())
-        {
-            tracks.push_back(std::visit([](const auto &track) {
-                using Track = std::decay_t<decltype(track)>;
-                json keyframes = json::array();
-                for (const auto &keyframe : track.keyframes())
-                {
-                    auto value = [](const auto &v) -> json {
-                        using V = std::decay_t<decltype(v)>;
-                        if constexpr (std::is_same_v<V, glm::quat>) return quat(v);
-                        else return vec3(v);
-                    };
-                    keyframes.push_back({{"seconds", keyframe.seconds}, {"value", value(keyframe.value)},
-                                         {"incoming_tangent", value(keyframe.incomingTangent)},
-                                         {"outgoing_tangent", value(keyframe.outgoingTangent)}});
-                }
-                const char *property = std::is_same_v<Track, TranslationTrack> ? "translation" :
-                                       std::is_same_v<Track, RotationTrack> ? "rotation" : "scale";
-                return json{{"target", toString(track.target())}, {"property", property},
-                            {"interpolation", interpolationName(track.interpolation())},
-                            {"keyframes", std::move(keyframes)}};
-            }, channel));
-        }
-        clips.push_back({{"name", clip.name()}, {"tracks", std::move(tracks)}});
-    }
-    // Playback position, active clip, playing state and an in-progress keyframe edit are session state.
-    return {{"clips", std::move(clips)}, {"loop", animator.loop()}, {"speed", animator.speedMultiplier()}};
-}
-
-struct LoadedAnimator
-{
-    std::vector<AnimationClip> clips;
-    bool loop;
-    float speed;
-};
-
-LoadedAnimator deserializeAnimator(const json &value, const std::string &where, const Scene &scene)
-{
-    std::vector<AnimationClip> clips;
-    const json &serializedClips = required(value, "clips", where);
-    if (!serializedClips.is_array()) throw std::runtime_error("SceneSerializer: " + where + ".clips must be an array");
-    for (size_t clipIndex = 0; clipIndex < serializedClips.size(); ++clipIndex)
-    {
-        const json &clip = serializedClips[clipIndex];
-        const std::string clipWhere = where + ".clips[" + std::to_string(clipIndex) + "]";
-        std::vector<AnimationChannel> tracks;
-        const json &serializedTracks = required(clip, "tracks", clipWhere);
-        for (size_t trackIndex = 0; trackIndex < serializedTracks.size(); ++trackIndex)
-        {
-            const json &track = serializedTracks[trackIndex];
-            const std::string trackWhere = clipWhere + ".tracks[" + std::to_string(trackIndex) + "]";
-            const SceneObjectId target = readId(required(track, "target", trackWhere), trackWhere + ".target");
-            if (!scene.contains(target))
-                throw std::runtime_error("SceneSerializer: missing animation target " + toString(target) + " at " + trackWhere);
-            const auto interpolation = readInterpolation(required(track, "interpolation", trackWhere), trackWhere + ".interpolation");
-            const std::string property = required(track, "property", trackWhere).get<std::string>();
-            const json &keyframes = required(track, "keyframes", trackWhere);
-            if (property == "rotation")
-            {
-                RotationTrack result(target, interpolation);
-                for (size_t i = 0; i < keyframes.size(); ++i)
-                {
-                    const json &key = keyframes[i];
-                    auto readQuaternion = [&](const char *name) {
-                        const glm::vec4 v = readVector<4, float, glm::defaultp>(required(key, name, trackWhere), trackWhere + "." + name);
-                        return glm::quat(v.w, v.x, v.y, v.z);
-                    };
-                    result.setKeyframe({required(key, "seconds", trackWhere).get<float>(), readQuaternion("value"),
-                                        readQuaternion("incoming_tangent"), readQuaternion("outgoing_tangent")});
-                }
-                tracks.emplace_back(std::move(result));
-            }
-            else if (property == "translation" || property == "scale")
-            {
-                auto fill = [&]<typename Track>(Track result) {
-                    for (size_t i = 0; i < keyframes.size(); ++i)
-                    {
-                        const json &key = keyframes[i];
-                        result.setKeyframe({required(key, "seconds", trackWhere).get<float>(),
-                            readVector<3, float, glm::defaultp>(required(key, "value", trackWhere), trackWhere + ".value"),
-                            readVector<3, float, glm::defaultp>(required(key, "incoming_tangent", trackWhere), trackWhere + ".incoming_tangent"),
-                            readVector<3, float, glm::defaultp>(required(key, "outgoing_tangent", trackWhere), trackWhere + ".outgoing_tangent")});
-                    }
-                    tracks.emplace_back(std::move(result));
-                };
-                if (property == "translation") fill(TranslationTrack(target, interpolation));
-                else fill(ScaleTrack(target, interpolation));
-            }
-            else throw std::runtime_error("SceneSerializer: invalid animation property '" + property + "' at " + trackWhere);
-        }
-        clips.emplace_back(required(clip, "name", clipWhere).get<std::string>(), std::move(tracks));
-    }
-    return {std::move(clips), required(value, "loop", where).get<bool>(),
-            required(value, "speed", where).get<float>()};
-}
-
-json serializeCollider(const Collider &collider)
-{
-    json shape = std::visit([](const auto &value) {
-        using T = std::decay_t<decltype(value)>;
-        if constexpr (std::is_same_v<T, SphereCollider>) return json{{"type", "sphere"}, {"radius", value.radius}};
-        else if constexpr (std::is_same_v<T, PlaneCollider>) return json{{"type", "plane"}, {"offset", value.offset}, {"half_extents", vec2(value.halfExtents)}};
-        else return json{{"type", "box"}, {"half_extents", vec3(value.halfExtents)}};
-    }, collider.shape);
-    return {{"shape", std::move(shape)}, {"local_position", vec3(collider.localPosition)},
-            {"local_rotation_xyzw", quat(collider.localRotation)},
-            {"material", {{"restitution", collider.material.restitution}, {"friction", collider.material.friction}}}};
-}
-
-Collider deserializeCollider(const json &value, const std::string &where)
-{
-    Collider result;
-    const json &shape = required(value, "shape", where);
-    const std::string type = required(shape, "type", where).get<std::string>();
-    if (type == "sphere") result.shape = SphereCollider{required(shape, "radius", where).get<float>()};
-    else if (type == "plane") result.shape = PlaneCollider{required(shape, "offset", where).get<float>(), readVector<2, float, glm::defaultp>(required(shape, "half_extents", where), where)};
-    else if (type == "box") result.shape = BoxCollider{readVector<3, float, glm::defaultp>(required(shape, "half_extents", where), where)};
-    else throw std::runtime_error("SceneSerializer: invalid collider shape '" + type + "' at " + where);
-    result.localPosition = readVector<3, float, glm::defaultp>(required(value, "local_position", where), where);
-    const glm::vec4 rotation = readVector<4, float, glm::defaultp>(required(value, "local_rotation_xyzw", where), where);
-    result.localRotation = glm::quat(rotation.w, rotation.x, rotation.y, rotation.z);
-    const json &material = required(value, "material", where);
-    result.material.restitution = required(material, "restitution", where).get<float>();
-    result.material.friction = required(material, "friction", where).get<float>();
-    return result;
-}
-
 } // namespace
 
 void SceneSerializer::save(const SceneAssets &assets, const std::filesystem::path &path)
@@ -535,82 +299,18 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
         meshes.push_back(std::move(item));
     }
 
+    const ComponentCodecRegistry codecs = makeSceneComponentCodecs();
+    const ComponentSaveContext componentContext{meshStore, materialStore};
     json objects = json::array();
     for (const auto &objectPointer : scene.sceneObjects())
     {
         const SceneObject &object = *objectPointer;
         if (!scene.contains(object.id())) continue;
+        json components = json::object();
         for (const std::type_index type : object.componentTypes())
         {
-            if (type != typeid(TransformComponent) && type != typeid(Camera) &&
-                type != typeid(SphericalCameraController) && type != typeid(Light) &&
-                type != typeid(MeshComponent) && type != typeid(AnimatorComponent) &&
-                type != typeid(SkinComponent) && type != typeid(RigidBodyComponent) &&
-                type != typeid(ColliderComponent))
-            {
-                throw std::runtime_error("SceneSerializer: object '" + object.name + "' has unsupported component '" +
-                                         std::string(type.name()) + "' in format version 1");
-            }
-        }
-
-        json components = json::object();
-        if (object.hasComponent<TransformComponent>())
-        {
-            const Transform &transform = object.getComponent<TransformComponent>().transform();
-            components["transform"] = {{"position", vec3(transform.position())},
-                                       {"rotation_xyzw", quat(transform.rotation())},
-                                       {"scale", vec3(transform.scale())}};
-        }
-        if (object.hasComponent<Camera>())
-        {
-            const Camera &camera = object.getComponent<Camera>();
-            components["camera"] = {{"projection", camera.projectionType == ProjectionType::Perspective
-                                                           ? "perspective" : "orthographic"},
-                                    {"fov_y_degrees", camera.fovYDegrees}, {"near_plane", camera.nearPlane},
-                                    {"far_plane", camera.farPlane}, {"ortho_height", camera.orthoHeight}};
-        }
-        if (object.hasComponent<SphericalCameraController>())
-        {
-            const auto state = object.getComponent<SphericalCameraController>().orbitState();
-            components["spherical_camera_controller"] = {{"target", vec3(state.target)},
-                {"radius", state.radius}, {"azimuth", state.azimuth}, {"elevation", state.elevation}};
-        }
-        if (object.hasComponent<Light>())
-        {
-            components["light"] = serializeLight(object.getComponent<Light>().light);
-        }
-        if (object.hasComponent<MeshComponent>())
-        {
-            const MeshComponent &mesh = object.getComponent<MeshComponent>();
-            json materialReferences = json::array();
-            for (MaterialHandle handle : mesh.materialHandles())
-                materialReferences.push_back(writeId(materialStore.idOf(handle)));
-            components["mesh"] = {{"mesh", writeId(meshStore.idOf(mesh.meshHandle()))},
-                                  {"materials", std::move(materialReferences)}};
-        }
-        if (object.hasComponent<AnimatorComponent>())
-            components["animator"] = serializeAnimator(object.getComponent<AnimatorComponent>());
-        if (object.hasComponent<SkinComponent>())
-        {
-            json joints = json::array();
-            for (const Joint &joint : object.getComponent<SkinComponent>().skin().joints())
-                joints.push_back({{"object", writeId(joint.sceneObject)}, {"inverse_bind_matrix", mat4(joint.inverseBindMatrix)}});
-            components["skin"] = {{"joints", std::move(joints)}};
-        }
-        if (object.hasComponent<RigidBodyComponent>())
-        {
-            const RigidBodyComponent &body = object.getComponent<RigidBodyComponent>();
-            components["rigid_body"] = {{"type", body.isStatic() ? "static" : "dynamic"}, {"mass", body.mass()},
-                {"inertia_diagonal", vec3(body.inertiaDiagonal())}, {"linear_drag", body.linearDrag()},
-                {"angular_drag", body.angularDrag()}, {"linear_velocity", vec3(body.linearVelocity())},
-                {"angular_velocity", vec3(body.angularVelocity())}};
-        }
-        if (object.hasComponent<ColliderComponent>())
-        {
-            json colliders = json::array();
-            for (const Collider &collider : object.getComponent<ColliderComponent>().colliders())
-                colliders.push_back(serializeCollider(collider));
-            components["colliders"] = std::move(colliders);
+            const ComponentCodec &codec = codecs.forType(type);
+            components[std::string(codec.key())] = codec.encode(object, componentContext);
         }
         json serialized{{"id", writeId(object.id())}, {"name", object.name}, {"parent", nullptr},
                         {"components", std::move(components)}};
@@ -777,6 +477,8 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
     // Scene::createSceneObject throws if one of those identities is already taken.
     std::vector<SceneObjectId> created;
     created.reserve(objects.size());
+    const ComponentCodecRegistry codecs = makeSceneComponentCodecs();
+    ComponentLoadContext componentContext{scene, meshStore, materialStore};
     for (size_t index = 0; index < objects.size(); ++index)
     {
         const json &value = objects[index];
@@ -794,110 +496,19 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
         SceneObject &object = scene.getSceneObject(created[index]);
         const json &components = required(value, "components", where);
         if (!components.is_object()) throw std::runtime_error("SceneSerializer: " + where + ".components must be an object");
-        for (const auto &[name, ignored] : components.items())
+        for (const auto &[name, component] : components.items())
         {
-            if (name != "transform" && name != "camera" && name != "spherical_camera_controller" &&
-                name != "light" && name != "mesh" &&
-                name != "animator" && name != "skin" && name != "rigid_body" && name != "colliders")
-                throw std::runtime_error("SceneSerializer: unknown component '" + name + "' at " + where + ".components");
-        }
-        if (components.contains("transform"))
-        {
-            const json &transform = components.at("transform");
-            const glm::vec3 position = readVector<3, float, glm::defaultp>(required(transform, "position", where), where + ".components.transform.position");
-            const glm::vec4 xyzw = readVector<4, float, glm::defaultp>(required(transform, "rotation_xyzw", where), where + ".components.transform.rotation_xyzw");
-            const glm::vec3 scale = readVector<3, float, glm::defaultp>(required(transform, "scale", where), where + ".components.transform.scale");
-            object.addComponent<TransformComponent>(position, glm::quat(xyzw.w, xyzw.x, xyzw.y, xyzw.z), scale);
-        }
-        if (components.contains("camera"))
-        {
-            const json &valueCamera = components.at("camera");
-            Camera &camera = object.addComponent<Camera>();
-            const std::string projection = required(valueCamera, "projection", where).get<std::string>();
-            if (projection == "perspective") camera.projectionType = ProjectionType::Perspective;
-            else if (projection == "orthographic") camera.projectionType = ProjectionType::Orthographic;
-            else throw std::runtime_error("SceneSerializer: invalid camera projection at " + where);
-            camera.fovYDegrees = required(valueCamera, "fov_y_degrees", where).get<float>();
-            camera.nearPlane = required(valueCamera, "near_plane", where).get<float>();
-            camera.farPlane = required(valueCamera, "far_plane", where).get<float>();
-            camera.orthoHeight = required(valueCamera, "ortho_height", where).get<float>();
-        }
-        if (components.contains("spherical_camera_controller"))
-        {
-            const json &controller = components.at("spherical_camera_controller");
-            SphericalCameraController::OrbitState state;
-            state.target = readVector<3, float, glm::defaultp>(required(controller, "target", where),
-                where + ".components.spherical_camera_controller.target");
-            state.radius = required(controller, "radius", where).get<float>();
-            state.azimuth = required(controller, "azimuth", where).get<float>();
-            state.elevation = required(controller, "elevation", where).get<float>();
-            // Restores the orbit only. Placing the camera reads this object's TransformComponent,
-            // which the "transform" entry may not have created yet, so it waits for onLoaded().
-            object.addComponent<SphericalCameraController>().restoreOrbitState(state);
-        }
-        if (components.contains("light")) object.addComponent<Light>(deserializeLight(components.at("light"), where + ".components.light"));
-        if (components.contains("mesh"))
-        {
-            const json &mesh = components.at("mesh");
-            const MeshId meshId = readId(required(mesh, "mesh", where), where + ".components.mesh.mesh");
-            const auto foundMesh = meshStore.find(meshId);
-            if (!foundMesh) throw std::runtime_error("SceneSerializer: missing mesh " + toString(meshId) + " at " + where);
-            std::vector<MaterialHandle> objectMaterials;
-            const json &references = required(mesh, "materials", where);
-            if (!references.is_array()) throw std::runtime_error("SceneSerializer: mesh materials must be an array at " + where);
-            for (const json &reference : references)
+            try
             {
-                const MaterialId materialId = readId(reference, where + ".components.mesh.materials");
-                const auto foundMaterial = materialStore.find(materialId);
-                if (!foundMaterial) throw std::runtime_error("SceneSerializer: missing material " + toString(materialId) + " at " + where);
-                objectMaterials.push_back(*foundMaterial);
+                codecs.forKey(name).decode(component, object, componentContext,
+                                           where + ".components." + name);
             }
-            object.addComponent<MeshComponent>(*foundMesh, meshStore, std::move(objectMaterials),
-                                               materialStore);
-        }
-        if (components.contains("animator"))
-        {
-            LoadedAnimator loaded = deserializeAnimator(components.at("animator"), where + ".components.animator", scene);
-            auto &animator = object.addComponent<AnimatorComponent>(std::move(loaded.clips));
-            animator.setLoop(loaded.loop);
-            animator.setSpeedMultiplier(loaded.speed);
-        }
-        if (components.contains("skin"))
-        {
-            std::vector<Joint> joints;
-            const json &serializedJoints = required(components.at("skin"), "joints", where);
-            if (!serializedJoints.is_array()) throw std::runtime_error("SceneSerializer: skin joints must be an array at " + where);
-            for (size_t i = 0; i < serializedJoints.size(); ++i)
+            catch (const std::runtime_error &error)
             {
-                const json &joint = serializedJoints[i];
-                const SceneObjectId jointObject = readId(required(joint, "object", where), where + ".skin.joints.object");
-                if (!scene.contains(jointObject)) throw std::runtime_error("SceneSerializer: missing skin joint object " + toString(jointObject) + " at " + where);
-                joints.push_back({jointObject, readMat4(required(joint, "inverse_bind_matrix", where), where + ".inverse_bind_matrix")});
+                if (std::string_view(error.what()).starts_with("SceneSerializer: unknown component"))
+                    throw std::runtime_error(std::string(error.what()) + " at " + where + ".components");
+                throw;
             }
-            object.addComponent<SkinComponent>(Skin(scene, std::move(joints)));
-        }
-        if (components.contains("rigid_body"))
-        {
-            const json &body = components.at("rigid_body");
-            const std::string type = required(body, "type", where).get<std::string>();
-            if (type != "static" && type != "dynamic") throw std::runtime_error("SceneSerializer: invalid rigid body type at " + where);
-            auto &loadedBody = object.addComponent<RigidBodyComponent>(required(body, "mass", where).get<float>(),
-                type == "static" ? RigidBodyType::Static : RigidBodyType::Dynamic);
-            loadedBody.setInertiaDiagonal(readVector<3, float, glm::defaultp>(required(body, "inertia_diagonal", where), where));
-            loadedBody.setLinearDrag(required(body, "linear_drag", where).get<float>());
-            loadedBody.setAngularDrag(required(body, "angular_drag", where).get<float>());
-            loadedBody.setLinearVelocity(readVector<3, float, glm::defaultp>(required(body, "linear_velocity", where), where));
-            loadedBody.setAngularVelocity(readVector<3, float, glm::defaultp>(required(body, "angular_velocity", where), where));
-        }
-        if (components.contains("colliders"))
-        {
-            const json &serializedColliders = components.at("colliders");
-            if (!serializedColliders.is_array() || serializedColliders.empty())
-                throw std::runtime_error("SceneSerializer: colliders must be a non-empty array at " + where);
-            std::vector<Collider> colliders;
-            for (size_t i = 0; i < serializedColliders.size(); ++i)
-                colliders.push_back(deserializeCollider(serializedColliders[i], where + ".components.colliders[" + std::to_string(i) + "]"));
-            object.addComponent<ColliderComponent>(std::move(colliders));
         }
 
         const json &parent = required(value, "parent", where);
