@@ -107,6 +107,7 @@ add_library(lr_core STATIC
     src/core/passes/pbr/PbrPass.cpp
     src/core/passes/transparent/TransparentPass.cpp
     src/core/passes/imgui/ImguiPass.cpp
+    src/core/passes/imgui/ImguiTheme.cpp
 
     src/core/scene/Mesh.cpp
     src/core/scene/MeshComponent.cpp

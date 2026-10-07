@@ -38,12 +38,6 @@ void LaplaceBeltramiTool::calculate()
 
 void LaplaceBeltramiTool::onGui()
 {
-    const ImGuiViewport *viewport = ImGui::GetMainViewport();
-    const ImVec2 windowSize(viewport->WorkSize.x * 0.24f, viewport->WorkSize.y * 0.32f);
-    ImGui::SetNextWindowPos(viewport->WorkPos, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(windowSize, ImGuiCond_FirstUseEver);
-    ImGui::Begin("Laplace-Beltrami Heatmap");
-
     if (ImGui::Button(m_hasResult ? "Recalculate" : "Calculate Laplace-Beltrami Operator"))
     {
         calculate();
@@ -66,8 +60,6 @@ void LaplaceBeltramiTool::onGui()
         ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.15f, 1.0f),
                            "Mesh geometry changed. Heatmap values are out of date.");
     }
-
-    ImGui::End();
 }
 
 } // namespace lr

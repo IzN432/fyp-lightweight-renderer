@@ -73,7 +73,8 @@ void ArapTool::onSolveClicked()
     }
 }
 
-void ArapTool::onGui(const glm::mat4 &viewProj, VkExtent2D extent, const glm::vec3 &selectionWorldCentroid)
+void ArapTool::onOverlayGui(const glm::mat4 &viewProj, VkExtent2D extent,
+                            const glm::vec3 &selectionWorldCentroid)
 {
     if (!m_modeActive)
     {
@@ -81,6 +82,11 @@ void ArapTool::onGui(const glm::mat4 &viewProj, VkExtent2D extent, const glm::ve
     }
 
     const bool hasSelection = !m_selectionManager.getSelectedIndices().empty();
+    if (!hasSelection)
+    {
+        return;
+    }
+
     if (hasSelection)
     {
         glm::vec2 screenPos = math::worldToScreenPixels(selectionWorldCentroid, viewProj, extent);
@@ -112,8 +118,18 @@ void ArapTool::onGui(const glm::mat4 &viewProj, VkExtent2D extent, const glm::ve
         }
         ImGui::End();
     }
+}
 
-    ImGui::Begin("ARAP");
+void ArapTool::onPanelGui()
+{
+    if (!m_modeActive)
+    {
+        ImGui::TextDisabled("Press A to enable ARAP mode.");
+        return;
+    }
+
+    ImGui::TextWrapped("Press TAB to enter Edit mode, then select vertices to begin.");
+
     const bool canSolve = !m_selectionManager.getIndicesWithRole(m_anchorRole).empty() &&
                           !m_selectionManager.getIndicesWithRole(m_handleRole).empty();
     ImGui::BeginDisabled(!canSolve);
@@ -150,7 +166,6 @@ void ArapTool::onGui(const glm::mat4 &viewProj, VkExtent2D extent, const glm::ve
         ImGui::Text("Last %s update: %.3f ms", stats.lastWasRelease ? "release" : "drag",
                     stats.lastInteractionMs);
     }
-    ImGui::End();
 }
 
 } // namespace lr

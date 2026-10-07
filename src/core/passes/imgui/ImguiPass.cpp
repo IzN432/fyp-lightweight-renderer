@@ -1,5 +1,7 @@
 #include "ImguiPass.hpp"
 
+#include "ImguiTheme.hpp"
+
 #include <spdlog/spdlog.h>
 #include "core/vulkan/Swapchain.hpp"
 #include <spdlog/spdlog.h>
@@ -26,7 +28,7 @@ ImguiPass::ImguiPass(const VulkanContext &ctx, const Window &window, const Swapc
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGui::StyleColorsDark();
+    applyImguiTheme();
 
     ImGui_ImplGlfw_InitForVulkan(window.getHandle(), true);
 

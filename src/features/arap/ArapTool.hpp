@@ -37,11 +37,12 @@ public:
     // same mesh (see SelectionManager::rebind/VertexManager::rebind).
     void rebind(const Mesh &mesh);
 
-    // Called once per frame from the host's ImGui callback. Draws the anchor/handle popup (only
-    // while a selection exists) and the Solve button. selectionWorldCentroid is only meaningful
-    // while a selection exists — the caller computes it the same way it already does for gizmo
-    // placement (see main.cpp's centroid loop).
-    void onGui(const glm::mat4 &viewProj, VkExtent2D extent, const glm::vec3 &selectionWorldCentroid);
+    // Draws the anchor/handle popup near the current selection. selectionWorldCentroid is only
+    // meaningful while a selection exists.
+    void onOverlayGui(const glm::mat4 &viewProj, VkExtent2D extent, const glm::vec3 &selectionWorldCentroid);
+
+    // Draws the controls intended to be embedded in the host's Features panel.
+    void onPanelGui();
 
 private:
     void onRoleChanged();

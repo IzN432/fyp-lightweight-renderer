@@ -505,6 +505,52 @@ try
     std::string             scenePersistenceError;
 
     viewer.onGui([&]() {
+        if (ImGui::BeginMainMenuBar())
+        {
+            if (ImGui::BeginMenu("File"))
+            {
+                if (ImGui::MenuItem("Load Scene..."))
+                {
+                    IGFD::FileDialogConfig dialogConfig;
+                    dialogConfig.path = sceneDocumentPath ? sceneDocumentPath->parent_path().string() : ".";
+                    dialogConfig.flags = ImGuiFileDialogFlags_Modal |
+                                         ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
+                                         ImGuiFileDialogFlags_ShowDevicesButton;
+                    ImGuiFileDialog::Instance()->OpenDialog("LoadNativeScene", "Load Scene", ".lrscene",
+                                                             dialogConfig);
+                }
+
+                if (ImGui::MenuItem("Save", nullptr, false, sceneDocumentPath.has_value()))
+                {
+                    try
+                    {
+                        sceneManager.save(*sceneDocumentPath);
+                        scenePersistenceError.clear();
+                    }
+                    catch (const std::exception &e)
+                    {
+                        scenePersistenceError = e.what();
+                        spdlog::error("Failed to save scene: {}", e.what());
+                    }
+                }
+
+                if (ImGui::MenuItem("Save As..."))
+                {
+                    IGFD::FileDialogConfig dialogConfig;
+                    dialogConfig.path = sceneDocumentPath ? sceneDocumentPath->parent_path().string() : ".";
+                    dialogConfig.fileName = sceneDocumentPath ? sceneDocumentPath->filename().string()
+                                                                : "scene.lrscene";
+                    dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_ConfirmOverwrite |
+                                         ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
+                                         ImGuiFileDialogFlags_ShowDevicesButton;
+                    ImGuiFileDialog::Instance()->OpenDialog("SaveNativeScene", "Save Scene As", ".lrscene",
+                                                             dialogConfig);
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMainMenuBar();
+        }
+
         const ImGuiViewport *viewport = ImGui::GetMainViewport();
         const ImVec2 panelSize(viewport->WorkSize.x * 0.24f, viewport->WorkSize.y * 0.32f);
         const ImVec2 topLeft(viewport->WorkPos.x, viewport->WorkPos.y);
@@ -514,8 +560,6 @@ try
                                 viewport->WorkPos.y + viewport->WorkSize.y - panelSize.y);
         const ImVec2 bottomRight(viewport->WorkPos.x + viewport->WorkSize.x - panelSize.x,
                                  viewport->WorkPos.y + viewport->WorkSize.y - panelSize.y);
-
-        laplaceBeltramiTool.onGui();
 
         ImGui::SetNextWindowPos(topLeft, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
@@ -583,6 +627,24 @@ try
             ImGui::Unindent();
         }
 
+        if (ImGui::CollapsingHeader("HBAO"))
+        {
+            ImGui::Indent();
+            lr::AmbientOcclusionPass::Config &aoConfig = aoPass.config();
+            bool                              aoDirty  = false;
+            aoDirty |= ImGui::SliderFloat("Sphere Radius", &aoConfig.sphereRadius, 0.0005f, 0.2f, "%.4f",
+                                          ImGuiSliderFlags_Logarithmic);
+            aoDirty |= ImGui::SliderInt("Num Steps", &aoConfig.numSteps, 1, 128);
+            aoDirty |= ImGui::SliderInt("Num Directions", &aoConfig.numDirs, 1, 128);
+            aoDirty |= ImGui::SliderFloat("Tan Angle Bias", &aoConfig.tanAngleBias, 0.0f, 1.0f);
+            aoDirty |= ImGui::SliderFloat("AO Scalar", &aoConfig.aoScalar, 0.0f, 5.0f);
+            if (aoDirty)
+            {
+                aoPass.updateParams(viewer.resources());
+            }
+            ImGui::Unindent();
+        }
+
         if (ImGuiFileDialog::Instance()->Display("ChooseEnvironmentHdri", ImGuiWindowFlags_NoCollapse,
                                                  ImVec2(640.0f, 360.0f)))
         {
@@ -601,62 +663,13 @@ try
 
         ImGui::End();
 
-        ImGui::Begin("HBAO");
-        {
-            lr::AmbientOcclusionPass::Config &aoConfig = aoPass.config();
-            bool                              aoDirty  = false;
-            aoDirty |= ImGui::SliderFloat("Sphere Radius", &aoConfig.sphereRadius, 0.0005f, 0.2f, "%.4f",
-                                          ImGuiSliderFlags_Logarithmic);
-            aoDirty |= ImGui::SliderInt("Num Steps", &aoConfig.numSteps, 1, 128);
-            aoDirty |= ImGui::SliderInt("Num Directions", &aoConfig.numDirs, 1, 128);
-            aoDirty |= ImGui::SliderFloat("Tan Angle Bias", &aoConfig.tanAngleBias, 0.0f, 1.0f);
-            aoDirty |= ImGui::SliderFloat("AO Scalar", &aoConfig.aoScalar, 0.0f, 5.0f);
-            if (aoDirty)
-            {
-                aoPass.updateParams(viewer.resources());
-            }
-        }
-        ImGui::End();
-
         ImGui::SetNextWindowPos(topRight, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
-        ImGui::Begin("Scene Hierarchy");
-        if (ImGui::Button("Load Scene..."))
-        {
-            IGFD::FileDialogConfig dialogConfig;
-            dialogConfig.path = sceneDocumentPath ? sceneDocumentPath->parent_path().string() : ".";
-            dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
-                                 ImGuiFileDialogFlags_ShowDevicesButton;
-            ImGuiFileDialog::Instance()->OpenDialog("LoadNativeScene", "Load Scene", ".lrscene", dialogConfig);
-        }
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!sceneDocumentPath.has_value());
-        if (ImGui::Button("Save"))
-        {
-            try
-            {
-                sceneManager.save(*sceneDocumentPath);
-                scenePersistenceError.clear();
-            }
-            catch (const std::exception &e)
-            {
-                scenePersistenceError = e.what();
-                spdlog::error("Failed to save scene: {}", e.what());
-            }
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        if (ImGui::Button("Save As..."))
-        {
-            IGFD::FileDialogConfig dialogConfig;
-            dialogConfig.path = sceneDocumentPath ? sceneDocumentPath->parent_path().string() : ".";
-            dialogConfig.fileName = sceneDocumentPath ? sceneDocumentPath->filename().string() : "scene.lrscene";
-            dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_ConfirmOverwrite |
-                                 ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
-                                 ImGuiFileDialogFlags_ShowDevicesButton;
-            ImGuiFileDialog::Instance()->OpenDialog("SaveNativeScene", "Save Scene As", ".lrscene",
-                                                     dialogConfig);
-        }
+        ImGui::SetNextWindowSize(ImVec2(panelSize.x, viewport->WorkSize.y * 0.64f), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Scene");
+        const float hierarchyHeight = ImGui::GetContentRegionAvail().y * 0.55f;
+        ImGui::BeginChild("SceneHierarchy", ImVec2(0.0f, hierarchyHeight),
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY);
+        ImGui::SeparatorText("Hierarchy");
         if (!scenePersistenceError.empty())
         {
             ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Scene file error: %s",
@@ -695,6 +708,12 @@ try
         }
         ImGui::Separator();
         scene.onHierarchyGUI();
+        ImGui::EndChild();
+
+        ImGui::BeginChild("SceneInspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+        ImGui::SeparatorText("Inspector");
+        scene.onInspectorGUI(editorContext);
+        ImGui::EndChild();
         ImGui::End();
 
         if (ImGuiFileDialog::Instance()->Display("LoadNativeScene", ImGuiWindowFlags_NoCollapse,
@@ -791,8 +810,19 @@ try
 
         ImGui::SetNextWindowPos(bottomRight, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
-        ImGui::Begin("Inspector");
-        scene.onInspectorGUI(editorContext);
+        ImGui::Begin("Features");
+        if (ImGui::CollapsingHeader("Laplace-Beltrami", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::Indent();
+            laplaceBeltramiTool.onGui();
+            ImGui::Unindent();
+        }
+        if (ImGui::CollapsingHeader("ARAP", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::Indent();
+            arapTool.onPanelGui();
+            ImGui::Unindent();
+        }
         ImGui::End();
 
         if (objectTransformWindowOpen && scene.selectedObject())
@@ -902,7 +932,7 @@ try
         };
 
         const auto &selected = selectionManager.getSelectedIndices();
-        arapTool.onGui(viewProj, extent, selected.empty() ? glm::vec3(0.0f) : worldCentroidOf(selected));
+        arapTool.onOverlayGui(viewProj, extent, selected.empty() ? glm::vec3(0.0f) : worldCentroidOf(selected));
 
         const bool objectTranslateActive = transformController.tool() == lr::TransformTool::Translate &&
                                            sceneManager.editorMode() == lr::EditorMode::View &&
