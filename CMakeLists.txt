@@ -303,7 +303,10 @@ target_link_libraries(lr_scene_serialization PUBLIC lr_core lr_animation_feature
     lr_linear_blend_skinning_feature lr_rigid_body_feature nlohmann_json::nlohmann_json)
 
 # Application executable
-add_executable(renderer src/main.cpp)
+add_executable(renderer
+    src/main.cpp
+    src/app/EditorSession.cpp
+)
 target_link_libraries(renderer PRIVATE lr_core lr_arap_feature lr_laplace_beltrami_feature
     lr_linear_blend_skinning_feature lr_animation_feature lr_rigid_body_feature lr_scene_serialization
     imguiFileDialog)
