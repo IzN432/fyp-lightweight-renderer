@@ -38,6 +38,8 @@ private:
     BoxSelectionTool   m_boxTool;
     Gesture            m_gesture = Gesture::None;
     glm::vec2          m_start{};
+    // Child-tool callbacks detach before the children and this parent are destroyed.
+    std::vector<CallbackConnection> m_connections;
 };
 
 } // namespace lr

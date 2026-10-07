@@ -149,11 +149,11 @@ def main():
         light = [math.cos(pitch) * math.sin(yaw), math.sin(pitch), math.cos(pitch) * math.cos(yaw), 0.0]
         res.update_buffer("settings", np.array([*settings["albedo"], 1.0, *light], dtype=np.float32))
 
-    viewer.on_update(update)
+    update_connection = viewer.on_update(update)
     # The camera ignores the mouse while it's over UI, so the self-test runs without the panel: the real
     # cursor resting on it would otherwise swallow the injected drag.
     if not args.scripted:
-        viewer.on_gui(gui)
+        gui_connection = viewer.on_gui(gui)
     viewer.run()
 
     if args.scripted:

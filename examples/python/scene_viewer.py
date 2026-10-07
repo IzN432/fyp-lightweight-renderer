@@ -168,8 +168,8 @@ def main():
         if args.frames and state["frames"] >= args.frames:
             viewer.close()
 
-    viewer.on_update(update)
-    viewer.on_gui(gui)
+    update_connection = viewer.on_update(update)
+    gui_connection = viewer.on_gui(gui)
     viewer.run()
 
 

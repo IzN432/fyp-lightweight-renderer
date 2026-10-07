@@ -40,14 +40,20 @@ public:
     // the selection). Queried once per highlight rebuild, applied to every highlighted vertex.
     virtual glm::vec3 highlightColor() const { return glm::vec3(1.0f, 0.8f, 0.0f); }
 
-    void registerSelectionCallback(std::function<void()> callback) { m_selectionCallback = std::move(callback); }
-    void registerHighlightCallback(std::function<void()> callback) { m_highlightCallback = std::move(callback); }
+    CallbackConnection registerSelectionCallback(std::function<void()> callback)
+    {
+        return m_selectionCallbacks.connect(std::move(callback));
+    }
+    CallbackConnection registerHighlightCallback(std::function<void()> callback)
+    {
+        return m_highlightCallbacks.connect(std::move(callback));
+    }
 
 protected:
     SceneObject          &m_camera;
     InputHandler         &m_input;
-    std::function<void()> m_selectionCallback;
-    std::function<void()> m_highlightCallback;
+    CallbackList<>        m_selectionCallbacks;
+    CallbackList<>        m_highlightCallbacks;
     VkExtent2D            m_viewportExtent{};
 };
 

@@ -8,6 +8,7 @@
 #include "core/vulkan/Swapchain.hpp"
 #include "core/vulkan/VulkanContext.hpp"
 #include "core/window/Window.hpp"
+#include "core/utility/CallbackList.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -65,21 +66,28 @@ public:
 
     // Called once per frame between imguiPass.beginFrame() and fg.execute().
     // Place all ImGui:: calls here. Throws if the Viewer was created without a GUI.
-    void onGui(std::function<void()> cb);
+    CallbackConnection onGui(std::function<void()> cb);
     bool guiEnabled() const { return m_imguiPass != nullptr; }
 
     // Called once per frame after a valid swapchain image is acquired.
     // dt is seconds since the last frame. extent is the current swapchain size.
-    void onUpdate(std::function<void(float dt, VkExtent2D extent)> cb) { m_updateCallbacks.push_back(std::move(cb)); }
+    CallbackConnection onUpdate(std::function<void(float dt, VkExtent2D extent)> cb)
+    {
+        return m_updateCallbacks.connect(std::move(cb));
+    }
 
     // Called once per frame after every onUpdate callback has run, and before the frame graph
     // records/executes GPU work. Use this for end-of-frame bookkeeping that needs to see the
     // results of this frame's updates — e.g. flushing dirty scene state into a single GPU upload
     // rather than reacting to each mutation as it happens.
-    void onLateUpdate(std::function<void(float dt, VkExtent2D extent)> cb)
+    CallbackConnection onLateUpdate(std::function<void(float dt, VkExtent2D extent)> cb)
     {
-        m_lateUpdateCallbacks.push_back(std::move(cb));
+        return m_lateUpdateCallbacks.connect(std::move(cb));
     }
+
+    // Adapters may make a scoped registration last for the Viewer's lifetime when no external
+    // owner exists (for example, a Python-owned engine block kept alive by this Viewer).
+    void ownConnection(CallbackConnection connection) { m_ownedConnections.push_back(std::move(connection)); }
 
     // Called for each validation-layer error (only when Config::enableValidation). Replaces any
     // previous handler; see VulkanContext::setValidationErrorHandler.
@@ -143,9 +151,10 @@ private:
     std::unique_ptr<ImguiPass>        m_imguiPass;
     ImageHandle                       m_backbuffer;
 
-    std::vector<std::function<void()>>                  m_guiCallbacks;
-    std::vector<std::function<void(float, VkExtent2D)>> m_updateCallbacks;
-    std::vector<std::function<void(float, VkExtent2D)>> m_lateUpdateCallbacks;
+    CallbackList<>                  m_guiCallbacks;
+    CallbackList<float, VkExtent2D> m_updateCallbacks;
+    CallbackList<float, VkExtent2D> m_lateUpdateCallbacks;
+    std::vector<CallbackConnection> m_ownedConnections;
     uint32_t                                            m_currentImageIndex = 0;
     double                                              m_lastFrameTime     = 0.0;
     bool                                                m_frameExecuted     = false;

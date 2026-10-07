@@ -30,7 +30,7 @@ ArapTool::ArapTool(SelectionManager &selectionManager, VertexManager &vertexMana
       m_handleRole(selectionManager.registerRole(kHandleColor)),
       m_arapHandler(m_solver, vertexManager, selectionManager, m_handleRole, commandManager)
 {
-    m_selectionManager.registerRoleChangedCallback([this]() {
+    m_roleChangedConnection = m_selectionManager.registerRoleChangedCallback([this]() {
         onRoleChanged();
     });
 }

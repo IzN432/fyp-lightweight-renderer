@@ -81,6 +81,8 @@ private:
     ArapDragHandler m_arapHandler;
 
     bool m_lastSolveFailed = false;
+    // Declared last so role-change notifications detach before this tool's state is destroyed.
+    CallbackConnection m_roleChangedConnection;
 };
 
 } // namespace lr

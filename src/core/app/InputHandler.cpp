@@ -7,14 +7,14 @@ InputHandler::InputHandler() = default;
 
 InputHandler::~InputHandler() = default;
 
-void InputHandler::onKeyPress(std::function<void(int, int, bool, bool, bool)> callback)
+CallbackConnection InputHandler::onKeyPress(std::function<void(int, int, bool, bool, bool)> callback)
 {
-    m_keyPressCallbacks.push_back(callback);
+    return m_keyPressCallbacks.connect(std::move(callback));
 }
 
-void InputHandler::onMouseButton(std::function<void(int, int, bool, bool, bool)> callback)
+CallbackConnection InputHandler::onMouseButton(std::function<void(int, int, bool, bool, bool)> callback)
 {
-    m_mouseButtonCallbacks.push_back(callback);
+    return m_mouseButtonCallbacks.connect(std::move(callback));
 }
 
 void InputHandler::update()
@@ -59,10 +59,7 @@ void InputHandler::notifyKey(int key, int action)
     bool shift = isShiftPressed();
     bool ctrl  = isCtrlPressed();
     bool alt   = isAltPressed();
-    for (auto &cb : m_keyPressCallbacks)
-    {
-        cb(key, action, shift, ctrl, alt);
-    }
+    m_keyPressCallbacks.invoke(key, action, shift, ctrl, alt);
 }
 
 void InputHandler::notifyMouseMove(double x, double y)
@@ -84,10 +81,7 @@ void InputHandler::notifyMouseButton(int button, int action)
     bool shift = isShiftPressed();
     bool ctrl  = isCtrlPressed();
     bool alt   = isAltPressed();
-    for (auto &cb : m_mouseButtonCallbacks)
-    {
-        cb(button, action, shift, ctrl, alt);
-    }
+    m_mouseButtonCallbacks.invoke(button, action, shift, ctrl, alt);
 }
 
 void InputHandler::notifyScroll(double delta) { m_scrollAccum += delta; }

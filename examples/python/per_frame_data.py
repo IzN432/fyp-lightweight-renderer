@@ -93,7 +93,7 @@ def main():
         if state["frame"] >= args.frames:
             viewer.close()
 
-    viewer.on_update(update)
+    update_connection = viewer.on_update(update)
     viewer.run()
 
     seen = res.read_buffer("history").view(np.uint32)

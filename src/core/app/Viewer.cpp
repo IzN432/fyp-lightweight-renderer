@@ -62,13 +62,13 @@ Viewer::Viewer(const Config &config)
     m_backbuffer = m_fg->importBackbuffer(kBackbufferName, m_swapchain->getFormat());
 }
 
-void Viewer::onGui(std::function<void()> cb)
+CallbackConnection Viewer::onGui(std::function<void()> cb)
 {
     if (!m_imguiPass)
     {
         throw std::logic_error("Viewer: onGui() needs a GUI, but this Viewer was created without one");
     }
-    m_guiCallbacks.push_back(std::move(cb));
+    return m_guiCallbacks.connect(std::move(cb));
 }
 
 template <typename F> auto Viewer::blocking(F &&call)
@@ -198,10 +198,7 @@ void Viewer::renderFrame()
     if (m_imguiPass)
     {
         m_imguiPass->beginFrame();
-        for (auto &cb : m_guiCallbacks)
-        {
-            cb();
-        }
+        m_guiCallbacks.invoke();
     }
 
     // Waits for this frame slot's previous submission and acquires the next swapchain image.
@@ -225,14 +222,8 @@ void Viewer::renderFrame()
     const double now = glfwGetTime();
     const float  dt  = static_cast<float>(now - m_lastFrameTime);
     m_lastFrameTime  = now;
-    for (auto &cb : m_updateCallbacks)
-    {
-        cb(dt, m_swapchain->getExtent());
-    }
-    for (auto &cb : m_lateUpdateCallbacks)
-    {
-        cb(dt, m_swapchain->getExtent());
-    }
+    m_updateCallbacks.invoke(dt, m_swapchain->getExtent());
+    m_lateUpdateCallbacks.invoke(dt, m_swapchain->getExtent());
 
     ExternalImageBindings externalImages;
     externalImages.bind(m_backbuffer, m_swapchain->getImage(imageIndex), m_swapchain->getImageView(imageIndex));

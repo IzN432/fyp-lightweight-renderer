@@ -77,7 +77,7 @@ public:
         const auto applyPresentation = [this](const EditorPresentation &presentation) {
             m_renderBridge.apply(presentation);
         };
-        m_sceneManager.registerEditorPresentationChangedCallback(applyPresentation);
+        m_connections.push_back(m_sceneManager.registerEditorPresentationChangedCallback(applyPresentation));
 
         registerEditorStates();
         registerEditorShortcuts();
@@ -98,9 +98,9 @@ public:
         registerSceneCallbacks();
         registerInputLayers();
         registerInputCallbacks();
-        m_viewer.onUpdate([this](float, VkExtent2D extent) {
+        m_connections.push_back(m_viewer.onUpdate([this](float, VkExtent2D extent) {
             update(extent);
-        });
+        }));
     }
 
     EditorContext &context() { return m_context; }
@@ -283,7 +283,7 @@ private:
 
     void registerSceneCallbacks()
     {
-        m_scene.registerSelectionChangedCallback([this](SceneObjectId id) {
+        m_connections.push_back(m_scene.registerSelectionChangedCallback([this](SceneObjectId id) {
             SceneObject &object   = m_scene.getSceneObject(id);
             m_transformWindowOpen = true;
             m_transformController.setSelectedTarget(object.hasComponent<TransformComponent>() ? &object : nullptr);
@@ -301,9 +301,9 @@ private:
                 m_sceneManager.setEditedMeshObject(object);
                 rebindEditableTarget(object, true);
             }
-        });
+        }));
 
-        m_scene.registerObjectsDestroyedCallback([this](std::span<const SceneObjectId> ids) {
+        m_connections.push_back(m_scene.registerObjectsDestroyedCallback([this](std::span<const SceneObjectId> ids) {
             m_viewer.context().waitIdle();
             const SceneObject *previousEditedMesh = m_sceneManager.editedMeshObject();
             const bool         editedMeshDestroyed =
@@ -329,7 +329,7 @@ private:
                 return;
             }
             rebindEditableTarget(*replacement, false);
-        });
+        }));
     }
 
     // Pointer priority, highest first. The UI and the active gizmo outrank every layer and are
@@ -357,7 +357,8 @@ private:
 
     void registerInputCallbacks()
     {
-        m_viewer.input().onMouseButton([this](int button, int action, bool shift, bool ctrl, bool alt) {
+        m_connections.push_back(m_viewer.input().onMouseButton(
+            [this](int button, int action, bool shift, bool ctrl, bool alt) {
             m_inputRouter.routeButton({
                 .button = button,
                 .action = action,
@@ -365,17 +366,17 @@ private:
                 .ctrl   = ctrl,
                 .alt    = alt,
             });
-        });
+        }));
 
         // One key callback for the whole editor. The ImGui check that each of these handlers used to
         // repeat now happens here, once, and chord matching belongs to EditorShortcuts.
-        m_viewer.input().onKeyPress([this](int key, int action, bool, bool ctrl, bool) {
+        m_connections.push_back(m_viewer.input().onKeyPress([this](int key, int action, bool, bool ctrl, bool) {
             if (action != GLFW_PRESS || imguiCapturesKeyboard())
             {
                 return;
             }
             m_shortcuts.dispatch({.key = key, .ctrl = ctrl});
-        });
+        }));
     }
 
     // The editor's own shortcuts. Registered before any tool's, so a feature cannot shadow them.
@@ -471,6 +472,8 @@ private:
     // Every registered tool, in panel order. Declared after the tools it points at.
     std::vector<EditorTool *> m_tools;
     bool                      m_transformWindowOpen = false;
+    // Declared last so every external callback disconnects before the objects it may call into.
+    std::vector<CallbackConnection> m_connections;
 };
 
 EditorSession::EditorSession(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,

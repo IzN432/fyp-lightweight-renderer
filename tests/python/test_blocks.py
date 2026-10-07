@@ -89,7 +89,7 @@ def run_frames(viewer, frames, each=None):
         if count[0] >= frames:
             viewer.close()
 
-    viewer.on_update(update)
+    update_connection = viewer.on_update(update)
     viewer.run()
 
 

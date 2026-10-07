@@ -8,15 +8,15 @@ namespace lr
 SelectionGestureTool::SelectionGestureTool(InputHandler &input, SceneObject &camera)
     : SelectionTool(input, camera), m_clickTool(input, camera), m_boxTool(input, camera)
 {
-    m_clickTool.registerSelectionCallback([this]() {
-        m_selectionCallback();
-    });
-    m_boxTool.registerSelectionCallback([this]() {
-        m_selectionCallback();
-    });
-    m_boxTool.registerHighlightCallback([this]() {
-        m_highlightCallback();
-    });
+    m_connections.push_back(m_clickTool.registerSelectionCallback([this]() {
+        m_selectionCallbacks.invoke();
+    }));
+    m_connections.push_back(m_boxTool.registerSelectionCallback([this]() {
+        m_selectionCallbacks.invoke();
+    }));
+    m_connections.push_back(m_boxTool.registerHighlightCallback([this]() {
+        m_highlightCallbacks.invoke();
+    }));
 }
 
 void SelectionGestureTool::onMouseDown(double ndcX, double ndcY, double aspect)

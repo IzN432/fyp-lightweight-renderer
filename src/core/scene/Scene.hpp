@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SceneObject.hpp"
+#include "core/utility/CallbackList.hpp"
 
 #include <cstddef>
 #include <filesystem>
@@ -62,14 +63,15 @@ public:
     // Fired whenever a Scene Hierarchy row is clicked, with the newly selected object's id — even
     // if it's the object that was already selected (callers that only care about actual changes
     // should compare against their own last-seen id).
-    void registerSelectionChangedCallback(std::function<void(SceneObjectId)> callback)
+    CallbackConnection registerSelectionChangedCallback(std::function<void(SceneObjectId)> callback)
     {
-        m_selectionChangedCallbacks.push_back(std::move(callback));
+        return m_selectionChangedCallbacks.connect(std::move(callback));
     }
 
-    void registerObjectsDestroyedCallback(std::function<void(std::span<const SceneObjectId>)> callback)
+    CallbackConnection registerObjectsDestroyedCallback(
+        std::function<void(std::span<const SceneObjectId>)> callback)
     {
-        m_objectsDestroyedCallbacks.push_back(std::move(callback));
+        return m_objectsDestroyedCallbacks.connect(std::move(callback));
     }
 
 private:
@@ -79,8 +81,8 @@ private:
     std::optional<std::filesystem::path>       m_hdriPath;
     std::vector<std::byte>                     m_hdriData;
     std::optional<SceneObjectId>               m_selectedObject;
-    std::vector<std::function<void(SceneObjectId)>> m_selectionChangedCallbacks;
-    std::vector<std::function<void(std::span<const SceneObjectId>)>> m_objectsDestroyedCallbacks;
+    CallbackList<SceneObjectId>                     m_selectionChangedCallbacks;
+    CallbackList<std::span<const SceneObjectId>>    m_objectsDestroyedCallbacks;
     std::unordered_set<SceneObjectId> m_protectedObjects;
 };
 

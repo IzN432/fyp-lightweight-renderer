@@ -618,6 +618,11 @@ class Input:
     @property
     def alt(self) -> bool: ...
 
+class CallbackConnection:
+    """A scoped callback registration. Keep it alive while the callback is needed."""
+
+    def disconnect(self) -> None: ...
+
 class Viewer:
     """Window + Vulkan device + frame graph. Declare passes, then call run(), or call step() in your own
     loop."""
@@ -650,16 +655,16 @@ class Viewer:
     @property
     def swapchain_format(self) -> Format: ...
 
-    def on_update(self, callback: Callable[[float, tuple[int, int]], None]) -> None:
-        """callback(dt: float, extent: (width, height)), called every frame before rendering."""
+    def on_update(self, callback: Callable[[float, tuple[int, int]], None]) -> CallbackConnection:
+        """Register callback(dt, extent) before rendering. Keep the returned connection alive."""
         ...
 
-    def on_late_update(self, callback: Callable[[float, tuple[int, int]], None]) -> None:
-        """Like on_update, but after every on_update callback has run."""
+    def on_late_update(self, callback: Callable[[float, tuple[int, int]], None]) -> CallbackConnection:
+        """Like on_update, but after every on_update callback. Keep the connection alive."""
         ...
 
-    def on_gui(self, callback: Callable[[], None]) -> None:
-        """callback(), called every frame to build ImGui panels with lr.gui (e.g. `with lr.gui.window(...)`)."""
+    def on_gui(self, callback: Callable[[], None]) -> CallbackConnection:
+        """Register the per-frame GUI callback. Keep the returned connection alive."""
         ...
 
     @property

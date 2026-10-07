@@ -98,10 +98,7 @@ void Scene::destroySceneObject(SceneObjectId id)
     {
         m_selectedObject.reset();
     }
-    for (const auto &callback : m_objectsDestroyedCallbacks)
-    {
-        callback(destroyed);
-    }
+    m_objectsDestroyedCallbacks.invoke(destroyed);
 }
 
 void Scene::setParent(SceneObjectId childId, std::optional<SceneObjectId> parentId)
@@ -158,10 +155,7 @@ void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> 
     if (ImGui::IsItemClicked())
     {
         m_selectedObject = object.id();
-        for (const auto &callback : m_selectionChangedCallbacks)
-        {
-            callback(object.id());
-        }
+        m_selectionChangedCallbacks.invoke(object.id());
     }
 
     if (ImGui::BeginPopupContextItem())

@@ -229,18 +229,6 @@ try
     setTransparentGeometry(sceneManager.gpu());
     transparentPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
 
-    // Whenever SceneGpu re-packs geometry (an import, lights added or removed) or re-uploads the lights,
-    // keep the passes' draw lists and light count in step.
-    sceneManager.gpu().onGeometryRebuilt([&](const lr::SceneGpu &gpu) {
-        geometryPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
-                                      gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
-        setTransparentGeometry(gpu);
-    });
-    sceneManager.gpu().onLightsUploaded([&](uint32_t numLights) {
-        pbrPass.setNumLights(numLights);
-        transparentPass.setNumLights(numLights);
-    });
-
     // Keep the geometry overlay stage alive even when it has no instances. Besides remaining
     // available for future editor visuals (for example, bones), it owns the per-frame clear of
     // the shared overlay color/depth targets before later overlay passes append to them.
@@ -282,9 +270,6 @@ try
     lr::EditorRenderBridge editorRendering(sceneManager, geometryPass, transparentPass, heatmapPass,
                                            overlayPointsPass, overlayLinesPass);
     lr::EditorSession editor(viewer, sceneManager, *camera, editorRendering);
-    scene.registerObjectsDestroyedCallback([&](std::span<const lr::SceneObjectId>) {
-        physicsWorld.onSceneChanged();
-    });
 
     // -------------------------------------------------------------------------
     // Per-frame callbacks
@@ -296,8 +281,27 @@ try
     std::string             sceneImportError;
     std::optional<fs::path> sceneDocumentPath;
     std::string             scenePersistenceError;
+    lr::SphericalCameraController cameraController(*camera, viewer.input());
 
-    viewer.onGui([&]() {
+    // Constructed after everything its callbacks capture, so all registrations disconnect first.
+    std::vector<lr::CallbackConnection> appConnections;
+
+    // Whenever SceneGpu re-packs geometry (an import, lights added or removed) or re-uploads the lights,
+    // keep the passes' draw lists and light count in step.
+    appConnections.push_back(sceneManager.gpu().onGeometryRebuilt([&](const lr::SceneGpu &gpu) {
+        geometryPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
+                                      gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
+        setTransparentGeometry(gpu);
+    }));
+    appConnections.push_back(sceneManager.gpu().onLightsUploaded([&](uint32_t numLights) {
+        pbrPass.setNumLights(numLights);
+        transparentPass.setNumLights(numLights);
+    }));
+    appConnections.push_back(scene.registerObjectsDestroyedCallback([&](std::span<const lr::SceneObjectId>) {
+        physicsWorld.onSceneChanged();
+    }));
+
+    appConnections.push_back(viewer.onGui([&]() {
         if (ImGui::BeginMainMenuBar())
         {
             if (ImGui::BeginMenu("File"))
@@ -590,11 +594,11 @@ try
         editor.drawFeaturePanel();
         ImGui::End();
         editor.drawTransformWindow();
-    });
+    }));
 
     // Application-level rendering policy: the C++ demo owns the IBL shaders, resource names,
     // and rebuild timing. Scene only retains the authored HDRI path for persistence.
-    viewer.onLateUpdate([&](float, VkExtent2D) {
+    appConnections.push_back(viewer.onLateUpdate([&](float, VkExtent2D) {
         if (!environmentDirty)
         {
             return;
@@ -629,16 +633,15 @@ try
         }
 
         environmentDirty = false;
-    });
+    }));
 
-    lr::SphericalCameraController cameraController(*camera, viewer.input());
-    viewer.onUpdate([&](float dt, VkExtent2D) {
+    appConnections.push_back(viewer.onUpdate([&](float dt, VkExtent2D) {
         physicsWorld.update(dt);
-    });
+    }));
 
-    viewer.onUpdate([&](float dt, VkExtent2D extent) {
+    appConnections.push_back(viewer.onUpdate([&](float dt, VkExtent2D extent) {
         cameraController.update(dt, editor.allowsViewportNavigation());
-    });
+    }));
 
     // Registers SceneManager's own onUpdate (aspect tracking) and onLateUpdate (flushDirty —
     // runs after every onUpdate above, so it sees the results of this frame's camera

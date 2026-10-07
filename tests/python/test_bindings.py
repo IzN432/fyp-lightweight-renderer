@@ -73,7 +73,7 @@ def test_runs_frames_and_closes():
         if len(frames) == 10:
             viewer.close()
 
-    viewer.on_update(update)
+    connection = viewer.on_update(update)
     viewer.run()
     assert len(frames) == 10
 
@@ -87,7 +87,7 @@ def test_update_callback_exception_is_reraised():
         if len(calls) == 3:
             raise ValueError("boom from on_update")
 
-    viewer.on_update(update)
+    connection = viewer.on_update(update)
     try:
         viewer.run()
     except ValueError as e:
@@ -95,6 +95,25 @@ def test_update_callback_exception_is_reraised():
     else:
         raise AssertionError("expected ValueError from run()")
     assert len(calls) == 3, "the window should close after the frame that raised"
+
+
+def test_callback_connection_disconnects():
+    viewer = make_viewer()
+    disconnected_calls = []
+    disconnected = viewer.on_update(lambda dt, extent: disconnected_calls.append(dt))
+    disconnected.disconnect()
+
+    frames = []
+
+    def close_after_three(dt, extent):
+        frames.append(dt)
+        if len(frames) == 3:
+            viewer.close()
+
+    closer = viewer.on_update(close_after_three)
+    viewer.run()
+    assert len(frames) == 3
+    assert disconnected_calls == []
 
 
 def test_execute_callback_exception_is_reraised():
@@ -143,7 +162,7 @@ def test_pipeline_state_runs():
         if len(frames) >= 5:
             viewer.close()
 
-    viewer.on_update(update)
+    connection = viewer.on_update(update)
     viewer.run()
     assert len(frames) == 5
 
@@ -231,13 +250,13 @@ def make_recorder(writes_dynamic=False):
         if frame[0] >= 8:
             viewer.close()
 
-    viewer.on_update(update)
-    return viewer
+    connection = viewer.on_update(update)
+    return viewer, connection
 
 
 def test_dynamic_data_written_once_reaches_every_frame():
     # Each frame in flight has its own copy; data written before run() must still reach all of them.
-    viewer = make_recorder()
+    viewer, connection = make_recorder()
     viewer.resources.update_buffer("data", np.array([1234], dtype=np.uint32))
     viewer.run()
     seen = viewer.resources.read_buffer("history").view(np.uint32)
@@ -245,7 +264,7 @@ def test_dynamic_data_written_once_reaches_every_frame():
 
 
 def test_gpu_writes_to_dynamic_buffers_are_rejected():
-    viewer = make_recorder(writes_dynamic=True)
+    viewer, connection = make_recorder(writes_dynamic=True)
     try:
         viewer.run()
     except RuntimeError as e:
@@ -264,7 +283,7 @@ def run_frames(viewer, count, per_frame=None):
         if frame[0] >= count:
             viewer.close()
 
-    viewer.on_update(update)
+    connection = viewer.on_update(update)
     viewer.run()
 
 
@@ -301,7 +320,7 @@ def test_gui_widgets_and_window_balancing():
             lr.gui.spacing()
         lr.gui.begin("Left open")  # never ended: closed automatically after the callback
 
-    viewer.on_gui(gui)
+    connection = viewer.on_gui(gui)
     run_frames(viewer, 3)
     assert seen["checkbox"] == (False, True), seen["checkbox"]
     assert seen["slider"] == (False, 0.5) and seen["slider_int"] == (False, 3)
@@ -316,7 +335,7 @@ def test_gui_exception_closes_window_and_reraises():
         with lr.gui.window("Broken"):
             raise ValueError("boom from on_gui")
 
-    viewer.on_gui(gui)
+    connection = viewer.on_gui(gui)
     try:
         run_frames(viewer, 50)
     except ValueError as e:
@@ -428,7 +447,7 @@ def test_recompile_before_the_first_frame_runs():
         if frames[0] == 3:
             viewer.close()
 
-    viewer.on_update(update)
+    connection = viewer.on_update(update)
     viewer.run()  # raises VulkanValidationError if the recompiled graph skipped the initial transitions
     assert fg.compile_count == 2, fg.compile_count
 
@@ -445,7 +464,7 @@ void main() { copy.value = source.value; }
 def test_step_lets_python_own_the_loop():
     viewer = make_viewer()
     dts = []
-    viewer.on_update(lambda dt, extent: dts.append(dt))
+    connection = viewer.on_update(lambda dt, extent: dts.append(dt))
     time.sleep(1.2)  # setup time before the loop starts must not count as the first frame
     for _ in range(5):
         assert viewer.step() and viewer.is_open
@@ -488,7 +507,7 @@ def test_step_reraises_callback_errors():
         if len(frames) == 3:
             raise ValueError("boom from on_update")
 
-    viewer.on_update(update)
+    connection = viewer.on_update(update)
     assert viewer.step() and viewer.step()
     try:
         viewer.step()
@@ -508,7 +527,7 @@ def test_step_then_run():
         if len(frames) == 6:
             viewer.close()
 
-    viewer.on_update(update)
+    connection = viewer.on_update(update)
     assert viewer.step() and viewer.step()
     viewer.run()  # continues the same frame loop until the window closes
     assert len(frames) == 6 and not viewer.is_open
@@ -535,7 +554,7 @@ def test_viewer_without_gui():
     viewer = lr.Viewer(title="lr binding test", width=320, height=240, gui=False)
     assert viewer.gui is False
     try:
-        viewer.on_gui(lambda: None)
+        connection = viewer.on_gui(lambda: None)
     except RuntimeError as e:
         assert "gui=False" in str(e), e
     else:
@@ -562,7 +581,7 @@ def test_viewer_without_gui():
     # The orbit camera reads ImGui's mouse capture; without an ImGui context it must still work.
     camera = lr.OrbitCamera(viewer)
     azimuth = camera.azimuth
-    viewer.on_update(lambda dt, extent: camera.update(dt))
+    connection = viewer.on_update(lambda dt, extent: camera.update(dt))
     x, y = viewer.input.mouse_position
     _testing.inject_mouse_button(viewer, lr.MouseButton.MIDDLE, True)
     for i in range(4):
@@ -630,6 +649,7 @@ def main():
         test_compile_errors_raise_with_location,
         test_runs_frames_and_closes,
         test_update_callback_exception_is_reraised,
+        test_callback_connection_disconnects,
         test_execute_callback_exception_is_reraised,
         test_resource_errors_raise_immediately,
         test_pipeline_state_runs,

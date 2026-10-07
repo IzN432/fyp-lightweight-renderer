@@ -79,7 +79,7 @@ void SelectionManager::updateCallback(float dt, VkExtent2D extent)
 void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
 {
     m_selectTool = std::move(tool);
-    m_selectTool->registerSelectionCallback([this]() {
+    m_toolSelectionConnection = m_selectTool->registerSelectionCallback([this]() {
         if (!m_selectTool)
         {
             return;
@@ -87,16 +87,10 @@ void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
         m_selectTool->selectVertices(m_highlightedVertices, m_selectedVertices,
                                      toWorldSpace(*m_vertices, *m_meshTransform));
         rebuildColors();
-        if (m_selectionChangedCallback)
-        {
-            m_selectionChangedCallback();
-        }
-        if (m_colorsChangedCallback)
-        {
-            m_colorsChangedCallback();
-        }
+        m_selectionChangedCallbacks.invoke();
+        m_colorsChangedCallbacks.invoke();
     });
-    m_selectTool->registerHighlightCallback([this]() {
+    m_toolHighlightConnection = m_selectTool->registerHighlightCallback([this]() {
         if (!m_selectTool)
         {
             return;
@@ -104,10 +98,7 @@ void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
         m_selectTool->highlightVertices(m_highlightedVertices, m_selectedVertices,
                                         toWorldSpace(*m_vertices, *m_meshTransform));
         rebuildColors();
-        if (m_colorsChangedCallback)
-        {
-            m_colorsChangedCallback();
-        }
+        m_colorsChangedCallbacks.invoke();
     });
 }
 
@@ -121,18 +112,9 @@ void SelectionManager::rebind(const std::vector<glm::vec3> &vertices, const Tran
     m_colors.assign(vertices.size(), kDefaultColor);
     m_roles.assign(vertices.size(), kNoRole);
 
-    if (m_selectionChangedCallback)
-    {
-        m_selectionChangedCallback();
-    }
-    if (m_colorsChangedCallback)
-    {
-        m_colorsChangedCallback();
-    }
-    if (m_roleChangedCallback)
-    {
-        m_roleChangedCallback();
-    }
+    m_selectionChangedCallbacks.invoke();
+    m_colorsChangedCallbacks.invoke();
+    m_roleChangedCallbacks.invoke();
 }
 
 void SelectionManager::rebuildColors()
@@ -182,13 +164,13 @@ void SelectionManager::clearSelection()
         rebuildColors();
     }
 
-    if (hadSelection && m_selectionChangedCallback)
+    if (hadSelection)
     {
-        m_selectionChangedCallback();
+        m_selectionChangedCallbacks.invoke();
     }
-    if (hadHighlight && m_colorsChangedCallback)
+    if (hadHighlight)
     {
-        m_colorsChangedCallback();
+        m_colorsChangedCallbacks.invoke();
     }
 }
 
@@ -215,14 +197,8 @@ void SelectionManager::classifySelectionAs(VertexRoleId role)
     }
 
     rebuildColors();
-    if (m_colorsChangedCallback)
-    {
-        m_colorsChangedCallback();
-    }
-    if (m_roleChangedCallback)
-    {
-        m_roleChangedCallback();
-    }
+    m_colorsChangedCallbacks.invoke();
+    m_roleChangedCallbacks.invoke();
 }
 
 void SelectionManager::clearAllRoles()
@@ -238,14 +214,8 @@ void SelectionManager::clearAllRoles()
     std::fill(m_roles.begin(), m_roles.end(), kNoRole);
 
     rebuildColors();
-    if (m_colorsChangedCallback)
-    {
-        m_colorsChangedCallback();
-    }
-    if (m_roleChangedCallback)
-    {
-        m_roleChangedCallback();
-    }
+    m_colorsChangedCallbacks.invoke();
+    m_roleChangedCallbacks.invoke();
 }
 
 VertexRoleId SelectionManager::getVertexRole(uint32_t index) const

@@ -101,7 +101,7 @@ def main():
 
     camera = lr.OrbitCamera(viewer)
     camera.target, camera.radius, camera.elevation = (0.0, 1.2, 0.0), 6.0, 0.25
-    viewer.on_update(lambda dt, extent: camera.update(dt))  # callbacks still run inside each step
+    update_connection = viewer.on_update(lambda dt, extent: camera.update(dt))  # keep while stepping
 
     paused = False
     timings = {"simulate": 0.0, "frame": 0.0}
@@ -115,7 +115,7 @@ def main():
             lr.gui.text("Paused (Space)" if paused else "Running (Space pauses)")
             lr.gui.text(f"simulate {timings['simulate'] * 1e3:.2f} ms, frame {timings['frame'] * 1e3:.2f} ms")
 
-    viewer.on_gui(gui)
+    gui_connection = viewer.on_gui(gui)
 
     frames, space_was_down = 0, False
     last = time.perf_counter()

@@ -64,7 +64,7 @@ def run_pass(frag_source=FRAG, tint_binding=0, push_size=16, push_data=None, rec
         if count[0] >= frames:
             viewer.close()
 
-    viewer.on_update(update)
+    update_connection = viewer.on_update(update)
     viewer.run()
     return count[0]
 

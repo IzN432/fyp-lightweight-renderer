@@ -240,8 +240,8 @@ def main():
         if args.scripted:
             scripted_check(state["frame"], editor, viewer, gpu, state)
 
-    viewer.on_update(update)
-    viewer.on_gui(lambda: editor.gui(gpu))
+    update_connection = viewer.on_update(update)
+    gui_connection = viewer.on_gui(lambda: editor.gui(gpu))
     viewer.run()
 
 

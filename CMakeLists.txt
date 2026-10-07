@@ -445,6 +445,10 @@ if(LR_BUILD_PYTHON)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(callback_list_tests tests/utility/CallbackListTests.cpp)
+    target_include_directories(callback_list_tests PRIVATE src)
+    add_test(NAME utility.callback_list COMMAND callback_list_tests)
+
     add_executable(mesh_buffer_sync_tests
         tests/upload/MeshBufferSyncTests.cpp
         src/core/scene/Mesh.cpp

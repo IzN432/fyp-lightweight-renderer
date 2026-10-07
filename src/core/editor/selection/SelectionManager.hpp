@@ -79,19 +79,22 @@ public:
     std::vector<uint32_t>            getIndicesWithRole(VertexRoleId role) const;
     const std::vector<VertexRoleId> &getRoles() const { return m_roles; }
 
-    void registerSelectionChangedCallback(std::function<void()> callback)
+    CallbackConnection registerSelectionChangedCallback(std::function<void()> callback)
     {
-        m_selectionChangedCallback = std::move(callback);
+        return m_selectionChangedCallbacks.connect(std::move(callback));
     }
     // Fired by rebuildColors() any time m_colors changes, regardless of why (highlight drag or
     // role classification) — this is what should drive a GPU color re-upload.
-    void registerColorsChangedCallback(std::function<void()> callback)
+    CallbackConnection registerColorsChangedCallback(std::function<void()> callback)
     {
-        m_colorsChangedCallback = std::move(callback);
+        return m_colorsChangedCallbacks.connect(std::move(callback));
     }
     // Fired only by classifySelectionAs() — distinct from colors-changed since this is meant for
     // invalidation hooks (e.g. an ARAP tool re-running its precompute), not GPU sync.
-    void registerRoleChangedCallback(std::function<void()> callback) { m_roleChangedCallback = std::move(callback); }
+    CallbackConnection registerRoleChangedCallback(std::function<void()> callback)
+    {
+        return m_roleChangedCallbacks.connect(std::move(callback));
+    }
 
 private:
     static inline const glm::vec3 kDefaultColor{1.0f, 0.0f, 1.0f};
@@ -112,9 +115,12 @@ private:
     InputHandler                               &m_input;
     bool                                        m_mouseClickedThisFrame  = false;
     bool                                        m_mouseReleasedThisFrame = false;
-    std::function<void()>                       m_selectionChangedCallback;
-    std::function<void()>                       m_colorsChangedCallback;
-    std::function<void()>                       m_roleChangedCallback;
+    CallbackList<>                              m_selectionChangedCallbacks;
+    CallbackList<>                              m_colorsChangedCallbacks;
+    CallbackList<>                              m_roleChangedCallbacks;
+    // Declared last so callbacks detach before the active tool or manager state is destroyed.
+    CallbackConnection                          m_toolSelectionConnection;
+    CallbackConnection                          m_toolHighlightConnection;
 };
 
 } // namespace lr

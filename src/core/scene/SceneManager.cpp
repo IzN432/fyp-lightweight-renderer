@@ -188,9 +188,9 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
     uploadSelectedMeshBuffers();
     // Imports and light changes re-pack the shared geometry; the overlays follow (the GPU-side
     // SceneGpu is owned by this SceneManager, so the listener can't outlive it).
-    gpu().onGeometryRebuilt([this](const SceneGpu &) {
+    m_connections.push_back(gpu().onGeometryRebuilt([this](const SceneGpu &) {
         onGeometryRebuilt();
-    });
+    }));
 
     // Constructed here rather than as a SceneManager member-initializer since it operates on the
     // selected mesh's Mesh/TransformComponent, which only exist once the meshes are uploaded. The
@@ -199,23 +199,23 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
     auto &selectedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
     m_selectionManager = std::make_unique<SelectionManager>(
         selectedMesh.positions(), m_editedMeshObject->getComponent<TransformComponent>(), input);
-    m_selectionManager->registerColorsChangedCallback([this]() {
+    m_connections.push_back(m_selectionManager->registerColorsChangedCallback([this]() {
         updateSelectedMeshHighlightColors();
-    });
+    }));
 }
 
 void SceneManager::registerCallbacks(Viewer &viewer)
 {
     gpu().registerCallbacks(viewer);
 
-    viewer.onUpdate([this](float dt, VkExtent2D extent) {
+    m_connections.push_back(viewer.onUpdate([this](float dt, VkExtent2D extent) {
         m_selectionManager->updateCallback(dt, extent);
-    });
+    }));
 
     // After SceneGpu's own late update (skins, flushDirty), which this registers after.
-    viewer.onLateUpdate([this](float, VkExtent2D) {
+    m_connections.push_back(viewer.onLateUpdate([this](float, VkExtent2D) {
         synchronizeSelectedMeshBuffers();
-    });
+    }));
 }
 
 void SceneManager::flushDirty()
@@ -361,16 +361,13 @@ void SceneManager::setEditorPresentation(EditorPresentation presentation)
         m_selectionManager->clearSelection();
     }
 
-    for (const auto &callback : m_editorPresentationChangedCallbacks)
-    {
-        callback(m_editorPresentation);
-    }
+    m_editorPresentationChangedCallbacks.invoke(m_editorPresentation);
 }
 
-void SceneManager::registerEditorPresentationChangedCallback(
+CallbackConnection SceneManager::registerEditorPresentationChangedCallback(
     std::function<void(const EditorPresentation &)> callback)
 {
-    m_editorPresentationChangedCallbacks.push_back(std::move(callback));
+    return m_editorPresentationChangedCallbacks.connect(std::move(callback));
 }
 
 } // namespace lr

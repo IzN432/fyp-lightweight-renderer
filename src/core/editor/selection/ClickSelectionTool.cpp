@@ -17,7 +17,7 @@ void ClickSelectionTool::onMouseDown(double ndcX, double ndcY, double aspect)
 void ClickSelectionTool::onMouseUp(double ndcX, double ndcY, double aspect)
 {
     m_viewProjectionMatrix = m_camera.getComponent<Camera>().viewProjectionMatrix(aspect);
-    m_selectionCallback();
+    m_selectionCallbacks.invoke();
 }
 
 void ClickSelectionTool::selectVertices(std::unordered_set<uint32_t> &highlightedVertices,

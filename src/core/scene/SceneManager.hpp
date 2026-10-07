@@ -117,7 +117,7 @@ public:
     // Applies capabilities selected by the application-level editor state. SceneManager does not
     // know state names; it only uses these flags for selection lifetime and overlay synchronization.
     void setEditorPresentation(EditorPresentation presentation);
-    void registerEditorPresentationChangedCallback(
+    CallbackConnection registerEditorPresentationChangedCallback(
         std::function<void(const EditorPresentation &)> callback);
 
     // SceneGpu::flushDirty() (component edits and the shared mesh buffers), then the selected-mesh
@@ -207,10 +207,9 @@ private:
     // Declared after the stores it refers to, so it is destroyed first.
     std::unique_ptr<SceneGpu> m_gpu;
 
-    std::unique_ptr<SelectionManager>            m_selectionManager;
+    std::unique_ptr<SelectionManager> m_selectionManager;
     EditorPresentation m_editorPresentation;
-    std::vector<std::function<void(const EditorPresentation &)>>
-        m_editorPresentationChangedCallbacks;
+    CallbackList<const EditorPresentation &> m_editorPresentationChangedCallbacks;
 
     SceneObject   *m_editedMeshObject         = nullptr;
     Mesh::Revision m_selectedTopologyRevision = 0;
@@ -232,6 +231,8 @@ private:
 
     VertexBufferUploadResult m_selectedMeshPoints;
     VertexBufferUploadResult m_selectedMeshHeatmap;
+    // Declared last so SceneGpu/Viewer callbacks disconnect before this manager's state is destroyed.
+    std::vector<CallbackConnection> m_connections;
 };
 
 } // namespace lr

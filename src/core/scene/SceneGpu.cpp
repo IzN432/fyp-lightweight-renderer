@@ -159,23 +159,14 @@ void SceneGpu::syncLights()
     rebuildGeometry();
 }
 
-SceneGpu::ListenerId SceneGpu::onGeometryRebuilt(std::function<void(const SceneGpu &)> listener)
+CallbackConnection SceneGpu::onGeometryRebuilt(std::function<void(const SceneGpu &)> listener)
 {
-    m_listeners.push_back({.id = m_nextListenerId, .geometryRebuilt = std::move(listener)});
-    return m_nextListenerId++;
+    return m_geometryRebuiltCallbacks.connect(std::move(listener));
 }
 
-SceneGpu::ListenerId SceneGpu::onLightsUploaded(std::function<void(uint32_t)> listener)
+CallbackConnection SceneGpu::onLightsUploaded(std::function<void(uint32_t)> listener)
 {
-    m_listeners.push_back({.id = m_nextListenerId, .lightsUploaded = std::move(listener)});
-    return m_nextListenerId++;
-}
-
-void SceneGpu::removeListener(ListenerId id)
-{
-    std::erase_if(m_listeners, [id](const Listener &listener) {
-        return listener.id == id;
-    });
+    return m_lightsUploadedCallbacks.connect(std::move(listener));
 }
 
 void SceneGpu::initialize(const AreaLightVisualConfig &areaLightVisualConfig, const GpuMaterialLayout &materialLayout,
@@ -202,18 +193,18 @@ void SceneGpu::initialize(const AreaLightVisualConfig &areaLightVisualConfig, co
 
 void SceneGpu::registerCallbacks(Viewer &viewer)
 {
-    viewer.onUpdate([this](float, VkExtent2D extent) {
+    m_connections.push_back(viewer.onUpdate([this](float, VkExtent2D extent) {
         setAspect((extent.height == 0) ? 1.0f : static_cast<float>(extent.width) / static_cast<float>(extent.height));
-    });
+    }));
 
-    viewer.onUpdate([this](float dt, VkExtent2D) {
+    m_connections.push_back(viewer.onUpdate([this](float dt, VkExtent2D) {
         updateAnimations(dt);
-    });
+    }));
 
-    viewer.onLateUpdate([this](float, VkExtent2D) {
+    m_connections.push_back(viewer.onLateUpdate([this](float, VkExtent2D) {
         updateSkins();
         flushDirty();
-    });
+    }));
 }
 
 void SceneGpu::createLightVisuals(const AreaLightVisualConfig &config)
@@ -334,13 +325,7 @@ void SceneGpu::rebuildGeometry()
                                           m_pendingTextureUpdates);
         m_pendingTextureUpdates.clear();
     }
-    for (const Listener &listener : m_listeners)
-    {
-        if (listener.geometryRebuilt)
-        {
-            listener.geometryRebuilt(*this);
-        }
-    }
+    m_geometryRebuiltCallbacks.invoke(*this);
 }
 
 void SceneGpu::uploadLights()
@@ -354,13 +339,7 @@ void SceneGpu::uploadLights()
         }
     }
     m_lightUploader.upload(lights);
-    for (const Listener &listener : m_listeners)
-    {
-        if (listener.lightsUploaded)
-        {
-            listener.lightsUploaded(numLights());
-        }
-    }
+    m_lightsUploadedCallbacks.invoke(numLights());
 }
 
 void SceneGpu::updateMaterials()

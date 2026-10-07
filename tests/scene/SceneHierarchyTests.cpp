@@ -84,7 +84,7 @@ int main()
     assert(cycleRejected);
 
     std::vector<lr::SceneObjectId> destroyed;
-    scene.registerObjectsDestroyedCallback([&](std::span<const lr::SceneObjectId> ids) {
+    auto destroyedConnection = scene.registerObjectsDestroyedCallback([&](std::span<const lr::SceneObjectId> ids) {
         destroyed.assign(ids.begin(), ids.end());
     });
 

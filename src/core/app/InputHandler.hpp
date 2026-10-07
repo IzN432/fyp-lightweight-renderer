@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/utility/CallbackList.hpp"
+
 #include <functional>
 #include <unordered_set>
 #include <vector>
@@ -15,11 +17,13 @@ public:
     ~InputHandler();
 
     // Register a callback for key press events
-    void onKeyPress(std::function<void(int key, int action, bool shift, bool ctrl, bool alt)> callback);
+    CallbackConnection onKeyPress(
+        std::function<void(int key, int action, bool shift, bool ctrl, bool alt)> callback);
 
     // Register a callback for mouse button events. Query getMousePos()/getMouseDelta()
     // in an update callback if position is needed — mouse move no longer fires events.
-    void onMouseButton(std::function<void(int button, int action, bool shift, bool ctrl, bool alt)> callback);
+    CallbackConnection onMouseButton(
+        std::function<void(int button, int action, bool shift, bool ctrl, bool alt)> callback);
 
     // Call this each frame to poll input state
     void update();
@@ -46,8 +50,8 @@ public:
     void notifyScroll(double delta);
 
 private:
-    std::vector<std::function<void(int, int, bool, bool, bool)>> m_keyPressCallbacks;
-    std::vector<std::function<void(int, int, bool, bool, bool)>> m_mouseButtonCallbacks;
+    CallbackList<int, int, bool, bool, bool> m_keyPressCallbacks;
+    CallbackList<int, int, bool, bool, bool> m_mouseButtonCallbacks;
 
     std::unordered_set<int> m_pressedKeys;
     std::unordered_set<int> m_pressedButtons;

@@ -22,6 +22,7 @@
 #include "core/upload/MaterialUploader.hpp"
 #include "core/upload/MeshUploader.hpp"
 #include "core/upload/SkinUploader.hpp"
+#include "core/utility/CallbackList.hpp"
 
 // SceneGpu turns a Scene (plus the MeshStore/MaterialStore its components refer to) into the GPU
 // buffers the engine's passes read, and keeps them in sync as the scene changes:
@@ -122,12 +123,10 @@ public:
     void syncLights();
 
     // Called after rebuildGeometry() (draw lists changed: refresh GeometryPass::setSceneGeometry) and
-    // after uploadLights() (with the new light count: PbrPass::setNumLights). Listeners must stay valid
-    // until removed, or for the SceneGpu's lifetime.
-    using ListenerId = uint64_t;
-    ListenerId onGeometryRebuilt(std::function<void(const SceneGpu &)> listener);
-    ListenerId onLightsUploaded(std::function<void(uint32_t numLights)> listener);
-    void       removeListener(ListenerId id);
+    // after uploadLights() (with the new light count: PbrPass::setNumLights). The returned connection
+    // owns the registration and disconnects automatically.
+    CallbackConnection onGeometryRebuilt(std::function<void(const SceneGpu &)> listener);
+    CallbackConnection onLightsUploaded(std::function<void(uint32_t numLights)> listener);
 
     // The steps initialize() runs, for callers that sequence setup themselves.
     void createLightVisuals(const AreaLightVisualConfig &config);
@@ -201,14 +200,8 @@ private:
     bool        lightsChanged() const;
     LightVisual makeLightVisual(SceneObject &light);
 
-    struct Listener
-    {
-        ListenerId                              id;
-        std::function<void(const SceneGpu &)>   geometryRebuilt;
-        std::function<void(uint32_t numLights)> lightsUploaded;
-    };
-    std::vector<Listener> m_listeners;
-    ListenerId            m_nextListenerId = 1;
+    CallbackList<const SceneGpu &> m_geometryRebuiltCallbacks;
+    CallbackList<uint32_t>         m_lightsUploadedCallbacks;
 
     ResourceRegistry &m_registry;
     Scene            &m_scene;
@@ -252,6 +245,8 @@ private:
     IndexBufferUploadResult  m_indexBuffer;
     MaterialUploadResult     m_materialUploadResult;
     SkinUploadResult         m_skinUploadResult;
+    // Declared last so Viewer callbacks disconnect before the SceneGpu state they access is destroyed.
+    std::vector<CallbackConnection> m_connections;
 };
 
 } // namespace lr

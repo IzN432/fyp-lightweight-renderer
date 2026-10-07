@@ -135,7 +135,7 @@ def main():
         if args.frames and state["frames"] >= args.frames:
             viewer.close()
 
-    viewer.on_update(update)
+    update_connection = viewer.on_update(update)
     viewer.run()
 
 

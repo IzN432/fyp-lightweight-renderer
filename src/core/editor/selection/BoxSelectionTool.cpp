@@ -28,7 +28,7 @@ void BoxSelectionTool::onMouseUp(double ndcX, double ndcY, double aspect)
     m_viewProjectionMatrix = m_camera.getComponent<Camera>().viewProjectionMatrix(aspect);
 
     // Perform selection
-    m_selectionCallback();
+    m_selectionCallbacks.invoke();
 
     m_boxStart = glm::vec2(0.0, 0.0);
     m_boxEnd   = glm::vec2(0.0, 0.0);
@@ -40,7 +40,7 @@ void BoxSelectionTool::dragCallback(double ndcX, double ndcY, double dNdcX, doub
     {
         m_boxEnd               = glm::vec2(ndcX, ndcY);
         m_viewProjectionMatrix = m_camera.getComponent<Camera>().viewProjectionMatrix(aspect);
-        m_highlightCallback();
+        m_highlightCallbacks.invoke();
     }
 }
 

@@ -240,7 +240,8 @@ template <typename T> void holdWhileViewerRuns(Viewer &viewer, T *self)
     {
         throw std::logic_error("lr: holdWhileViewerRuns called on an unregistered instance");
     }
-    viewer.onLateUpdate([slot = g_callbackSlots.hold(std::move(object))](float, VkExtent2D) {});
+    viewer.ownConnection(
+        viewer.onLateUpdate([slot = g_callbackSlots.hold(std::move(object))](float, VkExtent2D) {}));
 }
 
 nb::tuple toTuple(VkExtent2D extent) { return nb::make_tuple(extent.width, extent.height); }
@@ -2083,36 +2084,10 @@ private:
     }
 };
 
-// A SceneGpu listener a block registers, removed with the block (the block keeps the SceneGpu alive, so
-// the SceneGpu outlives it).
-struct SceneGpuListener
-{
-    lr::SceneGpu            *gpu = nullptr;
-    lr::SceneGpu::ListenerId id  = 0;
-
-    SceneGpuListener() = default;
-    SceneGpuListener(lr::SceneGpu &sceneGpu, lr::SceneGpu::ListenerId listenerId) : gpu(&sceneGpu), id(listenerId) {}
-    SceneGpuListener(const SceneGpuListener &)            = delete;
-    SceneGpuListener &operator=(const SceneGpuListener &) = delete;
-    SceneGpuListener &operator=(SceneGpuListener &&other) noexcept
-    {
-        std::swap(gpu, other.gpu);
-        std::swap(id, other.id);
-        return *this;
-    }
-    ~SceneGpuListener()
-    {
-        if (gpu)
-        {
-            gpu->removeListener(id);
-        }
-    }
-};
-
 struct GeometryBlock : PassBlock
 {
     std::unique_ptr<lr::GeometryPass> pass;
-    SceneGpuListener                  geometryRebuilt; // refreshes the draw lists
+    lr::CallbackConnection            geometryRebuilt; // refreshes the draw lists
 };
 
 struct AmbientOcclusionBlock : PassBlock
@@ -2131,7 +2106,7 @@ struct AmbientOcclusionBlock : PassBlock
 struct PbrBlock : PassBlock
 {
     std::unique_ptr<lr::PbrPass> pass;
-    SceneGpuListener             lightsUploaded; // keeps the light count current
+    lr::CallbackConnection       lightsUploaded; // keeps the light count current
 };
 
 struct CompositeBlock : PassBlock
@@ -2301,11 +2276,10 @@ void bindBuildingBlocks(nb::module_ &m)
                 self->declare(viewer.frameGraph(), [&](FrameGraph &fg) {
                     self->pass->build(fg, lr::conventions::geometryMeshLayout());
                 });
-                self->geometryRebuilt =
-                    SceneGpuListener(gpu, gpu.onGeometryRebuilt([pass = self->pass.get()](const lr::SceneGpu &rebuilt) {
-                        pass->setSceneGeometry(rebuilt.meshPositions(), rebuilt.indexBuffer(), rebuilt.meshTransforms(),
-                                               rebuilt.geometryObjects(), rebuilt.skinUploadResult().drawInfos);
-                    }));
+                self->geometryRebuilt = gpu.onGeometryRebuilt([pass = self->pass.get()](const lr::SceneGpu &rebuilt) {
+                    pass->setSceneGeometry(rebuilt.meshPositions(), rebuilt.indexBuffer(), rebuilt.meshTransforms(),
+                                           rebuilt.geometryObjects(), rebuilt.skinUploadResult().drawInfos);
+                });
                 holdWhileViewerRuns(viewer, self); // the pass's execute callback reads self->pass
             },
             "viewer"_a, "scene_gpu"_a, nb::keep_alive<1, 2>(), nb::keep_alive<1, 3>())
@@ -2409,10 +2383,9 @@ void bindBuildingBlocks(nb::module_ &m)
                 self->declare(viewer.frameGraph(), [&](FrameGraph &fg) {
                     self->pass->build(fg);
                 });
-                self->lightsUploaded =
-                    SceneGpuListener(gpu, gpu.onLightsUploaded([pass = self->pass.get()](uint32_t numLights) {
-                        pass->setNumLights(numLights);
-                    }));
+                self->lightsUploaded = gpu.onLightsUploaded([pass = self->pass.get()](uint32_t numLights) {
+                    pass->setNumLights(numLights);
+                });
                 holdWhileViewerRuns(viewer, self); // the pass's execute callback reads the light count from it
             },
             "viewer"_a, "scene_gpu"_a, "ibl"_a, nb::keep_alive<1, 2>(), nb::keep_alive<1, 3>());
@@ -2496,6 +2469,10 @@ bool driveFrames(Viewer &v, FrameCount count)
 
 void bindViewer(nb::module_ &m)
 {
+    nb::class_<lr::CallbackConnection>(m, "CallbackConnection",
+                                       "A scoped callback registration. Keep it alive while the callback is needed.")
+        .def("disconnect", &lr::CallbackConnection::disconnect);
+
     nb::class_<Viewer>(m, "Viewer",
                        "Window + Vulkan device + frame graph. Declare passes, then call run(), or call step() "
                        "in your own loop.")
@@ -2524,7 +2501,7 @@ void bindViewer(nb::module_ &m)
                     .enableValidation = validation,
                     .enableGui        = gui,
                 });
-                self->onUpdate([token = std::make_shared<ViewerToken>()](float, VkExtent2D) {});
+                self->ownConnection(self->onUpdate([token = std::make_shared<ViewerToken>()](float, VkExtent2D) {}));
                 // Other Python threads run while a frame waits on the GPU or the display (fences, vsync,
                 // present). Nothing inside these calls touches Python; callbacks and recording keep the GIL.
                 self->setBlockingCallWrapper([](const std::function<void()> &call) {
@@ -2550,7 +2527,7 @@ void bindViewer(nb::module_ &m)
         .def(
             "on_update",
             [](Viewer &v, nb::callable callback) {
-                v.onUpdate([slot = g_callbackSlots.hold(std::move(callback))](float dt, VkExtent2D extent) {
+                return v.onUpdate([slot = g_callbackSlots.hold(std::move(callback))](float dt, VkExtent2D extent) {
                     if (*slot)
                     {
                         g_callbackErrors.guard([&] {
@@ -2559,11 +2536,12 @@ void bindViewer(nb::module_ &m)
                     }
                 });
             },
-            "callback"_a, "callback(dt: float, extent: (width, height)), called every frame before rendering.")
+            "callback"_a,
+            "Register callback(dt, extent) before rendering. Keep the returned connection alive.")
         .def(
             "on_late_update",
             [](Viewer &v, nb::callable callback) {
-                v.onLateUpdate([slot = g_callbackSlots.hold(std::move(callback))](float dt, VkExtent2D extent) {
+                return v.onLateUpdate([slot = g_callbackSlots.hold(std::move(callback))](float dt, VkExtent2D extent) {
                     if (*slot)
                     {
                         g_callbackErrors.guard([&] {
@@ -2572,7 +2550,7 @@ void bindViewer(nb::module_ &m)
                     }
                 });
             },
-            "callback"_a, "Like on_update, but after every on_update callback has run.")
+            "callback"_a, "Like on_update, but after every on_update callback. Keep the connection alive.")
         .def(
             "on_gui",
             [](Viewer &v, nb::callable callback) {
@@ -2580,7 +2558,7 @@ void bindViewer(nb::module_ &m)
                 {
                     throw std::logic_error("on_gui: this Viewer was created with gui=False");
                 }
-                v.onGui([slot = g_callbackSlots.hold(std::move(callback))] {
+                return v.onGui([slot = g_callbackSlots.hold(std::move(callback))] {
                     if (!*slot)
                     {
                         return;
@@ -2722,12 +2700,12 @@ void bindTesting(nb::module_ &m)
         [](Viewer &viewer, int afterFrames) {
             // A C++ (not Python) callback, so the exception escapes Viewer::run() mid-frame — after
             // the swapchain image is acquired, with earlier frames possibly still on the GPU.
-            viewer.onLateUpdate([frames = std::make_shared<int>(0), afterFrames](float, VkExtent2D) {
+            viewer.ownConnection(viewer.onLateUpdate([frames = std::make_shared<int>(0), afterFrames](float, VkExtent2D) {
                 if (++*frames > afterFrames)
                 {
                     throw std::runtime_error("lr._testing: injected C++ failure inside the frame loop");
                 }
-            });
+            }));
         },
         "viewer"_a, "after_frames"_a);
 
