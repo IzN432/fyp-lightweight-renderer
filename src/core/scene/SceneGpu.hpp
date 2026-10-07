@@ -62,7 +62,8 @@ public:
     const MaterialStore &materialStore() const { return m_materialStore; }
 
     // Registers renderable geometry: `object` needs a TransformComponent and a MeshComponent, applied as
-    // its model matrix at draw time. Register before initialize(), or call rebuildGeometry() afterwards.
+    // its model matrix at draw time. Register before initialize(), or call rebuildGeometry() afterwards
+    // (which is also how geometry is added back to a scene that was cleared).
     void addMeshObject(SceneObject &object);
 
     // Registers every mesh a SceneLoader::load() call created, and queues its material textures for
@@ -134,6 +135,8 @@ public:
 
     // Re-packs all geometry after objects were added or removed, then notifies onGeometryRebuilt
     // listeners, which refresh GeometryPass's draw metadata (GeometryPass::setSceneGeometry).
+    // A scene left with nothing to draw is supported: the draw lists go empty and the shared buffers
+    // are left as they are, so clearing the scene and then importing or adding objects back works.
     void rebuildGeometry();
 
     void uploadLights();
@@ -184,6 +187,11 @@ private:
     };
 
     void gatherGeometry(const std::vector<std::string> &vertexAttributeNames);
+    // Whether the geometry gathered by gatherGeometry() would pack into non-empty vertex and index
+    // buffers, i.e. whether there is anything for GeometryPass to draw.
+    bool hasDrawableGeometry() const;
+    // Empties the draw lists without touching the GPU buffers (see rebuildGeometry()).
+    void dropGeometry();
     void releaseLightVisuals();
     // Uploads whichever shared mesh buffers' source revisions changed (see flushDirty()).
     void synchronizeMeshes();

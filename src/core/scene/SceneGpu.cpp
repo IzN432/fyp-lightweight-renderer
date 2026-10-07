@@ -75,10 +75,7 @@ void SceneGpu::clearSceneResources()
 {
     releaseLightVisuals();
     m_meshObjects.clear();
-    m_geometryMeshes.clear();
-    m_meshTransforms.clear();
-    m_meshSkins.clear();
-    m_geometryObjects.clear();
+    dropGeometry();
     m_pendingTextureUpdates.clear();
     // Keep SkinUploader's structural expectations synchronized with the cleared scene. Without an
     // explicit empty upload it still expects the previous scene's skin list and the next per-frame
@@ -285,18 +282,47 @@ void SceneGpu::uploadMeshes(const GpuMaterialLayout        &materialLayout,
     m_pendingTextureUpdates.clear();
 }
 
+bool SceneGpu::hasDrawableGeometry() const
+{
+    uint32_t vertices = 0;
+    uint32_t faces    = 0;
+    for (const Mesh *mesh : m_geometryMeshes)
+    {
+        vertices += mesh->vertexCount();
+        faces += mesh->faceCount();
+    }
+    return vertices > 0 && faces > 0;
+}
+
+void SceneGpu::dropGeometry()
+{
+    m_geometryMeshes.clear();
+    m_meshTransforms.clear();
+    m_meshSkins.clear();
+    m_geometryObjects.clear();
+    m_meshPositions = {};
+    m_indexBuffer   = {};
+}
+
 void SceneGpu::rebuildGeometry()
 {
-    if (m_meshObjects.empty())
-    {
-        throw std::runtime_error("SceneGpu::rebuildGeometry: scene has no renderable meshes");
-    }
-
     gatherGeometry(m_vertexAttributeNames);
-    m_meshPositions = m_meshUploader.replaceVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
-    m_meshUploader.replaceVertexBuffer(m_geometryMeshes, m_meshAttributeUploadConfig);
-    m_indexBuffer = m_meshUploader.replaceIndexBuffer(m_geometryMeshes, {.indexBufferName = m_meshIndexBufferName});
-    m_meshUploader.replaceFaceGroupBuffer(m_geometryMeshes, {.faceGroupBufferName = m_meshFaceGroupBufferName});
+    if (hasDrawableGeometry())
+    {
+        m_meshPositions = m_meshUploader.replaceVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
+        m_meshUploader.replaceVertexBuffer(m_geometryMeshes, m_meshAttributeUploadConfig);
+        m_indexBuffer = m_meshUploader.replaceIndexBuffer(m_geometryMeshes, {.indexBufferName = m_meshIndexBufferName});
+        m_meshUploader.replaceFaceGroupBuffer(m_geometryMeshes, {.faceGroupBufferName = m_meshFaceGroupBufferName});
+    } else
+    {
+        // A scene with nothing to draw is a normal state (cleared before an import, or the last mesh
+        // deleted). The shared buffers keep whatever they last held and MeshBufferCache keeps its
+        // stamps: replacing them with empty payloads would gain nothing, and the stamps cannot
+        // describe a draw list that shrank to nothing (see MeshBufferCache::synchronize). Publishing
+        // empty draw lists is what makes it safe — GeometryPass issues no draws, so nothing reads
+        // the stale contents, and the next rebuild with real geometry replaces the buffers properly.
+        dropGeometry();
+    }
     m_skinUploadResult = m_skinUploader.upload(m_geometryMeshes, m_meshSkins);
     updateMaterials();
     if (!m_pendingTextureUpdates.empty())
@@ -463,6 +489,10 @@ void SceneGpu::flushDirty()
 
 void SceneGpu::synchronizeMeshes()
 {
+    if (m_geometryMeshes.empty())
+    {
+        return; // nothing registered: the buffers keep their last contents (see rebuildGeometry)
+    }
     m_meshUploader.synchronizeVertexBuffer(m_geometryMeshes, m_meshPositionUploadConfig);
     m_meshUploader.synchronizeVertexBuffer(m_geometryMeshes, m_meshAttributeUploadConfig);
     m_meshUploader.synchronizeIndexBuffer(m_geometryMeshes, {.indexBufferName = m_meshIndexBufferName});

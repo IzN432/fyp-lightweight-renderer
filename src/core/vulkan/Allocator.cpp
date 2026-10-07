@@ -41,9 +41,15 @@ Allocator::~Allocator()
 
 AllocatedBuffer Allocator::createBuffer(VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage)
 {
+    // An empty payload is a legitimate state (a scene cleared of all geometry, a skinless mesh list),
+    // but a zero-sized buffer is not: vkCreateBuffer rejects size 0, and a descriptor written over it
+    // would carry range 0. Round up to a byte so the allocation and its descriptors stay valid; the
+    // buffer is never read, since whatever draws from it has an empty draw list.
+    const VkDeviceSize allocationSize = (size == 0) ? 1 : size;
+
     VkBufferCreateInfo bufferCI{};
     bufferCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferCI.size  = size;
+    bufferCI.size  = allocationSize;
     bufferCI.usage = bufferUsage;
 
     VmaAllocationCreateInfo allocCI{};
@@ -51,7 +57,7 @@ AllocatedBuffer Allocator::createBuffer(VkDeviceSize size, VkBufferUsageFlags bu
     allocCI.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT; // persistent mapping for CPU-visible buffers
 
     AllocatedBuffer result;
-    result.size = size;
+    result.size = allocationSize;
 
     checkVk(vmaCreateBuffer(m_allocator, &bufferCI, &allocCI, &result.buffer, &result.allocation, &result.info),
             "Allocator: vmaCreateBuffer");

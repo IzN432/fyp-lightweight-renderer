@@ -585,7 +585,10 @@ void ResourceRegistry::uploadBuffer(const std::string &name, const void *data, V
     // Create staging buffer and copy data in
     AllocatedBuffer staging =
         m_allocator.createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-    std::memcpy(staging.info.pMappedData, data, size);
+    if (size > 0) // an empty payload has no source pointer to read from
+    {
+        std::memcpy(staging.info.pMappedData, data, size);
+    }
 
     PendingUpload upload{};
     upload.staging      = staging;
@@ -674,7 +677,10 @@ void ResourceRegistry::reuploadBuffer(const std::string &name, const void *data,
 
     AllocatedBuffer staging =
         m_allocator.createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-    std::memcpy(staging.info.pMappedData, data, size);
+    if (size > 0) // an empty payload has no source pointer to read from
+    {
+        std::memcpy(staging.info.pMappedData, data, size);
+    }
 
     PendingUpload upload{};
     upload.staging      = staging;
@@ -714,7 +720,10 @@ void ResourceRegistry::replaceUploadedBuffer(const std::string &name, const void
         m_allocator.destroy(entry.buffer);
         throw;
     }
-    std::memcpy(staging.info.pMappedData, data, size);
+    if (size > 0) // an empty payload has no source pointer to read from
+    {
+        std::memcpy(staging.info.pMappedData, data, size);
+    }
 
     // Frames still in flight may be reading the old buffer.
     retire(it->second.buffer);
