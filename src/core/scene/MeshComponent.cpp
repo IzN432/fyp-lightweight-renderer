@@ -4,9 +4,9 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
-#include <utility>
 #include <variant>
 
 namespace lr
@@ -45,11 +45,20 @@ struct MaterialGUICallbacks
 
 } // namespace
 
-MeshComponent::MeshComponent(MeshHandle meshHandle, MeshStore &meshStore,
-                             std::vector<MaterialHandle> materialHandles, MaterialStore &materialStore)
+MeshComponent::MeshComponent(MeshHandle meshHandle, MeshStore &meshStore, MaterialStore &materialStore)
     : Component("MeshComponent"), m_meshHandle(meshHandle), m_meshStore(&meshStore),
-      m_materialHandles(std::move(materialHandles)), m_materialStore(&materialStore)
-{}
+      m_materialStore(&materialStore)
+{
+    // One entry per face, so the same handle repeats constantly — collect the distinct ones in the
+    // order they first appear to keep the inspector list stable across reloads.
+    for (MaterialHandle handle : m_meshStore->get(m_meshHandle).faceGroups())
+    {
+        if (std::ranges::find(m_materialHandles, handle) == m_materialHandles.end())
+        {
+            m_materialHandles.push_back(handle);
+        }
+    }
+}
 
 void MeshComponent::onGUIImpl()
 {

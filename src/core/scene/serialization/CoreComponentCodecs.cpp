@@ -161,14 +161,13 @@ class MeshComponentCodec final : public TypedCodec<MeshComponent>
 {
 public:
     std::string_view key() const override { return "mesh"; }
+    // The component's material list is derived from the mesh's faceGroups, which are saved and
+    // remapped with the mesh itself, so there is nothing material-side to write here. Files written
+    // before that still carry a "materials" array; it is redundant now and simply ignored on load.
     json encode(const SceneObject &object, const ComponentSaveContext &context) const override
     {
         const MeshComponent &mesh = component(object);
-        json materials = json::array();
-        for (MaterialHandle handle : mesh.materialHandles())
-            materials.push_back(toString(context.materials.idOf(handle)));
-        return {{"mesh", toString(context.meshes.idOf(mesh.meshHandle()))},
-                {"materials", std::move(materials)}};
+        return {{"mesh", toString(context.meshes.idOf(mesh.meshHandle()))}};
     }
     void decode(const json &value, SceneObject &object, ComponentLoadContext &context,
                 const std::string &where) const override
@@ -177,19 +176,7 @@ public:
         const auto foundMesh = context.meshes.find(meshId);
         if (!foundMesh)
             throw std::runtime_error("SceneSerializer: missing mesh " + toString(meshId) + " at " + where);
-        const json &references = required(value, "materials", where);
-        if (!references.is_array())
-            throw std::runtime_error("SceneSerializer: mesh materials must be an array at " + where);
-        std::vector<MaterialHandle> materials;
-        for (const json &reference : references)
-        {
-            const MaterialId id = readId(reference, where + ".materials");
-            const auto handle = context.materials.find(id);
-            if (!handle)
-                throw std::runtime_error("SceneSerializer: missing material " + toString(id) + " at " + where);
-            materials.push_back(*handle);
-        }
-        object.addComponent<MeshComponent>(*foundMesh, context.meshes, std::move(materials), context.materials);
+        object.addComponent<MeshComponent>(*foundMesh, context.meshes, context.materials);
     }
 };
 } // namespace

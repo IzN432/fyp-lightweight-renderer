@@ -145,7 +145,7 @@ int main()
     {
         auto &object = source.scene.createSceneObject();
         object.name = "Shared mesh " + std::to_string(i);
-        object.addComponent<lr::MeshComponent>(meshHandle, source.meshes, std::vector{materialHandle}, source.materials);
+        object.addComponent<lr::MeshComponent>(meshHandle, source.meshes, source.materials);
         meshObjectIds.push_back(object.id());
     }
     lr::TranslationTrack translation(meshObjectIds[0], lr::AnimationInterpolation::CubicSpline);

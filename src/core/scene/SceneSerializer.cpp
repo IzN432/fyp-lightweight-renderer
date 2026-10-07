@@ -266,13 +266,8 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
         const MeshComponent &component = objectPointer->getComponent<MeshComponent>();
         if (std::ranges::find(referencedMeshes, component.meshHandle()) == referencedMeshes.end())
             referencedMeshes.push_back(component.meshHandle());
-        for (MaterialHandle handle : component.materialHandles())
-        {
-            if (std::ranges::find(referencedMaterials, handle) == referencedMaterials.end())
-                referencedMaterials.push_back(handle);
-        }
-        // Face groups are what the renderer actually indexes. Keep this independent of the
-        // component's editor-facing material list so a valid mesh cannot silently lose a material.
+        // Face groups are what the renderer actually indexes, and what the component derives its
+        // editor-facing material list from, so they are the single source for what to write out.
         for (MaterialHandle handle : component.mesh().faceGroups())
         {
             if (std::ranges::find(referencedMaterials, handle) == referencedMaterials.end())

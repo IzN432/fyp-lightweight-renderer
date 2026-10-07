@@ -67,7 +67,7 @@ struct Harness
     {
         lr::SceneObject &object = scene.createSceneObject();
         object.addComponent<lr::TransformComponent>();
-        object.addComponent<lr::MeshComponent>(handle, meshStore, std::vector<lr::MaterialHandle>{}, materialStore);
+        object.addComponent<lr::MeshComponent>(handle, meshStore, materialStore);
         return object;
     }
 

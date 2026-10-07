@@ -231,7 +231,7 @@ SceneLoadResult SceneLoader::load(const std::filesystem::path &path, Scene &scen
             throw std::runtime_error("SceneLoader: node mesh index is out of range");
         }
         SceneObject &object = scene.getSceneObject(result.nodeObjects[nodeIndex].value());
-        object.addComponent<MeshComponent>(meshHandles[meshIndex], meshStore, loaded.materialHandles, materialStore);
+        object.addComponent<MeshComponent>(meshHandles[meshIndex], meshStore, materialStore);
         if (loaded.nodes[nodeIndex].skinIndex)
         {
             const SkinLoadData &loadedSkin = loaded.skins[loaded.nodes[nodeIndex].skinIndex.value()];

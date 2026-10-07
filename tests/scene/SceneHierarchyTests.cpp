@@ -128,10 +128,8 @@ int main()
 
     auto &firstInstance = scene.createSceneObject();
     auto &secondInstance = scene.createSceneObject();
-    auto &firstMesh = firstInstance.addComponent<lr::MeshComponent>(meshHandle, meshStore,
-                                                                    std::vector<lr::MaterialHandle>{}, materialStore);
-    auto &secondMesh = secondInstance.addComponent<lr::MeshComponent>(meshHandle, meshStore,
-                                                                      std::vector<lr::MaterialHandle>{}, materialStore);
+    auto &firstMesh = firstInstance.addComponent<lr::MeshComponent>(meshHandle, meshStore, materialStore);
+    auto &secondMesh = secondInstance.addComponent<lr::MeshComponent>(meshHandle, meshStore, materialStore);
 
     assert(firstMesh.meshHandle() == secondMesh.meshHandle());
     assert(&firstMesh.mesh() == &secondMesh.mesh());
