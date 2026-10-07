@@ -36,16 +36,16 @@ void LaplaceBeltramiTool::calculate()
     m_resultTopologyRevision = m_mesh->topologyRevision();
 }
 
-void LaplaceBeltramiTool::onGui()
+void LaplaceBeltramiTool::onGui(bool enabled, const std::function<void(bool)> &setEnabled)
 {
     const Scene &scene = m_sceneManager.scene();
     const auto   selectedObject = scene.selectedObject();
     if (!selectedObject || !SceneManager::isEditable(scene.getSceneObject(*selectedObject)))
     {
         m_hasResult = false;
-        if (m_sceneManager.editorMode() == EditorMode::Analysis)
+        if (enabled)
         {
-            m_sceneManager.setEditorMode(EditorMode::View);
+            setEnabled(false);
         }
         ImGui::TextDisabled("Select a mesh object to use Laplace-Beltrami analysis.");
         return;
@@ -56,11 +56,10 @@ void LaplaceBeltramiTool::onGui()
         calculate();
     }
 
-    bool enabled = m_sceneManager.editorMode() == EditorMode::Analysis;
     ImGui::BeginDisabled(!m_hasResult);
     if (ImGui::Checkbox("Show heatmap", &enabled))
     {
-        m_sceneManager.setEditorMode(enabled ? EditorMode::Analysis : EditorMode::View);
+        setEnabled(enabled);
     }
     ImGui::EndDisabled();
 

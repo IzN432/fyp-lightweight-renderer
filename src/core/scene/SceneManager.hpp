@@ -13,6 +13,7 @@
 #include "MeshStore.hpp"
 
 #include "core/editor/selection/SelectionManager.hpp"
+#include "core/editor/EditorPresentation.hpp"
 #include "core/framegraph/ResourceRegistry.hpp"
 #include "core/loaders/Material.hpp"
 #include "core/loaders/MaterialStore.hpp"
@@ -22,21 +23,11 @@
 // SceneManager owns the MeshStore/MaterialStore for a Scene and is the editor's view of it. Keeping the
 // GPU-facing scene buffers (meshes, materials, lights, camera, skins) in sync is SceneGpu's job — see
 // gpu() — and SceneManager adds the editor's state on top: the edited mesh, vertex selection, editor
-// mode, and the selected-mesh points/heatmap buffers the editor overlays draw.
+// presentation capabilities, and the selected-mesh points/heatmap buffers editor overlays draw.
 namespace lr
 {
 
 class Viewer;
-
-// The editor's current interpretation of the selected mesh. View displays the posed/skinned surface;
-// Edit and Analysis operate on the unskinned rest mesh so tools and derived values agree with the
-// geometry they address.
-enum class EditorMode
-{
-    View,
-    Edit,
-    Analysis,
-};
 
 class SceneManager
 {
@@ -120,13 +111,13 @@ public:
     // getHighlightedIndices() for its own UI (translate gizmo placement, etc.).
     SelectionManager &selectionManager() { return *m_selectionManager; }
 
-    EditorMode editorMode() const { return m_editorMode; }
+    const EditorPresentation &editorPresentation() const { return m_editorPresentation; }
 
-    // Switches between posed viewing, rest-mesh editing, and rest-mesh analysis. Leaving Edit
-    // clears the current selection. SceneManager publishes the change rather than owning render
-    // passes, allowing the application to apply one consistent visibility/skinning policy.
-    void setEditorMode(EditorMode mode);
-    void registerEditorModeChangedCallback(std::function<void(EditorMode)> callback);
+    // Applies capabilities selected by the application-level editor state. SceneManager does not
+    // know state names; it only uses these flags for selection lifetime and overlay synchronization.
+    void setEditorPresentation(EditorPresentation presentation);
+    void registerEditorPresentationChangedCallback(
+        std::function<void(const EditorPresentation &)> callback);
 
     // SceneGpu::flushDirty() (component edits and the shared mesh buffers), then the selected-mesh
     // overlays. Mesh edits never upload directly; call once per frame, after every other update.
@@ -198,8 +189,8 @@ private:
     // initialize().
     void updateSelectedMeshHighlightColors();
 
-    // Uploads the overlay of the current editor mode if its source revisions changed (points in Edit,
-    // heatmap in Analysis). Inactive overlays keep their own stamps and catch up when next active.
+    // Uploads whichever overlays the current editor presentation requests. Inactive overlays keep
+    // their own stamps and catch up when next active.
     void synchronizeSelectedMeshBuffers();
 
     // After SceneGpu re-packs geometry: replaces the overlays, and rebinds the selection if the
@@ -216,8 +207,9 @@ private:
     std::unique_ptr<SceneGpu> m_gpu;
 
     std::unique_ptr<SelectionManager>            m_selectionManager;
-    EditorMode                                   m_editorMode = EditorMode::View;
-    std::vector<std::function<void(EditorMode)>> m_editorModeChangedCallbacks;
+    EditorPresentation m_editorPresentation;
+    std::vector<std::function<void(const EditorPresentation &)>>
+        m_editorPresentationChangedCallbacks;
 
     SceneObject   *m_editedMeshObject         = nullptr;
     Mesh::Revision m_selectedTopologyRevision = 0;

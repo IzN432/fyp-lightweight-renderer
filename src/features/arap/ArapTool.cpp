@@ -26,17 +26,11 @@ ArapTool::ArapTool(SelectionManager &selectionManager, VertexManager &vertexMana
     });
 }
 
-void ArapTool::setModeActive(bool active)
-{
-    m_modeActive = active;
-}
-
 void ArapTool::rebind(const Mesh &mesh)
 {
     m_mesh = &mesh;
     m_solver.invalidate();
     m_lastSolveFailed = false;
-    setModeActive(false);
 }
 
 void ArapTool::onRoleChanged()
@@ -55,11 +49,6 @@ void ArapTool::onSolveClicked()
 void ArapTool::onOverlayGui(const glm::mat4 &viewProj, VkExtent2D extent,
                             const glm::vec3 &selectionWorldCentroid)
 {
-    if (!m_modeActive)
-    {
-        return;
-    }
-
     const bool hasSelection = !m_selectionManager.getSelectedIndices().empty();
     if (!hasSelection)
     {
@@ -99,15 +88,15 @@ void ArapTool::onOverlayGui(const glm::mat4 &viewProj, VkExtent2D extent,
     }
 }
 
-void ArapTool::onPanelGui()
+void ArapTool::onPanelGui(bool active)
 {
-    if (!m_modeActive)
+    if (!active)
     {
         ImGui::TextDisabled("Press A to enable ARAP mode.");
         return;
     }
 
-    ImGui::TextWrapped("Press TAB to enter Edit mode, then select vertices to begin.");
+    ImGui::TextWrapped("Select vertices to classify anchors and handles.");
 
     const bool canSolve = !m_selectionManager.getIndicesWithRole(m_anchorRole).empty() &&
                           !m_selectionManager.getIndicesWithRole(m_handleRole).empty();

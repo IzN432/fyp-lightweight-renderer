@@ -253,11 +253,11 @@ void SceneManager::synchronizeSelectedMeshBuffers()
     }
     const Mesh &mesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
     // Inactive overlays catch up on their next use from their own retained stamps.
-    if (m_editorMode == EditorMode::Edit)
+    if (m_editorPresentation.vertexPointsVisible)
     {
         m_meshUploader.synchronizeUniqueVertexBuffer({&mesh}, m_selectedMeshPointsUploadConfig);
     }
-    if (m_editorMode == EditorMode::Analysis)
+    if (m_editorPresentation.heatmapVisible)
     {
         m_meshUploader.synchronizeVertexBuffer({&mesh}, m_selectedMeshHeatmapUploadConfig);
     }
@@ -347,29 +347,30 @@ const IndexBufferUploadPerMeshResult &SceneManager::selectedMeshIndexRange() con
     return gpu().indexRange(m_editedMeshObject->getComponent<MeshComponent>().mesh());
 }
 
-void SceneManager::setEditorMode(EditorMode mode)
+void SceneManager::setEditorPresentation(EditorPresentation presentation)
 {
-    if (mode == m_editorMode)
+    if (presentation == m_editorPresentation)
     {
         return;
     }
 
-    const EditorMode previousMode = m_editorMode;
-    m_editorMode                  = mode;
-    if (previousMode == EditorMode::Edit && mode != EditorMode::Edit)
+    const bool selectionWasActive = m_editorPresentation.vertexSelectionActive;
+    m_editorPresentation = presentation;
+    if (selectionWasActive && !presentation.vertexSelectionActive)
     {
         m_selectionManager->clearSelection();
     }
 
-    for (const auto &callback : m_editorModeChangedCallbacks)
+    for (const auto &callback : m_editorPresentationChangedCallbacks)
     {
-        callback(mode);
+        callback(m_editorPresentation);
     }
 }
 
-void SceneManager::registerEditorModeChangedCallback(std::function<void(EditorMode)> callback)
+void SceneManager::registerEditorPresentationChangedCallback(
+    std::function<void(const EditorPresentation &)> callback)
 {
-    m_editorModeChangedCallbacks.push_back(std::move(callback));
+    m_editorPresentationChangedCallbacks.push_back(std::move(callback));
 }
 
 } // namespace lr

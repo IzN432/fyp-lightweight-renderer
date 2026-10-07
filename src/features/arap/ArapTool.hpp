@@ -26,9 +26,7 @@ public:
     ArapTool(SelectionManager &selectionManager, VertexManager &vertexManager, CommandManager &commandManager,
              const Mesh &mesh);
 
-    void setModeActive(bool active);
-    bool isModeActive() const { return m_modeActive; }
-    bool hasDeformationTarget() const { return m_modeActive && m_solver.isPrecomputed(); }
+    bool hasDeformationTarget() const { return m_solver.isPrecomputed(); }
     VertexDragHandler &dragHandler() { return m_arapHandler; }
 
     // Repoints this ArapTool at a different mesh (e.g. the Scene Hierarchy selection changed).
@@ -42,7 +40,7 @@ public:
     void onOverlayGui(const glm::mat4 &viewProj, VkExtent2D extent, const glm::vec3 &selectionWorldCentroid);
 
     // Draws the controls intended to be embedded in the host's Features panel.
-    void onPanelGui();
+    void onPanelGui(bool active);
 
 private:
     void onRoleChanged();
@@ -57,7 +55,6 @@ private:
     ArapSolver      m_solver;
     ArapDragHandler m_arapHandler;
 
-    bool m_modeActive      = false;
     bool m_lastSolveFailed = false;
 };
 

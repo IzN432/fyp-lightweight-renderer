@@ -2,6 +2,8 @@
 
 #include "core/scene/SceneManager.hpp"
 
+#include <functional>
+
 namespace lr
 {
 
@@ -14,7 +16,8 @@ public:
 
     void rebind(const Mesh &mesh);
 
-    void onGui();
+    // Draws the tool's GUI. setEnabled is called when the user toggles the analysis mode on/off.
+    void onGui(bool enabled, const std::function<void(bool)> &setEnabled);
 
 private:
     void calculate();

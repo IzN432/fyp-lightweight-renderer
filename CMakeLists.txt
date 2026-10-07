@@ -307,6 +307,7 @@ target_link_libraries(lr_scene_serialization PUBLIC lr_core lr_animation_feature
 # feature libraries which themselves depend on lr_core.
 add_library(lr_editor_app STATIC
     src/app/EditorSession.cpp
+    src/app/EditorStateController.cpp
 )
 target_include_directories(lr_editor_app PUBLIC src)
 target_link_libraries(lr_editor_app PUBLIC lr_core lr_arap_feature lr_laplace_beltrami_feature
