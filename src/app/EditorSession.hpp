@@ -22,9 +22,8 @@ class Viewer;
 class EditorSession
 {
 public:
-    EditorSession(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,
-                  GeometryPass &geometryPass, TransparentPass &transparentPass,
-                  HeatmapPass &heatmapPass, OverlayPointsPass &overlayPointsPass,
+    EditorSession(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera, GeometryPass &geometryPass,
+                  TransparentPass &transparentPass, HeatmapPass &heatmapPass, OverlayPointsPass &overlayPointsPass,
                   OverlayLinesPass &overlayLinesPass);
     ~EditorSession();
 
@@ -40,8 +39,9 @@ public:
     void drawFeaturePanel();
     void drawTransformWindow();
 
-    // Returns if the editor gizmos are currently capturing the mouse
-    bool capturesMouse() const;
+    // Whether camera orbit/pan/zoom may act on the pointer this frame — the editor arbitrates
+    // pointer priority, so a host camera controller asks rather than guessing.
+    bool allowsViewportNavigation() const;
 
 private:
     class Impl;

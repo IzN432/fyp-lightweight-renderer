@@ -138,7 +138,9 @@ add_library(lr_core STATIC
     src/core/app/InputHandler.cpp
     src/core/app/Viewer.cpp
 
+    src/core/editor/EditorInputRouter.cpp
     src/core/editor/EditorShortcuts.cpp
+    src/core/editor/PointerCapture.cpp
     src/core/editor/EditorStateController.cpp
     src/core/editor/VertexCentroid.cpp
     src/core/editor/VertexManager.cpp
@@ -458,6 +460,7 @@ if(BUILD_TESTING)
 
     add_executable(editor_state_controller_tests
         tests/editor/EditorStateControllerTests.cpp
+        src/core/editor/EditorInputRouter.cpp
         src/core/editor/EditorShortcuts.cpp
         src/core/editor/EditorStateController.cpp
     )

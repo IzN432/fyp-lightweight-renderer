@@ -6,7 +6,9 @@
 #include "core/editor/EditableMeshContext.hpp"
 #include "core/editor/EditorContext.hpp"
 #include "core/editor/EditorFrameContext.hpp"
+#include "core/editor/EditorInputRouter.hpp"
 #include "core/editor/EditorShortcuts.hpp"
+#include "core/editor/PointerCapture.hpp"
 #include "core/editor/EditorTool.hpp"
 #include "core/editor/VertexCentroid.hpp"
 #include "core/editor/SceneObjectDragHandler.hpp"
@@ -68,6 +70,10 @@ public:
           m_objectTranslationHandler(m_commandManager), m_objectRotationHandler(m_commandManager),
           m_objectScaleHandler(m_commandManager),
           m_gizmoController(m_defaultVertexHandler, m_objectRotationHandler, m_objectScaleHandler),
+          m_inputRouter(imguiCapturesPointer,
+                        [this] {
+                            return m_gizmoController.capturesMouse();
+                        }),
           m_transformController(m_objectTranslationHandler, m_objectRotationHandler, m_objectScaleHandler),
           m_context{m_transformController, m_commandManager},
           m_arapTool(m_selectionManager, m_vertexManager, m_commandManager), m_laplaceBeltramiTool(sceneManager),
@@ -100,6 +106,7 @@ public:
         notifyTargetChanged(*m_meshObject);
 
         registerSceneCallbacks();
+        registerInputLayers();
         registerInputCallbacks();
         m_viewer.onUpdate([this](float, VkExtent2D extent) {
             update(extent);
@@ -108,7 +115,7 @@ public:
 
     EditorContext &context() { return m_context; }
 
-    bool capturesMouse() const { return m_gizmoController.capturesMouse(); }
+    bool allowsViewportNavigation() const { return m_inputRouter.viewportNavigationAllowed(); }
 
     void onSceneContentChanged()
     {
@@ -331,21 +338,45 @@ private:
         });
     }
 
+    // Pointer priority, highest first. The UI and the active gizmo outrank every layer and are
+    // handled by the router itself; camera navigation sits below all of them and polls rather than
+    // consuming, so it is not a layer either.
+    void registerInputLayers()
+    {
+        // The active state gets first refusal, which is how a feature claims viewport input for as
+        // long as its state is the active one.
+        m_inputRouter.addButtonLayer("active editor state", [this](const PointerButtonEvent &event) {
+            return m_stateController.handleInput(event);
+        });
+
+        // Generic vertex picking, available to any state whose presentation asks for it.
+        m_inputRouter.addButtonLayer("vertex selection", [this](const PointerButtonEvent &event) {
+            if (event.button != GLFW_MOUSE_BUTTON_LEFT ||
+                !m_stateController.active().presentation.vertexSelectionActive)
+            {
+                return false;
+            }
+            m_selectionManager.mouseButtonCallback(event.button, event.action, event.shift, event.ctrl, event.alt);
+            return true;
+        });
+    }
+
     void registerInputCallbacks()
     {
         m_viewer.input().onMouseButton([this](int button, int action, bool shift, bool ctrl, bool alt) {
-            if (button != GLFW_MOUSE_BUTTON_LEFT || ImGui::GetIO().WantCaptureMouse || capturesMouse() ||
-                !m_stateController.active().presentation.vertexSelectionActive)
-            {
-                return;
-            }
-            m_selectionManager.mouseButtonCallback(button, action, shift, ctrl, alt);
+            m_inputRouter.routeButton({
+                .button = button,
+                .action = action,
+                .shift  = shift,
+                .ctrl   = ctrl,
+                .alt    = alt,
+            });
         });
 
         // One key callback for the whole editor. The ImGui check that each of these handlers used to
         // repeat now happens here, once, and chord matching belongs to EditorShortcuts.
         m_viewer.input().onKeyPress([this](int key, int action, bool, bool ctrl, bool) {
-            if (action != GLFW_PRESS || ImGui::GetIO().WantCaptureKeyboard)
+            if (action != GLFW_PRESS || imguiCapturesKeyboard())
             {
                 return;
             }
@@ -466,6 +497,7 @@ private:
     SceneObjectRotationHandler     m_objectRotationHandler;
     SceneObjectScaleHandler        m_objectScaleHandler;
     GizmoController                m_gizmoController;
+    EditorInputRouter              m_inputRouter;
     SceneObjectTransformController m_transformController;
     EditorContext                  m_context;
     ArapTool                       m_arapTool;
@@ -488,6 +520,6 @@ EditorContext &EditorSession::context() { return m_impl->context(); }
 void           EditorSession::onSceneContentChanged() { m_impl->onSceneContentChanged(); }
 void           EditorSession::drawFeaturePanel() { m_impl->drawFeaturePanel(); }
 void           EditorSession::drawTransformWindow() { m_impl->drawTransformWindow(); }
-bool           EditorSession::capturesMouse() const { return m_impl->capturesMouse(); }
+bool           EditorSession::allowsViewportNavigation() const { return m_impl->allowsViewportNavigation(); }
 
 } // namespace lr

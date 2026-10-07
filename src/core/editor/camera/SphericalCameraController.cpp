@@ -1,5 +1,6 @@
 #include "SphericalCameraController.hpp"
 
+#include "core/editor/PointerCapture.hpp"
 #include "core/scene/TransformComponent.hpp"
 
 #include <glm/glm.hpp>
@@ -9,9 +10,9 @@
 namespace lr
 {
 
-void SphericalCameraController::update(float dt) { update(dt, false); }
+void SphericalCameraController::update(float dt) { update(dt, !imguiCapturesPointer()); }
 
-void SphericalCameraController::update(float dt, bool gizmoCapturesPrimaryMouse)
+void SphericalCameraController::update(float dt, bool navigationAllowed)
 {
     double dx, dy;
     m_input.getMouseDelta(dx, dy);
@@ -28,9 +29,7 @@ void SphericalCameraController::update(float dt, bool gizmoCapturesPrimaryMouse)
         m_orbitElevation = 0.0f;
     }
 
-    // No ImGui context means no UI to keep the mouse from (e.g. a Viewer without a GUI).
-    const bool uiHasMouse = ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse;
-    if (!uiHasMouse || gizmoCapturesPrimaryMouse)
+    if (navigationAllowed)
     {
         if (mmb && shift)
         {

@@ -635,7 +635,7 @@ try
     });
 
     viewer.onUpdate([&](float dt, VkExtent2D extent) {
-        cameraController.update(dt, editor.capturesMouse());
+        cameraController.update(dt, editor.allowsViewportNavigation());
     });
 
     // Registers SceneManager's own onUpdate (aspect tracking) and onLateUpdate (flushDirty —

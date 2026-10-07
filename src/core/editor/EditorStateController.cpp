@@ -101,4 +101,10 @@ GizmoRequest EditorStateController::gizmoRequest(const EditorFrameContext &frame
     return state.gizmoRequest ? state.gizmoRequest(frame) : GizmoRequest{};
 }
 
+bool EditorStateController::handleInput(const PointerButtonEvent &event) const
+{
+    const EditorStateDefinition &state = active();
+    return state.handleInput && state.handleInput(event);
+}
+
 } // namespace lr

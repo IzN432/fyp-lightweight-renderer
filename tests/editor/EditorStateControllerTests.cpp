@@ -1,5 +1,6 @@
 #include "core/editor/EditorStateController.hpp"
 
+#include "core/editor/EditorInputRouter.hpp"
 #include "core/editor/EditorShortcuts.hpp"
 #include "core/editor/EditorTool.hpp"
 
@@ -302,6 +303,140 @@ void shortcutsMatchChordsAndStopAtTheFirstOwner()
     assert(!shortcuts.dispatch({.key = 'Q'}));
 }
 
+void routerStopsAtTheFirstLayerThatConsumes()
+{
+    bool uiCaptures    = false;
+    bool gizmoCaptures = false;
+
+    lr::EditorInputRouter router(
+        [&uiCaptures] {
+            return uiCaptures;
+        },
+        [&gizmoCaptures] {
+            return gizmoCaptures;
+        });
+
+    std::vector<std::string> saw;
+    // The upper layer only claims button 0, so button 1 must fall through to the lower one.
+    router.addButtonLayer("upper", [&saw](const lr::PointerButtonEvent &event) {
+        saw.push_back("upper");
+        return event.button == 0;
+    });
+    router.addButtonLayer("lower", [&saw](const lr::PointerButtonEvent &) {
+        saw.push_back("lower");
+        return true;
+    });
+
+    assert(router.routeButton({.button = 0}));
+    assert((saw == std::vector<std::string>{"upper"}));
+
+    saw.clear();
+    assert(router.routeButton({.button = 1}));
+    assert((saw == std::vector<std::string>{"upper", "lower"}));
+
+    // While the UI or the gizmo owns the pointer, no layer is offered anything at all.
+    saw.clear();
+    uiCaptures = true;
+    assert(!router.routeButton({.button = 0}));
+    uiCaptures    = false;
+    gizmoCaptures = true;
+    assert(!router.routeButton({.button = 0}));
+    assert(saw.empty());
+}
+
+void navigationYieldsToUiButNotToTheGizmo()
+{
+    bool uiCaptures    = false;
+    bool gizmoCaptures = false;
+
+    const lr::EditorInputRouter router(
+        [&uiCaptures] {
+            return uiCaptures;
+        },
+        [&gizmoCaptures] {
+            return gizmoCaptures;
+        });
+
+    assert(router.viewportNavigationAllowed());
+    assert(!router.pointerCaptured());
+
+    // A real UI window stops orbit/pan/zoom.
+    uiCaptures = true;
+    assert(!router.viewportNavigationAllowed());
+
+    // A hovered gizmo also raises the UI capture flag, because ImGuizmo goes through ImGui — but the
+    // navigation buttons are ones the gizmo never takes, so navigation must survive it.
+    gizmoCaptures = true;
+    assert(router.viewportNavigationAllowed());
+    assert(router.pointerCaptured());
+
+    bool rejectedEmptyQuery = false;
+    try
+    {
+        lr::EditorInputRouter bad({}, [] {
+            return false;
+        });
+    } catch (const std::invalid_argument &)
+    {
+        rejectedEmptyQuery = true;
+    }
+    assert(rejectedEmptyQuery);
+}
+
+void anActiveStateCanClaimPointerInput()
+{
+    lr::EditorStateController controller([](const lr::EditorStateDefinition &) {});
+
+    int handled = 0;
+    controller.registerState({.id = "passive"});
+    controller.registerState({
+        .id = "greedy",
+        .handleInput =
+            [&handled](const lr::PointerButtonEvent &event) {
+                if (event.button != 0)
+                {
+                    return false;
+                }
+                ++handled;
+                return true;
+            },
+    });
+
+    lr::EditorInputRouter router(
+        [] {
+            return false;
+        },
+        [] {
+            return false;
+        });
+    router.addButtonLayer("active editor state", [&controller](const lr::PointerButtonEvent &event) {
+        return controller.handleInput(event);
+    });
+
+    bool fellThrough = false;
+    router.addButtonLayer("fallback", [&fellThrough](const lr::PointerButtonEvent &) {
+        fellThrough = true;
+        return true;
+    });
+
+    // A state with no input hook is not an error; the event simply falls through.
+    controller.activate("passive");
+    assert(router.routeButton({.button = 0}));
+    assert(handled == 0);
+    assert(fellThrough);
+
+    fellThrough = false;
+    controller.activate("greedy");
+    assert(router.routeButton({.button = 0}));
+    assert(handled == 1);
+    assert(!fellThrough);
+
+    // The state only claims button 0, so anything else still reaches the layer below it.
+    assert(router.routeButton({.button = 2}));
+    assert(handled == 1);
+    assert(fellThrough);
+}
+
 void activeThrowsBeforeAnyActivation()
 {
     lr::EditorStateController controller([](const lr::EditorStateDefinition &) {});
@@ -328,6 +463,9 @@ int main()
     defaultStateIsTheFallbackAndToggleTarget();
     aRegisteredToolContributesItsOwnState();
     shortcutsMatchChordsAndStopAtTheFirstOwner();
+    routerStopsAtTheFirstLayerThatConsumes();
+    navigationYieldsToUiButNotToTheGizmo();
+    anActiveStateCanClaimPointerInput();
     activeThrowsBeforeAnyActivation();
     return 0;
 }

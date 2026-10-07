@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/editor/EditorFrameContext.hpp"
+#include "core/editor/EditorInputRouter.hpp"
 #include "core/editor/EditorPresentation.hpp"
 #include "core/editor/gizmo/GizmoRequest.hpp"
 
@@ -32,6 +33,11 @@ struct EditorStateDefinition
     // The state's bid for the single shared gizmo. Returning a default-constructed GizmoRequest
     // (or leaving the hook unset) means the state wants no gizmo this frame.
     std::function<GizmoRequest(const EditorFrameContext &)> gizmoRequest;
+
+    // Viewport pointer input the state wants for itself, ahead of the editor's generic handling.
+    // Returning true consumes the event. The router has already established that neither the UI nor
+    // the active gizmo wants it.
+    std::function<bool(const PointerButtonEvent &)> handleInput;
 };
 
 // Registry-backed state controller. Feature code can add states without extending a central enum;
@@ -64,6 +70,7 @@ public:
     // which state that is and whether it happens to define the hook.
     void         update(const EditorFrameContext &frame) const;
     GizmoRequest gizmoRequest(const EditorFrameContext &frame) const;
+    bool         handleInput(const PointerButtonEvent &event) const;
 
 private:
     std::unordered_map<std::string, EditorStateDefinition> m_states;

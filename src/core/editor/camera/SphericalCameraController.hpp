@@ -13,11 +13,13 @@ public:
     SphericalCameraController(SceneObject &camera, InputHandler &input) : CameraController(camera, input) {}
     virtual ~SphericalCameraController() = default;
 
+    // Decides for itself whether the UI has the pointer. For a host that arbitrates pointer
+    // priority — see EditorInputRouter::viewportNavigationAllowed() — use the overload below.
     void update(float dt) override;
-    // ImGuizmo uses ImGui's global mouse-capture flag for its primary-button handles. Camera
-    // orbit/pan/zoom remain valid viewport interactions in that case, while ordinary ImGui
-    // windows must still block them.
-    void update(float dt, bool gizmoCapturesPrimaryMouse);
+
+    // `navigationAllowed` is the host's verdict on whether orbit/pan/zoom may act this frame. The
+    // controller does not ask who or what is holding the pointer; that is not its decision to make.
+    void update(float dt, bool navigationAllowed);
 
     // The orbit: the camera looks at `target` from `radius` away, `azimuth` radians around +Y (0 = on
     // the +Z axis) and `elevation` radians above the horizontal. Setting it places the camera at once,
