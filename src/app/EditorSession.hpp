@@ -13,8 +13,8 @@ class Viewer;
 
 // Application-level editor facade. It owns the interaction objects that must move in lockstep
 // when the hierarchy selection or edited mesh changes. Keeping this separate from SceneManager
-// avoids making scene/GPU synchronization depend on optional editor features; a future Engine can
-// own both objects without moving this orchestration back into main.cpp.
+// avoids making scene/GPU synchronization depend on optional editor features; Engine owns both
+// objects without exposing this orchestration through the executable entry point.
 class EditorSession
 {
 public:

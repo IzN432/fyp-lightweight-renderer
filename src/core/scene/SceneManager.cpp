@@ -195,7 +195,7 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
     // Constructed here rather than as a SceneManager member-initializer since it operates on the
     // selected mesh's Mesh/TransformComponent, which only exist once the meshes are uploaded. The
     // highlight-changed callback updates the CPU color attribute; late synchronization updates the
-    // GPU. The caller (main.cpp) still owns wiring up a SelectionTool and its own UI on top of it.
+    // GPU. The application layer still owns wiring up a SelectionTool and its own UI on top of it.
     auto &selectedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
     m_selectionManager = std::make_unique<SelectionManager>(
         selectedMesh.positions(), m_editedMeshObject->getComponent<TransformComponent>(), input);

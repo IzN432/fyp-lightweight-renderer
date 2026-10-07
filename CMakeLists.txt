@@ -312,18 +312,18 @@ target_link_libraries(lr_scene_serialization PUBLIC lr_core lr_animation_feature
 # Application-level editor composition. This stays above lr_core because it combines optional
 # feature libraries which themselves depend on lr_core.
 add_library(lr_editor_app STATIC
+    src/app/Engine.cpp
     src/app/EditorRenderBridge.cpp
     src/app/EditorSession.cpp
 )
 target_include_directories(lr_editor_app PUBLIC src)
 target_link_libraries(lr_editor_app PUBLIC lr_core lr_arap_feature lr_laplace_beltrami_feature
-    lr_rigid_body_feature)
+    lr_rigid_body_feature lr_linear_blend_skinning_feature lr_animation_feature
+    lr_scene_serialization imguiFileDialog)
 
 # Application executable
 add_executable(renderer src/main.cpp)
-target_link_libraries(renderer PRIVATE lr_editor_app
-    lr_linear_blend_skinning_feature lr_animation_feature lr_rigid_body_feature lr_scene_serialization
-    imguiFileDialog)
+target_link_libraries(renderer PRIVATE lr_editor_app)
 if(LR_ARAP_BACKEND STREQUAL "pardiso")
     lr_copy_mkl_dispatch_runtime(renderer)
 endif()
