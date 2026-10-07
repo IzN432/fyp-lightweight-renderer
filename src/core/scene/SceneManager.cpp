@@ -25,7 +25,44 @@ SceneManager::SceneManager(ResourceRegistry &registry, uint32_t materialCapacity
                            std::function<Material()> defaultMaterialFactory)
     : m_registry(registry), m_meshUploader(registry),
       m_materialStore(materialCapacity, std::move(defaultMaterialFactory))
-{}
+{
+    // Establishing empty topology is what makes the placeholder a usable Mesh: per-unique-vertex
+    // attributes can only be set once a topology exists (see Mesh::setPerUniqueVertexArray), and
+    // ensureSelectedMeshAttributes seeds the overlay attributes onto it like any other mesh.
+    m_unboundMesh.setTopology({}, {}, {});
+}
+
+Mesh &SceneManager::editedMesh()
+{
+    return m_editedMeshObject ? m_editedMeshObject->getComponent<MeshComponent>().mesh() : m_unboundMesh;
+}
+
+const TransformComponent &SceneManager::editedMeshTransform() const
+{
+    return m_editedMeshObject ? m_editedMeshObject->getComponent<TransformComponent>() : m_unboundMeshTransform;
+}
+
+GpuMeshLayout SceneManager::selectedMeshPointsLayout()
+{
+    MeshLayout layout;
+    layout.addPerUniqueVertexAttr<glm::vec3>("color");
+
+    GpuMeshLayout gpuLayout(layout);
+    gpuLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT)
+        .mapUniqueVertex("color", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
+    return gpuLayout;
+}
+
+GpuMeshLayout SceneManager::selectedMeshHeatmapLayout()
+{
+    MeshLayout layout;
+    layout.addPerUniqueVertexAttr<glm::vec3>("heatmapColors");
+
+    GpuMeshLayout gpuLayout(layout);
+    gpuLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT)
+        .mapUniqueVertex("heatmapColors", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
+    return gpuLayout;
+}
 
 void SceneManager::setScene(Scene &scene)
 {
@@ -179,11 +216,6 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
                               const GpuMaterialLayout        &materialLayout,
                               const std::vector<std::string> &vertexAttributeNames, InputHandler &input)
 {
-    if (!m_editedMeshObject)
-    {
-        throw std::runtime_error("SceneManager::initialize: at least one mesh object must be registered");
-    }
-
     gpu().initialize(areaLightVisualConfig, materialLayout, vertexAttributeNames);
     uploadSelectedMeshBuffers();
     // Imports and light changes re-pack the shared geometry; the overlays follow (the GPU-side
@@ -196,9 +228,10 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
     // selected mesh's Mesh/TransformComponent, which only exist once the meshes are uploaded. The
     // highlight-changed callback updates the CPU color attribute; late synchronization updates the
     // GPU. The application layer still owns wiring up a SelectionTool and its own UI on top of it.
-    auto &selectedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
-    m_selectionManager = std::make_unique<SelectionManager>(
-        selectedMesh.positions(), m_editedMeshObject->getComponent<TransformComponent>(), input);
+    // With no mesh registered this binds to the placeholder (see editedMesh()) and rebinds on the
+    // first import.
+    m_selectionManager =
+        std::make_unique<SelectionManager>(editedMesh().positions(), editedMeshTransform(), input);
     m_connections.push_back(m_selectionManager->registerColorsChangedCallback([this]() {
         updateSelectedMeshHighlightColors();
     }));
@@ -237,7 +270,7 @@ void SceneManager::uploadSelectedMeshBuffers()
     // UV-seam corner), this is mesh.positions() verbatim, matching the index space VertexManager/
     // SelectionManager and the points-picking overlay already operate in. Color comes from the
     // selected mesh's own per-unique-vertex attribute.
-    auto &selectedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
+    Mesh &selectedMesh = editedMesh();
     ensureSelectedMeshAttributes(selectedMesh);
     m_selectedMeshPoints = m_meshUploader.uploadUniqueVertexBuffer({&selectedMesh}, m_selectedMeshPointsUploadConfig);
 
@@ -324,8 +357,7 @@ void SceneManager::ensureSelectedMeshAttributes(Mesh &mesh)
 
 void SceneManager::setSelectedMeshHeatmapColors(std::span<const glm::vec3> colors)
 {
-    auto &selectedMesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
-    selectedMesh.setPerUniqueVertexArray("heatmapColors", colors);
+    editedMesh().setPerUniqueVertexArray("heatmapColors", colors);
 }
 
 void SceneManager::updateSelectedMeshHighlightColors()
@@ -344,6 +376,13 @@ void SceneManager::updateSelectedMeshHighlightColors()
 
 const IndexBufferUploadPerMeshResult &SceneManager::selectedMeshIndexRange() const
 {
+    if (!m_editedMeshObject)
+    {
+        // Nothing is being edited: an empty range, so a pass configured from this draws nothing
+        // until setEditedMeshObject() gives it a real one.
+        static const IndexBufferUploadPerMeshResult kEmptyRange{};
+        return kEmptyRange;
+    }
     return gpu().indexRange(m_editedMeshObject->getComponent<MeshComponent>().mesh());
 }
 

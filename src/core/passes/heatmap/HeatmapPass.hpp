@@ -27,7 +27,9 @@ public:
             indexBufferResourceName; // shared scene index buffer
 
         VertexBufferUploadResult vertexBufferUploadResult;
-        IndexBufferUploadResult  indexBufferUploadResult;
+        // The selected mesh's range within the shared index buffer. A default (zero-count) range is
+        // the "nothing selected" state: the pass draws nothing until setMeshSource() supplies one.
+        IndexBufferUploadPerMeshResult indexRange;
 
         // Read fresh every frame, same as GeometryPass::Config::meshTransforms — dragging the
         // mesh's TransformComponent moves the heatmap surface immediately with no pass rebuild.
@@ -46,7 +48,6 @@ public:
 
 private:
     Config       m_cfg;
-    IndexBufferUploadPerMeshResult m_indexRange;
     mutable bool m_enabled = false;
 };
 

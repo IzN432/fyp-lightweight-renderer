@@ -13,7 +13,11 @@ inline std::vector<std::byte> packMeshVertexData(const std::vector<const Mesh *>
                                                const VertexBufferUploadConfig &config,
                                                bool uniqueVertices = false)
 {
-    if (meshes.empty()) throw std::invalid_argument("Mesh packing: no meshes supplied");
+    // An empty mesh list packs to an empty payload: the stride is unknowable without a mesh to read
+    // it from, but with no vertices to write there is nothing for it to describe. This is a normal
+    // state (a scene with no geometry yet), and ResourceRegistry/Allocator already accept a
+    // zero-sized payload, so the GPU views still exist for passes to bind.
+    if (meshes.empty()) return {};
     const bool uniqueAttributes = uniqueVertices || config.expandUniqueVertexAttributes;
     const auto findAttribute = [&](const Mesh &mesh, const std::string &name) {
         const auto *desc = uniqueAttributes ? mesh.layout().findPerUniqueVertexAttr(name)

@@ -172,10 +172,6 @@ CallbackConnection SceneGpu::onLightsUploaded(std::function<void(uint32_t)> list
 void SceneGpu::initialize(const AreaLightVisualConfig &areaLightVisualConfig, const GpuMaterialLayout &materialLayout,
                           const std::vector<std::string> &vertexAttributeNames)
 {
-    if (m_meshObjects.empty())
-    {
-        throw std::runtime_error("SceneGpu::initialize: at least one mesh object must be registered");
-    }
     if (!m_camera)
     {
         throw std::runtime_error("SceneGpu::initialize: camera must be set first (see setCamera)");

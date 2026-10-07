@@ -100,7 +100,8 @@ public:
     }
 
     // One-time setup: builds light visuals, then uploads lights, geometry, materials and the camera.
-    // Requires at least one registered mesh and a camera.
+    // Requires a camera. Registered geometry is optional: with none, every shared buffer is created
+    // empty so passes still have something to bind, and the first import replaces them.
     void initialize(const AreaLightVisualConfig    &areaLightVisualConfig = conventions::areaLightVisualConfig(),
                     const GpuMaterialLayout        &materialLayout        = conventions::materialLayout(),
                     const std::vector<std::string> &vertexAttributeNames  = conventions::geometryVertexAttributes());

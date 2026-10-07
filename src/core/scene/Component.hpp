@@ -36,6 +36,9 @@ private:
 
 protected:
     const SceneObject &getOwningObject() const { return *m_owningObject; }
+    // Null until SceneObject::addComponent adopts this component. Components that may legitimately
+    // live detached from the hierarchy (see TransformComponent::worldMatrix) ask through this.
+    const SceneObject *findOwningObject() const { return m_owningObject; }
     void               markDirty() { m_dirty = true; }
     EditorContext     *editorContext() const { return m_editorContext; }
 

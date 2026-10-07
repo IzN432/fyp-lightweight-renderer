@@ -10,7 +10,9 @@
 #include "Scene.hpp"
 #include "SceneGpu.hpp"
 #include "AreaLightVisual.hpp"
+#include "Mesh.hpp"
 #include "MeshStore.hpp"
+#include "TransformComponent.hpp"
 
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/EditorPresentationState.hpp"
@@ -66,7 +68,13 @@ public:
     // overlay's points buffer and heatmap analysis). The caller drives this from Scene Hierarchy
     // selection. Defaults to the first registered mesh.
     SceneObject *editedMeshObject() { return m_editedMeshObject; }
-    SceneObject &selectedMeshObject() { return *m_editedMeshObject; }
+
+    // The Mesh and TransformComponent the overlay buffers, SelectionManager and the editor's
+    // VertexManager bind to. With no edited mesh object these are an empty placeholder mesh and a
+    // detached transform owned by this manager, so those bindings are always valid and non-optional
+    // — an application does not have to load an asset just to construct its editor.
+    Mesh                     &editedMesh();
+    const TransformComponent &editedMeshTransform() const;
 
     // True if `object` has what setEditedMeshObject() requires (a MeshComponent + TransformComponent).
     static bool isEditable(const SceneObject &object);
@@ -95,7 +103,8 @@ public:
     // Performs all one-time scene setup that would otherwise have to be manually sequenced by the
     // caller: SceneGpu::initialize() (light visuals; lights/mesh/material/camera buffers), the
     // selected mesh's points/heatmap buffers, and the SelectionManager that operates on the initially
-    // selected mesh. Requires a scene, at least one registered mesh, and a default camera.
+    // selected mesh. Requires a scene and a default camera; registered geometry is optional (see
+    // editedMesh()).
     void initialize(const AreaLightVisualConfig &areaLightVisualConfig, const GpuMaterialLayout &materialLayout,
                     const std::vector<std::string> &vertexAttributeNames, InputHandler &input);
 
@@ -147,6 +156,12 @@ public:
     // Replaces the analysis colors used by HeatmapPass without touching the selection-highlight
     // colors used by the points overlay. Colors are indexed by mesh.positions().
     void setSelectedMeshHeatmapColors(std::span<const glm::vec3> colors);
+
+    // Vulkan vertex inputs matching the two overlay buffers above. Declared here, next to the
+    // upload configs that define their packing, so a pass can be built before any mesh exists
+    // rather than deriving the layout from whichever mesh happens to be loaded.
+    static GpuMeshLayout selectedMeshPointsLayout();
+    static GpuMeshLayout selectedMeshHeatmapLayout();
 
     const std::string &cameraBufferName() const { return gpu().cameraBufferName(); }
 
@@ -223,6 +238,14 @@ private:
 
     SceneObject   *m_editedMeshObject         = nullptr;
     Mesh::Revision m_selectedTopologyRevision = 0;
+
+    // Null object for "nothing is being edited": an empty mesh (topology established, so the
+    // overlay attributes can be seeded onto it) and a transform with no owning SceneObject. Every
+    // consumer that needs a Mesh&/TransformComponent& binds to these while m_editedMeshObject is
+    // null, which keeps the overlay buffers registered — passes resolve them at build time — and
+    // keeps SelectionManager/VertexManager pointer-stable. See editedMesh().
+    Mesh               m_unboundMesh;
+    TransformComponent m_unboundMeshTransform;
 
     const std::string m_selectedMeshPointsBufferName  = "meshPointsBuffer";
     const std::string m_selectedMeshHeatmapBufferName = "meshHeatmapBuffer";

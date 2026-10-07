@@ -2,7 +2,6 @@
 #include "app/EditorSession.hpp"
 #include "app/EditorRenderBridge.hpp"
 #include "core/app/Viewer.hpp"
-#include "core/Paths.hpp"
 #include "core/loaders/Material.hpp"
 #include "core/loaders/MaterialStore.hpp"
 #include "core/passes/final/FinalPass.hpp"
@@ -20,16 +19,13 @@
 #include "core/scene/Camera.hpp"
 #include "core/scene/Light.hpp"
 #include "core/scene/Mesh.hpp"
-#include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
 #include "core/scene/EngineConventions.hpp"
 #include "core/scene/SceneManager.hpp"
 #include "core/scene/Scene.hpp"
 
-#include "features/rigid_body/ColliderComponent.hpp"
 #include "features/rigid_body/PhysicsWorld.hpp"
-#include "features/rigid_body/RigidBodyComponent.hpp"
 
 #include <ImGuiFileDialog.h>
 #include <imgui.h>
@@ -46,6 +42,13 @@
 
 namespace lr
 {
+
+namespace
+{
+// HBAO world-space sampling radius the app starts with, before anything is loaded. Previously this
+// was derived from the bootstrap asset's bounding box; the HBAO panel's slider owns it from here.
+constexpr float kDefaultAoSphereRadius = 0.02f;
+} // namespace
 
 void Engine::run()
 {
@@ -99,12 +102,6 @@ void Engine::run()
     sceneManager.setDefaultCamera(*camera);
     scene.protectSceneObject(camera->id());
 
-    // The editor pipeline currently needs one mesh while its GPU buffers and mesh-editing tools are
-    // constructed. This bootstrap asset is retired before the frame loop, leaving only Main Camera
-    // in the initial scene hierarchy.
-    const fs::path meshPath = lr::paths::assetDir / "samples/models/bird_orange.glb";
-    lr::SceneObject &bootstrapRoot = sceneManager.load(meshPath, sceneLoadConfig);
-
     // LIGHT VISUALS — every light, not just ones that start out as AreaLight, gets a quad mesh owned by
     // SceneGpu (not a component on the light, so it isn't selectable or editable). The quad still draws
     // through the same GeometryPass (see AreaLightVisual.hpp for why the visual needs to be real
@@ -112,34 +109,6 @@ void Engine::run()
     // so switching a light's type at runtime (see Light::onGUIImpl) just rewrites that slot in place —
     // see SceneGpu::updateLightVisuals.
     const lr::AreaLightVisualConfig areaLightVisualConfig = lr::conventions::areaLightVisualConfig();
-
-    lr::SceneObject *meshObject = &sceneManager.selectedMeshObject();
-    auto &meshComponent = meshObject->getComponent<lr::MeshComponent>();
-
-    // Also read by the AmbientOcclusionPass config below, to size sphereRadius off the model.
-    glm::vec3 boundsMin(0.0f);
-    glm::vec3 boundsMax(0.0f);
-
-    // Seed the demo object with a local-space box collider fitted to its mesh. Collision
-    // detection will consume the same component later; for now this also makes the collider
-    // inspector and visualization immediately available in the sample application.
-    if (!meshComponent.mesh().positions().empty())
-    {
-        boundsMin = meshComponent.mesh().positions().front();
-        boundsMax = boundsMin;
-        for (const glm::vec3 &position : meshComponent.mesh().positions())
-        {
-            boundsMin = glm::min(boundsMin, position);
-            boundsMax = glm::max(boundsMax, position);
-        }
-
-        lr::Collider collider;
-        collider.shape         = lr::BoxCollider{glm::max((boundsMax - boundsMin) * 0.5f, glm::vec3(0.001f))};
-        collider.localPosition = (boundsMin + boundsMax) * 0.5f;
-        meshObject->addComponent<lr::ColliderComponent>(std::move(collider));
-        meshObject->addComponent<lr::RigidBodyComponent>();
-
-    }
 
     lr::PhysicsWorld physicsWorld(scene);
 
@@ -167,28 +136,22 @@ void Engine::run()
     lr::GeometryPass geometryPass(sceneManager.gpu().geometryPassConfig());
     geometryPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
 
+    // Mesh-independent sources and layout: the scene starts empty, and EditorRenderBridge
+    // repoints the pass (setMeshSource) whenever the edited mesh changes.
     lr::HeatmapPass heatmapPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
         .vertexBufferResourceName = sceneManager.selectedMeshHeatmapBufferName(),
         .indexBufferResourceName  = sceneManager.meshIndexBufferName(),
         .vertexBufferUploadResult = sceneManager.selectedMeshHeatmap(),
-        .indexBufferUploadResult  = sceneManager.indexBuffer(),
-        .meshTransform            = &meshObject->getComponent<lr::TransformComponent>(),
+        .indexRange               = sceneManager.selectedMeshIndexRange(),
     });
-
-    lr::GpuMeshLayout heatmapMeshLayout(meshComponent.mesh().layout());
-    heatmapMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
-    heatmapMeshLayout.mapUniqueVertex("heatmapColors", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
-
-    heatmapPass.build(viewer.frameGraph(), heatmapMeshLayout);
-
-    // sphereRadius is 2% of the lion's largest local-space extent (see boundsMin/boundsMax above).
-    const glm::vec3 lionExtents        = boundsMax - boundsMin;
-    const float     lionLargestExtent  = std::max({lionExtents.x, lionExtents.y, lionExtents.z});
+    heatmapPass.build(viewer.frameGraph(), lr::SceneManager::selectedMeshHeatmapLayout());
 
     lr::AmbientOcclusionPass aoPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
-        .sphereRadius             = lionLargestExtent * 0.02f,
+        // World-space sampling radius. Nothing is loaded yet to scale it against, so this is a
+        // starting value for the HBAO panel's slider rather than anything derived from the scene.
+        .sphereRadius             = kDefaultAoSphereRadius,
     });
     aoPass.uploadResources(viewer.resources());
     aoPass.build(viewer.frameGraph());
@@ -248,18 +211,14 @@ void Engine::run()
     overlayLinesPass.build(viewer.frameGraph());
     overlayLinesPass.setLines({});
 
-    lr::GpuMeshLayout pointsMeshLayout(meshComponent.mesh().layout());
-    pointsMeshLayout.mapPosition(0, 0, VK_FORMAT_R32G32B32_SFLOAT);
-    pointsMeshLayout.mapUniqueVertex("color", 0, 1, VK_FORMAT_R32G32B32_SFLOAT);
-
+    // As with the heatmap pass: one empty draw entry until EditorRenderBridge points it at a mesh.
     lr::OverlayPointsPass overlayPointsPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
         .pointsBufferResourceName = sceneManager.selectedMeshPointsBufferName(),
         .pointsBufferUploadResult = sceneManager.selectedMeshPoints(),
-        .vertexCounts             = {meshComponent.mesh().uniquePositionCount()},
-        .meshTransform            = &meshObject->getComponent<lr::TransformComponent>(),
+        .vertexCounts             = {0},
     });
-    overlayPointsPass.build(viewer.frameGraph(), pointsMeshLayout);
+    overlayPointsPass.build(viewer.frameGraph(), lr::SceneManager::selectedMeshPointsLayout());
 
     lr::FinalPass finalPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
@@ -650,11 +609,6 @@ void Engine::run()
     // controller / gizmo / GUI edits and does at most one GPU re-upload per dirtied resource
     // rather than one per individual mutation) callbacks — see SceneManager::registerCallbacks.
     sceneManager.registerCallbacks(viewer);
-
-    // Start with no authored scene objects. Retirement keeps the bootstrap allocations alive long
-    // enough for dormant editor references to remain safe until loadScene() clears the asset stores
-    // and rebinds every mesh-editing tool to the loaded scene.
-    scene.destroySceneObject(bootstrapRoot.id());
 
     viewer.addImguiPass();
     viewer.run();

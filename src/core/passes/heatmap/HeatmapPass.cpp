@@ -13,18 +13,15 @@ struct HeatmapPC
 };
 } // namespace
 
-HeatmapPass::HeatmapPass(Config cfg) : m_cfg(std::move(cfg))
-{
-    m_indexRange = m_cfg.indexBufferUploadResult.singleMeshResults[0];
-}
+HeatmapPass::HeatmapPass(Config cfg) : m_cfg(std::move(cfg)) {}
 
 void HeatmapPass::setMeshSource(VertexBufferUploadResult vertexUpload,
                                 IndexBufferUploadPerMeshResult indexRange,
                                 const TransformComponent &transform)
 {
     m_cfg.vertexBufferUploadResult = std::move(vertexUpload);
-    m_indexRange                   = indexRange;
-    m_cfg.meshTransform           = &transform;
+    m_cfg.indexRange               = indexRange;
+    m_cfg.meshTransform            = &transform;
 }
 
 void HeatmapPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
@@ -42,18 +39,19 @@ void HeatmapPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         .depthAttachment(fg.image("heatmapDepth"), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,
                          {.depthStencil = {1.0f, 0}})
         .execute([&](PassContext &ctx) {
-            if (!m_enabled)
+            if (!m_enabled || m_cfg.indexRange.indexCount == 0 ||
+                m_cfg.vertexBufferUploadResult.singleMeshResults.empty())
             {
                 return;
             }
-
             const auto &vert = m_cfg.vertexBufferUploadResult.singleMeshResults[0];
 
             const HeatmapPC pc{
                 .model = m_cfg.meshTransform ? m_cfg.meshTransform->worldMatrix() : glm::mat4(1.0f),
             };
             ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, pc);
-            ctx.cmd().drawIndexed(m_indexRange.indexCount, 1, m_indexRange.firstIndex, vert.vertexOffset, 0);
+            ctx.cmd().drawIndexed(m_cfg.indexRange.indexCount, 1, m_cfg.indexRange.firstIndex, vert.vertexOffset,
+                                  0);
         });
 }
 

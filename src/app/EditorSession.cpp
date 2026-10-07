@@ -33,7 +33,6 @@
 #include <imgui.h>
 
 #include <algorithm>
-#include <stdexcept>
 #include <unordered_set>
 #include <vector>
 
@@ -56,8 +55,7 @@ public:
           m_stateController([this](const EditorStateDefinition &state) {
               m_sceneManager.setEditorPresentation(state.presentation);
           }),
-          m_meshObject(requireEditedMesh(sceneManager)),
-          m_vertexManager(m_meshObject->getComponent<MeshComponent>().mesh()),
+          m_meshObject(sceneManager.editedMeshObject()), m_vertexManager(sceneManager.editedMesh()),
           m_selectionManager(sceneManager.selectionManager()),
           m_defaultVertexHandler(m_vertexManager, m_selectionManager, m_commandManager),
           m_objectTranslationHandler(m_commandManager), m_objectRotationHandler(m_commandManager),
@@ -93,7 +91,15 @@ public:
 
         m_stateController.activate(kViewState);
         applyPresentation(m_sceneManager.editorPresentation());
-        notifyTargetChanged(*m_meshObject);
+        // An empty scene is a valid starting point: the editor opens with no target and binds one
+        // on the first import, exactly as it does after the last editable object is deleted.
+        if (m_meshObject)
+        {
+            notifyTargetChanged(*m_meshObject);
+        } else
+        {
+            notifyTargetCleared();
+        }
 
         registerSceneCallbacks();
         registerInputLayers();
@@ -269,16 +275,6 @@ private:
                 break;
         }
         return {};
-    }
-
-    static SceneObject *requireEditedMesh(SceneManager &sceneManager)
-    {
-        SceneObject *mesh = sceneManager.editedMeshObject();
-        if (!mesh)
-        {
-            throw std::logic_error("EditorSession requires an initial editable mesh");
-        }
-        return mesh;
     }
 
     void registerSceneCallbacks()
