@@ -8,7 +8,6 @@
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/selection/VertexRole.hpp"
 #include "core/editor/command/CommandManager.hpp"
-#include "core/editor/gizmo/TranslateGizmo.hpp"
 #include "core/scene/Mesh.hpp"
 
 #include <vulkan/vulkan.h>
@@ -25,16 +24,17 @@ class ArapTool
 {
 public:
     ArapTool(SelectionManager &selectionManager, VertexManager &vertexManager, CommandManager &commandManager,
-             const Mesh &mesh, VertexDragHandler &defaultHandler, TranslateGizmo &gizmo);
+             const Mesh &mesh);
 
     void setModeActive(bool active);
     bool isModeActive() const { return m_modeActive; }
+    bool hasDeformationTarget() const { return m_modeActive && m_solver.isPrecomputed(); }
+    VertexDragHandler &dragHandler() { return m_arapHandler; }
 
     // Repoints this ArapTool at a different mesh (e.g. the Scene Hierarchy selection changed).
     // Invalidates any precomputed solve (it was factored for the old mesh's topology/vertex
-    // domain) and forces ARAP mode off, detaching the gizmos back to the default handler — the
-    // caller's SelectionManager/VertexManager are expected to have already been rebound to the
-    // same mesh (see SelectionManager::rebind/VertexManager::rebind).
+    // domain) and forces ARAP mode off. The caller's SelectionManager/VertexManager are expected
+    // to have already been rebound to the same mesh.
     void rebind(const Mesh &mesh);
 
     // Draws the anchor/handle popup near the current selection. selectionWorldCentroid is only
@@ -47,14 +47,9 @@ public:
 private:
     void onRoleChanged();
     void onSolveClicked();
-    void resetToDefaultHandler();
 
-    SelectionManager               &m_selectionManager;
-    VertexManager                  &m_vertexManager;
-    CommandManager                 &m_commandManager;
-    const Mesh                     *m_mesh;
-    VertexDragHandler              &m_defaultHandler;
-    TranslateGizmo                 &m_gizmo;
+    SelectionManager &m_selectionManager;
+    const Mesh       *m_mesh;
 
     VertexRoleId m_anchorRole;
     VertexRoleId m_handleRole;

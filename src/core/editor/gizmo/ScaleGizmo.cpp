@@ -11,7 +11,7 @@ void ScaleGizmo::finishDrag()
 {
     if (m_using)
     {
-        m_dragHandler.endDrag();
+        m_dragHandler->endDrag();
         m_using = false;
     }
 }
@@ -39,11 +39,11 @@ void ScaleGizmo::draw(const glm::mat4 &view, const glm::mat4 &projection, bool o
     const bool usingNow = ImGuizmo::IsUsing();
     if (usingNow && !m_using)
     {
-        m_dragHandler.beginDrag();
+        m_dragHandler->beginDrag();
     }
     if (changed)
     {
-        m_dragHandler.scaleToWorld(manipulatedWorld);
+        m_dragHandler->scaleToWorld(manipulatedWorld);
     }
     if (!usingNow)
     {

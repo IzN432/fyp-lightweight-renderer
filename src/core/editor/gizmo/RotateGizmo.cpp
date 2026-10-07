@@ -11,7 +11,7 @@ void RotateGizmo::finishDrag()
 {
     if (m_using)
     {
-        m_dragHandler.endDrag();
+        m_dragHandler->endDrag();
         m_using = false;
     }
 }
@@ -39,11 +39,11 @@ void RotateGizmo::draw(const glm::mat4 &view, const glm::mat4 &projection, bool 
     const bool usingNow = ImGuizmo::IsUsing();
     if (usingNow && !m_using)
     {
-        m_dragHandler.beginDrag();
+        m_dragHandler->beginDrag();
     }
     if (changed)
     {
-        m_dragHandler.rotateToWorld(manipulatedWorld);
+        m_dragHandler->rotateToWorld(manipulatedWorld);
     }
     if (!usingNow)
     {

@@ -159,6 +159,7 @@ add_library(lr_core STATIC
     src/core/editor/gizmo/TranslateGizmo.cpp
     src/core/editor/gizmo/RotateGizmo.cpp
     src/core/editor/gizmo/ScaleGizmo.cpp
+    src/core/editor/gizmo/GizmoController.cpp
 
     src/core/editor/camera/SphericalCameraController.cpp
 

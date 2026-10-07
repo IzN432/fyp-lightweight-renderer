@@ -9,9 +9,7 @@
 #include "core/editor/SceneObjectTransformController.hpp"
 #include "core/editor/VertexManager.hpp"
 #include "core/editor/command/CommandManager.hpp"
-#include "core/editor/gizmo/RotateGizmo.hpp"
-#include "core/editor/gizmo/ScaleGizmo.hpp"
-#include "core/editor/gizmo/TranslateGizmo.hpp"
+#include "core/editor/gizmo/GizmoController.hpp"
 #include "core/editor/selection/SelectionGestureTool.hpp"
 #include "core/passes/geometry/GeometryPass.hpp"
 #include "core/passes/heatmap/HeatmapPass.hpp"
@@ -53,13 +51,12 @@ public:
           m_selectionManager(sceneManager.selectionManager()),
           m_defaultVertexHandler(m_vertexManager, m_selectionManager, m_commandManager),
           m_objectTranslationHandler(m_commandManager), m_objectRotationHandler(m_commandManager),
-          m_objectScaleHandler(m_commandManager), m_translateGizmo(m_defaultVertexHandler),
-          m_rotateGizmo(m_objectRotationHandler), m_scaleGizmo(m_objectScaleHandler),
+          m_objectScaleHandler(m_commandManager),
+          m_gizmoController(m_defaultVertexHandler, m_objectRotationHandler, m_objectScaleHandler),
           m_transformController(m_objectTranslationHandler, m_objectRotationHandler, m_objectScaleHandler),
           m_context{m_transformController, m_commandManager},
           m_arapTool(m_selectionManager, m_vertexManager, m_commandManager,
-                     m_meshObject->getComponent<MeshComponent>().mesh(), m_defaultVertexHandler,
-                     m_translateGizmo),
+                     m_meshObject->getComponent<MeshComponent>().mesh()),
           m_laplaceBeltramiTool(m_meshObject->getComponent<MeshComponent>().mesh(), sceneManager)
     {
         m_selectionManager.setSelectTool(std::make_unique<SelectionGestureTool>(viewer.input(), camera));
@@ -87,8 +84,7 @@ public:
 
     bool capturesMouse() const
     {
-        return m_translateGizmo.capturesMouse() || m_rotateGizmo.capturesMouse() ||
-               m_scaleGizmo.capturesMouse();
+        return m_gizmoController.capturesMouse();
     }
 
     void onSceneContentChanged()
@@ -329,47 +325,48 @@ private:
                                        m_sceneManager.editorMode() == EditorMode::View &&
                                        m_objectScaleHandler.target();
 
-        if (objectTranslateActive)
-        {
-            if (&m_translateGizmo.dragHandler() != &m_objectTranslationHandler)
-            {
-                m_objectTranslateReturnHandler = &m_translateGizmo.dragHandler();
-            }
-            m_translateGizmo.setDragHandler(m_objectTranslationHandler);
-        }
-        else if (&m_translateGizmo.dragHandler() == &m_objectTranslationHandler)
-        {
-            m_translateGizmo.setDragHandler(*m_objectTranslateReturnHandler);
-        }
-
-        const TranslateDragHandler &activeHandler = m_translateGizmo.dragHandler();
-        const auto &driven = objectTranslateActive
-            ? m_selectionManager.getSelectedIndices()
-            : static_cast<const VertexDragHandler &>(activeHandler).indices();
-        const bool suppressedByArap = m_arapTool.isModeActive() &&
-                                      &activeHandler == &m_defaultVertexHandler;
-        const bool translateVisible = (objectTranslateActive || !driven.empty()) && !suppressedByArap;
-        glm::vec3 translateOrigin(0.0f);
-        if (translateVisible)
-        {
-            translateOrigin = objectTranslateActive
-                ? glm::vec3(m_objectTranslationHandler.target()->worldMatrix()[3])
-                : worldCentroidOf(driven);
-        }
-
         const glm::mat4 projection = camera.projectionMatrix(aspect);
         const bool orthographic = camera.projectionType == ProjectionType::Orthographic;
-        m_translateGizmo.draw(camera.viewMatrix(), projection, orthographic, extent,
-                              translateOrigin, translateVisible);
-        m_rotateGizmo.draw(camera.viewMatrix(), projection, orthographic, extent,
-                           objectRotateActive
-                               ? glm::translate(glm::mat4(1.0f), glm::vec3(m_objectRotationHandler.target()->worldMatrix()[3])) *
-                                     glm::mat4_cast(m_objectRotationHandler.target()->worldRotation())
-                               : glm::mat4(1.0f),
-                           objectRotateActive);
-        m_scaleGizmo.draw(camera.viewMatrix(), projection, orthographic, extent,
-                          objectScaleActive ? m_objectScaleHandler.target()->worldMatrix() : glm::mat4(1.0f),
-                          objectScaleActive);
+        GizmoRequest gizmoRequest;
+        if (objectTranslateActive)
+        {
+            gizmoRequest = TranslateGizmoRequest{
+                .origin = glm::vec3(m_objectTranslationHandler.target()->worldMatrix()[3]),
+                .handler = &m_objectTranslationHandler,
+            };
+        }
+        else if (objectRotateActive)
+        {
+            gizmoRequest = RotateGizmoRequest{
+                .worldMatrix = glm::translate(
+                                   glm::mat4(1.0f),
+                                   glm::vec3(m_objectRotationHandler.target()->worldMatrix()[3])) *
+                               glm::mat4_cast(m_objectRotationHandler.target()->worldRotation()),
+                .handler = &m_objectRotationHandler,
+            };
+        }
+        else if (objectScaleActive)
+        {
+            gizmoRequest = ScaleGizmoRequest{
+                .worldMatrix = m_objectScaleHandler.target()->worldMatrix(),
+                .handler = &m_objectScaleHandler,
+            };
+        }
+        else if (m_arapTool.hasDeformationTarget() && !m_arapTool.dragHandler().indices().empty())
+        {
+            gizmoRequest = TranslateGizmoRequest{
+                .origin = worldCentroidOf(m_arapTool.dragHandler().indices()),
+                .handler = &m_arapTool.dragHandler(),
+            };
+        }
+        else if (!m_arapTool.isModeActive() && !m_defaultVertexHandler.indices().empty())
+        {
+            gizmoRequest = TranslateGizmoRequest{
+                .origin = worldCentroidOf(m_defaultVertexHandler.indices()),
+                .handler = &m_defaultVertexHandler,
+            };
+        }
+        m_gizmoController.draw(camera.viewMatrix(), projection, orthographic, extent, gizmoRequest);
 
         std::vector<OverlayLine> overlayLines = buildColliderOverlayLines(m_scene);
         if (const auto selectedObject = m_scene.selectedObject())
@@ -405,10 +402,7 @@ private:
     SceneObjectDragHandler     m_objectTranslationHandler;
     SceneObjectRotationHandler m_objectRotationHandler;
     SceneObjectScaleHandler    m_objectScaleHandler;
-    TranslateGizmo             m_translateGizmo;
-    RotateGizmo                m_rotateGizmo;
-    ScaleGizmo                 m_scaleGizmo;
-    TranslateDragHandler      *m_objectTranslateReturnHandler = &m_defaultVertexHandler;
+    GizmoController                m_gizmoController;
     SceneObjectTransformController m_transformController;
     EditorContext                  m_context;
     ArapTool                       m_arapTool;
