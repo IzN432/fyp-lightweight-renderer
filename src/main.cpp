@@ -28,7 +28,7 @@
 #include "core/editor/SceneObjectRotationHandler.hpp"
 #include "core/editor/SceneObjectScaleHandler.hpp"
 #include "core/editor/SceneObjectTransformController.hpp"
-#include "core/editor/selection/BoxSelectionTool.hpp"
+#include "core/editor/selection/SelectionGestureTool.hpp"
 #include "core/editor/selection/SelectionManager.hpp"
 #include "core/editor/VertexManager.hpp"
 #include "core/editor/DefaultVertexDragHandler.hpp"
@@ -314,7 +314,7 @@ try
     // SceneManager::selectionManager()) since it needs to wire selection-highlight changes straight
     // to the GPU color buffer; this is just a local alias to keep the call sites below unchanged.
     lr::SelectionManager &selectionManager = sceneManager.selectionManager();
-    selectionManager.setSelectTool(std::make_unique<lr::BoxSelectionTool>(viewer.input(), *camera, selectionManager));
+    selectionManager.setSelectTool(std::make_unique<lr::SelectionGestureTool>(viewer.input(), *camera));
 
     // What the translation gizmo drives by default. ArapTool swaps this for its solve handler
     // after a successful precompute.

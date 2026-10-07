@@ -50,6 +50,7 @@ void SelectionManager::updateCallback(float dt, VkExtent2D extent)
 
     const float aspect =
         (extent.height == 0) ? 1.0f : static_cast<float>(extent.width) / static_cast<float>(extent.height);
+    m_selectTool->setViewportExtent(extent);
 
     double mouseX, mouseY;
     m_input.getMousePos(mouseX, mouseY);
@@ -85,9 +86,14 @@ void SelectionManager::setSelectTool(std::unique_ptr<SelectionTool> tool)
         }
         m_selectTool->selectVertices(m_highlightedVertices, m_selectedVertices,
                                      toWorldSpace(*m_vertices, *m_meshTransform));
+        rebuildColors();
         if (m_selectionChangedCallback)
         {
             m_selectionChangedCallback();
+        }
+        if (m_colorsChangedCallback)
+        {
+            m_colorsChangedCallback();
         }
     });
     m_selectTool->registerHighlightCallback([this]() {

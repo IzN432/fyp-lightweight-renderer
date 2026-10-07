@@ -152,6 +152,8 @@ add_library(lr_core STATIC
     src/core/editor/command/CommandManager.cpp
 
     src/core/editor/selection/BoxSelectionTool.cpp
+    src/core/editor/selection/ClickSelectionTool.cpp
+    src/core/editor/selection/SelectionGestureTool.cpp
     src/core/editor/selection/SelectionManager.cpp
 
     src/core/editor/gizmo/TranslateGizmo.cpp
