@@ -1,25 +1,26 @@
 #pragma once
 
-#include "CameraController.hpp"
+#include "core/scene/Component.hpp"
 
 #include <glm/glm.hpp>
 
 namespace lr
 {
 
-class SphericalCameraController : public CameraController
+class InputHandler;
+
+class SphericalCameraController : public Component
 {
 public:
-    SphericalCameraController(SceneObject &camera, InputHandler &input) : CameraController(camera, input) {}
-    virtual ~SphericalCameraController() = default;
+    SphericalCameraController() : Component("Spherical Camera Controller") {}
 
     // Decides for itself whether the UI has the pointer. For a host that arbitrates pointer
     // priority — see EditorInputRouter::viewportNavigationAllowed() — use the overload below.
-    void update(float dt) override;
+    void update(InputHandler &input, float dt);
 
     // `navigationAllowed` is the host's verdict on whether orbit/pan/zoom may act this frame. The
     // controller does not ask who or what is holding the pointer; that is not its decision to make.
-    void update(float dt, bool navigationAllowed);
+    void update(InputHandler &input, float dt, bool navigationAllowed);
 
     // The orbit: the camera looks at `target` from `radius` away, `azimuth` radians around +Y (0 = on
     // the +Z axis) and `elevation` radians above the horizontal. Setting it places the camera at once,
@@ -33,6 +34,8 @@ public:
     };
     OrbitState orbitState() const { return {m_orbitTarget, m_orbitRadius, m_orbitAzimuth, m_orbitElevation}; }
     void       setOrbitState(const OrbitState &state);
+
+    void onGUIImpl() override;
 
 private:
     // Places the camera object according to the orbit state.

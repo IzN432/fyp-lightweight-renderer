@@ -98,6 +98,7 @@ void Engine::run()
     lr::SceneObject *camera = &scene.createSceneObject();
     camera->addComponent<lr::Camera>();
     camera->addComponent<lr::TransformComponent>();
+    auto &cameraController = camera->addComponent<lr::SphericalCameraController>();
     camera->name = "Main Camera";
     sceneManager.setDefaultCamera(*camera);
     scene.protectSceneObject(camera->id());
@@ -242,8 +243,6 @@ void Engine::run()
     std::string             sceneImportError;
     std::optional<fs::path> sceneDocumentPath;
     std::string             scenePersistenceError;
-    lr::SphericalCameraController cameraController(*camera, viewer.input());
-
     // Constructed after everything its callbacks capture, so all registrations disconnect first.
     std::vector<lr::CallbackConnection> appConnections;
 
@@ -601,7 +600,7 @@ void Engine::run()
     }));
 
     appConnections.push_back(viewer.onUpdate([&](float dt, VkExtent2D extent) {
-        cameraController.update(dt, editor.allowsViewportNavigation());
+        cameraController.update(viewer.input(), dt, editor.allowsViewportNavigation());
     }));
 
     // Registers SceneManager's own onUpdate (aspect tracking) and onLateUpdate (flushDirty —

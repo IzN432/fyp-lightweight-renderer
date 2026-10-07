@@ -1113,23 +1113,29 @@ class OrbitCamera
 {
 public:
     explicit OrbitCamera(Viewer &viewer)
-        : m_object(&m_scene.createSceneObject()), m_camera(&m_object->addComponent<lr::Camera>())
+        : m_object(&m_scene.createSceneObject()), m_camera(&m_object->addComponent<lr::Camera>()),
+          m_input(&viewer.input())
     {
         m_object->addComponent<lr::TransformComponent>();
-        m_controller = std::make_unique<lr::SphericalCameraController>(*m_object, viewer.input());
+        m_controller = &m_object->addComponent<lr::SphericalCameraController>();
         m_controller->setOrbitState(m_controller->orbitState()); // place the camera before the first update
     }
+
+    OrbitCamera(const OrbitCamera &) = delete;
+    OrbitCamera &operator=(const OrbitCamera &) = delete;
 
     lr::SphericalCameraController &controller() { return *m_controller; }
     lr::Camera                    &camera() { return *m_camera; }
     lr::SceneObject               &object() { return *m_object; }
     glm::vec3 position() const { return m_object->getComponent<lr::TransformComponent>().transform().position(); }
+    void update(float dt) { m_controller->update(*m_input, dt); }
 
 private:
     lr::Scene                                      m_scene; // owns the camera object; declared first
     lr::SceneObject                               *m_object;
     lr::Camera                                    *m_camera;
-    std::unique_ptr<lr::SphericalCameraController> m_controller;
+    lr::InputHandler                              *m_input;
+    lr::SphericalCameraController                 *m_controller;
 };
 
 // glm is column-major; numpy matrices here follow lr.transforms: row-major, acting on column vectors.
@@ -1169,7 +1175,7 @@ void bindCamera(nb::module_ &m)
         .def(
             "update",
             [](OrbitCamera &camera, float dt) {
-                camera.controller().update(dt);
+                camera.update(dt);
             },
             "dt"_a, "Apply this frame's input (from on_update).")
         .def(

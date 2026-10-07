@@ -4,6 +4,7 @@
 #include "Camera.hpp"
 #include "TransformComponent.hpp"
 #include "SceneSerializer.hpp"
+#include "core/editor/camera/SphericalCameraController.hpp"
 
 #include "core/app/Viewer.hpp"
 
@@ -158,6 +159,12 @@ std::vector<SceneObjectId> SceneManager::loadScene(const std::filesystem::path &
                     cameraTransform.setPosition(loadedTransform.position());
                     cameraTransform.setRotation(loadedTransform.rotation());
                     cameraTransform.setScale(loadedTransform.scale());
+                }
+                if (object.hasComponent<SphericalCameraController>() &&
+                    liveCamera->hasComponent<SphericalCameraController>())
+                {
+                    liveCamera->getComponent<SphericalCameraController>().setOrbitState(
+                        object.getComponent<SphericalCameraController>().orbitState());
                 }
             }
             legacyEditorCameras.push_back(object.id());

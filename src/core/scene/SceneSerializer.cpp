@@ -5,6 +5,7 @@
 #include "MeshComponent.hpp"
 #include "SceneAssets.hpp"
 #include "TransformComponent.hpp"
+#include "core/editor/camera/SphericalCameraController.hpp"
 #include "features/animation/AnimatorComponent.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 #include "features/rigid_body/ColliderComponent.hpp"
@@ -520,7 +521,8 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
         if (!scene.contains(object.id())) continue;
         for (const std::type_index type : object.componentTypes())
         {
-            if (type != typeid(TransformComponent) && type != typeid(Camera) && type != typeid(Light) &&
+            if (type != typeid(TransformComponent) && type != typeid(Camera) &&
+                type != typeid(SphericalCameraController) && type != typeid(Light) &&
                 type != typeid(MeshComponent) && type != typeid(AnimatorComponent) &&
                 type != typeid(SkinComponent) && type != typeid(RigidBodyComponent) &&
                 type != typeid(ColliderComponent))
@@ -545,6 +547,12 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
                                                            ? "perspective" : "orthographic"},
                                     {"fov_y_degrees", camera.fovYDegrees}, {"near_plane", camera.nearPlane},
                                     {"far_plane", camera.farPlane}, {"ortho_height", camera.orthoHeight}};
+        }
+        if (object.hasComponent<SphericalCameraController>())
+        {
+            const auto state = object.getComponent<SphericalCameraController>().orbitState();
+            components["spherical_camera_controller"] = {{"target", vec3(state.target)},
+                {"radius", state.radius}, {"azimuth", state.azimuth}, {"elevation", state.elevation}};
         }
         if (object.hasComponent<Light>())
         {
@@ -768,7 +776,8 @@ void SceneSerializer::load(const std::filesystem::path &path, Scene &scene, Mesh
         if (!components.is_object()) throw std::runtime_error("SceneSerializer: " + where + ".components must be an object");
         for (const auto &[name, ignored] : components.items())
         {
-            if (name != "transform" && name != "camera" && name != "light" && name != "mesh" &&
+            if (name != "transform" && name != "camera" && name != "spherical_camera_controller" &&
+                name != "light" && name != "mesh" &&
                 name != "animator" && name != "skin" && name != "rigid_body" && name != "colliders")
                 throw std::runtime_error("SceneSerializer: unknown component '" + name + "' at " + where + ".components");
         }
@@ -792,6 +801,18 @@ void SceneSerializer::load(const std::filesystem::path &path, Scene &scene, Mesh
             camera.nearPlane = required(valueCamera, "near_plane", where).get<float>();
             camera.farPlane = required(valueCamera, "far_plane", where).get<float>();
             camera.orthoHeight = required(valueCamera, "ortho_height", where).get<float>();
+        }
+        if (components.contains("spherical_camera_controller"))
+        {
+            const json &controller = components.at("spherical_camera_controller");
+            SphericalCameraController::OrbitState state;
+            state.target = readVector<3, float, glm::defaultp>(required(controller, "target", where),
+                where + ".components.spherical_camera_controller.target");
+            state.radius = required(controller, "radius", where).get<float>();
+            state.azimuth = required(controller, "azimuth", where).get<float>();
+            state.elevation = required(controller, "elevation", where).get<float>();
+            auto &component = object.addComponent<SphericalCameraController>();
+            component.setOrbitState(state);
         }
         if (components.contains("light")) object.addComponent<Light>(deserializeLight(components.at("light"), where + ".components.light"));
         if (components.contains("mesh"))

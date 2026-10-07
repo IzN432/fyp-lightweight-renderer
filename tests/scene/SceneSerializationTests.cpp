@@ -4,6 +4,7 @@
 #include "core/scene/SceneAssets.hpp"
 #include "core/scene/SceneSerializer.hpp"
 #include "core/scene/TransformComponent.hpp"
+#include "core/editor/camera/SphericalCameraController.hpp"
 #include "features/animation/AnimatorComponent.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 #include "features/rigid_body/ColliderComponent.hpp"
@@ -50,6 +51,9 @@ int main()
     auto &camera = root.addComponent<lr::Camera>();
     camera.projectionType = lr::ProjectionType::Orthographic;
     camera.fovYDegrees = 73; camera.nearPlane = 0.25f; camera.farPlane = 400; camera.orthoHeight = 22;
+    auto &cameraController = root.addComponent<lr::SphericalCameraController>();
+    cameraController.setOrbitState({{4, 5, 6}, 12.0f, 0.75f, -0.25f});
+    const glm::vec3 authoredCameraPosition = root.getComponent<lr::TransformComponent>().transform().position();
 
     const lr::LightVariant lights[] = {
         lr::PointLight{{{1, 0, 0}, 2}},
@@ -138,10 +142,13 @@ int main()
     const auto &loadedRoot = loaded->scene.getSceneObject(0);
     assert(loadedRoot.name == root.name && loadedRoot.children().size() == 5);
     const auto &loadedTransform = loadedRoot.getComponent<lr::TransformComponent>().transform();
-    assert(near(loadedTransform.position(), {1, 2, 3}) && near(loadedTransform.scale(), {2, 2, 2}));
+    assert(near(loadedTransform.position(), authoredCameraPosition) && near(loadedTransform.scale(), {2, 2, 2}));
     const auto &loadedCamera = loadedRoot.getComponent<lr::Camera>();
     assert(loadedCamera.projectionType == lr::ProjectionType::Orthographic && loadedCamera.fovYDegrees == 73 &&
            loadedCamera.nearPlane == 0.25f && loadedCamera.farPlane == 400 && loadedCamera.orthoHeight == 22);
+    const auto loadedOrbit = loadedRoot.getComponent<lr::SphericalCameraController>().orbitState();
+    assert(near(loadedOrbit.target, {4, 5, 6}) && loadedOrbit.radius == 12.0f &&
+           loadedOrbit.azimuth == 0.75f && loadedOrbit.elevation == -0.25f);
     for (size_t i = 0; i < std::size(lights); ++i)
     {
         const auto &object = loaded->scene.getSceneObject(static_cast<lr::SceneObjectId>(i + 1));
