@@ -253,11 +253,11 @@ void SceneManager::synchronizeSelectedMeshBuffers()
     }
     const Mesh &mesh = m_editedMeshObject->getComponent<MeshComponent>().mesh();
     // Inactive overlays catch up on their next use from their own retained stamps.
-    if (m_editorPresentation.vertexPointsVisible)
+    if (m_editorPresentation.current().vertexPointsVisible)
     {
         m_meshUploader.synchronizeUniqueVertexBuffer({&mesh}, m_selectedMeshPointsUploadConfig);
     }
-    if (m_editorPresentation.heatmapVisible)
+    if (m_editorPresentation.current().heatmapVisible)
     {
         m_meshUploader.synchronizeVertexBuffer({&mesh}, m_selectedMeshHeatmapUploadConfig);
     }
@@ -345,29 +345,6 @@ void SceneManager::updateSelectedMeshHighlightColors()
 const IndexBufferUploadPerMeshResult &SceneManager::selectedMeshIndexRange() const
 {
     return gpu().indexRange(m_editedMeshObject->getComponent<MeshComponent>().mesh());
-}
-
-void SceneManager::setEditorPresentation(EditorPresentation presentation)
-{
-    if (presentation == m_editorPresentation)
-    {
-        return;
-    }
-
-    const bool selectionWasActive = m_editorPresentation.vertexSelectionActive;
-    m_editorPresentation = presentation;
-    if (selectionWasActive && !presentation.vertexSelectionActive)
-    {
-        m_selectionManager->clearSelection();
-    }
-
-    m_editorPresentationChangedCallbacks.invoke(m_editorPresentation);
-}
-
-CallbackConnection SceneManager::registerEditorPresentationChangedCallback(
-    std::function<void(const EditorPresentation &)> callback)
-{
-    return m_editorPresentationChangedCallbacks.connect(std::move(callback));
 }
 
 } // namespace lr

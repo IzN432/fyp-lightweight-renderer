@@ -139,6 +139,7 @@ add_library(lr_core STATIC
     src/core/app/Viewer.cpp
 
     src/core/editor/EditorInputRouter.cpp
+    src/core/editor/EditorPresentationState.cpp
     src/core/editor/EditorShortcuts.cpp
     src/core/editor/PointerCapture.cpp
     src/core/editor/EditorStateController.cpp
@@ -466,6 +467,7 @@ if(BUILD_TESTING)
     add_executable(editor_state_controller_tests
         tests/editor/EditorStateControllerTests.cpp
         src/core/editor/EditorInputRouter.cpp
+        src/core/editor/EditorPresentationState.cpp
         src/core/editor/EditorShortcuts.cpp
         src/core/editor/EditorStateController.cpp
     )

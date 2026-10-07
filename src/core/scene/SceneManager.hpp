@@ -13,7 +13,7 @@
 #include "MeshStore.hpp"
 
 #include "core/editor/selection/SelectionManager.hpp"
-#include "core/editor/EditorPresentation.hpp"
+#include "core/editor/EditorPresentationState.hpp"
 #include "core/framegraph/ResourceRegistry.hpp"
 #include "core/loaders/Material.hpp"
 #include "core/loaders/MaterialStore.hpp"
@@ -112,13 +112,17 @@ public:
     // getHighlightedIndices() for its own UI (translate gizmo placement, etc.).
     SelectionManager &selectionManager() { return *m_selectionManager; }
 
-    const EditorPresentation &editorPresentation() const { return m_editorPresentation; }
+    const EditorPresentation &editorPresentation() const { return m_editorPresentation.current(); }
 
     // Applies capabilities selected by the application-level editor state. SceneManager does not
-    // know state names; it only uses these flags for selection lifetime and overlay synchronization.
-    void setEditorPresentation(EditorPresentation presentation);
-    CallbackConnection registerEditorPresentationChangedCallback(
-        std::function<void(const EditorPresentation &)> callback);
+    // know state names; it only wires this manager's selection to the transition policy that
+    // EditorPresentationState owns, and forwards the flags to its own overlay synchronization.
+    void setEditorPresentation(EditorPresentation presentation) { m_editorPresentation.set(presentation); }
+    CallbackConnection
+    registerEditorPresentationChangedCallback(std::function<void(const EditorPresentation &)> callback)
+    {
+        return m_editorPresentation.registerChangedCallback(std::move(callback));
+    }
 
     // SceneGpu::flushDirty() (component edits and the shared mesh buffers), then the selected-mesh
     // overlays. Mesh edits never upload directly; call once per frame, after every other update.
@@ -208,8 +212,14 @@ private:
     std::unique_ptr<SceneGpu> m_gpu;
 
     std::unique_ptr<SelectionManager> m_selectionManager;
-    EditorPresentation m_editorPresentation;
-    CallbackList<const EditorPresentation &> m_editorPresentationChangedCallbacks;
+    // Selection is created lazily by initialize(), so the withdrawal hook tolerates not having one
+    // yet; a presentation cannot withdraw vertex selection before something granted it.
+    EditorPresentationState m_editorPresentation{[this] {
+        if (m_selectionManager)
+        {
+            m_selectionManager->clearSelection();
+        }
+    }};
 
     SceneObject   *m_editedMeshObject         = nullptr;
     Mesh::Revision m_selectedTopologyRevision = 0;
@@ -225,8 +235,8 @@ private:
     // Config for the corner-domain position+heatmapColors buffer; the unique-position colors are
     // gathered through positionIndices while packing.
     VertexBufferUploadConfig m_selectedMeshHeatmapUploadConfig = {.vertexBufferName = m_selectedMeshHeatmapBufferName,
-                                                                  .vertexAttributeNames = {"heatmapColors"},
-                                                                  .includePosition      = true,
+                                                                  .vertexAttributeNames         = {"heatmapColors"},
+                                                                  .includePosition              = true,
                                                                   .expandUniqueVertexAttributes = true};
 
     VertexBufferUploadResult m_selectedMeshPoints;

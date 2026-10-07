@@ -1,6 +1,7 @@
 #include "core/editor/EditorStateController.hpp"
 
 #include "core/editor/EditorInputRouter.hpp"
+#include "core/editor/EditorPresentationState.hpp"
 #include "core/editor/EditorShortcuts.hpp"
 #include "core/editor/EditorTool.hpp"
 
@@ -481,6 +482,102 @@ void onlyTheActiveStateBidsForTheGizmo()
     assert(std::holds_alternative<std::monostate>(controller.gizmoRequest(frame)));
 }
 
+// The selection-lifetime policy itself, driven by the real EditorPresentationState: vertex indices
+// only mean something while a state actually selects vertices, so withdrawing that capability must
+// invalidate the selection, and leaving it in place must not.
+void withdrawingVertexSelectionInvalidatesTheSelection()
+{
+    int                    invalidations = 0;
+    std::vector<bool>      publishedSelectionActive;
+    lr::EditorPresentation lastPublished;
+
+    lr::EditorPresentationState  presentation([&invalidations] {
+        ++invalidations;
+    });
+    const lr::CallbackConnection connection =
+        presentation.registerChangedCallback([&](const lr::EditorPresentation &applied) {
+            lastPublished = applied;
+            publishedSelectionActive.push_back(applied.vertexSelectionActive);
+        });
+
+    const lr::EditorPresentation vertexEditing{
+        .skinningEnabled = false, .vertexPointsVisible = true, .vertexSelectionActive = true};
+    const lr::EditorPresentation analysis{.skinningEnabled = false, .heatmapVisible = true};
+
+    assert(presentation.current() == lr::EditorPresentation{});
+
+    presentation.set(vertexEditing);
+    assert(invalidations == 0);
+    assert(presentation.current().vertexSelectionActive);
+
+    // Edit -> ARAP: a different state asking for the same capabilities is not a transition at all,
+    // so nothing is published and nothing is invalidated. This is what makes handing a selection
+    // from one vertex-selecting state to another safe.
+    presentation.set(vertexEditing);
+    assert(invalidations == 0);
+    assert(publishedSelectionActive.size() == 1);
+
+    // Leaving vertex selection is the one transition that invalidates.
+    presentation.set(analysis);
+    assert(invalidations == 1);
+    assert(!presentation.current().vertexSelectionActive);
+    assert(presentation.current().heatmapVisible);
+
+    // Going from one non-selecting presentation to another changes what is rendered but has no
+    // selection to invalidate.
+    presentation.set({});
+    assert(invalidations == 1);
+    assert(publishedSelectionActive.size() == 3);
+
+    // Returning to vertex editing grants the capability rather than withdrawing it.
+    presentation.set(vertexEditing);
+    assert(invalidations == 1);
+    assert(lastPublished.vertexSelectionActive);
+
+    bool rejectedEmptyCallback = false;
+    try
+    {
+        lr::EditorPresentationState bad({});
+    } catch (const std::invalid_argument &)
+    {
+        rejectedEmptyCallback = true;
+    }
+    assert(rejectedEmptyCallback);
+}
+
+// The state controller is what feeds that policy, so what it owes it is exactly one publish per real
+// transition — and none when the active state is re-activated.
+void activatingAStatePublishesItsPresentationOnce()
+{
+    std::vector<lr::EditorPresentation> published;
+    lr::EditorStateController           controller([&published](const lr::EditorStateDefinition &state) {
+        published.push_back(state.presentation);
+    });
+
+    const lr::EditorPresentation vertexEditing{
+        .skinningEnabled = false, .vertexPointsVisible = true, .vertexSelectionActive = true};
+
+    controller.registerState({.id = "view", .presentation = {}});
+    controller.registerState({.id = "edit", .presentation = vertexEditing});
+    // ARAP asks for the same capabilities as plain vertex editing.
+    controller.registerState({.id = "arap", .presentation = vertexEditing});
+
+    controller.activate("view");
+    controller.activate("edit");
+    controller.activate("arap");
+    assert(published.size() == 3);
+    assert(published[1] == published[2]);
+
+    // Re-activating the active state publishes nothing, so a consumer is never handed a transition
+    // the user did not make.
+    controller.activate("arap");
+    assert(published.size() == 3);
+
+    controller.activate("view");
+    assert(published.size() == 4);
+    assert(!published.back().vertexSelectionActive);
+}
+
 // A state added later must work without the presentation consumer learning anything about it: the
 // consumer only ever reads EditorPresentation fields. This is what lets a feature library add a
 // state without SceneManager (or any other consumer) changing.
@@ -550,6 +647,8 @@ int main()
     navigationYieldsToUiButNotToTheGizmo();
     anActiveStateCanClaimPointerInput();
     onlyTheActiveStateBidsForTheGizmo();
+    withdrawingVertexSelectionInvalidatesTheSelection();
+    activatingAStatePublishesItsPresentationOnce();
     aNewStateNeedsNoConsumerChange();
     activeThrowsBeforeAnyActivation();
     return 0;
