@@ -32,7 +32,7 @@ public:
     // role classification to the unclassified state, since indices only ever meant something in the
     // previous mesh's vertex domain; role *definitions* (ids/colors registered via registerRole())
     // are unaffected. Fires the selection/colors/role-changed callbacks so dependents (GPU color
-    // upload, ArapTool's onRoleChanged) resync.
+    // upload, a tool's role-changed handler) resync.
     void rebind(const std::vector<glm::vec3> &vertices, const TransformComponent &meshTransform);
 
     void setSelectTool(std::unique_ptr<SelectionTool> tool);

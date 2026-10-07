@@ -1,30 +1,42 @@
 #pragma once
 
+#include "core/editor/EditorTool.hpp"
 #include "core/scene/SceneManager.hpp"
 
-#include <functional>
+#include <string_view>
 
 namespace lr
 {
 
-// Owns the interactive Laplace-Beltrami analysis workflow: calculation, analysis-mode selection,
+// Owns the interactive Laplace-Beltrami analysis workflow: calculation, the heatmap editor state,
 // GUI, and stale-result tracking after geometry edits.
-class LaplaceBeltramiTool
+class LaplaceBeltramiTool final : public EditorTool
 {
 public:
-    LaplaceBeltramiTool(const Mesh &mesh, SceneManager &sceneManager);
+    explicit LaplaceBeltramiTool(SceneManager &sceneManager);
 
-    void rebind(const Mesh &mesh);
+    // The editor state this tool registers, for hosts that want to bind a shortcut to it.
+    static std::string_view stateId();
 
-    // Draws the tool's GUI. setEnabled is called when the user toggles the analysis mode on/off.
-    void onGui(bool enabled, const std::function<void(bool)> &setEnabled);
+    void registerWith(EditorServices &services) override;
+
+    // Analysis magnitudes are per-mesh, so a new target discards the previous result.
+    void onTargetChanged(const EditableMeshContext &target) override;
+    void onTargetCleared() override;
+
+    void        drawPanel() override;
+    const char *displayName() const override { return "Laplace-Beltrami"; }
 
 private:
     void calculate();
-    const Mesh *m_mesh = nullptr;
+    void discardResult();
+
+    const Mesh            *m_mesh   = nullptr;
+    EditorStateController *m_states = nullptr;
+
     Mesh::Revision m_resultPositionsRevision = 0;
-    Mesh::Revision m_resultTopologyRevision = 0;
-    SceneManager &m_sceneManager;
+    Mesh::Revision m_resultTopologyRevision  = 0;
+    SceneManager  &m_sceneManager;
 
     bool m_hasResult = false;
 };

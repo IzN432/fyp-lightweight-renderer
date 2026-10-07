@@ -47,6 +47,16 @@ public:
     void registerState(EditorStateDefinition state);
     void activate(std::string_view id);
 
+    // The state to fall back to when the active one stops making sense — its tool lost its target,
+    // deactivated itself, or the editable mesh went away. Lets a feature retreat to the editor's
+    // baseline without naming a state it does not own.
+    void setDefaultState(std::string_view id);
+    void activateDefault();
+
+    // Activates `id`, or the default state if `id` is already active. The self-contained form of a
+    // feature toggle, so callers do not reimplement it against activate()/isActive().
+    void toggle(std::string_view id);
+
     bool                         isActive(std::string_view id) const { return m_active == id; }
     const EditorStateDefinition &active() const;
 
@@ -58,6 +68,7 @@ public:
 private:
     std::unordered_map<std::string, EditorStateDefinition> m_states;
     std::string                                            m_active;
+    std::string                                            m_defaultState;
     ChangedCallback                                        m_onChanged;
 };
 

@@ -1,10 +1,14 @@
 #include "EditorSession.hpp"
-#include "EditorStateController.hpp"
+#include "core/editor/EditorStateController.hpp"
 
 #include "core/app/Viewer.hpp"
 #include "core/editor/DefaultVertexDragHandler.hpp"
+#include "core/editor/EditableMeshContext.hpp"
 #include "core/editor/EditorContext.hpp"
 #include "core/editor/EditorFrameContext.hpp"
+#include "core/editor/EditorShortcuts.hpp"
+#include "core/editor/EditorTool.hpp"
+#include "core/editor/VertexCentroid.hpp"
 #include "core/editor/SceneObjectDragHandler.hpp"
 #include "core/editor/SceneObjectRotationHandler.hpp"
 #include "core/editor/SceneObjectScaleHandler.hpp"
@@ -34,29 +38,26 @@
 #include <algorithm>
 #include <stdexcept>
 #include <unordered_set>
+#include <vector>
 
 namespace lr
 {
 
 namespace
 {
-constexpr std::string_view kViewState     = "view";
-constexpr std::string_view kEditState     = "edit";
-constexpr std::string_view kAnalysisState = "analysis";
-constexpr std::string_view kArapState     = "arap";
+constexpr std::string_view kViewState = "view";
+constexpr std::string_view kEditState = "edit";
 } // namespace
 
 class EditorSession::Impl
 {
 public:
-    Impl(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,
-         GeometryPass &geometryPass, TransparentPass &transparentPass,
-         HeatmapPass &heatmapPass, OverlayPointsPass &overlayPointsPass,
+    Impl(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera, GeometryPass &geometryPass,
+         TransparentPass &transparentPass, HeatmapPass &heatmapPass, OverlayPointsPass &overlayPointsPass,
          OverlayLinesPass &overlayLinesPass)
         : m_viewer(viewer), m_sceneManager(sceneManager), m_scene(sceneManager.scene()), m_camera(camera),
-          m_geometryPass(geometryPass), m_transparentPass(transparentPass),
-          m_heatmapPass(heatmapPass), m_overlayPointsPass(overlayPointsPass),
-          m_overlayLinesPass(overlayLinesPass),
+          m_geometryPass(geometryPass), m_transparentPass(transparentPass), m_heatmapPass(heatmapPass),
+          m_overlayPointsPass(overlayPointsPass), m_overlayLinesPass(overlayLinesPass),
           m_stateController([this](const EditorStateDefinition &state) {
               m_sceneManager.setEditorPresentation(state.presentation);
           }),
@@ -69,9 +70,8 @@ public:
           m_gizmoController(m_defaultVertexHandler, m_objectRotationHandler, m_objectScaleHandler),
           m_transformController(m_objectTranslationHandler, m_objectRotationHandler, m_objectScaleHandler),
           m_context{m_transformController, m_commandManager},
-          m_arapTool(m_selectionManager, m_vertexManager, m_commandManager,
-                     m_meshObject->getComponent<MeshComponent>().mesh()),
-          m_laplaceBeltramiTool(m_meshObject->getComponent<MeshComponent>().mesh(), sceneManager)
+          m_arapTool(m_selectionManager, m_vertexManager, m_commandManager), m_laplaceBeltramiTool(sceneManager),
+          m_tools{&m_arapTool, &m_laplaceBeltramiTool}
     {
         m_selectionManager.setSelectTool(std::make_unique<SelectionGestureTool>(viewer.input(), camera));
 
@@ -84,8 +84,20 @@ public:
         m_sceneManager.registerEditorPresentationChangedCallback(applyPresentation);
 
         registerEditorStates();
+        registerEditorShortcuts();
+        m_stateController.setDefaultState(kViewState);
+
+        // Tools register after the baseline states and shortcuts, so that a tool retreating to the
+        // default state always finds one and cannot take over a key the editor itself needs.
+        EditorServices services(m_stateController, m_shortcuts);
+        for (EditorTool *tool : m_tools)
+        {
+            tool->registerWith(services);
+        }
+
         m_stateController.activate(kViewState);
         applyPresentation(m_sceneManager.editorPresentation());
+        notifyTargetChanged(*m_meshObject);
 
         registerSceneCallbacks();
         registerInputCallbacks();
@@ -96,17 +108,15 @@ public:
 
     EditorContext &context() { return m_context; }
 
-    bool capturesMouse() const
-    {
-        return m_gizmoController.capturesMouse();
-    }
+    bool capturesMouse() const { return m_gizmoController.capturesMouse(); }
 
     void onSceneContentChanged()
     {
         SceneObject *editedMesh = m_sceneManager.editedMeshObject();
         if (!editedMesh)
         {
-            m_stateController.activate(kViewState);
+            m_stateController.activateDefault();
+            notifyTargetCleared();
             m_transformController.setSelectedTarget(nullptr);
             return;
         }
@@ -120,21 +130,17 @@ public:
 
     void drawFeaturePanel()
     {
-        if (ImGui::CollapsingHeader("Laplace-Beltrami", ImGuiTreeNodeFlags_DefaultOpen))
+        for (EditorTool *tool : m_tools)
         {
+            if (!ImGui::CollapsingHeader(tool->displayName(), ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                continue;
+            }
+            ImGui::PushID(tool);
             ImGui::Indent();
-            m_laplaceBeltramiTool.onGui(
-                m_stateController.isActive(kAnalysisState),
-                [this](bool enabled) {
-                    m_stateController.activate(enabled ? kAnalysisState : kViewState);
-                });
+            tool->drawPanel();
             ImGui::Unindent();
-        }
-        if (ImGui::CollapsingHeader("ARAP", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::Indent();
-            m_arapTool.onPanelGui(m_stateController.isActive(kArapState));
-            ImGui::Unindent();
+            ImGui::PopID();
         }
     }
 
@@ -146,8 +152,7 @@ public:
         }
 
         const ImGuiViewport *viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
-                                       viewport->WorkPos.y + 20.0f),
+        ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + 20.0f),
                                 ImGuiCond_Appearing, ImVec2(0.5f, 0.0f));
         ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_Appearing);
         if (ImGui::Begin("Transform Gizmo", &m_transformWindowOpen, ImGuiWindowFlags_AlwaysAutoResize))
@@ -192,7 +197,7 @@ private:
             .id           = std::string(kEditState),
             .presentation = {.skinningEnabled = false, .vertexPointsVisible = true, .vertexSelectionActive = true},
             .gizmoRequest = [this](const EditorFrameContext &) -> GizmoRequest {
-                if (m_defaultVertexHandler.indices().empty())
+                if (!m_meshObject || m_defaultVertexHandler.indices().empty())
                 {
                     return {};
                 }
@@ -202,32 +207,29 @@ private:
                 };
             },
         });
+    }
 
-        m_stateController.registerState({
-            .id           = std::string(kAnalysisState),
-            .presentation = {.skinningEnabled = false, .heatmapVisible = true},
-        });
+    // Target binding is one operation applied to every registered tool, so adding a feature does not
+    // mean adding a line here.
+    void notifyTargetChanged(SceneObject &object)
+    {
+        const EditableMeshContext target{
+            .object = object,
+            .mesh   = object.getComponent<MeshComponent>().mesh(),
+        };
+        for (EditorTool *tool : m_tools)
+        {
+            tool->onTargetChanged(target);
+        }
+    }
 
-        m_stateController.registerState({
-            .id           = std::string(kArapState),
-            .presentation = {.skinningEnabled = false, .vertexPointsVisible = true, .vertexSelectionActive = true},
-            .update =
-                [this](const EditorFrameContext &frame) {
-                    const auto &selected = m_selectionManager.getSelectedIndices();
-                    m_arapTool.onOverlayGui(frame.viewProjection, frame.extent,
-                                            selected.empty() ? glm::vec3(0.0f) : worldCentroidOf(selected));
-                },
-            .gizmoRequest = [this](const EditorFrameContext &) -> GizmoRequest {
-                if (!m_arapTool.hasDeformationTarget() || m_arapTool.dragHandler().indices().empty())
-                {
-                    return {};
-                }
-                return TranslateGizmoRequest{
-                    .origin  = worldCentroidOf(m_arapTool.dragHandler().indices()),
-                    .handler = &m_arapTool.dragHandler(),
-                };
-            },
-        });
+    void notifyTargetCleared()
+    {
+        m_meshObject = nullptr;
+        for (EditorTool *tool : m_tools)
+        {
+            tool->onTargetCleared();
+        }
     }
 
     // The transform gizmo the hierarchy selection drives. Only the View state bids for it, which is
@@ -281,14 +283,14 @@ private:
     void registerSceneCallbacks()
     {
         m_scene.registerSelectionChangedCallback([this](SceneObjectId id) {
-            SceneObject &object = m_scene.getSceneObject(id);
+            SceneObject &object   = m_scene.getSceneObject(id);
             m_transformWindowOpen = true;
             m_transformController.setSelectedTarget(object.hasComponent<TransformComponent>() ? &object : nullptr);
             if (!SceneManager::isEditable(object))
             {
                 if (m_stateController.active().presentation.vertexSelectionActive)
                 {
-                    m_stateController.activate(kViewState);
+                    m_stateController.activateDefault();
                 }
                 return;
             }
@@ -303,8 +305,8 @@ private:
         m_scene.registerObjectsDestroyedCallback([this](std::span<const SceneObjectId> ids) {
             m_viewer.context().waitIdle();
             const SceneObject *previousEditedMesh = m_sceneManager.editedMeshObject();
-            const bool editedMeshDestroyed = previousEditedMesh &&
-                std::ranges::find(ids, previousEditedMesh->id()) != ids.end();
+            const bool         editedMeshDestroyed =
+                previousEditedMesh && std::ranges::find(ids, previousEditedMesh->id()) != ids.end();
 
             if (m_transformController.target() &&
                 std::ranges::find(ids, m_transformController.target()->id()) != ids.end())
@@ -321,7 +323,8 @@ private:
             }
             if (!replacement)
             {
-                m_stateController.activate(kViewState);
+                m_stateController.activateDefault();
+                notifyTargetCleared();
                 return;
             }
             rebindEditableTarget(*replacement, false);
@@ -339,11 +342,21 @@ private:
             m_selectionManager.mouseButtonCallback(button, action, shift, ctrl, alt);
         });
 
-        m_viewer.input().onKeyPress([this](int key, int action, bool, bool, bool) {
-            if (key != GLFW_KEY_TAB || action != GLFW_PRESS || ImGui::GetIO().WantCaptureKeyboard)
+        // One key callback for the whole editor. The ImGui check that each of these handlers used to
+        // repeat now happens here, once, and chord matching belongs to EditorShortcuts.
+        m_viewer.input().onKeyPress([this](int key, int action, bool, bool ctrl, bool) {
+            if (action != GLFW_PRESS || ImGui::GetIO().WantCaptureKeyboard)
             {
                 return;
             }
+            m_shortcuts.dispatch({.key = key, .ctrl = ctrl});
+        });
+    }
+
+    // The editor's own shortcuts. Registered before any tool's, so a feature cannot shadow them.
+    void registerEditorShortcuts()
+    {
+        m_shortcuts.add({.key = GLFW_KEY_TAB}, [this] {
             const bool nowEditing = !m_stateController.isActive(kEditState);
             if (nowEditing)
             {
@@ -356,28 +369,15 @@ private:
             m_stateController.activate(nowEditing ? kEditState : kViewState);
         });
 
-        m_viewer.input().onKeyPress([this](int key, int action, bool, bool ctrl, bool) {
-            if (key == GLFW_KEY_Z && action == GLFW_PRESS && ctrl && !ImGui::GetIO().WantCaptureKeyboard)
-            {
-                m_commandManager.undo();
-            }
+        m_shortcuts.add({.key = GLFW_KEY_Z, .ctrl = true}, [this] {
+            m_commandManager.undo();
         });
 
-        m_viewer.input().onKeyPress([this](int key, int action, bool, bool, bool) {
-            if (key == GLFW_KEY_DELETE && action == GLFW_PRESS && !ImGui::GetIO().WantCaptureKeyboard)
+        m_shortcuts.add({.key = GLFW_KEY_DELETE}, [this] {
+            const auto selected = m_scene.selectedObject();
+            if (selected && m_scene.canDestroySceneObject(*selected))
             {
-                const auto selected = m_scene.selectedObject();
-                if (selected && m_scene.canDestroySceneObject(*selected))
-                {
-                    m_scene.destroySceneObject(*selected);
-                }
-            }
-        });
-
-        m_viewer.input().onKeyPress([this](int key, int action, bool, bool, bool) {
-            if (key == GLFW_KEY_A && action == GLFW_PRESS && !ImGui::GetIO().WantCaptureKeyboard)
-            {
-                m_stateController.activate(m_stateController.isActive(kArapState) ? kViewState : kArapState);
+                m_scene.destroySceneObject(*selected);
             }
         });
     }
@@ -389,22 +389,15 @@ private:
             m_sceneManager.setEditedMeshObject(object);
         }
         m_meshObject = &object;
-        Mesh &mesh = object.getComponent<MeshComponent>().mesh();
-        m_vertexManager.rebind(mesh);
-        if (m_stateController.isActive(kArapState))
-        {
-            m_stateController.activate(kViewState);
-        }
-        m_arapTool.rebind(mesh);
-        m_laplaceBeltramiTool.rebind(mesh);
+        m_vertexManager.rebind(object.getComponent<MeshComponent>().mesh());
+        notifyTargetChanged(object);
         refreshRenderSources(object);
     }
 
     void refreshRenderSources(SceneObject &object)
     {
         Mesh &mesh = object.getComponent<MeshComponent>().mesh();
-        m_heatmapPass.setMeshSource(m_sceneManager.selectedMeshHeatmap(),
-                                    m_sceneManager.selectedMeshIndexRange(),
+        m_heatmapPass.setMeshSource(m_sceneManager.selectedMeshHeatmap(), m_sceneManager.selectedMeshIndexRange(),
                                     object.getComponent<TransformComponent>());
         m_overlayPointsPass.setPointsSource(m_sceneManager.selectedMeshPoints(), mesh.uniquePositionCount(),
                                             object.getComponent<TransformComponent>());
@@ -412,14 +405,7 @@ private:
 
     glm::vec3 worldCentroidOf(const std::unordered_set<uint32_t> &indices) const
     {
-        glm::vec3 localCentroid(0.0f);
-        for (uint32_t index : indices)
-        {
-            localCentroid += m_vertexManager.getPositions()[index];
-        }
-        localCentroid /= static_cast<float>(indices.size());
-        return glm::vec3(m_meshObject->getComponent<TransformComponent>().worldMatrix() *
-                         glm::vec4(localCentroid, 1.0f));
+        return worldVertexCentroid(m_vertexManager, m_meshObject->getComponent<TransformComponent>(), indices);
     }
 
     void update(VkExtent2D extent)
@@ -460,38 +446,40 @@ private:
         m_overlayLinesPass.setLines(overlayLines);
     }
 
-    Viewer                    &m_viewer;
-    SceneManager              &m_sceneManager;
-    Scene                     &m_scene;
-    SceneObject               &m_camera;
-    GeometryPass              &m_geometryPass;
-    TransparentPass           &m_transparentPass;
-    HeatmapPass               &m_heatmapPass;
-    OverlayPointsPass         &m_overlayPointsPass;
-    OverlayLinesPass          &m_overlayLinesPass;
-    EditorStateController      m_stateController;
-    SceneObject               *m_meshObject;
-    VertexManager              m_vertexManager;
-    CommandManager             m_commandManager;
-    SelectionManager          &m_selectionManager;
-    DefaultVertexDragHandler   m_defaultVertexHandler;
-    SceneObjectDragHandler     m_objectTranslationHandler;
-    SceneObjectRotationHandler m_objectRotationHandler;
-    SceneObjectScaleHandler    m_objectScaleHandler;
+    Viewer                        &m_viewer;
+    SceneManager                  &m_sceneManager;
+    Scene                         &m_scene;
+    SceneObject                   &m_camera;
+    GeometryPass                  &m_geometryPass;
+    TransparentPass               &m_transparentPass;
+    HeatmapPass                   &m_heatmapPass;
+    OverlayPointsPass             &m_overlayPointsPass;
+    OverlayLinesPass              &m_overlayLinesPass;
+    EditorStateController          m_stateController;
+    EditorShortcuts                m_shortcuts;
+    SceneObject                   *m_meshObject;
+    VertexManager                  m_vertexManager;
+    CommandManager                 m_commandManager;
+    SelectionManager              &m_selectionManager;
+    DefaultVertexDragHandler       m_defaultVertexHandler;
+    SceneObjectDragHandler         m_objectTranslationHandler;
+    SceneObjectRotationHandler     m_objectRotationHandler;
+    SceneObjectScaleHandler        m_objectScaleHandler;
     GizmoController                m_gizmoController;
     SceneObjectTransformController m_transformController;
     EditorContext                  m_context;
     ArapTool                       m_arapTool;
     LaplaceBeltramiTool            m_laplaceBeltramiTool;
-    bool                           m_transformWindowOpen = false;
+    // Every registered tool, in panel order. Declared after the tools it points at.
+    std::vector<EditorTool *> m_tools;
+    bool                      m_transformWindowOpen = false;
 };
 
 EditorSession::EditorSession(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,
-                             GeometryPass &geometryPass, TransparentPass &transparentPass,
-                             HeatmapPass &heatmapPass, OverlayPointsPass &overlayPointsPass,
-                             OverlayLinesPass &overlayLinesPass)
-    : m_impl(std::make_unique<Impl>(viewer, sceneManager, camera, geometryPass, transparentPass,
-                                    heatmapPass, overlayPointsPass, overlayLinesPass))
+                             GeometryPass &geometryPass, TransparentPass &transparentPass, HeatmapPass &heatmapPass,
+                             OverlayPointsPass &overlayPointsPass, OverlayLinesPass &overlayLinesPass)
+    : m_impl(std::make_unique<Impl>(viewer, sceneManager, camera, geometryPass, transparentPass, heatmapPass,
+                                    overlayPointsPass, overlayLinesPass))
 {}
 
 EditorSession::~EditorSession() = default;

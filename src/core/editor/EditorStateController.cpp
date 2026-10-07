@@ -48,6 +48,34 @@ void EditorStateController::activate(std::string_view id)
     }
 }
 
+void EditorStateController::setDefaultState(std::string_view id)
+{
+    if (!m_states.contains(std::string(id)))
+    {
+        throw std::out_of_range("EditorStateController: unknown default state: " + std::string(id));
+    }
+    m_defaultState = id;
+}
+
+void EditorStateController::activateDefault()
+{
+    if (m_defaultState.empty())
+    {
+        throw std::logic_error("EditorStateController: no default state has been set");
+    }
+    activate(m_defaultState);
+}
+
+void EditorStateController::toggle(std::string_view id)
+{
+    if (isActive(id))
+    {
+        activateDefault();
+        return;
+    }
+    activate(id);
+}
+
 const EditorStateDefinition &EditorStateController::active() const
 {
     const auto found = m_states.find(m_active);

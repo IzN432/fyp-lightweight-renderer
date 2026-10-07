@@ -75,8 +75,9 @@ public:
     // and replaces the vertex-picking overlay's points buffer for the new mesh's vertex count,
     // which may differ arbitrarily from the previous mesh's. Resets selection, highlighting, and
     // per-vertex role classification (SelectionManager::rebind's doc comment). The caller is still
-    // responsible for rebinding anything it owns directly against the old mesh (VertexManager,
-    // ArapTool — see their rebind()) and for ensuring the GPU is done with the previous points
+    // responsible for rebinding anything it owns directly against the old mesh (VertexManager's
+    // rebind(), each EditorTool's onTargetChanged()) and for ensuring the GPU is done with the
+    // previous points
     // buffer first (see ResourceRegistry::replaceUploadedBuffer's doc comment) — e.g.
     // viewer.context().waitIdle() before calling this, the way the HDRI-reload path does.
     // Also replaces the selected heatmap buffer. Throws if `object` isn't isEditable(). No-op if
