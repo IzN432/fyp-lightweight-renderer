@@ -81,6 +81,7 @@ struct GraphicsState
 
 inline constexpr uint32_t noDescriptorBinding = std::numeric_limits<uint32_t>::max();
 inline constexpr uint32_t allImageMips        = std::numeric_limits<uint32_t>::max();
+inline constexpr uint32_t allImageLayers      = std::numeric_limits<uint32_t>::max();
 
 // Mip selection affects the bound descriptor view only. Synchronization is
 // deliberately conservative and covers the complete parent image.
@@ -88,8 +89,10 @@ struct ImageView
 {
     ImageHandle image;
     uint32_t    mipLevel = allImageMips;
+    uint32_t    arrayLayer = allImageLayers;
 
-    static ImageView mip(ImageHandle image, uint32_t mipLevel) { return {image, mipLevel}; }
+    static ImageView mip(ImageHandle image, uint32_t mipLevel) { return {image, mipLevel, allImageLayers}; }
+    static ImageView layer(ImageHandle image, uint32_t arrayLayer) { return {image, allImageMips, arrayLayer}; }
 };
 
 struct ImageUse
@@ -102,6 +105,7 @@ struct ImageUse
     uint32_t           descriptorCount = 1;
     VkShaderStageFlags stages          = 0;
     uint32_t           boundMip        = allImageMips;
+    uint32_t           boundLayer      = allImageLayers;
 
     VkFormat            format  = VK_FORMAT_UNDEFINED;
     ExtentSpec          extent  = ExtentSpec::swapchain();

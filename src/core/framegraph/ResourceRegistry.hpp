@@ -42,6 +42,11 @@ public:
     void registerPersistentImage(const std::string &name, VkFormat format, VkImageUsageFlags usage, VkExtent2D extent,
                                  VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
 
+    // Persistent 2D array with a full-array sampling view and one 2D attachment view per layer.
+    void registerPersistentImageArray(const std::string &name, VkFormat format, VkImageUsageFlags usage,
+                                      VkExtent2D extent, uint32_t layers,
+                                      VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
+
     // External — wraps an image owned outside the registry (e.g. swapchain).
     // Registers a placeholder so allocateResources skips it and buildBarriers
     // can read the format. The actual VkImage/VkImageView are injected per-frame
@@ -196,6 +201,7 @@ private:
         VkImageCreateFlags imageFlags    = 0;
         VkImageViewType    viewType      = VK_IMAGE_VIEW_TYPE_2D;
         bool               hasMipViews   = false;
+        bool               hasLayerViews = false;
         VkImageLayout      initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         VkImageLayout      currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     };

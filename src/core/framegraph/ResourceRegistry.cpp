@@ -161,6 +161,31 @@ void ResourceRegistry::registerPersistentImage(const std::string &name, VkFormat
     spdlog::debug("ResourceRegistry: persistent image '{}' ({}x{})", name, extent.width, extent.height);
 }
 
+void ResourceRegistry::registerPersistentImageArray(const std::string &name, VkFormat format,
+                                                     VkImageUsageFlags usage, VkExtent2D extent, uint32_t layers,
+                                                     VkImageAspectFlags aspect)
+{
+    if (m_images.count(name))
+        throw std::runtime_error("ResourceRegistry: duplicate image '" + name + "'");
+    if (layers == 0)
+        throw std::invalid_argument("ResourceRegistry: image array must have at least one layer");
+
+    ImageEntry entry{};
+    entry.format        = format;
+    entry.usage         = usage;
+    entry.aspect        = aspect;
+    entry.extentSpec    = ExtentSpec::absolute(extent.width, extent.height);
+    entry.extent        = extent;
+    entry.persistent    = true;
+    entry.arrayLayers   = layers;
+    entry.viewType      = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    entry.hasLayerViews = true;
+    allocateImageEntry(name, entry);
+    m_images.emplace(name, std::move(entry));
+    spdlog::debug("ResourceRegistry: persistent image array '{}' ({}x{}, {} layers)", name, extent.width,
+                  extent.height, layers);
+}
+
 void ResourceRegistry::registerCubemap(const std::string &name, VkFormat format, uint32_t resolution,
                                        uint32_t mipLevels, VkImageUsageFlags usage)
 {
@@ -539,6 +564,10 @@ void ResourceRegistry::allocateImageEntry(const std::string &name, ImageEntry &e
     if (entry.hasMipViews)
     {
         m_allocator.createMipViews(entry.image, entry.aspect);
+    }
+    if (entry.hasLayerViews)
+    {
+        m_allocator.createLayerViews(entry.image, entry.aspect);
     }
     setDebugName(VK_OBJECT_TYPE_IMAGE, reinterpret_cast<uint64_t>(entry.image.image), name);
 }

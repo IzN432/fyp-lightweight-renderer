@@ -76,6 +76,9 @@ public:
     PassBuilder &depthAttachment(ImageHandle image, VkFormat format,
                                  VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, VkClearValue clearValue = {},
                                  ExtentSpec extent = ExtentSpec::swapchain());
+    PassBuilder &depthAttachment(ImageView image, VkFormat format,
+                                 VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                 VkClearValue clearValue = {}, ExtentSpec extent = ExtentSpec::swapchain());
 
     // Order this pass after every other pass that shares a resource with it, including passes
     // declared later — for a final overlay (e.g. the Viewer's ImGui pass).

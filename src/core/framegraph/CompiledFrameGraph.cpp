@@ -134,6 +134,12 @@ VkRenderingInfo CompiledFrameGraph::prepareRenderingInfo(const PassDesc &pass, V
         }
 
         VkImageView view = image->view;
+        if (use.boundLayer != allImageLayers)
+        {
+            if (use.boundLayer >= image->layerViews.size())
+                throw std::runtime_error("CompiledFrameGraph: attachment layer is unavailable for '" + name + "'");
+            view = image->layerViews[use.boundLayer];
+        }
         for (const FrameGraphDefinition::ExternalImageDesc &external : m_definition.externalImages())
         {
             if (external.image == use.image)

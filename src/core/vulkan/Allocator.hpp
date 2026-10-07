@@ -23,6 +23,7 @@ struct AllocatedImage
     VkImage                  image = VK_NULL_HANDLE;
     VkImageView              view  = VK_NULL_HANDLE; // full range (all mips, all layers)
     std::vector<VkImageView> mipViews;               // per-mip views, created by createMipViews()
+    std::vector<VkImageView> layerViews;             // per-layer 2D views, created by createLayerViews()
     VmaAllocation            allocation = nullptr;
     VkExtent3D               extent{};
     VkFormat                 format      = VK_FORMAT_UNDEFINED;
@@ -69,6 +70,7 @@ public:
     // Creates one VkImageView per mip level (covering all array layers),
     // stored in image.mipViews. Used for compute writes to specific mip levels.
     void createMipViews(AllocatedImage &image, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
+    void createLayerViews(AllocatedImage &image, VkImageAspectFlags aspect);
     void destroy(AllocatedImage &image);
 
     VmaAllocator getHandle() const { return m_allocator; }

@@ -191,11 +191,48 @@ void Allocator::createMipViews(AllocatedImage &image, VkImageAspectFlags aspect)
     image.mipViews = std::move(mipViews);
 }
 
+void Allocator::createLayerViews(AllocatedImage &image, VkImageAspectFlags aspect)
+{
+    VmaAllocatorInfo allocInfo;
+    vmaGetAllocatorInfo(m_allocator, &allocInfo);
+    const VkDevice device = allocInfo.device;
+    if (!image.layerViews.empty())
+        throw std::runtime_error("Allocator: layer views already exist");
+    image.layerViews.resize(image.arrayLayers, VK_NULL_HANDLE);
+    for (uint32_t layer = 0; layer < image.arrayLayers; ++layer)
+    {
+        VkImageViewCreateInfo ci{};
+        ci.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        ci.image                           = image.image;
+        ci.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+        ci.format                          = image.format;
+        ci.subresourceRange.aspectMask     = aspect;
+        ci.subresourceRange.baseMipLevel   = 0;
+        ci.subresourceRange.levelCount     = image.mipLevels;
+        ci.subresourceRange.baseArrayLayer = layer;
+        ci.subresourceRange.layerCount     = 1;
+        const VkResult result = vkCreateImageView(device, &ci, nullptr, &image.layerViews[layer]);
+        if (result != VK_SUCCESS)
+        {
+            for (VkImageView view : image.layerViews)
+                if (view) vkDestroyImageView(device, view, nullptr);
+            image.layerViews.clear();
+            throwVkError(result, "Allocator: vkCreateImageView(layer)");
+        }
+    }
+}
+
 void Allocator::destroy(AllocatedImage &image)
 {
     VmaAllocatorInfo allocInfo;
     vmaGetAllocatorInfo(m_allocator, &allocInfo);
     VkDevice device = allocInfo.device;
+
+    for (auto view : image.layerViews)
+    {
+        if (view) vkDestroyImageView(device, view, nullptr);
+    }
+    image.layerViews.clear();
 
     for (auto view : image.mipViews)
     {

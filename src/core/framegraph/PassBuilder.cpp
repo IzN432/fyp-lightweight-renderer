@@ -324,6 +324,14 @@ PassBuilder &PassBuilder::depthAttachment(ImageHandle image, VkFormat format, Vk
     return *this;
 }
 
+PassBuilder &PassBuilder::depthAttachment(ImageView image, VkFormat format, VkAttachmentLoadOp loadOp,
+                                          VkClearValue clearValue, ExtentSpec extent)
+{
+    depthAttachment(image.image, format, loadOp, clearValue, extent);
+    desc().imageUses.back().boundLayer = image.arrayLayer;
+    return *this;
+}
+
 PassBuilder &PassBuilder::dependsOn(PassHandle dependency)
 {
     desc().explicitDependencies.push_back(dependency);
