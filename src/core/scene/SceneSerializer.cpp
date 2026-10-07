@@ -360,7 +360,8 @@ std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &
 }
 
 std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &path, Scene &scene,
-                                                 MeshStore &meshStore, MaterialStore &materialStore)
+                                                 MeshStore &meshStore, MaterialStore &materialStore,
+                                                 bool remapCameraObject)
 {
     if constexpr (std::endian::native != std::endian::little)
         throw std::runtime_error("SceneSerializer: only little-endian hosts are currently supported");
@@ -477,6 +478,8 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
     // Scene::createSceneObject throws if one of those identities is already taken.
     std::vector<SceneObjectId> created;
     created.reserve(objects.size());
+    std::optional<SceneObjectId> serializedCameraId;
+    std::optional<SceneObjectId> loadedCameraId;
     const ComponentCodecRegistry codecs = makeSceneComponentCodecs();
     ComponentLoadContext componentContext{scene, meshStore, materialStore};
     for (size_t index = 0; index < objects.size(); ++index)
@@ -484,7 +487,16 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
         const json &value = objects[index];
         const std::string where = "objects[" + std::to_string(index) + "]";
         const SceneObjectId id = readId(required(value, "id", where), where + ".id");
-        SceneObject &object = scene.createSceneObject(id);
+        const json &components = required(value, "components", where);
+        const bool isCamera = components.is_object() && components.contains("camera");
+        if (remapCameraObject && isCamera && serializedCameraId)
+            throw std::runtime_error("SceneSerializer: an lrscene may contain only one camera object");
+        SceneObject &object = remapCameraObject && isCamera ? scene.createSceneObject() : scene.createSceneObject(id);
+        if (remapCameraObject && isCamera)
+        {
+            serializedCameraId = id;
+            loadedCameraId = object.id();
+        }
         object.name = required(value, "name", where).get<std::string>();
         created.push_back(object.id());
     }
@@ -514,7 +526,10 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
         const json &parent = required(value, "parent", where);
         if (!parent.is_null())
         {
-            const SceneObjectId parentId = readId(parent, where + ".parent");
+            if (remapCameraObject && loadedCameraId && created[index] == *loadedCameraId)
+                throw std::runtime_error("SceneSerializer: the main camera must be a root object");
+            SceneObjectId parentId = readId(parent, where + ".parent");
+            if (serializedCameraId && parentId == *serializedCameraId) parentId = *loadedCameraId;
             if (!scene.contains(parentId)) throw std::runtime_error("SceneSerializer: missing parent object " + toString(parentId) + " at " + where);
             scene.setParent(object.id(), parentId);
         }

@@ -31,12 +31,17 @@ public:
     // than silently rebinding a live reference.
     SceneObject &createSceneObject(SceneObjectId id);
 
-    // Retires an object and its complete subtree. IDs and object addresses are never reused, so
-    // editor commands that still mention an old object cannot become references to a different
-    // object. Destruction callbacks run after retirement so observers see the new scene state.
+    // Retires an object and its complete subtree. IDs and object addresses are not reused during
+    // ordinary editing, so stale editor references cannot bind to a different object. Destruction
+    // callbacks run after retirement so observers see the new scene state. A full-scene replacement
+    // may subsequently release the tombstones with purgeDestroyedSceneObjects().
     void destroySceneObject(SceneObjectId id);
     bool contains(SceneObjectId id) const;
     bool canDestroySceneObject(SceneObjectId id) const;
+
+    // Permanently removes retired object storage and releases its IDs. Only use at a full-scene
+    // replacement boundary, after every observer has processed the destruction callbacks.
+    void purgeDestroyedSceneObjects();
 
     void protectSceneObject(SceneObjectId id) { m_protectedObjects.insert(id); }
 

@@ -38,6 +38,33 @@ struct TempScene
 
 int main()
 {
+    // Minimal generic-scene smoke test: saving and loading into a fresh SceneAssets must work
+    // without relying on any editor-owned objects or camera-specific loading behavior.
+    {
+        TempScene genericTemporary;
+        lr::SceneAssets genericSource;
+        auto &genericRoot = genericSource.scene.createSceneObject();
+        genericRoot.name = "Generic root";
+        genericRoot.addComponent<lr::TransformComponent>(glm::vec3(1, 2, 3));
+
+        auto &genericChild = genericSource.scene.createSceneObject();
+        genericChild.name = "Generic child";
+        genericChild.addComponent<lr::TransformComponent>(glm::vec3(4, 5, 6));
+        genericSource.scene.setParent(genericChild.id(), genericRoot.id());
+
+        lr::SceneSerializer::save(genericSource, genericTemporary.path);
+        auto genericLoaded = lr::SceneSerializer::load(genericTemporary.path);
+
+        assert(genericLoaded->scene.contains(genericRoot.id()));
+        assert(genericLoaded->scene.contains(genericChild.id()));
+        assert(genericLoaded->scene.getSceneObject(genericChild.id()).parent() == genericRoot.id());
+        assert(near(genericLoaded->scene.getSceneObject(genericRoot.id())
+                        .getComponent<lr::TransformComponent>()
+                        .transform()
+                        .position(),
+                    {1, 2, 3}));
+    }
+
     TempScene temporary;
     const std::array<std::byte, 4> hdriBytes{
         std::byte{0x23}, std::byte{0x3f}, std::byte{0x52}, std::byte{0x41}};
@@ -145,6 +172,29 @@ int main()
     skinnedObject.addComponent<lr::ColliderComponent>(std::vector{sphere, plane, box});
 
     lr::SceneSerializer::save(source, temporary.path);
+
+    // The editor already owns a protected main camera. Its serialized counterpart is loaded under
+    // a temporary identity so SceneManager can copy its state onto the live object and retire it.
+    lr::SceneAssets editorTarget;
+    auto &liveCamera = editorTarget.scene.createSceneObject(root.id());
+    liveCamera.name = "Main Camera";
+    liveCamera.addComponent<lr::Camera>();
+    liveCamera.addComponent<lr::TransformComponent>();
+    liveCamera.addComponent<lr::SphericalCameraController>();
+    // Reproduce SceneManager's full replacement: the current authored objects are destroyed, but
+    // their IDs remain reserved until the replacement boundary purges the tombstones.
+    auto &existingLight = editorTarget.scene.createSceneObject(lightObjectIds.front());
+    existingLight.addComponent<lr::TransformComponent>();
+    existingLight.addComponent<lr::Light>(lr::PointLight{});
+    editorTarget.scene.destroySceneObject(existingLight.id());
+    editorTarget.scene.purgeDestroyedSceneObjects();
+    const auto editorLoaded = lr::SceneSerializer::load(
+        temporary.path, editorTarget.scene, editorTarget.meshes, editorTarget.materials, true);
+    assert(editorLoaded.front() != liveCamera.id());
+    const auto &temporaryCamera = editorTarget.scene.getSceneObject(editorLoaded.front());
+    assert(temporaryCamera.hasComponent<lr::Camera>() && !temporaryCamera.parent());
+    assert(temporaryCamera.getComponent<lr::Camera>().orthoHeight == 22);
+
     auto loaded = lr::SceneSerializer::load(temporary.path);
     assert(loaded->scene.hdriPath() == temporary.hdriPath.filename());
     assert(loaded->scene.hdriData() == std::vector<std::byte>(hdriBytes.begin(), hdriBytes.end()));

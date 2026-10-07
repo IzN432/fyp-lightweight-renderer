@@ -124,6 +124,18 @@ void Scene::destroySceneObject(SceneObjectId id)
     m_objectsDestroyedCallbacks.invoke(destroyed);
 }
 
+void Scene::purgeDestroyedSceneObjects()
+{
+    std::erase_if(m_sceneObjects, [](const std::unique_ptr<SceneObject> &object) {
+        return !object->m_alive;
+    });
+    m_objectIndices.clear();
+    for (size_t index = 0; index < m_sceneObjects.size(); ++index)
+    {
+        m_objectIndices.emplace(m_sceneObjects[index]->id(), index);
+    }
+}
+
 void Scene::setParent(SceneObjectId childId, std::optional<SceneObjectId> parentId)
 {
     SceneObject &child = getSceneObject(childId);

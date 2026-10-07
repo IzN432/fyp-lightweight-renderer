@@ -45,7 +45,8 @@ public:
     // returns the objects it created. Throws if the file names an object, mesh or material whose
     // identity the caller's scene or stores already hold.
     static std::vector<SceneObjectId> load(const std::filesystem::path &path, Scene &scene,
-                                           MeshStore &meshes, MaterialStore &materials);
+                                           MeshStore &meshes, MaterialStore &materials,
+                                           bool remapCameraObject = false);
 };
 
 } // namespace lr

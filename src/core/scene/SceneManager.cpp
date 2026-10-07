@@ -121,13 +121,17 @@ std::vector<SceneObjectId> SceneManager::loadScene(const std::filesystem::path &
     {
         if (target.contains(id) && target.canDestroySceneObject(id)) target.destroySceneObject(id);
     }
+    // Destruction normally keeps IDs reserved so stale editor references cannot silently bind to a
+    // new object. A full scene replacement is the one boundary where those retired objects and
+    // their IDs must be released before the saved objects are recreated.
+    target.purgeDestroyedSceneObjects();
     gpu().clearSceneResources();
     m_editedMeshObject = nullptr;
     m_meshStore.clear();
     m_materialStore.clear();
 
     const std::vector<SceneObjectId> loadedObjects =
-        SceneSerializer::load(path, target, m_meshStore, m_materialStore);
+        SceneSerializer::load(path, target, m_meshStore, m_materialStore, true);
 
     std::vector<SceneObjectId> added;
     std::vector<MaterialHandle> loadedMaterials;
@@ -138,7 +142,7 @@ std::vector<SceneObjectId> SceneManager::loadScene(const std::filesystem::path &
         SceneObject &object = target.getSceneObject(loadedId);
         // Preserve the live camera object's identity (Viewer/input systems reference it), but restore
         // all authored camera state from the serialized copy before retiring that temporary object.
-        if (object.name == "Main Camera" && object.hasComponent<Camera>())
+        if (object.hasComponent<Camera>())
         {
             SceneObject *liveCamera = gpu().camera();
             if (liveCamera)
