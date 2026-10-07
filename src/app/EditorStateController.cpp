@@ -30,8 +30,22 @@ void EditorStateController::activate(std::string_view id)
     {
         return;
     }
+
+    if (!m_active.empty())
+    {
+        const EditorStateDefinition &outgoing = m_states.at(m_active);
+        if (outgoing.onExit)
+        {
+            outgoing.onExit();
+        }
+    }
+
     m_active = found->first;
     m_onChanged(found->second);
+    if (found->second.onEnter)
+    {
+        found->second.onEnter();
+    }
 }
 
 const EditorStateDefinition &EditorStateController::active() const
@@ -42,6 +56,21 @@ const EditorStateDefinition &EditorStateController::active() const
         throw std::logic_error("EditorStateController: no active state");
     }
     return found->second;
+}
+
+void EditorStateController::update(const EditorFrameContext &frame) const
+{
+    const EditorStateDefinition &state = active();
+    if (state.update)
+    {
+        state.update(frame);
+    }
+}
+
+GizmoRequest EditorStateController::gizmoRequest(const EditorFrameContext &frame) const
+{
+    const EditorStateDefinition &state = active();
+    return state.gizmoRequest ? state.gizmoRequest(frame) : GizmoRequest{};
 }
 
 } // namespace lr

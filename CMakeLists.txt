@@ -454,6 +454,14 @@ if(BUILD_TESTING)
     add_executable(mesh_gpu_sync_smoke EXCLUDE_FROM_ALL tests/upload/MeshGpuSyncSmoke.cpp)
     target_link_libraries(mesh_gpu_sync_smoke PRIVATE lr_core)
 
+    add_executable(editor_state_controller_tests
+        tests/editor/EditorStateControllerTests.cpp
+        src/app/EditorStateController.cpp
+    )
+    target_include_directories(editor_state_controller_tests PRIVATE src)
+    target_link_libraries(editor_state_controller_tests PRIVATE Vulkan::Vulkan glm::glm)
+    add_test(NAME editor.state_controller COMMAND editor_state_controller_tests)
+
     add_executable(scene_hierarchy_tests
         tests/scene/SceneHierarchyTests.cpp
     )
