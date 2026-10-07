@@ -1,4 +1,5 @@
 #include "EditorSession.hpp"
+#include "EditorRenderBridge.hpp"
 #include "core/editor/EditorStateController.hpp"
 
 #include "core/app/Viewer.hpp"
@@ -19,17 +20,11 @@
 #include "core/editor/command/CommandManager.hpp"
 #include "core/editor/gizmo/GizmoController.hpp"
 #include "core/editor/selection/SelectionGestureTool.hpp"
-#include "core/passes/geometry/GeometryPass.hpp"
-#include "core/passes/heatmap/HeatmapPass.hpp"
-#include "core/passes/overlaylines/OverlayLinesPass.hpp"
-#include "core/passes/overlaypoints/OverlayPointsPass.hpp"
-#include "core/passes/transparent/TransparentPass.hpp"
 #include "core/scene/Camera.hpp"
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneManager.hpp"
 #include "features/arap/ArapTool.hpp"
 #include "features/laplace_beltrami/LaplaceBeltramiTool.hpp"
-#include "features/rigid_body/ColliderVisual.hpp"
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -54,12 +49,10 @@ constexpr std::string_view kEditState = "edit";
 class EditorSession::Impl
 {
 public:
-    Impl(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera, GeometryPass &geometryPass,
-         TransparentPass &transparentPass, HeatmapPass &heatmapPass, OverlayPointsPass &overlayPointsPass,
-         OverlayLinesPass &overlayLinesPass)
+    Impl(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,
+         EditorRenderBridge &renderBridge)
         : m_viewer(viewer), m_sceneManager(sceneManager), m_scene(sceneManager.scene()), m_camera(camera),
-          m_geometryPass(geometryPass), m_transparentPass(transparentPass), m_heatmapPass(heatmapPass),
-          m_overlayPointsPass(overlayPointsPass), m_overlayLinesPass(overlayLinesPass),
+          m_renderBridge(renderBridge),
           m_stateController([this](const EditorStateDefinition &state) {
               m_sceneManager.setEditorPresentation(state.presentation);
           }),
@@ -82,10 +75,7 @@ public:
         m_selectionManager.setSelectTool(std::make_unique<SelectionGestureTool>(viewer.input(), camera));
 
         const auto applyPresentation = [this](const EditorPresentation &presentation) {
-            m_geometryPass.setSkinningEnabled(presentation.skinningEnabled);
-            m_transparentPass.setSkinningEnabled(presentation.skinningEnabled);
-            m_overlayPointsPass.setEnabled(presentation.vertexPointsVisible);
-            m_heatmapPass.setEnabled(presentation.heatmapVisible);
+            m_renderBridge.apply(presentation);
         };
         m_sceneManager.registerEditorPresentationChangedCallback(applyPresentation);
 
@@ -129,7 +119,10 @@ public:
         }
         if (editedMesh == m_meshObject)
         {
-            refreshRenderSources(*editedMesh);
+            m_renderBridge.setEditableTarget({
+                .object = *editedMesh,
+                .mesh   = editedMesh->getComponent<MeshComponent>().mesh(),
+            });
             return;
         }
         rebindEditableTarget(*editedMesh, false);
@@ -228,6 +221,7 @@ private:
         {
             tool->onTargetChanged(target);
         }
+        m_renderBridge.setEditableTarget(target);
     }
 
     void notifyTargetCleared()
@@ -422,16 +416,6 @@ private:
         m_meshObject = &object;
         m_vertexManager.rebind(object.getComponent<MeshComponent>().mesh());
         notifyTargetChanged(object);
-        refreshRenderSources(object);
-    }
-
-    void refreshRenderSources(SceneObject &object)
-    {
-        Mesh &mesh = object.getComponent<MeshComponent>().mesh();
-        m_heatmapPass.setMeshSource(m_sceneManager.selectedMeshHeatmap(), m_sceneManager.selectedMeshIndexRange(),
-                                    object.getComponent<TransformComponent>());
-        m_overlayPointsPass.setPointsSource(m_sceneManager.selectedMeshPoints(), mesh.uniquePositionCount(),
-                                            object.getComponent<TransformComponent>());
     }
 
     glm::vec3 worldCentroidOf(const std::unordered_set<uint32_t> &indices) const
@@ -460,32 +444,14 @@ private:
         m_gizmoController.draw(frame.view, frame.projection, frame.orthographic, extent,
                                m_stateController.gizmoRequest(frame));
 
-        std::vector<OverlayLine> overlayLines = buildColliderOverlayLines(m_scene);
-        if (const auto selectedObject = m_scene.selectedObject())
-        {
-            OverlayLineBuilder    selectionGizmo;
-            SelectionGizmoContext context{
-                .lines          = selectionGizmo,
-                .cameraPosition = frame.cameraPosition,
-                .cameraForward  = frame.cameraForward,
-                .orthographic   = frame.orthographic,
-            };
-            m_scene.getSceneObject(*selectedObject).onSelectGizmo(context);
-            std::vector<OverlayLine> selectionLines = selectionGizmo.takeLines();
-            overlayLines.insert(overlayLines.end(), selectionLines.begin(), selectionLines.end());
-        }
-        m_overlayLinesPass.setLines(overlayLines);
+        m_renderBridge.updateSceneOverlays(m_scene, frame);
     }
 
     Viewer                        &m_viewer;
     SceneManager                  &m_sceneManager;
     Scene                         &m_scene;
     SceneObject                   &m_camera;
-    GeometryPass                  &m_geometryPass;
-    TransparentPass               &m_transparentPass;
-    HeatmapPass                   &m_heatmapPass;
-    OverlayPointsPass             &m_overlayPointsPass;
-    OverlayLinesPass              &m_overlayLinesPass;
+    EditorRenderBridge            &m_renderBridge;
     EditorStateController          m_stateController;
     EditorShortcuts                m_shortcuts;
     SceneObject                   *m_meshObject;
@@ -508,10 +474,8 @@ private:
 };
 
 EditorSession::EditorSession(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,
-                             GeometryPass &geometryPass, TransparentPass &transparentPass, HeatmapPass &heatmapPass,
-                             OverlayPointsPass &overlayPointsPass, OverlayLinesPass &overlayLinesPass)
-    : m_impl(std::make_unique<Impl>(viewer, sceneManager, camera, geometryPass, transparentPass, heatmapPass,
-                                    overlayPointsPass, overlayLinesPass))
+                             EditorRenderBridge &renderBridge)
+    : m_impl(std::make_unique<Impl>(viewer, sceneManager, camera, renderBridge))
 {}
 
 EditorSession::~EditorSession() = default;

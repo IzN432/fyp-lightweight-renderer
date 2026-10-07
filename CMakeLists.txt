@@ -311,6 +311,7 @@ target_link_libraries(lr_scene_serialization PUBLIC lr_core lr_animation_feature
 # Application-level editor composition. This stays above lr_core because it combines optional
 # feature libraries which themselves depend on lr_core.
 add_library(lr_editor_app STATIC
+    src/app/EditorRenderBridge.cpp
     src/app/EditorSession.cpp
 )
 target_include_directories(lr_editor_app PUBLIC src)

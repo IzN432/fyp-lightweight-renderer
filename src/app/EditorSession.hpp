@@ -6,13 +6,9 @@ namespace lr
 {
 
 struct EditorContext;
-class GeometryPass;
-class HeatmapPass;
-class OverlayLinesPass;
-class OverlayPointsPass;
+class EditorRenderBridge;
 class SceneManager;
 class SceneObject;
-class TransparentPass;
 class Viewer;
 
 // Application-level editor facade. It owns the interaction objects that must move in lockstep
@@ -22,9 +18,8 @@ class Viewer;
 class EditorSession
 {
 public:
-    EditorSession(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera, GeometryPass &geometryPass,
-                  TransparentPass &transparentPass, HeatmapPass &heatmapPass, OverlayPointsPass &overlayPointsPass,
-                  OverlayLinesPass &overlayLinesPass);
+    EditorSession(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,
+                  EditorRenderBridge &renderBridge);
     ~EditorSession();
 
     EditorSession(const EditorSession &)            = delete;

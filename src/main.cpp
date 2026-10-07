@@ -1,4 +1,5 @@
 #include "app/EditorSession.hpp"
+#include "app/EditorRenderBridge.hpp"
 #include "core/app/Viewer.hpp"
 #include "core/Paths.hpp"
 #include "core/loaders/Material.hpp"
@@ -278,8 +279,9 @@ try
 
     // Editor interaction is composed behind one facade. A future Engine can own this alongside
     // the render pipeline without reintroducing editor orchestration into main.cpp.
-    lr::EditorSession editor(viewer, sceneManager, *camera, geometryPass, transparentPass,
-                             heatmapPass, overlayPointsPass, overlayLinesPass);
+    lr::EditorRenderBridge editorRendering(sceneManager, geometryPass, transparentPass, heatmapPass,
+                                           overlayPointsPass, overlayLinesPass);
+    lr::EditorSession editor(viewer, sceneManager, *camera, editorRendering);
     scene.registerObjectsDestroyedCallback([&](std::span<const lr::SceneObjectId>) {
         physicsWorld.onSceneChanged();
     });
