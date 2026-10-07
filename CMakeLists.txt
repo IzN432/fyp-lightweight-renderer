@@ -302,12 +302,18 @@ target_include_directories(lr_scene_serialization PUBLIC src)
 target_link_libraries(lr_scene_serialization PUBLIC lr_core lr_animation_feature
     lr_linear_blend_skinning_feature lr_rigid_body_feature nlohmann_json::nlohmann_json)
 
-# Application executable
-add_executable(renderer
-    src/main.cpp
+# Application-level editor composition. This stays above lr_core because it combines optional
+# feature libraries which themselves depend on lr_core.
+add_library(lr_editor_app STATIC
     src/app/EditorSession.cpp
 )
-target_link_libraries(renderer PRIVATE lr_core lr_arap_feature lr_laplace_beltrami_feature
+target_include_directories(lr_editor_app PUBLIC src)
+target_link_libraries(lr_editor_app PUBLIC lr_core lr_arap_feature lr_laplace_beltrami_feature
+    lr_rigid_body_feature)
+
+# Application executable
+add_executable(renderer src/main.cpp)
+target_link_libraries(renderer PRIVATE lr_editor_app
     lr_linear_blend_skinning_feature lr_animation_feature lr_rigid_body_feature lr_scene_serialization
     imguiFileDialog)
 if(LR_ARAP_BACKEND STREQUAL "pardiso")
