@@ -30,6 +30,13 @@ struct PrefilterPC
     uint32_t sampleCount;
 };
 
+LoadedHdrImage loadConfiguredHdri(const IBLPass::Config &config)
+{
+    if (!config.hdriData.empty()) return loadHdrFromMemory(config.hdriData, config.hdriPath.string());
+    if (!config.hdriPath.empty()) return loadHdrFromFile(config.hdriPath);
+    return LoadedHdrImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+}
+
 } // namespace
 
 IBLPass::IBLPass(Config cfg) : m_cfg(std::move(cfg)) {}
@@ -37,7 +44,7 @@ IBLPass::IBLPass(Config cfg) : m_cfg(std::move(cfg)) {}
 void IBLPass::uploadResources(ResourceRegistry &resources) const
 {
     LoadedHdrImage hdri;
-    if (m_cfg.hdriPath.empty())
+    if (m_cfg.hdriPath.empty() && m_cfg.hdriData.empty())
     {
         spdlog::info("IBLPass: no HDRI configured; using a black environment");
         hdri = LoadedHdrImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
@@ -45,7 +52,7 @@ void IBLPass::uploadResources(ResourceRegistry &resources) const
     {
         try
         {
-            hdri = loadHdrFromFile(m_cfg.hdriPath);
+            hdri = loadConfiguredHdri(m_cfg);
         } catch (const std::exception &e)
         {
             spdlog::warn("IBLPass: failed to load HDRI '{}': {}. Using a black environment.", m_cfg.hdriPath.string(),
@@ -75,8 +82,7 @@ void IBLPass::uploadResources(ResourceRegistry &resources) const
 
 void IBLPass::replaceHdriResource(ResourceRegistry &resources) const
 {
-    LoadedHdrImage hdri = m_cfg.hdriPath.empty() ? LoadedHdrImage::singlePixel(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f))
-                                                 : loadHdrFromFile(m_cfg.hdriPath);
+    LoadedHdrImage hdri = loadConfiguredHdri(m_cfg);
 
     if (hdri.empty())
     {

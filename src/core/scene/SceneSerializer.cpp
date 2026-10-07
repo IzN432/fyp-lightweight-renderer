@@ -588,7 +588,26 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
         objects.push_back(std::move(serialized));
     }
 
-    const json document{{"format", "lr.scene"}, {"version", kFormatVersion}, {"objects", std::move(objects)},
+    json environment{{"hdri", nullptr}};
+    if (scene.hdriPath())
+    {
+        std::vector<std::byte> encoded = scene.hdriData();
+        if (encoded.empty())
+        {
+            std::ifstream hdri(*scene.hdriPath(), std::ios::binary | std::ios::ate);
+            if (!hdri) throw std::runtime_error("SceneSerializer: cannot open HDRI '" + scene.hdriPath()->string() + "'");
+            const std::streamsize size = hdri.tellg();
+            if (size <= 0) throw std::runtime_error("SceneSerializer: HDRI is empty or unreadable: '" + scene.hdriPath()->string() + "'");
+            encoded.resize(static_cast<size_t>(size));
+            hdri.seekg(0);
+            hdri.read(reinterpret_cast<char *>(encoded.data()), size);
+            if (!hdri) throw std::runtime_error("SceneSerializer: failed while reading HDRI '" + scene.hdriPath()->string() + "'");
+        }
+        environment["hdri"] = {{"name", scene.hdriPath()->filename().generic_string()},
+                               {"data", binary.appendBytes(encoded)}};
+    }
+    const json document{{"format", "lr.scene"}, {"version", kFormatVersion},
+                        {"environment", std::move(environment)}, {"objects", std::move(objects)},
                         {"meshes", std::move(meshes)}, {"materials", std::move(materials)}};
     const std::string manifest = document.dump();
     const uint64_t manifestBytes = static_cast<uint64_t>(manifest.size());
@@ -644,6 +663,21 @@ void SceneSerializer::load(const std::filesystem::path &path, Scene &scene, Mesh
 
     const std::streamoff payloadOffset = static_cast<std::streamoff>(kFileMagic.size() + sizeof(manifestBytes) + manifestBytes);
     const BinaryReader binary(path, payloadOffset);
+
+    if (document.contains("environment"))
+    {
+        const json &environment = document.at("environment");
+        const json &hdri = required(environment, "hdri", "root.environment");
+        if (hdri.is_null()) scene.setHdriPath(std::nullopt);
+        else if (hdri.is_object())
+        {
+            const std::string name = required(hdri, "name", "root.environment.hdri").get<std::string>();
+            auto data = binary.read(required(hdri, "data", "root.environment.hdri"), "root.environment.hdri.data");
+            scene.setEmbeddedHdri(std::filesystem::path(name), std::vector<std::byte>(data.begin(), data.end()));
+        }
+        else throw std::runtime_error("SceneSerializer: root.environment.hdri must be an object or null");
+    }
+    else scene.setHdriPath(std::nullopt);
 
     std::unordered_map<uint32_t, MaterialHandle> materialHandles;
     const json &materials = required(document, "materials", "root");

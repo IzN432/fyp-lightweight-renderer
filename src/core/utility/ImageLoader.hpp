@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <span>
 #include <glm/vec4.hpp>
 #include <vulkan/vulkan.h>
 
@@ -149,5 +151,6 @@ struct LoadedHdrImage
 // Returns 4-channel float data (RGBA32F). Y-axis is flipped to match Vulkan.
 // Throws std::runtime_error if the file cannot be loaded.
 LoadedHdrImage loadHdrFromFile(const std::filesystem::path &path);
+LoadedHdrImage loadHdrFromMemory(std::span<const std::byte> encoded, const std::string &name = "embedded HDRI");
 
 } // namespace lr

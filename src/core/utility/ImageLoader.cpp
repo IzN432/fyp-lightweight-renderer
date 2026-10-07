@@ -6,6 +6,7 @@
 #include <spdlog/spdlog.h>
 
 #include <stdexcept>
+#include <limits>
 namespace lr
 {
 
@@ -51,6 +52,26 @@ LoadedHdrImage loadHdrFromFile(const std::filesystem::path &path)
     {
         throw std::runtime_error("ImageLoader: failed to load HDR '" + path.string() + "': " + stbi_failure_reason());
     }
+
+    img.pixels = data;
+    img.width  = static_cast<uint32_t>(w);
+    img.height = static_cast<uint32_t>(h);
+    return img;
+}
+
+LoadedHdrImage loadHdrFromMemory(std::span<const std::byte> encoded, const std::string &name)
+{
+    if (encoded.empty() || encoded.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+        throw std::runtime_error("ImageLoader: invalid embedded HDR data for '" + name + "'");
+
+    LoadedHdrImage img;
+    int w, h, channels;
+    stbi_set_flip_vertically_on_load(true);
+    float *data = stbi_loadf_from_memory(reinterpret_cast<const stbi_uc *>(encoded.data()),
+                                         static_cast<int>(encoded.size()), &w, &h, &channels, STBI_rgb_alpha);
+    stbi_set_flip_vertically_on_load(false);
+    if (!data)
+        throw std::runtime_error("ImageLoader: failed to load embedded HDR '" + name + "': " + stbi_failure_reason());
 
     img.pixels = data;
     img.width  = static_cast<uint32_t>(w);

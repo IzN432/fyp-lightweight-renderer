@@ -12,6 +12,7 @@
 #include <glm/gtc/epsilon.hpp>
 
 #include <cassert>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -24,13 +25,25 @@ struct TempScene
 {
     std::filesystem::path path = std::filesystem::temp_directory_path() /
         ("lr-scene-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".lrscene");
-    ~TempScene() { std::filesystem::remove_all(path); }
+    std::filesystem::path hdriPath = path.parent_path() / (path.stem().string() + ".hdr");
+    ~TempScene()
+    {
+        std::filesystem::remove_all(path);
+        std::filesystem::remove_all(hdriPath);
+    }
 };
 }
 
 int main()
 {
+    TempScene temporary;
+    const std::array<std::byte, 4> hdriBytes{
+        std::byte{0x23}, std::byte{0x3f}, std::byte{0x52}, std::byte{0x41}};
+    std::ofstream(temporary.hdriPath, std::ios::binary).write(
+        reinterpret_cast<const char *>(hdriBytes.data()), static_cast<std::streamsize>(hdriBytes.size()));
+
     lr::SceneAssets source;
+    source.scene.setHdriPath(temporary.hdriPath);
     auto &root = source.scene.createSceneObject();
     root.name = "Camera root";
     root.addComponent<lr::TransformComponent>(glm::vec3(1, 2, 3), glm::quat(0.5f, 0.5f, 0.5f, 0.5f), glm::vec3(2));
@@ -117,9 +130,10 @@ int main()
     box.shape = lr::BoxCollider{{5, 6, 7}};
     skinnedObject.addComponent<lr::ColliderComponent>(std::vector{sphere, plane, box});
 
-    TempScene temporary;
     lr::SceneSerializer::save(source, temporary.path);
     auto loaded = lr::SceneSerializer::load(temporary.path);
+    assert(loaded->scene.hdriPath() == temporary.hdriPath.filename());
+    assert(loaded->scene.hdriData() == std::vector<std::byte>(hdriBytes.begin(), hdriBytes.end()));
     assert(loaded->scene.sceneObjects().size() == 8);
     const auto &loadedRoot = loaded->scene.getSceneObject(0);
     assert(loadedRoot.name == root.name && loadedRoot.children().size() == 5);

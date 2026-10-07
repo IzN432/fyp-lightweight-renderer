@@ -3,6 +3,8 @@
 #include "core/framegraph/FrameGraph.hpp"
 
 #include <filesystem>
+#include <span>
+#include <cstddef>
 
 namespace lr
 {
@@ -14,6 +16,7 @@ public:
     {
         // Empty or unreadable paths use a black 1x1 environment.
         std::filesystem::path hdriPath;
+        std::span<const std::byte> hdriData;
         uint32_t              envRes = 2048;
         uint32_t              irrRes = 32;
         uint32_t              pfRes  = 2048;

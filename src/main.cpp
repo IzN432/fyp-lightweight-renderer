@@ -497,7 +497,6 @@ try
     // Per-frame callbacks
     // -------------------------------------------------------------------------
 
-    std::optional<fs::path> environmentHdriPath;
     glm::vec3               environmentBackgroundColor(0.0f);
     std::string             environmentLoadError;
     bool                    environmentDirty = false;
@@ -534,9 +533,9 @@ try
 
             ImGui::TextUnformatted("HDRI");
             ImGui::SameLine();
-            if (environmentHdriPath)
+            if (scene.hdriPath())
             {
-                ImGui::TextWrapped("%s", environmentHdriPath->filename().string().c_str());
+                ImGui::TextWrapped("%s", scene.hdriPath()->filename().string().c_str());
             } else
             {
                 ImGui::TextDisabled("None (background color)");
@@ -545,7 +544,7 @@ try
             if (ImGui::Button("Load HDRI..."))
             {
                 IGFD::FileDialogConfig dialogConfig;
-                dialogConfig.path  = environmentHdriPath ? environmentHdriPath->parent_path().string() : ".";
+                dialogConfig.path  = scene.hdriPath() ? scene.hdriPath()->parent_path().string() : ".";
                 dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_ReadOnlyFileNameField |
                                      ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
                                      ImGuiFileDialogFlags_ShowDevicesButton;
@@ -553,23 +552,23 @@ try
             }
             ImGui::SameLine();
 
-            ImGui::BeginDisabled(!environmentHdriPath.has_value());
+            ImGui::BeginDisabled(!scene.hdriPath().has_value());
             if (ImGui::Button("Clear"))
             {
-                environmentHdriPath.reset();
+                scene.setHdriPath(std::nullopt);
                 environmentLoadError.clear();
                 environmentDirty = true;
             }
             ImGui::EndDisabled();
 
             ImGui::Spacing();
-            ImGui::BeginDisabled(environmentHdriPath.has_value());
+            ImGui::BeginDisabled(scene.hdriPath().has_value());
             if (ImGui::ColorEdit3("Background color", &environmentBackgroundColor.x))
             {
                 finalPass.setBackground(glm::vec4(environmentBackgroundColor, 1.0f), false);
             }
             ImGui::EndDisabled();
-            if (environmentHdriPath && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            if (scene.hdriPath() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             {
                 ImGui::SetTooltip("Clear the HDRI to use the background color");
             }
@@ -590,9 +589,9 @@ try
             if (ImGuiFileDialog::Instance()->IsOk())
             {
                 fs::path selectedPath(ImGuiFileDialog::Instance()->GetFilePathName());
-                if (environmentHdriPath != selectedPath)
+                if (scene.hdriPath() != selectedPath)
                 {
-                    environmentHdriPath = std::move(selectedPath);
+                    scene.setHdriPath(std::move(selectedPath));
                     environmentLoadError.clear();
                     environmentDirty = true;
                 }
@@ -709,6 +708,7 @@ try
                     const fs::path scenePath = selectedPath;
                     viewer.context().waitIdle();
                     sceneManager.loadScene(scenePath);
+                    environmentDirty = true;
                     sceneManager.rebuildGeometry();
                     if (lr::SceneObject *loadedMesh = sceneManager.editedMeshObject())
                     {
@@ -826,8 +826,7 @@ try
     });
 
     // Application-level rendering policy: the C++ demo owns the IBL shaders, resource names,
-    // and rebuild timing. A future Python entry point can express the same composition using the
-    // frame-graph and resource-registry bindings without Scene knowing what an environment is.
+    // and rebuild timing. Scene only retains the authored HDRI path for persistence.
     viewer.onLateUpdate([&](float, VkExtent2D) {
         if (!environmentDirty)
         {
@@ -837,7 +836,8 @@ try
         try
         {
             auto reloadConfig     = iblConfig;
-            reloadConfig.hdriPath = environmentHdriPath.value_or(fs::path{});
+            reloadConfig.hdriPath = scene.hdriPath().value_or(fs::path{});
+            reloadConfig.hdriData = scene.hdriData();
             lr::IBLPass iblPass(std::move(reloadConfig));
 
             // The existing cubemaps are sampled by in-flight frames and overwritten in place.
@@ -852,7 +852,7 @@ try
             });
 
             finalPass.setBackground(glm::vec4(environmentBackgroundColor, 1.0f),
-                                    environmentHdriPath.has_value());
+                                    scene.hdriPath().has_value());
 
             environmentLoadError.clear();
         } catch (const std::exception &e)
