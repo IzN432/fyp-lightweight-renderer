@@ -38,6 +38,19 @@ void LaplaceBeltramiTool::calculate()
 
 void LaplaceBeltramiTool::onGui()
 {
+    const Scene &scene = m_sceneManager.scene();
+    const auto   selectedObject = scene.selectedObject();
+    if (!selectedObject || !SceneManager::isEditable(scene.getSceneObject(*selectedObject)))
+    {
+        m_hasResult = false;
+        if (m_sceneManager.editorMode() == EditorMode::Analysis)
+        {
+            m_sceneManager.setEditorMode(EditorMode::View);
+        }
+        ImGui::TextDisabled("Select a mesh object to use Laplace-Beltrami analysis.");
+        return;
+    }
+
     if (ImGui::Button(m_hasResult ? "Recalculate" : "Calculate Laplace-Beltrami Operator"))
     {
         calculate();
