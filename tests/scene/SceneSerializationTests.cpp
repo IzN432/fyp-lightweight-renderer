@@ -17,6 +17,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <vector>
 
 namespace
 {
@@ -54,6 +55,11 @@ int main()
     auto &cameraController = root.addComponent<lr::SphericalCameraController>();
     cameraController.setOrbitState({{4, 5, 6}, 12.0f, 0.75f, -0.25f});
     const glm::vec3 authoredCameraPosition = root.getComponent<lr::TransformComponent>().transform().position();
+    // Push the transform away from the orbit-derived pose, so the saved file holds a transform that
+    // disagrees with the saved orbit. Nothing in the controller's own deserialization touches the
+    // transform, so the only way the round trip can recover the orbit-derived pose is through
+    // Component::onLoaded running after the whole scene exists.
+    root.getComponent<lr::TransformComponent>().setPosition(glm::vec3(99.0f, 99.0f, 99.0f));
 
     const lr::LightVariant lights[] = {
         lr::PointLight{{{1, 0, 0}, 2}},
@@ -62,6 +68,7 @@ int main()
         lr::DirectionalLight{{{0.2f, 0.3f, 0.4f}, 5}},
         lr::ImageLight{{{0.7f, 0.8f, 0.9f}, 6}},
     };
+    std::vector<lr::SceneObjectId> lightObjectIds;
     for (size_t i = 0; i < std::size(lights); ++i)
     {
         auto &object = source.scene.createSceneObject();
@@ -69,6 +76,7 @@ int main()
         object.addComponent<lr::TransformComponent>(glm::vec3(static_cast<float>(i), 0, 0));
         object.addComponent<lr::Light>(lights[i]);
         source.scene.setParent(object.id(), root.id());
+        lightObjectIds.push_back(object.id());
     }
 
     lr::Material material;
@@ -99,25 +107,27 @@ int main()
     mesh.setVertexGroups(2, groups2);
     mesh.setVertexGroupAttributeArray<float>("joint_data", std::vector<float>{10, 20});
     const lr::MeshHandle meshHandle = source.meshes.add(std::move(mesh));
+    std::vector<lr::SceneObjectId> meshObjectIds;
     for (int i = 0; i < 2; ++i)
     {
         auto &object = source.scene.createSceneObject();
         object.name = "Shared mesh " + std::to_string(i);
         object.addComponent<lr::MeshComponent>(meshHandle, source.meshes, std::vector{materialHandle}, source.materials);
+        meshObjectIds.push_back(object.id());
     }
-    lr::TranslationTrack translation(6, lr::AnimationInterpolation::CubicSpline);
+    lr::TranslationTrack translation(meshObjectIds[0], lr::AnimationInterpolation::CubicSpline);
     translation.setKeyframe({0.0f, {1, 2, 3}, {4, 5, 6}, {7, 8, 9}});
     translation.setKeyframe({2.0f, {10, 11, 12}, {13, 14, 15}, {16, 17, 18}});
-    lr::RotationTrack rotation(7, lr::AnimationInterpolation::Step);
+    lr::RotationTrack rotation(meshObjectIds[1], lr::AnimationInterpolation::Step);
     rotation.setKeyframe(0.0f, glm::quat(1, 0, 0, 0));
     auto &animator = root.addComponent<lr::AnimatorComponent>(
         std::vector<lr::AnimationClip>{lr::AnimationClip("Edited", {translation, rotation})});
     animator.setLoop(false);
     animator.setSpeedMultiplier(1.5f);
 
-    auto &skinnedObject = source.scene.getSceneObject(6);
+    auto &skinnedObject = source.scene.getSceneObject(meshObjectIds[0]);
     skinnedObject.addComponent<lr::SkinComponent>(lr::Skin(source.scene, {
-        {root.id(), glm::mat4(1.0f)}, {source.scene.getSceneObject(1).id(), glm::mat4(2.0f)}}));
+        {root.id(), glm::mat4(1.0f)}, {lightObjectIds[0], glm::mat4(2.0f)}}));
     auto &body = skinnedObject.addComponent<lr::RigidBodyComponent>(7.0f, lr::RigidBodyType::Dynamic);
     body.setInertiaDiagonal({2, 3, 4});
     body.setLinearDrag(0.2f);
@@ -139,7 +149,9 @@ int main()
     assert(loaded->scene.hdriPath() == temporary.hdriPath.filename());
     assert(loaded->scene.hdriData() == std::vector<std::byte>(hdriBytes.begin(), hdriBytes.end()));
     assert(loaded->scene.sceneObjects().size() == 8);
-    const auto &loadedRoot = loaded->scene.getSceneObject(0);
+    // Every object comes back under the identity it was saved with, which is what lets the
+    // references below (parents, animation targets, skin joints) be checked against the source ids.
+    const auto &loadedRoot = loaded->scene.getSceneObject(root.id());
     assert(loadedRoot.name == root.name && loadedRoot.children().size() == 5);
     const auto &loadedTransform = loadedRoot.getComponent<lr::TransformComponent>().transform();
     assert(near(loadedTransform.position(), authoredCameraPosition) && near(loadedTransform.scale(), {2, 2, 2}));
@@ -151,12 +163,12 @@ int main()
            loadedOrbit.azimuth == 0.75f && loadedOrbit.elevation == -0.25f);
     for (size_t i = 0; i < std::size(lights); ++i)
     {
-        const auto &object = loaded->scene.getSceneObject(static_cast<lr::SceneObjectId>(i + 1));
+        const auto &object = loaded->scene.getSceneObject(lightObjectIds[i]);
         assert(object.parent() == loadedRoot.id());
         assert(object.getComponent<lr::Light>().light.index() == lights[i].index());
     }
-    const auto &meshA = loaded->scene.getSceneObject(6).getComponent<lr::MeshComponent>();
-    const auto &meshB = loaded->scene.getSceneObject(7).getComponent<lr::MeshComponent>();
+    const auto &meshA = loaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::MeshComponent>();
+    const auto &meshB = loaded->scene.getSceneObject(meshObjectIds[1]).getComponent<lr::MeshComponent>();
     assert(meshA.meshHandle() == meshB.meshHandle());
     assert(meshA.materialHandles() == meshB.materialHandles());
     const lr::Mesh &roundTripMesh = meshA.mesh();
@@ -176,20 +188,46 @@ int main()
     assert(!roundTripAnimator.isPlaying() && !roundTripAnimator.activeClipIndex());
     assert(roundTripAnimator.clips().size() == 1 && roundTripAnimator.clips()[0].tracks().size() == 2);
     const auto &roundTripTranslation = std::get<lr::TranslationTrack>(roundTripAnimator.clips()[0].tracks()[0]);
-    assert(roundTripTranslation.target() == 6 && roundTripTranslation.interpolation() == lr::AnimationInterpolation::CubicSpline);
+    assert(roundTripTranslation.target() == meshObjectIds[0] && roundTripTranslation.interpolation() == lr::AnimationInterpolation::CubicSpline);
     assert(roundTripTranslation.keyframes()[1].outgoingTangent == glm::vec3(16, 17, 18));
-    const auto &roundTripSkin = loaded->scene.getSceneObject(6).getComponent<lr::SkinComponent>().skin();
+    const auto &roundTripSkin = loaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::SkinComponent>().skin();
     assert(roundTripSkin.joints().size() == 2 && roundTripSkin.joints()[0].sceneObject == loadedRoot.id());
     assert(roundTripSkin.joints()[1].inverseBindMatrix == glm::mat4(2.0f));
-    const auto &roundTripBody = loaded->scene.getSceneObject(6).getComponent<lr::RigidBodyComponent>();
+    const auto &roundTripBody = loaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::RigidBodyComponent>();
     assert(roundTripBody.mass() == 7.0f && roundTripBody.inertiaDiagonal() == glm::vec3(2, 3, 4));
     assert(roundTripBody.linearVelocity() == glm::vec3(5, 6, 7) && roundTripBody.angularVelocity() == glm::vec3(8, 9, 10));
     assert(roundTripBody.accumulatedForce() == glm::vec3(0) && roundTripBody.accumulatedTorque() == glm::vec3(0));
-    const auto &roundTripColliders = loaded->scene.getSceneObject(6).getComponent<lr::ColliderComponent>().colliders();
+    const auto &roundTripColliders = loaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::ColliderComponent>().colliders();
     assert(roundTripColliders.size() == 3);
     assert(std::get<lr::SphereCollider>(roundTripColliders[0].shape).radius == 1.25f);
     assert(std::get<lr::PlaneCollider>(roundTripColliders[1].shape).halfExtents == glm::vec2(3, 4));
     assert(std::get<lr::BoxCollider>(roundTripColliders[2].shape).halfExtents == glm::vec3(5, 6, 7));
+
+    // Identities are what the file names objects by, so loading the same file into a scene that
+    // already holds those objects is a collision rather than a silent duplicate.
+    bool collisionRejected = false;
+    try { (void)lr::SceneSerializer::load(temporary.path, loaded->scene, loaded->meshes, loaded->materials); }
+    catch (const std::exception &) { collisionRejected = true; }
+    assert(collisionRejected);
+
+    // Deleting an object must not disturb what the survivors are called. Under file-local indices
+    // the hole left behind shifted every id after it; under identities nothing moves.
+    source.scene.destroySceneObject(lightObjectIds[4]);
+    TempScene afterDelete;
+    lr::SceneSerializer::save(source, afterDelete.path);
+    auto reloaded = lr::SceneSerializer::load(afterDelete.path);
+    assert(reloaded->scene.sceneObjects().size() == 7);
+    assert(!reloaded->scene.contains(lightObjectIds[4]));
+    assert(reloaded->scene.getSceneObject(root.id()).name == root.name);
+    for (size_t i = 0; i < 4; ++i)
+    {
+        assert(reloaded->scene.contains(lightObjectIds[i]));
+        assert(reloaded->scene.getSceneObject(lightObjectIds[i]).parent() == root.id());
+    }
+    const auto &reloadedSkin = reloaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::SkinComponent>().skin();
+    assert(reloadedSkin.joints()[1].sceneObject == lightObjectIds[0]);
+    const auto &reloadedAnimator = reloaded->scene.getSceneObject(root.id()).getComponent<lr::AnimatorComponent>();
+    assert(std::get<lr::TranslationTrack>(reloadedAnimator.clips()[0].tracks()[0]).target() == meshObjectIds[0]);
 
     // Loading is transactional: malformed input never mutates an existing SceneAssets instance.
     TempScene invalid;

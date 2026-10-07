@@ -103,6 +103,16 @@ public:
         }
     }
 
+    // Runs Component::onLoaded on every component. Called by scene loading once the whole scene
+    // exists, so a component may reach its siblings here.
+    void onLoaded()
+    {
+        for (auto &[type, component] : components)
+        {
+            component->onLoaded();
+        }
+    }
+
     // Gives every component an opportunity to visualize itself when this object is selected.
     void onSelectGizmo(SelectionGizmoContext &context) const
     {

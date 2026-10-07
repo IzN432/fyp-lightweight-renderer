@@ -60,6 +60,20 @@ public:
     // Components without a selection visualization keep the default no-op.
     virtual void onSelectGizmo(SelectionGizmoContext &) const {}
 
+    // Runs once a whole scene has finished loading, when every object, every component and every
+    // parent link in it exists. This is the only place during a load where a component may reach
+    // outside itself.
+    //
+    // A component's deserialization must restore that component's own state and nothing else — it
+    // must not call SceneObject::getComponent or hasComponent, because the components of an object
+    // are created in manifest order and the sibling being asked for may not exist yet. Anything
+    // that needs a sibling, or another object, goes here instead. See SceneSerializer for the full
+    // rule, and SphericalCameraController for the worked example.
+    //
+    // Not called for components added at runtime: addComponent takes the component's full state,
+    // and whatever it needs to reach is already in place by then.
+    virtual void onLoaded() {}
+
     bool isDirty() const { return m_dirty; }
     void clearDirty() { m_dirty = false; }
 };

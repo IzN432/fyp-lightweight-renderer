@@ -10,6 +10,7 @@
         "vulkan-memory-allocator",
         "mikktspace",
         "nlohmann-json",
+        "stduuid",
         "libigl",
         "intel-mkl",
         "reactphysics3d",

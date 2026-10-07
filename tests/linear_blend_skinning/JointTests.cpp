@@ -47,7 +47,7 @@ int main()
     bool invalidJointRejected = false;
     try
     {
-        lr::Skin invalid(scene, {{.sceneObject = 1000}});
+        lr::Skin invalid(scene, {{.sceneObject = lr::generateUuid()}});
     }
     catch (const std::invalid_argument &)
     {

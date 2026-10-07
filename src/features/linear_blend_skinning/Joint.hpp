@@ -15,7 +15,7 @@ using JointIndex = uint32_t;
 // in palette order. The transform belongs to the referenced scene object.
 struct Joint
 {
-    SceneObjectId sceneObject = 0;
+    SceneObjectId sceneObject{};
     glm::mat4     inverseBindMatrix{1.0f};
 };
 

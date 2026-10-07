@@ -121,7 +121,9 @@ class SceneObject:
     or an animator."""
 
     @property
-    def id(self) -> int: ...
+    def id(self) -> str:
+        """The object's stable identity, as a UUID string. It survives saving and loading the scene,
+        so it is safe to hold on to across a reload."""
     @property
     def name(self) -> str: ...
     @name.setter

@@ -421,7 +421,7 @@ void AnimatorComponent::onGUIImpl()
                     if (scene.contains(track.target()))
                     {
                         const SceneObject &target = scene.getSceneObject(track.target());
-                        objectName = target.name.empty() ? "Scene Object " + std::to_string(track.target())
+                        objectName = target.name.empty() ? "Scene Object " + toString(track.target())
                                                          : target.name;
                     }
 

@@ -79,12 +79,19 @@ void SphericalCameraController::onGUIImpl()
 
 void SphericalCameraController::setOrbitState(const OrbitState &state)
 {
+    restoreOrbitState(state);
+    applyPose();
+}
+
+void SphericalCameraController::restoreOrbitState(const OrbitState &state)
+{
     m_orbitTarget    = state.target;
     m_orbitRadius    = std::max(state.radius, 0.01f);
     m_orbitAzimuth   = state.azimuth;
     m_orbitElevation = glm::clamp(state.elevation, glm::radians(-89.0f), glm::radians(89.0f));
-    applyPose();
 }
+
+void SphericalCameraController::onLoaded() { applyPose(); }
 
 void SphericalCameraController::applyPose()
 {

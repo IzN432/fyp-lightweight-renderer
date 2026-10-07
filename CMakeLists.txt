@@ -40,6 +40,7 @@ find_package(tinyobjloader CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(mikktspace CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(stduuid CONFIG REQUIRED)
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h" REQUIRED)
 find_package(libigl CONFIG REQUIRED)
 # ARAP keeps libigl's geometry assembly but can use oneMKL PARDISO for its sparse global solve.
@@ -173,6 +174,7 @@ add_library(lr_core STATIC
 
     src/core/utility/ImageLoader.cpp
     src/core/utility/HeatmapColors.cpp
+    src/core/utility/Uuid.cpp
 )
 target_include_directories(lr_core PUBLIC src)
 target_link_libraries(lr_core PUBLIC
@@ -182,6 +184,7 @@ target_link_libraries(lr_core PUBLIC
     spdlog::spdlog
     tinyobjloader::tinyobjloader
     GPUOpen::VulkanMemoryAllocator
+    stduuid
     imgui
     imguizmo
     mikktspace::mikktspace
@@ -449,6 +452,11 @@ if(BUILD_TESTING)
     add_executable(callback_list_tests tests/utility/CallbackListTests.cpp)
     target_include_directories(callback_list_tests PRIVATE src)
     add_test(NAME utility.callback_list COMMAND callback_list_tests)
+
+    add_executable(uuid_tests tests/utility/UuidTests.cpp src/core/utility/Uuid.cpp)
+    target_include_directories(uuid_tests PRIVATE src)
+    target_link_libraries(uuid_tests PRIVATE stduuid)
+    add_test(NAME utility.uuid COMMAND uuid_tests)
 
     add_executable(mesh_buffer_sync_tests
         tests/upload/MeshBufferSyncTests.cpp

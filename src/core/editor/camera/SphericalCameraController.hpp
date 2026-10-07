@@ -35,7 +35,12 @@ public:
     OrbitState orbitState() const { return {m_orbitTarget, m_orbitRadius, m_orbitAzimuth, m_orbitElevation}; }
     void       setOrbitState(const OrbitState &state);
 
+    // Restores the orbit without placing the camera, for loading a scene: the object's
+    // TransformComponent may not exist yet. onLoaded() applies the pose once it does.
+    void restoreOrbitState(const OrbitState &state);
+
     void onGUIImpl() override;
+    void onLoaded() override;
 
 private:
     // Places the camera object according to the orbit state.

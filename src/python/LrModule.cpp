@@ -1654,7 +1654,10 @@ void bindScene(nb::module_ &m)
     nb::class_<lr::SceneObject>(m, "SceneObject",
                                 "An object in a Scene: a name, a place in the hierarchy, a "
                                 "transform, and optionally a mesh, a light or an animator.")
-        .def_prop_ro("id", &lr::SceneObject::id)
+        .def_prop_ro(
+            "id", [](const lr::SceneObject &object) { return lr::toString(object.id()); },
+            "The object's stable identity, as a UUID string. It survives saving and loading the "
+            "scene, so it is safe to hold on to across a reload.")
         .def_rw("name", &lr::SceneObject::name)
         .def_prop_ro(
             "parent",

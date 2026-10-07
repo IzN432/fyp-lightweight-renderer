@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -24,6 +25,11 @@ public:
     void onInspectorGUI(EditorContext &context);
 
     SceneObject &createSceneObject();
+
+    // Recreates an object under an identity it already had, for loading a saved scene. Throws if
+    // the id is nil or already belongs to an object in this scene, so a collision is loud rather
+    // than silently rebinding a live reference.
+    SceneObject &createSceneObject(SceneObjectId id);
 
     // Retires an object and its complete subtree. IDs and object addresses are never reused, so
     // editor commands that still mention an old object cannot become references to a different
@@ -77,7 +83,16 @@ public:
 private:
     void drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &deleteRequested);
 
+    // Finds an object whether or not it is still alive — destroySceneObject() has to reach objects
+    // it is in the middle of retiring. Callers that need a live object go through getSceneObject().
+    SceneObject       *find(SceneObjectId id);
+    const SceneObject *find(SceneObjectId id) const;
+
+    // Objects are stored in creation order and looked up by identity. The vector is what
+    // sceneObjects() hands out, and iterating it keeps scene traversal and saved-file ordering
+    // deterministic, which a hash map's iteration order would not.
     std::vector<std::unique_ptr<SceneObject>> m_sceneObjects;
+    std::unordered_map<SceneObjectId, size_t> m_objectIndices;
     std::optional<std::filesystem::path>       m_hdriPath;
     std::vector<std::byte>                     m_hdriData;
     std::optional<SceneObjectId>               m_selectedObject;

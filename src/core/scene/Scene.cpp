@@ -8,34 +8,57 @@
 namespace lr
 {
 
-SceneObject &Scene::createSceneObject()
+SceneObject &Scene::createSceneObject() { return createSceneObject(generateUuid()); }
+
+SceneObject &Scene::createSceneObject(SceneObjectId id)
 {
-    const SceneObjectId id = static_cast<SceneObjectId>(m_sceneObjects.size());
+    if (id.is_nil())
+    {
+        throw std::invalid_argument("A scene object cannot be created with a nil ID");
+    }
+    if (m_objectIndices.contains(id))
+    {
+        throw std::invalid_argument("A scene object with ID " + toString(id) + " already exists");
+    }
+    m_objectIndices.emplace(id, m_sceneObjects.size());
     m_sceneObjects.push_back(std::unique_ptr<SceneObject>(new SceneObject(*this, id)));
     return *m_sceneObjects.back();
+}
+
+SceneObject *Scene::find(SceneObjectId id)
+{
+    const auto found = m_objectIndices.find(id);
+    return found == m_objectIndices.end() ? nullptr : m_sceneObjects[found->second].get();
+}
+
+const SceneObject *Scene::find(SceneObjectId id) const
+{
+    const auto found = m_objectIndices.find(id);
+    return found == m_objectIndices.end() ? nullptr : m_sceneObjects[found->second].get();
 }
 
 SceneObject &Scene::getSceneObject(SceneObjectId id)
 {
     if (!contains(id))
     {
-        throw std::out_of_range("Scene object ID is out of range");
+        throw std::out_of_range("Scene object ID " + toString(id) + " does not name a live object");
     }
-    return *m_sceneObjects[id];
+    return *find(id);
 }
 
 const SceneObject &Scene::getSceneObject(SceneObjectId id) const
 {
     if (!contains(id))
     {
-        throw std::out_of_range("Scene object ID is out of range");
+        throw std::out_of_range("Scene object ID " + toString(id) + " does not name a live object");
     }
-    return *m_sceneObjects[id];
+    return *find(id);
 }
 
 bool Scene::contains(SceneObjectId id) const
 {
-    return id < m_sceneObjects.size() && m_sceneObjects[id] && m_sceneObjects[id]->m_alive;
+    const SceneObject *object = find(id);
+    return object && object->m_alive;
 }
 
 bool Scene::canDestroySceneObject(SceneObjectId id) const
@@ -54,7 +77,7 @@ bool Scene::canDestroySceneObject(SceneObjectId id) const
         {
             return false;
         }
-        const auto &children = m_sceneObjects[current]->m_children;
+        const auto &children = find(current)->m_children;
         pending.insert(pending.end(), children.begin(), children.end());
     }
     return true;
@@ -78,18 +101,18 @@ void Scene::destroySceneObject(SceneObjectId id)
             throw std::invalid_argument("A protected scene object cannot be deleted");
         }
         destroyed.push_back(current);
-        const auto &children = m_sceneObjects[current]->m_children;
+        const auto &children = find(current)->m_children;
         pending.insert(pending.end(), children.begin(), children.end());
     }
 
-    SceneObject &root = *m_sceneObjects[id];
+    SceneObject &root = *find(id);
     if (root.m_parent && contains(*root.m_parent))
     {
-        std::erase(m_sceneObjects[*root.m_parent]->m_children, id);
+        std::erase(find(*root.m_parent)->m_children, id);
     }
     for (SceneObjectId destroyedId : destroyed)
     {
-        SceneObject &object = *m_sceneObjects[destroyedId];
+        SceneObject &object = *find(destroyedId);
         object.m_parent.reset();
         object.m_children.clear();
         object.m_alive = false;
@@ -149,9 +172,11 @@ void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> 
         flags |= ImGuiTreeNodeFlags_Selected;
     }
 
-    const std::string label = object.name.empty() ? "Scene Object " + std::to_string(object.id()) : object.name;
-    const bool open = ImGui::TreeNodeEx(reinterpret_cast<void *>(static_cast<uintptr_t>(object.id()) + 1), flags,
-                                        "%s", label.c_str());
+    const std::string identity = toString(object.id());
+    const std::string label    = object.name.empty() ? "Scene Object " + identity : object.name;
+    // The identity string is the ImGui ID, so a row keeps its expanded state across frames and
+    // across a reload of the same scene.
+    const bool open = ImGui::TreeNodeEx(identity.c_str(), flags, "%s", label.c_str());
     if (ImGui::IsItemClicked())
     {
         m_selectedObject = object.id();

@@ -29,7 +29,8 @@ namespace
 {
 using json = nlohmann::json;
 
-constexpr int kFormatVersion = 1;
+// 2 — objects, meshes and materials are named by UUID rather than by a file-local index.
+constexpr int kFormatVersion = 2;
 constexpr std::array<char, 8> kFileMagic{'L', 'R', 'S', 'C', 'E', 'N', 'E', '\0'};
 const json &required(const json &object, const char *key, const std::string &where);
 
@@ -146,6 +147,24 @@ const json &required(const json &object, const char *key, const std::string &whe
         throw std::runtime_error("SceneSerializer: missing " + where + "." + key);
     }
     return object.at(key);
+}
+
+json writeId(const Uuid &value) { return toString(value); }
+
+Uuid readId(const json &value, const std::string &where)
+{
+    if (!value.is_string())
+    {
+        throw std::runtime_error("SceneSerializer: " + where + " must be a UUID string");
+    }
+    try
+    {
+        return parseUuid(value.get<std::string>());
+    }
+    catch (const std::runtime_error &error)
+    {
+        throw std::runtime_error("SceneSerializer: " + where + ": " + error.what());
+    }
 }
 
 json serializeLight(const LightVariant &variant)
@@ -348,7 +367,7 @@ json serializeAnimator(const AnimatorComponent &animator)
                 }
                 const char *property = std::is_same_v<Track, TranslationTrack> ? "translation" :
                                        std::is_same_v<Track, RotationTrack> ? "rotation" : "scale";
-                return json{{"target", track.target()}, {"property", property},
+                return json{{"target", toString(track.target())}, {"property", property},
                             {"interpolation", interpolationName(track.interpolation())},
                             {"keyframes", std::move(keyframes)}};
             }, channel));
@@ -366,8 +385,7 @@ struct LoadedAnimator
     float speed;
 };
 
-LoadedAnimator deserializeAnimator(const json &value, const std::string &where,
-                                  const std::unordered_map<SceneObjectId, SceneObjectId> &ids)
+LoadedAnimator deserializeAnimator(const json &value, const std::string &where, const Scene &scene)
 {
     std::vector<AnimationClip> clips;
     const json &serializedClips = required(value, "clips", where);
@@ -382,15 +400,15 @@ LoadedAnimator deserializeAnimator(const json &value, const std::string &where,
         {
             const json &track = serializedTracks[trackIndex];
             const std::string trackWhere = clipWhere + ".tracks[" + std::to_string(trackIndex) + "]";
-            const SceneObjectId fileTarget = required(track, "target", trackWhere).get<SceneObjectId>();
-            const auto target = ids.find(fileTarget);
-            if (target == ids.end()) throw std::runtime_error("SceneSerializer: missing animation target " + std::to_string(fileTarget) + " at " + trackWhere);
+            const SceneObjectId target = readId(required(track, "target", trackWhere), trackWhere + ".target");
+            if (!scene.contains(target))
+                throw std::runtime_error("SceneSerializer: missing animation target " + toString(target) + " at " + trackWhere);
             const auto interpolation = readInterpolation(required(track, "interpolation", trackWhere), trackWhere + ".interpolation");
             const std::string property = required(track, "property", trackWhere).get<std::string>();
             const json &keyframes = required(track, "keyframes", trackWhere);
             if (property == "rotation")
             {
-                RotationTrack result(target->second, interpolation);
+                RotationTrack result(target, interpolation);
                 for (size_t i = 0; i < keyframes.size(); ++i)
                 {
                     const json &key = keyframes[i];
@@ -416,8 +434,8 @@ LoadedAnimator deserializeAnimator(const json &value, const std::string &where,
                     }
                     tracks.emplace_back(std::move(result));
                 };
-                if (property == "translation") fill(TranslationTrack(target->second, interpolation));
-                else fill(ScaleTrack(target->second, interpolation));
+                if (property == "translation") fill(TranslationTrack(target, interpolation));
+                else fill(ScaleTrack(target, interpolation));
             }
             else throw std::runtime_error("SceneSerializer: invalid animation property '" + property + "' at " + trackWhere);
         }
@@ -472,34 +490,37 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
         throw std::runtime_error("SceneSerializer: only little-endian hosts are currently supported");
 
     BinaryWriter binary;
-    std::unordered_map<MeshHandle, uint32_t> meshIds;
-    std::unordered_map<MaterialHandle, uint32_t> materialIds;
+    // Only assets a live object actually references are written. Collecting them in encounter order
+    // keeps the file deterministic; the assets carry their own identities, so there is nothing to
+    // assign here beyond deciding what to include.
+    std::vector<MeshHandle>     referencedMeshes;
+    std::vector<MaterialHandle> referencedMaterials;
     for (const auto &objectPointer : scene.sceneObjects())
     {
         if (!scene.contains(objectPointer->id()) || !objectPointer->hasComponent<MeshComponent>()) continue;
         const MeshComponent &component = objectPointer->getComponent<MeshComponent>();
-        meshIds.try_emplace(component.meshHandle(), static_cast<uint32_t>(meshIds.size()));
+        if (std::ranges::find(referencedMeshes, component.meshHandle()) == referencedMeshes.end())
+            referencedMeshes.push_back(component.meshHandle());
         for (MaterialHandle handle : component.materialHandles())
-            materialIds.try_emplace(handle, static_cast<uint32_t>(materialIds.size()));
+        {
+            if (std::ranges::find(referencedMaterials, handle) == referencedMaterials.end())
+                referencedMaterials.push_back(handle);
+        }
     }
 
     json materials = json::array();
-    std::vector<std::pair<MaterialHandle, uint32_t>> orderedMaterials(materialIds.begin(), materialIds.end());
-    std::ranges::sort(orderedMaterials, {}, &std::pair<MaterialHandle, uint32_t>::second);
-    for (const auto &[handle, id] : orderedMaterials)
+    for (MaterialHandle handle : referencedMaterials)
     {
-        json item = serializeMaterial(materialStore.get(handle), binary);
-        item["id"] = id;
+        json item  = serializeMaterial(materialStore.get(handle), binary);
+        item["id"] = writeId(materialStore.idOf(handle));
         materials.push_back(std::move(item));
     }
 
     json meshes = json::array();
-    std::vector<std::pair<MeshHandle, uint32_t>> orderedMeshes(meshIds.begin(), meshIds.end());
-    std::ranges::sort(orderedMeshes, {}, &std::pair<MeshHandle, uint32_t>::second);
-    for (const auto &[handle, id] : orderedMeshes)
+    for (MeshHandle handle : referencedMeshes)
     {
         const Mesh &mesh = meshStore.get(handle);
-        json item{{"id", id}, {"positions", binary.append(std::span(mesh.positions()))},
+        json item{{"id", writeId(meshStore.idOf(handle))}, {"positions", binary.append(std::span(mesh.positions()))},
                   {"position_indices", binary.append(std::span(mesh.positionIndices()))},
                   {"faces", binary.append(std::span(mesh.faces()))},
                   {"face_groups", binary.append(std::span(mesh.faceGroups()))},
@@ -562,8 +583,9 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
         {
             const MeshComponent &mesh = object.getComponent<MeshComponent>();
             json materialReferences = json::array();
-            for (MaterialHandle handle : mesh.materialHandles()) materialReferences.push_back(materialIds.at(handle));
-            components["mesh"] = {{"mesh", meshIds.at(mesh.meshHandle())},
+            for (MaterialHandle handle : mesh.materialHandles())
+                materialReferences.push_back(writeId(materialStore.idOf(handle)));
+            components["mesh"] = {{"mesh", writeId(meshStore.idOf(mesh.meshHandle()))},
                                   {"materials", std::move(materialReferences)}};
         }
         if (object.hasComponent<AnimatorComponent>())
@@ -572,7 +594,7 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
         {
             json joints = json::array();
             for (const Joint &joint : object.getComponent<SkinComponent>().skin().joints())
-                joints.push_back({{"object", joint.sceneObject}, {"inverse_bind_matrix", mat4(joint.inverseBindMatrix)}});
+                joints.push_back({{"object", writeId(joint.sceneObject)}, {"inverse_bind_matrix", mat4(joint.inverseBindMatrix)}});
             components["skin"] = {{"joints", std::move(joints)}};
         }
         if (object.hasComponent<RigidBodyComponent>())
@@ -590,9 +612,9 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
                 colliders.push_back(serializeCollider(collider));
             components["colliders"] = std::move(colliders);
         }
-        json serialized{{"id", object.id()}, {"name", object.name}, {"parent", nullptr},
+        json serialized{{"id", writeId(object.id())}, {"name", object.name}, {"parent", nullptr},
                         {"components", std::move(components)}};
-        if (object.parent()) serialized["parent"] = *object.parent();
+        if (object.parent()) serialized["parent"] = writeId(*object.parent());
         objects.push_back(std::move(serialized));
     }
 
@@ -637,8 +659,8 @@ std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &
     return result;
 }
 
-void SceneSerializer::load(const std::filesystem::path &path, Scene &scene, MeshStore &meshStore,
-                           MaterialStore &materialStore)
+std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &path, Scene &scene,
+                                                 MeshStore &meshStore, MaterialStore &materialStore)
 {
     if constexpr (std::endian::native != std::endian::little)
         throw std::runtime_error("SceneSerializer: only little-endian hosts are currently supported");
@@ -687,26 +709,22 @@ void SceneSerializer::load(const std::filesystem::path &path, Scene &scene, Mesh
     }
     else scene.setHdriPath(std::nullopt);
 
-    std::unordered_map<uint32_t, MaterialHandle> materialHandles;
     const json &materials = required(document, "materials", "root");
     if (!materials.is_array()) throw std::runtime_error("SceneSerializer: root.materials must be an array");
     for (size_t index = 0; index < materials.size(); ++index)
     {
         const std::string where = "materials[" + std::to_string(index) + "]";
-        const uint32_t id = required(materials[index], "id", where).get<uint32_t>();
-        if (materialHandles.contains(id)) throw std::runtime_error("SceneSerializer: duplicate material id " + std::to_string(id));
-        materialHandles.emplace(id, materialStore.acquire(deserializeMaterial(materials[index], where, binary)));
+        const MaterialId  id    = readId(required(materials[index], "id", where), where + ".id");
+        materialStore.acquire(deserializeMaterial(materials[index], where, binary), id);
     }
 
-    std::unordered_map<uint32_t, MeshHandle> meshHandles;
     const json &meshes = required(document, "meshes", "root");
     if (!meshes.is_array()) throw std::runtime_error("SceneSerializer: root.meshes must be an array");
     for (size_t index = 0; index < meshes.size(); ++index)
     {
         const json &value = meshes[index];
         const std::string where = "meshes[" + std::to_string(index) + "]";
-        const uint32_t id = required(value, "id", where).get<uint32_t>();
-        if (meshHandles.contains(id)) throw std::runtime_error("SceneSerializer: duplicate mesh id " + std::to_string(id));
+        const MeshId      id    = readId(required(value, "id", where), where + ".id");
         Mesh mesh;
         auto positions = binary.readArray<glm::vec3>(required(value, "positions", where), where + ".positions");
         auto positionIndices = binary.readArray<uint32_t>(required(value, "position_indices", where), where + ".position_indices");
@@ -751,27 +769,29 @@ void SceneSerializer::load(const std::filesystem::path &path, Scene &scene, Mesh
         loadDomain("vertex_group_attributes", [&]<typename T>(const std::string &name, std::span<const std::byte> bytes) {
             mesh.setVertexGroupAttributeArray<T>(name, typedBytes<T>(bytes, where + ".vertex_group_attributes." + name));
         });
-        meshHandles.emplace(id, meshStore.add(std::move(mesh)));
+        meshStore.add(std::move(mesh), id);
     }
 
-    std::unordered_map<SceneObjectId, SceneObjectId> ids;
+    // Objects are created under the identities the file gives them, so every reference below —
+    // parents, animation targets, skin joints — resolves to the same object it named when saved.
+    // Scene::createSceneObject throws if one of those identities is already taken.
+    std::vector<SceneObjectId> created;
+    created.reserve(objects.size());
     for (size_t index = 0; index < objects.size(); ++index)
     {
         const json &value = objects[index];
         const std::string where = "objects[" + std::to_string(index) + "]";
-        const SceneObjectId fileId = required(value, "id", where).get<SceneObjectId>();
-        if (ids.contains(fileId)) throw std::runtime_error("SceneSerializer: duplicate object id " + std::to_string(fileId));
-        SceneObject &object = scene.createSceneObject();
+        const SceneObjectId id = readId(required(value, "id", where), where + ".id");
+        SceneObject &object = scene.createSceneObject(id);
         object.name = required(value, "name", where).get<std::string>();
-        ids.emplace(fileId, object.id());
+        created.push_back(object.id());
     }
 
     for (size_t index = 0; index < objects.size(); ++index)
     {
         const json &value = objects[index];
         const std::string where = "objects[" + std::to_string(index) + "]";
-        const SceneObjectId fileId = required(value, "id", where).get<SceneObjectId>();
-        SceneObject &object = scene.getSceneObject(ids.at(fileId));
+        SceneObject &object = scene.getSceneObject(created[index]);
         const json &components = required(value, "components", where);
         if (!components.is_object()) throw std::runtime_error("SceneSerializer: " + where + ".components must be an object");
         for (const auto &[name, ignored] : components.items())
@@ -811,32 +831,33 @@ void SceneSerializer::load(const std::filesystem::path &path, Scene &scene, Mesh
             state.radius = required(controller, "radius", where).get<float>();
             state.azimuth = required(controller, "azimuth", where).get<float>();
             state.elevation = required(controller, "elevation", where).get<float>();
-            auto &component = object.addComponent<SphericalCameraController>();
-            component.setOrbitState(state);
+            // Restores the orbit only. Placing the camera reads this object's TransformComponent,
+            // which the "transform" entry may not have created yet, so it waits for onLoaded().
+            object.addComponent<SphericalCameraController>().restoreOrbitState(state);
         }
         if (components.contains("light")) object.addComponent<Light>(deserializeLight(components.at("light"), where + ".components.light"));
         if (components.contains("mesh"))
         {
             const json &mesh = components.at("mesh");
-            const uint32_t meshId = required(mesh, "mesh", where).get<uint32_t>();
-            const auto foundMesh = meshHandles.find(meshId);
-            if (foundMesh == meshHandles.end()) throw std::runtime_error("SceneSerializer: missing mesh " + std::to_string(meshId) + " at " + where);
+            const MeshId meshId = readId(required(mesh, "mesh", where), where + ".components.mesh.mesh");
+            const auto foundMesh = meshStore.find(meshId);
+            if (!foundMesh) throw std::runtime_error("SceneSerializer: missing mesh " + toString(meshId) + " at " + where);
             std::vector<MaterialHandle> objectMaterials;
             const json &references = required(mesh, "materials", where);
             if (!references.is_array()) throw std::runtime_error("SceneSerializer: mesh materials must be an array at " + where);
             for (const json &reference : references)
             {
-                const uint32_t materialId = reference.get<uint32_t>();
-                const auto foundMaterial = materialHandles.find(materialId);
-                if (foundMaterial == materialHandles.end()) throw std::runtime_error("SceneSerializer: missing material " + std::to_string(materialId) + " at " + where);
-                objectMaterials.push_back(foundMaterial->second);
+                const MaterialId materialId = readId(reference, where + ".components.mesh.materials");
+                const auto foundMaterial = materialStore.find(materialId);
+                if (!foundMaterial) throw std::runtime_error("SceneSerializer: missing material " + toString(materialId) + " at " + where);
+                objectMaterials.push_back(*foundMaterial);
             }
-            object.addComponent<MeshComponent>(foundMesh->second, meshStore, std::move(objectMaterials),
+            object.addComponent<MeshComponent>(*foundMesh, meshStore, std::move(objectMaterials),
                                                materialStore);
         }
         if (components.contains("animator"))
         {
-            LoadedAnimator loaded = deserializeAnimator(components.at("animator"), where + ".components.animator", ids);
+            LoadedAnimator loaded = deserializeAnimator(components.at("animator"), where + ".components.animator", scene);
             auto &animator = object.addComponent<AnimatorComponent>(std::move(loaded.clips));
             animator.setLoop(loaded.loop);
             animator.setSpeedMultiplier(loaded.speed);
@@ -849,10 +870,9 @@ void SceneSerializer::load(const std::filesystem::path &path, Scene &scene, Mesh
             for (size_t i = 0; i < serializedJoints.size(); ++i)
             {
                 const json &joint = serializedJoints[i];
-                const SceneObjectId fileObject = required(joint, "object", where).get<SceneObjectId>();
-                const auto found = ids.find(fileObject);
-                if (found == ids.end()) throw std::runtime_error("SceneSerializer: missing skin joint object " + std::to_string(fileObject) + " at " + where);
-                joints.push_back({found->second, readMat4(required(joint, "inverse_bind_matrix", where), where + ".inverse_bind_matrix")});
+                const SceneObjectId jointObject = readId(required(joint, "object", where), where + ".skin.joints.object");
+                if (!scene.contains(jointObject)) throw std::runtime_error("SceneSerializer: missing skin joint object " + toString(jointObject) + " at " + where);
+                joints.push_back({jointObject, readMat4(required(joint, "inverse_bind_matrix", where), where + ".inverse_bind_matrix")});
             }
             object.addComponent<SkinComponent>(Skin(scene, std::move(joints)));
         }
@@ -883,12 +903,18 @@ void SceneSerializer::load(const std::filesystem::path &path, Scene &scene, Mesh
         const json &parent = required(value, "parent", where);
         if (!parent.is_null())
         {
-            const SceneObjectId parentFileId = parent.get<SceneObjectId>();
-            const auto found = ids.find(parentFileId);
-            if (found == ids.end()) throw std::runtime_error("SceneSerializer: missing parent object " + std::to_string(parentFileId) + " at " + where);
-            scene.setParent(object.id(), found->second);
+            const SceneObjectId parentId = readId(parent, where + ".parent");
+            if (!scene.contains(parentId)) throw std::runtime_error("SceneSerializer: missing parent object " + toString(parentId) + " at " + where);
+            scene.setParent(object.id(), parentId);
         }
     }
+
+    // Every object and component in the file now exists, so components may reach their siblings.
+    for (SceneObjectId id : created)
+    {
+        scene.getSceneObject(id).onLoaded();
+    }
+    return created;
 }
 
 } // namespace lr

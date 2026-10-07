@@ -126,16 +126,16 @@ std::vector<SceneObjectId> SceneManager::loadScene(const std::filesystem::path &
     m_meshStore.clear();
     m_materialStore.clear();
 
-    const size_t firstObject = target.sceneObjects().size();
-    SceneSerializer::load(path, target, m_meshStore, m_materialStore);
+    const std::vector<SceneObjectId> loadedObjects =
+        SceneSerializer::load(path, target, m_meshStore, m_materialStore);
 
     std::vector<SceneObjectId> added;
     std::vector<MaterialHandle> loadedMaterials;
     std::vector<SceneObjectId> legacyEditorCameras;
-    for (size_t i = firstObject; i < target.sceneObjects().size(); ++i)
+    for (SceneObjectId loadedId : loadedObjects)
     {
-        SceneObject &object = *target.sceneObjects()[i];
-        if (!target.contains(object.id())) continue;
+        if (!target.contains(loadedId)) continue;
+        SceneObject &object = target.getSceneObject(loadedId);
         // Preserve the live camera object's identity (Viewer/input systems reference it), but restore
         // all authored camera state from the serialized copy before retiring that temporary object.
         if (object.name == "Main Camera" && object.hasComponent<Camera>())
