@@ -473,6 +473,12 @@ if(BUILD_TESTING)
     target_link_libraries(editor_state_controller_tests PRIVATE Vulkan::Vulkan glm::glm)
     add_test(NAME editor.state_controller COMMAND editor_state_controller_tests)
 
+    add_executable(editor_tool_target_tests
+        tests/editor/EditorToolTargetTests.cpp
+    )
+    target_link_libraries(editor_tool_target_tests PRIVATE lr_arap_feature)
+    add_test(NAME editor.tool_target COMMAND editor_tool_target_tests)
+
     add_executable(scene_hierarchy_tests
         tests/scene/SceneHierarchyTests.cpp
     )

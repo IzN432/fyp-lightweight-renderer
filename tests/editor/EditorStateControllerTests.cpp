@@ -437,6 +437,89 @@ void anActiveStateCanClaimPointerInput()
     assert(fellThrough);
 }
 
+// Two states that both want the translate gizmo. Only one of them can ever be the active state, so
+// the controller can only ever hand the host one request — the exclusivity the gizmo depends on is a
+// property of state activation, not something GizmoController has to police.
+void onlyTheActiveStateBidsForTheGizmo()
+{
+    lr::EditorStateController controller([](const lr::EditorStateDefinition &) {});
+    NoopTranslateHandler      vertexHandler;
+    NoopTranslateHandler      objectHandler;
+
+    controller.registerState({
+        .id           = "edit",
+        .gizmoRequest = [&vertexHandler](const lr::EditorFrameContext &) -> lr::GizmoRequest {
+            return lr::TranslateGizmoRequest{.origin = glm::vec3(1.0f), .handler = &vertexHandler};
+        },
+    });
+    controller.registerState({
+        .id           = "view",
+        .gizmoRequest = [&objectHandler](const lr::EditorFrameContext &) -> lr::GizmoRequest {
+            return lr::TranslateGizmoRequest{.origin = glm::vec3(2.0f), .handler = &objectHandler};
+        },
+    });
+    controller.registerState({.id = "analysis"});
+
+    const lr::EditorFrameContext frame{};
+
+    const auto handlerOf = [](const lr::GizmoRequest &request) -> const lr::TranslateDragHandler * {
+        const auto *translate = std::get_if<lr::TranslateGizmoRequest>(&request);
+        return translate ? translate->handler : nullptr;
+    };
+
+    controller.activate("edit");
+    assert(handlerOf(controller.gizmoRequest(frame)) == &vertexHandler);
+
+    // Switching states withdraws the previous bid in the same breath as publishing the new one:
+    // there is no frame in which both are live, which is what lets GizmoController finish the old
+    // interaction by simply not being asked for it again.
+    controller.activate("view");
+    assert(handlerOf(controller.gizmoRequest(frame)) == &objectHandler);
+
+    // And a state that wants no gizmo withdraws it entirely rather than leaving the last one up.
+    controller.activate("analysis");
+    assert(std::holds_alternative<std::monostate>(controller.gizmoRequest(frame)));
+}
+
+// A state added later must work without the presentation consumer learning anything about it: the
+// consumer only ever reads EditorPresentation fields. This is what lets a feature library add a
+// state without SceneManager (or any other consumer) changing.
+void aNewStateNeedsNoConsumerChange()
+{
+    // Stands in for every presentation consumer — it knows the flags, never the state ids.
+    lr::EditorPresentation applied;
+    int                    applications = 0;
+
+    lr::EditorStateController controller([&](const lr::EditorStateDefinition &state) {
+        applied = state.presentation;
+        ++applications;
+    });
+
+    controller.registerState({.id = "view", .presentation = {}});
+    controller.setDefaultState("view");
+    controller.activate("view");
+    assert(applications == 1);
+
+    // A state invented after the consumer was written, with a combination of flags no existing state
+    // uses.
+    controller.registerState({
+        .id           = "future-feature",
+        .presentation = {.skinningEnabled = true, .vertexPointsVisible = true, .heatmapVisible = true},
+    });
+    controller.activate("future-feature");
+
+    assert(applications == 2);
+    assert(applied.skinningEnabled);
+    assert(applied.vertexPointsVisible);
+    assert(applied.heatmapVisible);
+    assert(!applied.vertexSelectionActive);
+
+    // And it takes part in the default-state fallback like any other state.
+    controller.activateDefault();
+    assert(controller.isActive("view"));
+    assert(applied == lr::EditorPresentation{});
+}
+
 void activeThrowsBeforeAnyActivation()
 {
     lr::EditorStateController controller([](const lr::EditorStateDefinition &) {});
@@ -466,6 +549,8 @@ int main()
     routerStopsAtTheFirstLayerThatConsumes();
     navigationYieldsToUiButNotToTheGizmo();
     anActiveStateCanClaimPointerInput();
+    onlyTheActiveStateBidsForTheGizmo();
+    aNewStateNeedsNoConsumerChange();
     activeThrowsBeforeAnyActivation();
     return 0;
 }
