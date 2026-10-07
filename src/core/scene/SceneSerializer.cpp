@@ -22,8 +22,9 @@ namespace
 {
 using json = nlohmann::json;
 
-// 2 — objects, meshes and materials are named by UUID rather than by a file-local index.
-constexpr int kFormatVersion = 2;
+// 3 — the materials array is indexed by the source MaterialHandle. Mesh face groups index that
+// table and are remapped to destination handles while loading.
+constexpr int kFormatVersion = 3;
 constexpr std::array<char, 8> kFileMagic{'L', 'R', 'S', 'C', 'E', 'N', 'E', '\0'};
 const json &required(const json &object, const char *key, const std::string &where);
 
@@ -270,14 +271,26 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
             if (std::ranges::find(referencedMaterials, handle) == referencedMaterials.end())
                 referencedMaterials.push_back(handle);
         }
+        // Face groups are what the renderer actually indexes. Keep this independent of the
+        // component's editor-facing material list so a valid mesh cannot silently lose a material.
+        for (MaterialHandle handle : component.mesh().faceGroups())
+        {
+            if (std::ranges::find(referencedMaterials, handle) == referencedMaterials.end())
+                referencedMaterials.push_back(handle);
+        }
     }
 
     json materials = json::array();
+    if (!referencedMaterials.empty())
+    {
+        const size_t tableSize = static_cast<size_t>(*std::ranges::max_element(referencedMaterials)) + 1;
+        for (size_t index = 0; index < tableSize; ++index) materials.push_back(nullptr);
+    }
     for (MaterialHandle handle : referencedMaterials)
     {
         json item  = serializeMaterial(materialStore.get(handle), binary);
         item["id"] = writeId(materialStore.idOf(handle));
-        materials.push_back(std::move(item));
+        materials[handle] = std::move(item);
     }
 
     json meshes = json::array();
@@ -387,7 +400,7 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
     if (required(document, "format", "root").get<std::string>() != "lr.scene")
         throw std::runtime_error("SceneSerializer: root.format must be 'lr.scene'");
     const int version = required(document, "version", "root").get<int>();
-    if (version != kFormatVersion)
+    if (version != 2 && version != kFormatVersion)
         throw std::runtime_error("SceneSerializer: unsupported format version " + std::to_string(version));
     const json &objects = required(document, "objects", "root");
     if (!objects.is_array()) throw std::runtime_error("SceneSerializer: root.objects must be an array");
@@ -412,11 +425,19 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
 
     const json &materials = required(document, "materials", "root");
     if (!materials.is_array()) throw std::runtime_error("SceneSerializer: root.materials must be an array");
+    std::vector<std::optional<MaterialHandle>> materialHandleRemap(materials.size());
     for (size_t index = 0; index < materials.size(); ++index)
     {
+        if (materials[index].is_null())
+        {
+            if (version < 3)
+                throw std::runtime_error("SceneSerializer: materials[" + std::to_string(index) + "] must be an object");
+            continue;
+        }
         const std::string where = "materials[" + std::to_string(index) + "]";
         const MaterialId  id    = readId(required(materials[index], "id", where), where + ".id");
-        materialStore.acquire(deserializeMaterial(materials[index], where, binary), id);
+        const MaterialHandle handle = materialStore.acquire(deserializeMaterial(materials[index], where, binary), id);
+        if (version >= 3) materialHandleRemap[index] = handle;
     }
 
     const json &meshes = required(document, "meshes", "root");
@@ -432,6 +453,37 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
         auto faces = binary.readArray<glm::uvec3>(required(value, "faces", where), where + ".faces");
         mesh.setTopology(std::move(positions), std::move(positionIndices), std::move(faces));
         auto faceGroups = binary.readArray<uint32_t>(required(value, "face_groups", where), where + ".face_groups");
+        if (version >= 3)
+        {
+            for (size_t face = 0; face < faceGroups.size(); ++face)
+            {
+                const MaterialHandle savedHandle = faceGroups[face];
+                if (savedHandle >= materialHandleRemap.size() || !materialHandleRemap[savedHandle])
+                    throw std::runtime_error("SceneSerializer: missing material for saved handle " +
+                                             std::to_string(savedHandle) + " at " + where + ".face_groups[" +
+                                             std::to_string(face) + "]");
+                faceGroups[face] = *materialHandleRemap[savedHandle];
+            }
+        }
+        // Transitional version-2 files written during development stored a UUID per face. Keep
+        // accepting them even though version 3 replaces that representation with the global table.
+        else if (value.contains("face_group_materials"))
+        {
+            const json &materialIds = value.at("face_group_materials");
+            if (!materialIds.is_array() || materialIds.size() != faceGroups.size())
+                throw std::runtime_error("SceneSerializer: " + where +
+                                         ".face_group_materials must match face_groups");
+            for (size_t group = 0; group < materialIds.size(); ++group)
+            {
+                const std::string groupWhere = where + ".face_group_materials[" + std::to_string(group) + "]";
+                const MaterialId id = readId(materialIds[group], groupWhere);
+                const auto material = materialStore.find(id);
+                if (!material)
+                    throw std::runtime_error("SceneSerializer: missing material " + toString(id) + " at " +
+                                             groupWhere);
+                faceGroups[group] = *material;
+            }
+        }
         if (!faceGroups.empty()) mesh.setFaceGroups(std::move(faceGroups));
         mesh.setFaceGroupCount(required(value, "face_group_count", where).get<uint32_t>());
         const uint32_t vertexGroupCount = required(value, "vertex_group_count", where).get<uint32_t>();

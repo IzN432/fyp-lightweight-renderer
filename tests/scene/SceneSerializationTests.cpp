@@ -106,6 +106,12 @@ int main()
         lightObjectIds.push_back(object.id());
     }
 
+    // Leave an unreferenced occupied slot before the real material. It must not affect the loaded
+    // mesh: MaterialStore handles are session-local and are deliberately not preserved in the file.
+    lr::Material unusedMaterial;
+    unusedMaterial.name = "Unreferenced material";
+    source.materials.acquire(std::move(unusedMaterial));
+
     lr::Material material;
     material.name = "Complete material";
     material.parameters["rgba"] = lr::MaterialParam::ColorRGBA{{0.1f, 0.2f, 0.3f, 0.4f}};
@@ -117,7 +123,7 @@ int main()
 
     lr::Mesh mesh;
     mesh.setTopology({{0, 0, 0}, {1, 0, 0}, {0, 1, 0}}, {0, 1, 2}, {{0, 1, 2}});
-    mesh.setFaceGroups({0});
+    mesh.setFaceGroups({materialHandle});
     mesh.setFaceGroupCount(1);
     mesh.setPerVertexArray<glm::vec2>("uv", std::vector<glm::vec2>{{0, 0}, {1, 0}, {0, 1}});
     mesh.setPerVertexArray<glm::vec3>("normal", std::vector<glm::vec3>(3, {0, 0, 1}));
@@ -222,6 +228,7 @@ int main()
     assert(meshA.meshHandle() == meshB.meshHandle());
     assert(meshA.materialHandles() == meshB.materialHandles());
     const lr::Mesh &roundTripMesh = meshA.mesh();
+    assert(roundTripMesh.faceGroups() == std::vector<uint32_t>{meshA.materialHandles()[0]});
     assert(roundTripMesh.positions().size() == 3 && roundTripMesh.faces().size() == 1);
     assert(roundTripMesh.getPerVertexArray<glm::vec2>("uv").size() == 3);
     assert(roundTripMesh.getPerVertexArray<glm::vec3>("normal")[0] == glm::vec3(0, 0, 1));
