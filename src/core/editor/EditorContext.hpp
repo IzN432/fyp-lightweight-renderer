@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/scene/ComponentClipboard.hpp"
+
 #include <functional>
 
 namespace lr
@@ -29,6 +31,9 @@ struct EditorContext
 {
     TransformEditService &transformEdits;
     CommandManager       &commands;
+    // Owned here rather than referenced, because nothing outside the inspector's copy/paste menu
+    // touches it and it should live exactly as long as the editor session does.
+    ComponentClipboard componentClipboard;
 };
 
 } // namespace lr

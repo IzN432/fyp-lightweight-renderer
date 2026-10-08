@@ -4,6 +4,7 @@
 #include "core/scene/Component.hpp"
 
 #include <algorithm>
+#include <memory>
 #include <variant>
 
 namespace lr
@@ -129,6 +130,18 @@ struct Light : public Component
         light = lightVariant;
         enforceConeAngles(light);
         markDirty();
+    }
+
+    // The variant carries the light's type as well as its parameters, so pasting turns the target
+    // into the same kind of light. Applied through set(), which re-runs the cone-angle clamps.
+    std::unique_ptr<ComponentValues> copyValues() const override
+    {
+        return std::make_unique<ComponentValueSnapshot<LightVariant>>(light);
+    }
+
+    void pasteValues(const ComponentValues &values) override
+    {
+        set(componentValuesAs<LightVariant>(values));
     }
 
     void onGUIImpl() override

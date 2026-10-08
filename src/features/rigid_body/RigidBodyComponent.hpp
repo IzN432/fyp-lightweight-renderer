@@ -4,6 +4,8 @@
 
 #include <glm/glm.hpp>
 
+#include <memory>
+
 namespace lr
 {
 
@@ -47,6 +49,23 @@ public:
     void addForce(const glm::vec3 &force);
     void addTorque(const glm::vec3 &torque);
     void clearAccumulators();
+
+    // Body setup and velocity, matching what the scene format stores for a rigid body. The force
+    // and torque accumulators are left out on purpose: they are cleared every solver step, so
+    // copying them would paste a value that has already expired.
+    struct Values
+    {
+        RigidBodyType type = RigidBodyType::Dynamic;
+        float         mass = 1.0f;
+        glm::vec3     inertiaDiagonal{1.0f / 6.0f};
+        float         linearDrag  = 0.05f;
+        float         angularDrag = 0.05f;
+        glm::vec3     linearVelocity{0.0f};
+        glm::vec3     angularVelocity{0.0f};
+    };
+
+    std::unique_ptr<ComponentValues> copyValues() const override;
+    void                             pasteValues(const ComponentValues &values) override;
 
     void onGUIImpl() override;
 

@@ -4,7 +4,6 @@
 
 namespace lr
 {
-
 glm::mat4 TransformComponent::worldMatrix() const
 {
     // A detached TransformComponent — one not owned by a SceneObject, such as the placeholder

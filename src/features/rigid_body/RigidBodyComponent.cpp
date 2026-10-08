@@ -134,6 +134,27 @@ void RigidBodyComponent::clearAccumulators()
     markDirty();
 }
 
+std::unique_ptr<ComponentValues> RigidBodyComponent::copyValues() const
+{
+    return std::make_unique<ComponentValueSnapshot<Values>>(Values{m_type, m_mass, m_inertiaDiagonal,
+                                                                   m_linearDrag, m_angularDrag,
+                                                                   m_linearVelocity, m_angularVelocity});
+}
+
+void RigidBodyComponent::pasteValues(const ComponentValues &values)
+{
+    // Routed through the setters so a pasted body passes the same clamps and derived-quantity
+    // updates — inverse mass, inverse inertia — as one edited by hand.
+    const Values &pasted = componentValuesAs<Values>(values);
+    setType(pasted.type);
+    setMass(pasted.mass);
+    setInertiaDiagonal(pasted.inertiaDiagonal);
+    setLinearDrag(pasted.linearDrag);
+    setAngularDrag(pasted.angularDrag);
+    setLinearVelocity(pasted.linearVelocity);
+    setAngularVelocity(pasted.angularVelocity);
+}
+
 void RigidBodyComponent::onGUIImpl()
 {
     bool changed = false;

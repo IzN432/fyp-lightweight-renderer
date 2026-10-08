@@ -5,6 +5,7 @@
 
 #include <glm/glm.hpp>
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -44,6 +45,35 @@ public:
     const glm::vec3 &visualizationColor() const { return m_visualizationColor; }
     float visualizationOpacity() const { return m_visualizationOpacity; }
     float occludedOpacity() const { return m_occludedOpacity; }
+
+    // The whole collider list plus its visualization settings: a shape set is exactly the kind of
+    // thing worth copying between objects, and Collider is a plain value, so the list duplicates
+    // cleanly without referring back to the object it came from.
+    struct Values
+    {
+        std::vector<Collider> colliders;
+        bool                  visible              = false;
+        glm::vec3             visualizationColor   = {0.15f, 0.85f, 0.35f};
+        float                 visualizationOpacity = 1.0f;
+        float                 occludedOpacity      = 0.15f;
+    };
+
+    std::unique_ptr<ComponentValues> copyValues() const override
+    {
+        return std::make_unique<ComponentValueSnapshot<Values>>(
+            Values{m_colliders, m_visible, m_visualizationColor, m_visualizationOpacity, m_occludedOpacity});
+    }
+
+    void pasteValues(const ComponentValues &values) override
+    {
+        const Values &pasted    = componentValuesAs<Values>(values);
+        m_colliders             = pasted.colliders;
+        m_visible               = pasted.visible;
+        m_visualizationColor    = pasted.visualizationColor;
+        m_visualizationOpacity  = pasted.visualizationOpacity;
+        m_occludedOpacity       = pasted.occludedOpacity;
+        markDirty();
+    }
 
     void onGUIImpl() override;
 

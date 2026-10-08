@@ -8,6 +8,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <memory>
 
 namespace lr
 {
@@ -70,6 +71,34 @@ struct Camera : public Component
     [[nodiscard]] glm::mat4 viewProjectionMatrix(float aspectRatio) const
     {
         return projectionMatrix(aspectRatio) * viewMatrix();
+    }
+
+    // Only the projection: a camera's placement lives in the owning object's TransformComponent,
+    // which is that object's to copy, not this component's.
+    struct Projection
+    {
+        ProjectionType projectionType = ProjectionType::Perspective;
+        float          fovYDegrees    = 60.0f;
+        float          nearPlane      = 0.1f;
+        float          farPlane       = 1000.0f;
+        float          orthoHeight    = 10.0f;
+    };
+
+    std::unique_ptr<ComponentValues> copyValues() const override
+    {
+        return std::make_unique<ComponentValueSnapshot<Projection>>(
+            Projection{projectionType, fovYDegrees, nearPlane, farPlane, orthoHeight});
+    }
+
+    void pasteValues(const ComponentValues &values) override
+    {
+        const Projection &projection = componentValuesAs<Projection>(values);
+        projectionType               = projection.projectionType;
+        fovYDegrees                  = projection.fovYDegrees;
+        nearPlane                    = projection.nearPlane;
+        farPlane                     = projection.farPlane;
+        orthoHeight                  = projection.orthoHeight;
+        markDirty();
     }
 
     void onGUIImpl() override

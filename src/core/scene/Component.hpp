@@ -1,7 +1,10 @@
 #pragma once
 
+#include "core/scene/ComponentClipboard.hpp"
+
 #include <glm/glm.hpp>
 
+#include <memory>
 #include <string>
 #include <imgui.h>
 
@@ -46,15 +49,22 @@ public:
     Component(std::string name = "") : m_name(std::move(name)) {}
     virtual ~Component() = default;
 
-    void onGUI(EditorContext &context)
-    {
-        m_editorContext = &context;
-        ImGui::Text("Component: %s", m_name.c_str());
-        onGUIImpl();
-        m_editorContext = nullptr;
-    }
+    void onGUI(EditorContext &context);
 
     virtual void onGUIImpl() {}
+
+    // Editor copy/paste of this component's values, offered from a right-click menu over the
+    // component's own block in the inspector. A component opts in by overriding both halves:
+    // copyValues takes a detached snapshot of whatever its inspector edits, pasteValues applies one
+    // back and marks itself dirty.
+    //
+    // The default copyValues returns null, which keeps the component out of the menu altogether —
+    // a component joins only once pasting it is actually meaningful, so there is no menu entry for
+    // components whose values belong to one object alone. The clipboard only ever hands pasteValues
+    // a snapshot produced by this same component type, so an override may cast straight to its own
+    // payload type.
+    virtual std::unique_ptr<ComponentValues> copyValues() const { return nullptr; }
+    virtual void                             pasteValues(const ComponentValues &values) { (void)values; }
 
     // Appends editor-only geometry when this component's owning object is selected.
     // Components without a selection visualization keep the default no-op.
@@ -76,6 +86,9 @@ public:
 
     bool isDirty() const { return m_dirty; }
     void clearDirty() { m_dirty = false; }
+
+private:
+    void drawValueClipboardMenu(EditorContext &context);
 };
 
 } // namespace lr

@@ -117,15 +117,9 @@ public:
 
     void onGUI(EditorContext &context)
     {
-        int  id = 0;
-        bool first = true;
+        int id = 0;
         for (auto &[type, component] : components)
         {
-            if (!first)
-            {
-                ImGui::Separator();
-            }
-            first = false;
             ImGui::PushID(id++);
             component->onGUI(context);
             ImGui::PopID();

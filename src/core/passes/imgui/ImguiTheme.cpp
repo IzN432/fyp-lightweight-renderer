@@ -58,6 +58,7 @@ void applyImguiTheme()
     style.ScrollbarRounding = 6.0f;
     style.GrabRounding      = 4.0f;
     style.TabRounding       = 4.0f;
+    style.DisabledAlpha     = 0.40f;
 
     style.WindowTitleAlign  = {0.0f, 0.5f};
     style.SeparatorTextBorderSize = 1.0f;

@@ -5,6 +5,7 @@
 
 #include <imgui.h>
 
+#include <memory>
 #include <utility>
 
 namespace lr
@@ -52,6 +53,20 @@ public:
     void setScale(const glm::vec3 &scale)
     {
         m_transform.setScale(scale);
+        markDirty();
+    }
+
+    // Position, rotation and scale are all a transform owns, so its snapshot is the whole
+    // Transform. Carrying the Transform itself also carries its euler angles rather than
+    // re-deriving them from the quaternion, so a paste reproduces the numbers that were copied.
+    std::unique_ptr<ComponentValues> copyValues() const override
+    {
+        return std::make_unique<ComponentValueSnapshot<Transform>>(m_transform);
+    }
+
+    void pasteValues(const ComponentValues &values) override
+    {
+        m_transform = componentValuesAs<Transform>(values);
         markDirty();
     }
 

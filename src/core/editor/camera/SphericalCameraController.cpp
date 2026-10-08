@@ -68,6 +68,17 @@ void SphericalCameraController::onGUIImpl()
     }
 }
 
+std::unique_ptr<ComponentValues> SphericalCameraController::copyValues() const
+{
+    return std::make_unique<ComponentValueSnapshot<OrbitState>>(orbitState());
+}
+
+void SphericalCameraController::pasteValues(const ComponentValues &values)
+{
+    setOrbitState(componentValuesAs<OrbitState>(values));
+    markDirty();
+}
+
 void SphericalCameraController::setOrbitState(const OrbitState &state)
 {
     restoreOrbitState(state);

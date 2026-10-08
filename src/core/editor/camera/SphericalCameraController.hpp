@@ -4,6 +4,8 @@
 
 #include <glm/glm.hpp>
 
+#include <memory>
+
 namespace lr
 {
 
@@ -39,6 +41,11 @@ public:
     // Restores the orbit without placing the camera, for loading a scene: the object's
     // TransformComponent may not exist yet. onLoaded() applies the pose once it does.
     void restoreOrbitState(const OrbitState &state);
+
+    // The orbit is this controller's whole editable state, and pasting it places the camera at
+    // once, exactly as typing the same numbers into the inspector would.
+    std::unique_ptr<ComponentValues> copyValues() const override;
+    void                             pasteValues(const ComponentValues &values) override;
 
     void onGUIImpl() override;
     void onLoaded() override;

@@ -115,6 +115,7 @@ add_library(lr_core STATIC
     src/core/passes/imgui/ImguiTheme.cpp
 
     src/core/scene/Mesh.cpp
+    src/core/scene/Component.cpp
     src/core/scene/MeshComponent.cpp
     src/core/scene/MeshStore.cpp
     src/core/scene/Light.cpp
@@ -521,6 +522,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(scene_hierarchy_tests PRIVATE lr_core)
     add_test(NAME scene.hierarchy COMMAND scene_hierarchy_tests)
+
+    add_executable(component_clipboard_tests
+        tests/scene/ComponentClipboardTests.cpp
+    )
+    target_link_libraries(component_clipboard_tests PRIVATE lr_core)
+    add_test(NAME scene.component_clipboard COMMAND component_clipboard_tests)
 
     add_executable(scene_serialization_tests
         tests/scene/SceneSerializationTests.cpp
