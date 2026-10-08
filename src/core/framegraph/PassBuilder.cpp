@@ -16,6 +16,27 @@ void requireShaderStages(VkShaderStageFlags stages, const char *declaration)
     }
 }
 
+// ImageView carries both axes, but each resolution path honours only one: descriptors select a mip
+// (all layers), attachments select a layer (mip 0). Reject the combinations that would be dropped
+// silently rather than binding the full-range view.
+void requireNoMipSelection(const lr::ImageView &image, const char *declaration)
+{
+    if (image.mipLevel != lr::allImageMips)
+    {
+        throw std::invalid_argument(std::string("FrameGraph: ") + declaration +
+                                    " does not support mip selection");
+    }
+}
+
+void requireNoLayerSelection(const lr::ImageView &image, const char *declaration)
+{
+    if (image.arrayLayer != lr::allImageLayers)
+    {
+        throw std::invalid_argument(std::string("FrameGraph: ") + declaration +
+                                    " does not support layer selection");
+    }
+}
+
 // A depth attachment is only read when its contents are loaded and the pass never writes depth; CLEAR
 // and DONT_CARE always produce new contents.
 lr::AccessMode depthAttachmentAccess(VkAttachmentLoadOp loadOp, std::optional<bool> depthWrite)
@@ -215,6 +236,7 @@ PassBuilder &PassBuilder::sampledImageArray(uint32_t binding, ImageHandle images
 PassBuilder &PassBuilder::storageImage(uint32_t binding, ImageView image, VkShaderStageFlags stages, AccessMode access)
 {
     requireShaderStages(stages, "storage image");
+    requireNoLayerSelection(image, "storage image");
     desc().imageUses.push_back({.image    = image.image,
                                 .usage    = ImageUsage::Storage,
                                 .access   = access,
@@ -295,15 +317,17 @@ PassBuilder &PassBuilder::runsLast()
     return *this;
 }
 
-PassBuilder &PassBuilder::colorAttachment(ImageHandle image, VkFormat format, VkAttachmentLoadOp loadOp,
+PassBuilder &PassBuilder::colorAttachment(ImageView image, VkFormat format, VkAttachmentLoadOp loadOp,
                                           VkClearValue clearValue, ExtentSpec extent)
 {
+    requireNoMipSelection(image, "color attachment");
     desc().imageUses.push_back(
-        {.image      = image,
+        {.image      = image.image,
          .usage      = ImageUsage::ColorAttachment,
          .access     = loadOp == VK_ATTACHMENT_LOAD_OP_LOAD || desc().graphics.blend != BlendMode::Opaque
                            ? AccessMode::ReadWrite
                            : AccessMode::Write,
+         .boundLayer = image.arrayLayer,
          .format     = format,
          .extent     = extent,
          .loadOp     = loadOp,
@@ -311,12 +335,20 @@ PassBuilder &PassBuilder::colorAttachment(ImageHandle image, VkFormat format, Vk
     return *this;
 }
 
-PassBuilder &PassBuilder::depthAttachment(ImageHandle image, VkFormat format, VkAttachmentLoadOp loadOp,
+PassBuilder &PassBuilder::colorAttachment(ImageHandle image, VkFormat format, VkAttachmentLoadOp loadOp,
                                           VkClearValue clearValue, ExtentSpec extent)
 {
-    desc().imageUses.push_back({.image      = image,
+    return colorAttachment(ImageView{image}, format, loadOp, clearValue, extent);
+}
+
+PassBuilder &PassBuilder::depthAttachment(ImageView image, VkFormat format, VkAttachmentLoadOp loadOp,
+                                          VkClearValue clearValue, ExtentSpec extent)
+{
+    requireNoMipSelection(image, "depth attachment");
+    desc().imageUses.push_back({.image      = image.image,
                                 .usage      = ImageUsage::DepthAttachment,
                                 .access     = depthAttachmentAccess(loadOp, desc().graphics.depthWrite),
+                                .boundLayer = image.arrayLayer,
                                 .format     = format,
                                 .extent     = extent,
                                 .loadOp     = loadOp,
@@ -324,12 +356,10 @@ PassBuilder &PassBuilder::depthAttachment(ImageHandle image, VkFormat format, Vk
     return *this;
 }
 
-PassBuilder &PassBuilder::depthAttachment(ImageView image, VkFormat format, VkAttachmentLoadOp loadOp,
+PassBuilder &PassBuilder::depthAttachment(ImageHandle image, VkFormat format, VkAttachmentLoadOp loadOp,
                                           VkClearValue clearValue, ExtentSpec extent)
 {
-    depthAttachment(image.image, format, loadOp, clearValue, extent);
-    desc().imageUses.back().boundLayer = image.arrayLayer;
-    return *this;
+    return depthAttachment(ImageView{image}, format, loadOp, clearValue, extent);
 }
 
 PassBuilder &PassBuilder::dependsOn(PassHandle dependency)

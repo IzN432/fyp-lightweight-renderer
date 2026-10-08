@@ -70,15 +70,20 @@ public:
     // Arguments for PassContext::drawIndirect/drawIndexedIndirect, e.g. written by a compute pass.
     PassBuilder &indirectBuffer(BufferHandle buffer);
 
+    // The ImageView overloads bind a single array layer of a layered target (see ImageView::layer).
+    // The ImageHandle overloads bind the full-range view and delegate to them.
+    PassBuilder &colorAttachment(ImageView image, VkFormat format,
+                                 VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, VkClearValue clearValue = {},
+                                 ExtentSpec extent = ExtentSpec::swapchain());
     PassBuilder &colorAttachment(ImageHandle image, VkFormat format,
+                                 VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, VkClearValue clearValue = {},
+                                 ExtentSpec extent = ExtentSpec::swapchain());
+    PassBuilder &depthAttachment(ImageView image, VkFormat format,
                                  VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, VkClearValue clearValue = {},
                                  ExtentSpec extent = ExtentSpec::swapchain());
     PassBuilder &depthAttachment(ImageHandle image, VkFormat format,
                                  VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, VkClearValue clearValue = {},
                                  ExtentSpec extent = ExtentSpec::swapchain());
-    PassBuilder &depthAttachment(ImageView image, VkFormat format,
-                                 VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                                 VkClearValue clearValue = {}, ExtentSpec extent = ExtentSpec::swapchain());
 
     // Order this pass after every other pass that shares a resource with it, including passes
     // declared later — for a final overlay (e.g. the Viewer's ImGui pass).

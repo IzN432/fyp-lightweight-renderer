@@ -208,7 +208,8 @@ void Allocator::createLayerViews(AllocatedImage &image, VkImageAspectFlags aspec
         ci.format                          = image.format;
         ci.subresourceRange.aspectMask     = aspect;
         ci.subresourceRange.baseMipLevel   = 0;
-        ci.subresourceRange.levelCount     = image.mipLevels;
+        // An attachment view must resolve to a single mip level.
+        ci.subresourceRange.levelCount     = 1;
         ci.subresourceRange.baseArrayLayer = layer;
         ci.subresourceRange.layerCount     = 1;
         const VkResult result = vkCreateImageView(device, &ci, nullptr, &image.layerViews[layer]);

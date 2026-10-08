@@ -70,6 +70,8 @@ public:
     // Creates one VkImageView per mip level (covering all array layers),
     // stored in image.mipViews. Used for compute writes to specific mip levels.
     void createMipViews(AllocatedImage &image, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
+    // Creates one single-layer, single-mip VkImageView per array layer, stored in
+    // image.layerViews. Used to render into one slice of a layered target.
     void createLayerViews(AllocatedImage &image, VkImageAspectFlags aspect);
     void destroy(AllocatedImage &image);
 

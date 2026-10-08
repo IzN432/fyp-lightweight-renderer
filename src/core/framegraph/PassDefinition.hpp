@@ -83,8 +83,9 @@ inline constexpr uint32_t noDescriptorBinding = std::numeric_limits<uint32_t>::m
 inline constexpr uint32_t allImageMips        = std::numeric_limits<uint32_t>::max();
 inline constexpr uint32_t allImageLayers      = std::numeric_limits<uint32_t>::max();
 
-// Mip selection affects the bound descriptor view only. Synchronization is
-// deliberately conservative and covers the complete parent image.
+// Selects a subresource of an image: a mip for a bound descriptor, or a layer for an
+// attachment. This affects the bound view only — synchronization is deliberately
+// conservative and covers the complete parent image.
 struct ImageView
 {
     ImageHandle image;
