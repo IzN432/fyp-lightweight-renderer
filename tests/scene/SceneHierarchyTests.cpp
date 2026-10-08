@@ -60,6 +60,28 @@ int main()
     auto     &child = scene.createSceneObject();
     auto     &grandchild = scene.createSceneObject();
 
+    int selectionNotifications = 0;
+    auto selectionConnection = scene.registerSelectionChangedCallback([&](lr::SceneObjectId selected) {
+        assert(selected == child.id());
+        ++selectionNotifications;
+    });
+    scene.selectObject(child.id());
+    scene.selectObject(child.id());
+    assert(scene.selectedObject() == child.id());
+    assert(selectionNotifications == 2);
+
+    lr::Scene otherScene;
+    auto &foreignObject = otherScene.createSceneObject();
+    bool rejectedForeignSelection = false;
+    try
+    {
+        scene.selectObject(foreignObject.id());
+    } catch (const std::out_of_range &)
+    {
+        rejectedForeignSelection = true;
+    }
+    assert(rejectedForeignSelection);
+
     root.addComponent<lr::TransformComponent>().setPosition(glm::vec3(1.0f, 0.0f, 0.0f));
     child.addComponent<lr::TransformComponent>().setPosition(glm::vec3(0.0f, 2.0f, 0.0f));
     grandchild.addComponent<lr::TransformComponent>().setPosition(glm::vec3(0.0f, 0.0f, 3.0f));

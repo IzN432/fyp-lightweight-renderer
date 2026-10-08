@@ -67,13 +67,13 @@ public:
         m_hdriData = std::move(data);
     }
 
-    // The object currently selected in the Scene Hierarchy panel, if any — nullopt until the user
-    // has clicked a row.
+    // The object currently selected by any editor surface (hierarchy, viewport picking, ...).
     std::optional<SceneObjectId> selectedObject() const { return m_selectedObject; }
 
-    // Fired whenever a Scene Hierarchy row is clicked, with the newly selected object's id — even
-    // if it's the object that was already selected (callers that only care about actual changes
-    // should compare against their own last-seen id).
+    // Routes every selection source through the same validation and notification path.
+    void selectObject(SceneObjectId id);
+
+    // Fired whenever selectObject() is called, even if the object was already selected.
     CallbackConnection registerSelectionChangedCallback(std::function<void(SceneObjectId)> callback)
     {
         return m_selectionChangedCallbacks.connect(std::move(callback));

@@ -16,6 +16,7 @@
 #include "core/passes/transparent/TransparentPass.hpp"
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
 #include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
+#include "core/passes/objectpicking/ObjectPickingPass.hpp"
 #include "core/passes/overlaylines/OverlayLinesPass.hpp"
 #include "core/passes/overlaypoints/OverlayPointsPass.hpp"
 
@@ -140,6 +141,12 @@ void Engine::run()
     // layout (conventions::geometryMeshLayout).
     lr::GeometryPass geometryPass(sceneManager.gpu().geometryPassConfig());
     geometryPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
+
+    // A single-sample integer target dedicated to editor selection. Keeping this separate from the
+    // MSAA G-buffer avoids integer resolve semantics and lets transparent geometry remain pickable.
+    lr::ObjectPickingPass objectPickingPass(sceneManager.gpu().geometryPassConfig());
+    objectPickingPass.uploadResources(viewer.resources());
+    objectPickingPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
 
     lr::SpotShadowPass spotShadowPass(viewer.resources(), {
         .geometry = sceneManager.gpu().geometryPassConfig(),
@@ -370,6 +377,8 @@ void Engine::run()
     appConnections.push_back(sceneManager.gpu().onGeometryRebuilt([&](const lr::SceneGpu &gpu) {
         geometryPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
                                       gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
+        objectPickingPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
+                                           gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
         spotShadowPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
                                         gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
         spotShadowPass.setLightObjects(gpu.lightObjects());

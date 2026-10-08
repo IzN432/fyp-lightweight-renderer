@@ -1,7 +1,10 @@
 #pragma once
 
+#include "core/editor/EditorPresentation.hpp"
+
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace lr
@@ -17,6 +20,17 @@ struct PointerButtonEvent
     bool alt   = false;
 };
 
+// Immutable editor policy accompanying a routed input event. Layers should prefer presentation
+// capabilities over state-name checks; activeState remains available when behavior truly belongs
+// to one specific state.
+struct EditorInputContext
+{
+    std::string_view   activeState;
+    EditorPresentation presentation;
+
+    bool isState(std::string_view id) const { return activeState == id; }
+};
+
 // The editor's pointer priority, in one place. Button events descend through registered layers in
 // priority order and stop at the first one that consumes them; nothing is offered to any layer while
 // the UI or the active gizmo owns the pointer.
@@ -27,7 +41,7 @@ class EditorInputRouter
 {
 public:
     using CaptureQuery = std::function<bool()>;
-    using ButtonLayer  = std::function<bool(const PointerButtonEvent &)>;
+    using ButtonLayer  = std::function<bool(const PointerButtonEvent &, const EditorInputContext &)>;
 
     // The two things that outrank every layer: the UI, and the active gizmo's handles.
     EditorInputRouter(CaptureQuery uiCapturesPointer, CaptureQuery gizmoCapturesPointer);
@@ -36,7 +50,7 @@ public:
     void addButtonLayer(std::string name, ButtonLayer layer);
 
     // Returns whether a layer consumed the event.
-    bool routeButton(const PointerButtonEvent &event) const;
+    bool routeButton(const PointerButtonEvent &event, const EditorInputContext &context) const;
 
     // Whether the UI or the active gizmo currently owns the pointer, which is what stops button
     // events reaching any layer.

@@ -11,6 +11,7 @@ struct EditorPresentation
     bool vertexPointsVisible   = false;
     bool heatmapVisible        = false;
     bool vertexSelectionActive = false;
+    bool objectSelectionActive = false;
 
     friend bool operator==(const EditorPresentation &, const EditorPresentation &) = default;
 };

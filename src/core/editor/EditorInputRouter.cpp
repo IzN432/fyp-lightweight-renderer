@@ -26,7 +26,7 @@ void EditorInputRouter::addButtonLayer(std::string name, ButtonLayer layer)
 
 bool EditorInputRouter::pointerCaptured() const { return m_uiCapturesPointer() || m_gizmoCapturesPointer(); }
 
-bool EditorInputRouter::routeButton(const PointerButtonEvent &event) const
+bool EditorInputRouter::routeButton(const PointerButtonEvent &event, const EditorInputContext &context) const
 {
     if (pointerCaptured())
     {
@@ -34,7 +34,7 @@ bool EditorInputRouter::routeButton(const PointerButtonEvent &event) const
     }
     for (const Layer &layer : m_layers)
     {
-        if (layer.handler(event))
+        if (layer.handler(event, context))
         {
             return true;
         }

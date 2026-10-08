@@ -318,30 +318,34 @@ void routerStopsAtTheFirstLayerThatConsumes()
         });
 
     std::vector<std::string> saw;
+    const lr::EditorInputContext inputContext{.activeState = "view",
+                                               .presentation = {.objectSelectionActive = true}};
     // The upper layer only claims button 0, so button 1 must fall through to the lower one.
-    router.addButtonLayer("upper", [&saw](const lr::PointerButtonEvent &event) {
+    router.addButtonLayer("upper", [&saw](const lr::PointerButtonEvent &event, const lr::EditorInputContext &context) {
+        assert(context.isState("view"));
+        assert(context.presentation.objectSelectionActive);
         saw.push_back("upper");
         return event.button == 0;
     });
-    router.addButtonLayer("lower", [&saw](const lr::PointerButtonEvent &) {
+    router.addButtonLayer("lower", [&saw](const lr::PointerButtonEvent &, const lr::EditorInputContext &) {
         saw.push_back("lower");
         return true;
     });
 
-    assert(router.routeButton({.button = 0}));
+    assert(router.routeButton({.button = 0}, inputContext));
     assert((saw == std::vector<std::string>{"upper"}));
 
     saw.clear();
-    assert(router.routeButton({.button = 1}));
+    assert(router.routeButton({.button = 1}, inputContext));
     assert((saw == std::vector<std::string>{"upper", "lower"}));
 
     // While the UI or the gizmo owns the pointer, no layer is offered anything at all.
     saw.clear();
     uiCaptures = true;
-    assert(!router.routeButton({.button = 0}));
+    assert(!router.routeButton({.button = 0}, inputContext));
     uiCaptures    = false;
     gizmoCaptures = true;
-    assert(!router.routeButton({.button = 0}));
+    assert(!router.routeButton({.button = 0}, inputContext));
     assert(saw.empty());
 }
 
@@ -410,30 +414,35 @@ void anActiveStateCanClaimPointerInput()
         [] {
             return false;
         });
-    router.addButtonLayer("active editor state", [&controller](const lr::PointerButtonEvent &event) {
+    router.addButtonLayer("active editor state", [&controller](const lr::PointerButtonEvent &event,
+                                                                const lr::EditorInputContext &) {
         return controller.handleInput(event);
     });
 
     bool fellThrough = false;
-    router.addButtonLayer("fallback", [&fellThrough](const lr::PointerButtonEvent &) {
+    router.addButtonLayer("fallback", [&fellThrough](const lr::PointerButtonEvent &,
+                                                      const lr::EditorInputContext &) {
         fellThrough = true;
         return true;
     });
 
     // A state with no input hook is not an error; the event simply falls through.
     controller.activate("passive");
-    assert(router.routeButton({.button = 0}));
+    assert(router.routeButton({.button = 0}, {.activeState = controller.activeId(),
+                                               .presentation = controller.active().presentation}));
     assert(handled == 0);
     assert(fellThrough);
 
     fellThrough = false;
     controller.activate("greedy");
-    assert(router.routeButton({.button = 0}));
+    assert(router.routeButton({.button = 0}, {.activeState = controller.activeId(),
+                                               .presentation = controller.active().presentation}));
     assert(handled == 1);
     assert(!fellThrough);
 
     // The state only claims button 0, so anything else still reaches the layer below it.
-    assert(router.routeButton({.button = 2}));
+    assert(router.routeButton({.button = 2}, {.activeState = controller.activeId(),
+                                               .presentation = controller.active().presentation}));
     assert(handled == 1);
     assert(fellThrough);
 }

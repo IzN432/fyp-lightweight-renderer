@@ -21,6 +21,8 @@
 #include "core/editor/camera/CameraController.hpp"
 #include "core/editor/gizmo/GizmoController.hpp"
 #include "core/editor/selection/SelectionGestureTool.hpp"
+#include "core/framegraph/ImageReadback.hpp"
+#include "core/passes/objectpicking/ObjectPickingPass.hpp"
 #include "core/scene/Camera.hpp"
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneManager.hpp"
@@ -34,6 +36,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 #include <unordered_set>
 #include <vector>
 
@@ -67,6 +70,7 @@ public:
                             return m_gizmoController.capturesMouse();
                         }),
           m_transformController(m_objectTranslationHandler, m_objectRotationHandler, m_objectScaleHandler),
+          m_objectPickingReadback(viewer.context(), viewer.allocator()),
           m_context{m_transformController, m_commandManager},
           m_arapTool(m_selectionManager, m_vertexManager, m_commandManager), m_laplaceBeltramiTool(sceneManager),
           m_tools{&m_arapTool, &m_laplaceBeltramiTool}
@@ -193,7 +197,7 @@ private:
     {
         m_stateController.registerState({
             .id           = std::string(kViewState),
-            .presentation = {},
+            .presentation = {.objectSelectionActive = true},
             .gizmoRequest =
                 [this](const EditorFrameContext &) {
                     return objectTransformGizmoRequest();
@@ -335,18 +339,75 @@ private:
     {
         // The active state gets first refusal, which is how a feature claims viewport input for as
         // long as its state is the active one.
-        m_inputRouter.addButtonLayer("active editor state", [this](const PointerButtonEvent &event) {
+        m_inputRouter.addButtonLayer("active editor state", [this](const PointerButtonEvent &event,
+                                                                    const EditorInputContext &) {
             return m_stateController.handleInput(event);
         });
 
         // Generic vertex picking, available to any state whose presentation asks for it.
-        m_inputRouter.addButtonLayer("vertex selection", [this](const PointerButtonEvent &event) {
-            if (event.button != GLFW_MOUSE_BUTTON_LEFT ||
-                !m_stateController.active().presentation.vertexSelectionActive)
+        m_inputRouter.addButtonLayer("vertex selection", [this](const PointerButtonEvent &event,
+                                                                 const EditorInputContext &context) {
+            if (event.button != GLFW_MOUSE_BUTTON_LEFT || !context.presentation.vertexSelectionActive)
             {
                 return false;
             }
             m_selectionManager.mouseButtonCallback(event.button, event.action, event.shift, event.ctrl, event.alt);
+            return true;
+        });
+
+        // Lowest-priority viewport interaction: select the frontmost rendered scene object. A small
+        // gesture threshold prevents an orbit/drag ending over geometry from becoming a click.
+        m_inputRouter.addButtonLayer("scene object selection", [this](const PointerButtonEvent &event,
+                                                                       const EditorInputContext &context) {
+            if (!context.presentation.objectSelectionActive)
+            {
+                m_objectPickPress.reset();
+                return false;
+            }
+            if (event.button != GLFW_MOUSE_BUTTON_LEFT)
+            {
+                return false;
+            }
+
+            double x = 0.0, y = 0.0;
+            m_viewer.input().getMousePos(x, y);
+            if (event.action == GLFW_PRESS)
+            {
+                m_objectPickPress = glm::dvec2(x, y);
+                return true;
+            }
+            if (event.action != GLFW_RELEASE || !m_objectPickPress)
+            {
+                return false;
+            }
+
+            const glm::dvec2 release(x, y);
+            const double distanceSquared = glm::dot(release - *m_objectPickPress, release - *m_objectPickPress);
+            m_objectPickPress.reset();
+            if (distanceSquared > 16.0 || !m_viewer.hasRenderedAtLeastOneFrame())
+            {
+                return true;
+            }
+
+            const VkExtent2D extent = m_viewer.resources().getExtent();
+            const ImVec2 display = ImGui::GetIO().DisplaySize;
+            if (display.x <= 0.0f || display.y <= 0.0f || x < 0.0 || y < 0.0 || x >= display.x || y >= display.y)
+            {
+                return true;
+            }
+            const uint32_t pixelX = std::min(static_cast<uint32_t>(x * extent.width / display.x), extent.width - 1);
+            const uint32_t pixelY = std::min(static_cast<uint32_t>(y * extent.height / display.y), extent.height - 1);
+            const uint32_t pickingId = m_objectPickingReadback.readPixel(
+                m_viewer.resources(), ObjectPickingPass::imageName, pixelX, pixelY);
+            const auto &objects = m_sceneManager.gpu().geometryObjects();
+            if (pickingId > 0 && pickingId <= objects.size())
+            {
+                SceneObject *object = objects[pickingId - 1];
+                if (object && m_scene.contains(object->id()))
+                {
+                    m_scene.selectObject(object->id());
+                }
+            }
             return true;
         });
     }
@@ -355,13 +416,18 @@ private:
     {
         m_connections.push_back(m_viewer.input().onMouseButton(
             [this](int button, int action, bool shift, bool ctrl, bool alt) {
-            m_inputRouter.routeButton({
-                .button = button,
-                .action = action,
-                .shift  = shift,
-                .ctrl   = ctrl,
-                .alt    = alt,
-            });
+            m_inputRouter.routeButton(
+                {
+                    .button = button,
+                    .action = action,
+                    .shift  = shift,
+                    .ctrl   = ctrl,
+                    .alt    = alt,
+                },
+                {
+                    .activeState = m_stateController.activeId(),
+                    .presentation = m_stateController.active().presentation,
+                });
         }));
 
         // One key callback for the whole editor. The ImGui check that each of these handlers used to
@@ -475,6 +541,8 @@ private:
     GizmoController                m_gizmoController;
     EditorInputRouter              m_inputRouter;
     SceneObjectTransformController m_transformController;
+    ImageReadback                  m_objectPickingReadback;
+    std::optional<glm::dvec2>      m_objectPickPress;
     EditorContext                  m_context;
     ArapTool                       m_arapTool;
     LaplaceBeltramiTool            m_laplaceBeltramiTool;

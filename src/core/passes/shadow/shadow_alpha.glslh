@@ -18,9 +18,9 @@ float shadowAlphaHashThreshold(uvec3 coordinate)
 
 bool shouldDiscardShadowFragment(MaterialData mat, float alpha, bool frontFacing, uvec3 shadowTexel)
 {
-    if (!frontFacing && mat.doubleSided < 0.5)
+    if (!frontFacing && !isFlagEnabled(mat.doubleSided))
         return true;
-    if (mat.alphaBlend > 0.5)
+    if (isFlagEnabled(mat.alphaBlend))
         return alpha <= shadowAlphaHashThreshold(shadowTexel);
     return alpha < mat.alphaCutoff;
 }

@@ -191,6 +191,14 @@ void Scene::setParent(SceneObjectId childId, std::optional<SceneObjectId> parent
     }
 }
 
+void Scene::selectObject(SceneObjectId id)
+{
+    // getSceneObject both validates the ID and rejects retired objects.
+    (void)getSceneObject(id);
+    m_selectedObject = id;
+    m_selectionChangedCallbacks.invoke(id);
+}
+
 void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &renameRequested,
                               std::optional<SceneObjectId> &deleteRequested)
 {
@@ -212,8 +220,7 @@ void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> 
     const bool open = ImGui::TreeNodeEx(identity.c_str(), flags, "%s", label.c_str());
     if (ImGui::IsItemClicked())
     {
-        m_selectedObject = object.id();
-        m_selectionChangedCallbacks.invoke(object.id());
+        selectObject(object.id());
     }
 
     if (ImGui::BeginPopupContextItem())

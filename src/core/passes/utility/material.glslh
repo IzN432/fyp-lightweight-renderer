@@ -14,11 +14,16 @@ struct MaterialData
     float _pad[3];
 };
 
+bool isFlagEnabled(float flag)
+{
+    return flag > 0.5;
+}
+
 bool shouldDiscardOpaqueFragment(MaterialData material, float baseColorAlpha, bool frontFacing)
 {
-    return material.alphaBlend > 0.5 ||
+    return isFlagEnabled(material.alphaBlend) ||
            baseColorAlpha < material.alphaCutoff ||
-           (!frontFacing && material.doubleSided < 0.5);
+           (!frontFacing && !isFlagEnabled(material.doubleSided));
 }
 
 #endif

@@ -64,6 +64,7 @@ public:
     void toggle(std::string_view id);
 
     bool                         isActive(std::string_view id) const { return m_active == id; }
+    std::string_view             activeId() const { return m_active; }
     const EditorStateDefinition &active() const;
 
     // Behavior dispatch. These exist so callers drive "the active state" rather than inspecting

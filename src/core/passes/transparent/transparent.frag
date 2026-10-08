@@ -98,7 +98,7 @@ void main()
 {
     uint faceGroupIndex = faceGroupIndices.values[pc.primitiveIdOffset + gl_PrimitiveID];
     MaterialData mat = materials.data[faceGroupIndex];
-    if (mat.alphaBlend < 0.5 || (!gl_FrontFacing && mat.doubleSided < 0.5))
+    if (!isFlagEnabled(mat.alphaBlend) || (!gl_FrontFacing && !isFlagEnabled(mat.doubleSided)))
     {
         discard;
     }

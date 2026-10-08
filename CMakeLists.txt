@@ -98,6 +98,7 @@ add_library(lr_core STATIC
     src/core/passes/composite/CompositePass.cpp
     src/core/passes/final/FinalPass.cpp
     src/core/passes/geometry/GeometryPass.cpp
+    src/core/passes/objectpicking/ObjectPickingPass.cpp
     src/core/passes/heatmap/HeatmapPass.cpp
     src/core/passes/overlaygeometry/OverlayGeometryPass.cpp
     src/core/passes/overlaylines/OverlayLine.cpp
@@ -208,6 +209,8 @@ add_shaders(lr_core
     src/core/passes/fullscreen.vert
     src/core/passes/geometry/geometry.vert
     src/core/passes/geometry/geometry.frag
+    src/core/passes/objectpicking/object_picking.frag
+    src/core/passes/objectpicking/object_picking.vert
     src/core/passes/ibl/hdritocubemap.comp
     src/core/passes/ibl/irradiance.comp
     src/core/passes/ibl/prefilter.comp
