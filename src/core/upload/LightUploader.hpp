@@ -24,7 +24,7 @@ struct alignas(16) LightGpuData
     uint32_t flags; // 4 bytes: bit 0 = two-sided (area lights); padded to 16 by alignas
     float    range;           // spot lights
     float    shadowNearPlane; // spot lights
-    uint32_t shadowIndex;     // spot lights; UINT32_MAX means no shadow
+    uint32_t shadowIndex;     // spot/directional type-local shadow index; UINT32_MAX means no shadow
 };
 
 inline constexpr uint32_t kLightFlagTwoSided = 1u;

@@ -3,6 +3,7 @@
 #include "core/Paths.hpp"
 #include "core/passes/pbr/LtcMatrix.hpp"
 #include "core/passes/shadow/SpotShadowPass.hpp"
+#include "core/passes/shadow/CascadedShadowPass.hpp"
 #include "core/upload/CameraUploader.hpp"
 
 namespace lr
@@ -43,6 +44,21 @@ void PbrPass::uploadResources(ResourceRegistry &resources) const
         const SpotShadowGpuData disabled{};
         resources.updateBuffer(m_cfg.shadowParamsBufferResourceName, &disabled, sizeof(disabled));
     }
+    if (!resources.hasImage(m_cfg.cascadedShadowImageResourceName))
+    {
+        resources.registerPersistentImageArray(m_cfg.cascadedShadowImageResourceName, VK_FORMAT_D32_SFLOAT,
+                                               VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                                   VK_IMAGE_USAGE_SAMPLED_BIT,
+                                               {1, 1}, CascadedShadowGpuData::maxLayers,
+                                               VK_IMAGE_ASPECT_DEPTH_BIT);
+    }
+    if (!resources.hasBuffer(m_cfg.cascadedShadowParamsBufferResourceName))
+    {
+        resources.registerDynamicBuffer(m_cfg.cascadedShadowParamsBufferResourceName,
+                                        sizeof(CascadedShadowGpuData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        const CascadedShadowGpuData disabled{};
+        resources.updateBuffer(m_cfg.cascadedShadowParamsBufferResourceName, &disabled, sizeof(disabled));
+    }
 }
 
 void PbrPass::build(FrameGraph &fg) const
@@ -70,6 +86,9 @@ void PbrPass::build(FrameGraph &fg) const
         .sampledDepth(13, fg.image(m_cfg.shadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
                       SamplerDesc::shadowComparison())
         .uniformBuffer(14, fg.buffer(m_cfg.shadowParamsBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledDepth(15, fg.image(m_cfg.cascadedShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
+                      SamplerDesc::shadowComparison())
+        .uniformBuffer(16, fg.buffer(m_cfg.cascadedShadowParamsBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .colorAttachment(fg.image("pbr"), VK_FORMAT_R16G16B16A16_SFLOAT)
         // Reads m_cfg when the pass runs, so setNumLights() takes effect without rebuilding the graph.
         .execute([this](PassContext &ctx) {

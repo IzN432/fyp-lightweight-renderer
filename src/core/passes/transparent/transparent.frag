@@ -51,6 +51,22 @@ layout(set = 0, binding = 11) readonly buffer LightBuffer
     LightData lights[];
 };
 
+layout(set = 0, binding = 17) uniform sampler2DArrayShadow spotShadowMap;
+layout(set = 0, binding = 18) uniform SpotShadowData
+{
+    mat4 lightViewProj[16];
+    uvec4 header;
+} spotShadow;
+layout(set = 0, binding = 19) uniform sampler2DArrayShadow cascadedShadowMap;
+layout(set = 0, binding = 20) uniform CascadedShadowData
+{
+    mat4 lightViewProj[4];
+    vec4 splitDepths;
+    uvec4 header;
+} cascadedShadow;
+
+#include "../utility/shadow_sampling.glslh"
+
 // The first four members mirror geometry.vert's block (see geometry.frag for primitiveIdOffset).
 layout(push_constant) uniform PC
 {
@@ -100,7 +116,9 @@ void main()
     vec3 color = emissive;
     for (uint i = 0; i < pc.numLights; ++i)
     {
-        color += ShadeLight(lights[i], position, normal, baseColor.rgb, roughness, metallic, 0.0, pc.pfMips);
+        float visibility = lightShadowVisibility(lights[i], position, inWorldPos);
+        color += visibility * ShadeLight(lights[i], position, normal, baseColor.rgb, roughness, metallic, 0.0,
+                                         pc.pfMips);
     }
 
     outColor = vec4(color * baseColor.a, baseColor.a);

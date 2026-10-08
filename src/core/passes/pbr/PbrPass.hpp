@@ -19,6 +19,8 @@ public:
         // Composable users may omit SpotShadowPass; uploadResources then creates disabled fallbacks.
         std::string shadowImageResourceName        = "pbrFallbackSpotShadowMap";
         std::string shadowParamsBufferResourceName = "pbrFallbackSpotShadowParams";
+        std::string cascadedShadowImageResourceName = "pbrFallbackCascadedShadowMap";
+        std::string cascadedShadowParamsBufferResourceName = "pbrFallbackCascadedShadowParams";
     };
 
     explicit PbrPass(Config cfg);

@@ -41,6 +41,15 @@ layout(set = 0, binding = 14) uniform SpotShadowData
     mat4 lightViewProj[16];
     uvec4 header;
 } spotShadow;
+layout(set = 0, binding = 15) uniform sampler2DArrayShadow cascadedShadowMap;
+layout(set = 0, binding = 16) uniform CascadedShadowData
+{
+    mat4 lightViewProj[4];
+    vec4 splitDepths;
+    uvec4 header;
+} cascadedShadow;
+
+#include "../utility/shadow_sampling.glslh"
 
 layout(push_constant) uniform PC {
     uint pfMips;
@@ -72,27 +81,8 @@ vec3 ShadeSample(ivec2 pixel, int sampleIndex, out bool covered)
     vec3 color = vec3(0.0);
     for (uint i = 0; i < pc.numLights; ++i)
     {
-        float visibility = 1.0;
-        int shadowIndex = lights[i].shadowIndex < spotShadow.header.x ? int(lights[i].shadowIndex) : -1;
-        if (shadowIndex >= 0 && lights[i].type == LIGHT_TYPE_SPOT)
-        {
-            vec3 worldPosition = (cameraUbo.invView * vec4(position, 1.0)).xyz;
-            vec4 lightClip = spotShadow.lightViewProj[shadowIndex] * vec4(worldPosition, 1.0);
-            vec3 shadowCoord = lightClip.xyz / lightClip.w;
-            vec2 uv = shadowCoord.xy * 0.5 + 0.5;
-            if (shadowCoord.z >= 0.0 && shadowCoord.z <= 1.0 && all(greaterThanEqual(uv, vec2(0.0))) &&
-                all(lessThanEqual(uv, vec2(1.0))))
-            {
-                vec2 texel = 1.0 / vec2(textureSize(spotShadowMap, 0).xy);
-                visibility = 0.0;
-                for (int y = -1; y <= 1; ++y)
-                    for (int x = -1; x <= 1; ++x)
-                        visibility += texture(spotShadowMap,
-                                              vec4(uv + vec2(x, y) * texel, float(shadowIndex),
-                                                   shadowCoord.z - 0.0005));
-                visibility /= 9.0;
-            }
-        }
+        vec3 worldPosition = (cameraUbo.invView * vec4(position, 1.0)).xyz;
+        float visibility = lightShadowVisibility(lights[i], position, worldPosition);
         color += visibility * ShadeLight(lights[i], position, normal, albedo, roughness, metallic, occlusion, pc.pfMips);
     }
 

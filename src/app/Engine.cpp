@@ -10,6 +10,7 @@
 #include "core/passes/ibl/IblPass.hpp"
 #include "core/passes/pbr/PbrPass.hpp"
 #include "core/passes/shadow/SpotShadowPass.hpp"
+#include "core/passes/shadow/CascadedShadowPass.hpp"
 #include "core/passes/transparent/TransparentPass.hpp"
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
 #include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
@@ -144,6 +145,13 @@ void Engine::run()
     });
     spotShadowPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
 
+    lr::CascadedShadowPass cascadedShadowPass(viewer.resources(), {
+        .geometry = sceneManager.gpu().geometryPassConfig(),
+        .lightObjects = sceneManager.gpu().lightObjects(),
+        .camera = camera,
+    });
+    cascadedShadowPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
+
     // Mesh-independent sources and layout: the scene starts empty, and EditorRenderBridge
     // repoints the pass (setMeshSource) whenever the edited mesh changes.
     lr::HeatmapPass heatmapPass({
@@ -171,6 +179,8 @@ void Engine::run()
         .pfMips                   = 8,
         .shadowImageResourceName = spotShadowPass.shadowImageName(),
         .shadowParamsBufferResourceName = spotShadowPass.paramsBufferName(),
+        .cascadedShadowImageResourceName = cascadedShadowPass.shadowImageName(),
+        .cascadedShadowParamsBufferResourceName = cascadedShadowPass.paramsBufferName(),
     });
     pbrPass.uploadResources(viewer.resources());
     pbrPass.build(viewer.frameGraph());
@@ -183,6 +193,10 @@ void Engine::run()
         .lightBufferResourceName = sceneManager.lightBufferName(),
         .numLights               = sceneManager.numLights(),
         .pfMips                  = 8,
+        .spotShadowImageResourceName = spotShadowPass.shadowImageName(),
+        .spotShadowParamsBufferResourceName = spotShadowPass.paramsBufferName(),
+        .cascadedShadowImageResourceName = cascadedShadowPass.shadowImageName(),
+        .cascadedShadowParamsBufferResourceName = cascadedShadowPass.paramsBufferName(),
         .eyePosition =
             [&sceneManager] {
                 const lr::Camera &camera = sceneManager.gpu().camera()->getComponent<lr::Camera>();
@@ -263,6 +277,9 @@ void Engine::run()
         spotShadowPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
                                         gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
         spotShadowPass.setLightObjects(gpu.lightObjects());
+        cascadedShadowPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
+                                            gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
+        cascadedShadowPass.setLightObjects(gpu.lightObjects());
         setTransparentGeometry(gpu);
     }));
     appConnections.push_back(sceneManager.gpu().onLightsUploaded([&](uint32_t numLights) {
@@ -411,6 +428,21 @@ void Engine::run()
             {
                 aoPass.updateParams(viewer.resources());
             }
+            ImGui::Unindent();
+        }
+
+        if (ImGui::CollapsingHeader("Cascaded Shadows"))
+        {
+            ImGui::Indent();
+            lr::CascadedShadowPass::Config &shadowConfig = cascadedShadowPass.config();
+            ImGui::DragFloat("Shadow Distance", &shadowConfig.shadowDistance, 1.0f, 1.0f, 10000.0f, "%.1f");
+            ImGui::SliderFloat("Split Lambda", &shadowConfig.splitLambda, 0.0f, 1.0f, "%.2f");
+            ImGui::DragFloat("Depth Padding", &shadowConfig.depthPadding, 1.0f, 0.0f, 10000.0f, "%.1f");
+            ImGui::Spacing();
+            ImGui::TextDisabled("Cascades: %u", lr::CascadedShadowGpuData::cascadeCount);
+            ImGui::TextDisabled("Resolution: %u x %u per cascade", shadowConfig.resolution,
+                                shadowConfig.resolution);
+            ImGui::TextDisabled("Cascade count and resolution require a framegraph rebuild.");
             ImGui::Unindent();
         }
 
@@ -613,6 +645,7 @@ void Engine::run()
 
     appConnections.push_back(viewer.onUpdate([&](float dt, VkExtent2D extent) {
         cameraController.update(viewer.input(), dt, editor.allowsViewportNavigation());
+        cascadedShadowPass.setViewportExtent(extent);
     }));
 
     // Registers SceneManager's own onUpdate (aspect tracking) and onLateUpdate (flushDirty —

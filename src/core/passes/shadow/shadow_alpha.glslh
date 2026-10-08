@@ -1,0 +1,28 @@
+#ifndef SHADOW_ALPHA_GLSLH
+#define SHADOW_ALPHA_GLSLH
+
+// Stable pseudo-random threshold per shadow-map texel. Including the array layer prevents the
+// same pattern from being projected by every light or cascade while keeping it temporally stable.
+float shadowAlphaHashThreshold(uvec3 coordinate)
+{
+    uint hash = coordinate.x * 0x8da6b343u;
+    hash ^= coordinate.y * 0xd8163841u;
+    hash ^= coordinate.z * 0xcb1ab31fu;
+    hash ^= hash >> 16;
+    hash *= 0x7feb352du;
+    hash ^= hash >> 15;
+    hash *= 0x846ca68bu;
+    hash ^= hash >> 16;
+    return float(hash >> 8) * (1.0 / 16777216.0);
+}
+
+bool shouldDiscardShadowFragment(MaterialData mat, float alpha, bool frontFacing, uvec3 shadowTexel)
+{
+    if (!frontFacing && mat.doubleSided < 0.5)
+        return true;
+    if (mat.alphaBlend > 0.5)
+        return alpha <= shadowAlphaHashThreshold(shadowTexel);
+    return alpha < mat.alphaCutoff;
+}
+
+#endif

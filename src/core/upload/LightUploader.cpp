@@ -28,6 +28,7 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
     std::vector<LightGpuData> data;
     data.reserve(lights.size());
     uint32_t nextSpotShadow = 0;
+    uint32_t nextDirectionalShadow = 0;
 
     for (const auto &lightObject : lights)
     {
@@ -36,7 +37,7 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
         LightGpuData &gpuData = data.emplace_back();
 
         std::visit(
-            [&gpuData, &lightObject, &nextSpotShadow](auto &&l) {
+            [&gpuData, &lightObject, &nextSpotShadow, &nextDirectionalShadow](auto &&l) {
                 using T = std::decay_t<decltype(l)>;
 
                 gpuData.color          = l.color;
@@ -80,6 +81,7 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
                     TransformComponent &transform = lightObject->getComponent<TransformComponent>();
                     gpuData.rotation     = transform.transform().rotation();
                     gpuData.type         = 3;
+                    gpuData.shadowIndex  = nextDirectionalShadow++;
                 } else if constexpr (std::is_same_v<T, ImageLight>)
                 {
                     gpuData.type = 4;

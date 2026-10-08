@@ -36,6 +36,10 @@ public:
         std::string          lightBufferResourceName;
         uint32_t             numLights = 0;
         uint32_t             pfMips    = 8;
+        std::string spotShadowImageResourceName = "pbrFallbackSpotShadowMap";
+        std::string spotShadowParamsBufferResourceName = "pbrFallbackSpotShadowParams";
+        std::string cascadedShadowImageResourceName = "pbrFallbackCascadedShadowMap";
+        std::string cascadedShadowParamsBufferResourceName = "pbrFallbackCascadedShadowParams";
         // World-space camera position, read every frame to sort draws.
         std::function<glm::vec3()> eyePosition;
         // Whether a material is BLEND. Read every frame, so a draw whose materials are all opaque is

@@ -1,0 +1,43 @@
+#ifndef SHADOW_SAMPLING_GLSLH
+#define SHADOW_SAMPLING_GLSLH
+
+float sampleShadowPcf(sampler2DArrayShadow shadowMap, vec3 shadowCoord, uint layer)
+{
+    vec2 uv = shadowCoord.xy * 0.5 + 0.5;
+    if (shadowCoord.z < 0.0 || shadowCoord.z > 1.0 || any(lessThan(uv, vec2(0.0))) ||
+        any(greaterThan(uv, vec2(1.0))))
+        return 1.0;
+
+    vec2 texel = 1.0 / vec2(textureSize(shadowMap, 0).xy);
+    float visibility = 0.0;
+    for (int y = -1; y <= 1; ++y)
+        for (int x = -1; x <= 1; ++x)
+            visibility += texture(shadowMap, vec4(uv + vec2(x, y) * texel, float(layer),
+                                                  shadowCoord.z - 0.0005));
+    return visibility / 9.0;
+}
+
+float lightShadowVisibility(LightData light, vec3 viewPosition, vec3 worldPosition)
+{
+    if (light.type == LIGHT_TYPE_SPOT && light.shadowIndex < spotShadow.header.x)
+    {
+        vec4 lightClip = spotShadow.lightViewProj[light.shadowIndex] * vec4(worldPosition, 1.0);
+        return sampleShadowPcf(spotShadowMap, lightClip.xyz / lightClip.w, light.shadowIndex);
+    }
+
+    if (light.type == LIGHT_TYPE_DIRECTIONAL && light.shadowIndex < cascadedShadow.header.x)
+    {
+        float viewDepth = -viewPosition.z;
+        uint cascade = 0u;
+        cascade += viewDepth > cascadedShadow.splitDepths.x ? 1u : 0u;
+        cascade += viewDepth > cascadedShadow.splitDepths.y ? 1u : 0u;
+        cascade += viewDepth > cascadedShadow.splitDepths.z ? 1u : 0u;
+        uint layer = light.shadowIndex * cascadedShadow.header.y + cascade;
+        vec4 lightClip = cascadedShadow.lightViewProj[layer] * vec4(worldPosition, 1.0);
+        return sampleShadowPcf(cascadedShadowMap, lightClip.xyz / lightClip.w, layer);
+    }
+
+    return 1.0;
+}
+
+#endif
