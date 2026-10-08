@@ -54,11 +54,11 @@ void Component::drawValueClipboardMenu(EditorContext &context)
     ImGui::BeginDisabled(snapshot == nullptr);
     if (ImGui::MenuItem("Copy component values"))
     {
-        context.componentClipboard.store(type, std::move(snapshot));
+        context.componentClipboard.store(type, std::move(snapshot), valuesAdder());
     }
     ImGui::EndDisabled();
 
-    ImGui::BeginDisabled(!context.componentClipboard.holdsValuesFor(type));
+    ImGui::BeginDisabled(!context.componentClipboard.holdsValuesFor(type) || !acceptsPastedValues());
     if (ImGui::MenuItem("Paste component values"))
     {
         pasteValues(*context.componentClipboard.valuesFor(type));

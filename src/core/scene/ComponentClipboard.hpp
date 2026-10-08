@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <typeindex>
@@ -7,6 +8,8 @@
 
 namespace lr
 {
+
+class SceneObject;
 
 // A detached copy of one component's editable values, taken for the inspector's copy/paste.
 //
@@ -43,16 +46,35 @@ template <typename T> const T &componentValuesAs(const ComponentValues &values)
     return static_cast<const ComponentValueSnapshot<T> &>(values).value;
 }
 
+// Puts a component carrying copied values onto an object that has no component of that type yet,
+// which is what the inspector's "Paste component" does. Bound at the moment the values are copied,
+// so a component that cannot be built from its values alone — MeshComponent, which resolves its
+// mesh through the stores — can capture what it needs while it still has it.
+using ComponentValuesAdder = std::function<void(SceneObject &, const ComponentValues &)>;
+
 // Holds at most one copied snapshot, tagged with the component type it came from. Owned by
 // EditorContext, so it outlives both the inspector GUI that filled it and the object copied from.
 class ComponentClipboard
 {
 public:
-    void store(std::type_index componentType, std::unique_ptr<ComponentValues> values)
+    void store(std::type_index componentType, std::unique_ptr<ComponentValues> values,
+               ComponentValuesAdder adder = {})
     {
         m_componentType = componentType;
         m_values        = std::move(values);
+        m_adder         = std::move(adder);
     }
+
+    // The copied component's type, or nothing while the clipboard is empty.
+    std::optional<std::type_index> componentType() const
+    {
+        return m_values ? m_componentType : std::nullopt;
+    }
+
+    const ComponentValues *values() const { return m_values.get(); }
+
+    // Empty unless the copied component type can be added to an object that lacks one.
+    const ComponentValuesAdder &adder() const { return m_adder; }
 
     // Null unless the clipboard holds a snapshot taken from this very component type. Pasting
     // across component types would mean inventing a translation between two unrelated sets of
@@ -74,6 +96,7 @@ public:
 private:
     std::optional<std::type_index>   m_componentType;
     std::unique_ptr<ComponentValues> m_values;
+    ComponentValuesAdder             m_adder;
 };
 
 } // namespace lr

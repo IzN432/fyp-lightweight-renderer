@@ -73,6 +73,10 @@ public:
 
     template <typename T> bool hasComponent() const { return components.contains(std::type_index(typeid(T))); };
 
+    // For code holding a component type it cannot name, such as the inspector asking whether this
+    // object already has whatever is on the component clipboard.
+    bool hasComponent(std::type_index type) const { return components.contains(type); }
+
     // Finds a component by interface as well as by its concrete stored type. Components are keyed by
     // their concrete type, so editor-facing contracts such as CameraController need the polymorphic
     // fallback when the object actually stores a SphericalCameraController.

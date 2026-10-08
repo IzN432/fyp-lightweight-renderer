@@ -529,6 +529,18 @@ void Engine::run()
             ImGui::SetTooltip("The scene already contains the maximum of %u lights",
                               sceneManager.gpu().maxLights());
         }
+        // Added after the tooltip above, which reads the last item and would otherwise attach to
+        // this button instead of the disabled one it explains.
+        ImGui::SameLine();
+        if (ImGui::Button("Add Scene Object"))
+        {
+            // Empty but for a transform, which every other component reads as its object's place in
+            // the world — so the object is ready to receive one straight away. What it becomes is
+            // then decided in the Inspector.
+            lr::SceneObject &emptyObject = scene.createSceneObject();
+            emptyObject.name             = "Scene Object";
+            emptyObject.addComponent<lr::TransformComponent>();
+        }
         if (!sceneImportError.empty())
         {
             ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Import failed: %s", sceneImportError.c_str());

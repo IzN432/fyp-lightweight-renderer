@@ -2,12 +2,15 @@
 
 #include "core/loaders/Material.hpp"
 #include "core/scene/EngineConventions.hpp"
+#include "core/scene/SceneObject.hpp"
 
 #include <imgui.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -77,8 +80,14 @@ MeshComponent::MeshComponent(MeshHandle meshHandle, MeshStore &meshStore, Materi
     : Component("MeshComponent"), m_meshHandle(meshHandle), m_meshStore(&meshStore),
       m_materialStore(&materialStore)
 {
+    collectMaterialHandles();
+}
+
+void MeshComponent::collectMaterialHandles()
+{
     // One entry per face, so the same handle repeats constantly — collect the distinct ones in the
     // order they first appear to keep the inspector list stable across reloads.
+    m_materialHandles.clear();
     for (MaterialHandle handle : m_meshStore->get(m_meshHandle).faceGroups())
     {
         if (std::ranges::find(m_materialHandles, handle) == m_materialHandles.end())
@@ -86,6 +95,39 @@ MeshComponent::MeshComponent(MeshHandle meshHandle, MeshStore &meshStore, Materi
             m_materialHandles.push_back(handle);
         }
     }
+}
+
+std::unique_ptr<ComponentValues> MeshComponent::copyValues() const
+{
+    return std::make_unique<ComponentValueSnapshot<MeshId>>(m_meshStore->idOf(m_meshHandle));
+}
+
+ComponentValuesAdder MeshComponent::valuesAdder() const
+{
+    // The stores outlive any one scene — SceneManager owns them and a load clears them rather than
+    // replacing them — so capturing them is safe even across a load. Whether the copied *mesh* is
+    // still in there is a separate question, which addPasted answers by id.
+    return [meshStore = m_meshStore, materialStore = m_materialStore](SceneObject            &object,
+                                                                     const ComponentValues &values) {
+        addPasted(object, *meshStore, *materialStore, values);
+    };
+}
+
+void MeshComponent::addPasted(SceneObject &object, MeshStore &meshStore, MaterialStore &materialStore,
+                              const ComponentValues &values)
+{
+    const std::optional<MeshHandle> handle = meshStore.find(componentValuesAs<MeshId>(values));
+    // The copied mesh is not in this store — the usual way being a copy taken before a scene load
+    // cleared it. There is no geometry to point at, so nothing is added.
+    if (!handle)
+    {
+        return;
+    }
+    MeshComponent &added = object.addComponent<MeshComponent>(*handle, meshStore, materialStore);
+    // The object only joins the gathered geometry once the editor registers it (see
+    // ComponentPasteService); this is what then asks for the re-pack that uploads it. Geometry
+    // alone, because a re-pack re-uploads the materials on its way through.
+    added.markDirty(Aspect::Geometry);
 }
 
 void MeshComponent::onGUIImpl()
@@ -124,7 +166,7 @@ void MeshComponent::onGUIImpl()
 
     if (changed)
     {
-        markDirty();
+        markDirty(Aspect::Materials);
     }
 }
 

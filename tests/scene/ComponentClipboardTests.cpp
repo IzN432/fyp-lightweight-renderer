@@ -1,5 +1,8 @@
+#include "core/loaders/MaterialStore.hpp"
 #include "core/scene/Camera.hpp"
 #include "core/scene/ComponentClipboard.hpp"
+#include "core/scene/MeshComponent.hpp"
+#include "core/scene/MeshStore.hpp"
 #include "core/scene/Light.hpp"
 #include "core/scene/Scene.hpp"
 #include "core/scene/TransformComponent.hpp"
@@ -116,4 +119,52 @@ int main()
     assert(targetCamera.nearPlane == 0.5f);
     assert(targetCamera.farPlane == 250.0f);
     assert(targetCamera.fovYDegrees == 35.0f);
+
+    // A transform can be given to an object that has none at all, which is the one component with
+    // no prerequisite of its own.
+    clipboard.store(transformType, sourceTransform.copyValues(), sourceTransform.valuesAdder());
+    lr::SceneObject &bareObject = scene.createSceneObject();
+    assert(!bareObject.hasComponent(transformType));
+    clipboard.adder()(bareObject, *clipboard.values());
+    assert(bareObject.hasComponent(transformType));
+    assert(glm::all(glm::epsilonEqual(bareObject.getComponent<lr::TransformComponent>().transform().position(),
+                                      sourceTransform.transform().position(), 0.0001f)));
+
+    // A mesh component is add-only: it hands another object the same shared Mesh, and refuses to be
+    // overwritten on an object that already has one.
+    lr::Mesh mesh;
+    mesh.setTopology({glm::vec3(0.0f)}, {0}, {});
+    lr::MeshStore        meshStore;
+    const lr::MeshHandle meshHandle = meshStore.add(std::move(mesh));
+    lr::MaterialStore    materialStore(1, [] { return lr::Material{}; });
+
+    lr::SceneObject &meshSource = scene.createSceneObject();
+    meshSource.addComponent<lr::TransformComponent>();
+    auto &sourceMeshComponent = meshSource.addComponent<lr::MeshComponent>(meshHandle, meshStore, materialStore);
+    assert(!sourceMeshComponent.acceptsPastedValues());
+
+    const std::type_index meshType(typeid(lr::MeshComponent));
+    clipboard.store(meshType, sourceMeshComponent.copyValues(), sourceMeshComponent.valuesAdder());
+
+    lr::SceneObject &meshTarget = scene.createSceneObject();
+    meshTarget.addComponent<lr::TransformComponent>();
+    clipboard.adder()(meshTarget, *clipboard.values());
+    assert(meshTarget.hasComponent(meshType));
+    auto &addedMeshComponent = meshTarget.getComponent<lr::MeshComponent>();
+    // The same mesh, not a copy of it, and the material list derived afresh for the new component.
+    assert(addedMeshComponent.meshHandle() == sourceMeshComponent.meshHandle());
+    assert(&addedMeshComponent.mesh() == &sourceMeshComponent.mesh());
+    assert(addedMeshComponent.materialHandles() == sourceMeshComponent.materialHandles());
+    // Flagged for a geometry re-pack rather than a material update, since the object has only now
+    // become renderable.
+    assert(addedMeshComponent.isDirty(lr::MeshComponent::Geometry));
+    assert(!addedMeshComponent.isDirty(lr::MeshComponent::Materials));
+
+    // The mesh is carried by MeshId, so a snapshot taken before the store was cleared resolves to
+    // nothing and adds nothing, rather than addressing whatever now occupies the old handle.
+    meshStore.clear();
+    lr::SceneObject &staleTarget = scene.createSceneObject();
+    staleTarget.addComponent<lr::TransformComponent>();
+    clipboard.adder()(staleTarget, *clipboard.values());
+    assert(!staleTarget.hasComponent(meshType));
 }

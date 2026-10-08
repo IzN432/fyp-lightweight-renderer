@@ -66,6 +66,7 @@ public:
 
     std::unique_ptr<ComponentValues> copyValues() const override;
     void                             pasteValues(const ComponentValues &values) override;
+    ComponentValuesAdder             valuesAdder() const override;
 
     void onGUIImpl() override;
 

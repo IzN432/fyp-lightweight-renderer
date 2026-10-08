@@ -2,6 +2,7 @@
 
 #include "core/scene/TransformComponent.hpp"
 #include "core/scene/Component.hpp"
+#include "core/scene/SceneObject.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -142,6 +143,13 @@ struct Light : public Component
     void pasteValues(const ComponentValues &values) override
     {
         set(componentValuesAs<LightVariant>(values));
+    }
+
+    ComponentValuesAdder valuesAdder() const override
+    {
+        return [](SceneObject &object, const ComponentValues &values) {
+            object.addComponent<Light>(componentValuesAs<LightVariant>(values));
+        };
     }
 
     void onGUIImpl() override

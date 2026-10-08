@@ -101,6 +101,13 @@ struct Camera : public Component
         markDirty();
     }
 
+    ComponentValuesAdder valuesAdder() const override
+    {
+        return [](SceneObject &object, const ComponentValues &values) {
+            object.addComponent<Camera>().pasteValues(values);
+        };
+    }
+
     void onGUIImpl() override
     {
         bool changed = false;

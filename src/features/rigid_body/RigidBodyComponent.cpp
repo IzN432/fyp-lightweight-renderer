@@ -1,5 +1,7 @@
 #include "features/rigid_body/RigidBodyComponent.hpp"
 
+#include "core/scene/SceneObject.hpp"
+
 #include <imgui.h>
 
 #include <algorithm>
@@ -153,6 +155,13 @@ void RigidBodyComponent::pasteValues(const ComponentValues &values)
     setAngularDrag(pasted.angularDrag);
     setLinearVelocity(pasted.linearVelocity);
     setAngularVelocity(pasted.angularVelocity);
+}
+
+ComponentValuesAdder RigidBodyComponent::valuesAdder() const
+{
+    return [](SceneObject &object, const ComponentValues &values) {
+        object.addComponent<RigidBodyComponent>().pasteValues(values);
+    };
 }
 
 void RigidBodyComponent::onGUIImpl()

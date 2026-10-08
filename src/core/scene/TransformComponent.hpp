@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/scene/Component.hpp"
+#include "core/scene/SceneObject.hpp"
 #include "core/scene/Transform.hpp"
 
 #include <imgui.h>
@@ -68,6 +69,14 @@ public:
     {
         m_transform = componentValuesAs<Transform>(values);
         markDirty();
+    }
+
+    // The one component with no prerequisite of its own, so it can be given to a bare object.
+    ComponentValuesAdder valuesAdder() const override
+    {
+        return [](SceneObject &object, const ComponentValues &values) {
+            object.addComponent<TransformComponent>(componentValuesAs<Transform>(values));
+        };
     }
 
     void onGUIImpl() override

@@ -445,16 +445,27 @@ void SceneGpu::flushDirty()
         }
     }
 
-    // Pushes material edits made via the Scene Hierarchy's sliders (MeshComponent::onGUIImpl) to the
-    // GPU materials SSBO — without this, dragging a slider only updates the MaterialStore's CPU copy.
+    // Material edits made via the Scene Hierarchy's sliders (MeshComponent::onGUIImpl) reach the GPU
+    // materials SSBO here — without this, dragging a slider only updates the MaterialStore's CPU
+    // copy. A component pointed at a different mesh needs more than that: the gathered Mesh* list
+    // and every shared buffer packed from it describe the old one.
     bool materialsDirty = false;
+    bool geometryDirty  = false;
     for (SceneObject *object : m_meshObjects)
     {
         auto &meshComponent = object->getComponent<MeshComponent>();
-        materialsDirty |= meshComponent.isDirty();
+        materialsDirty |= meshComponent.isDirty(MeshComponent::Materials);
+        geometryDirty |= meshComponent.isDirty(MeshComponent::Geometry);
         meshComponent.clearDirty();
     }
-    if (materialsDirty)
+    if (geometryDirty)
+    {
+        // Re-packs and re-uploads everything, materials included, so it subsumes the branch below.
+        // Safe without a device stall: the uploaders replace buffers through
+        // ResourceRegistry::replaceUploadedBuffer, which retires the old allocation until the frames
+        // still reading it have completed.
+        rebuildGeometry();
+    } else if (materialsDirty)
     {
         updateMaterials();
     }

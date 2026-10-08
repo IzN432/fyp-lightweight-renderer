@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/scene/Component.hpp"
+#include "core/scene/SceneObject.hpp"
 #include "features/rigid_body/Collider.hpp"
 
 #include <glm/glm.hpp>
@@ -73,6 +74,14 @@ public:
         m_visualizationOpacity  = pasted.visualizationOpacity;
         m_occludedOpacity       = pasted.occludedOpacity;
         markDirty();
+    }
+
+    ComponentValuesAdder valuesAdder() const override
+    {
+        return [](SceneObject &object, const ComponentValues &values) {
+            object.addComponent<ColliderComponent>(componentValuesAs<Values>(values).colliders)
+                .pasteValues(values);
+        };
     }
 
     void onGUIImpl() override;

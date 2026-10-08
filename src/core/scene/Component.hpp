@@ -4,6 +4,7 @@
 
 #include <glm/glm.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <imgui.h>
@@ -34,7 +35,12 @@ private:
     // This is a poll-based replacement for the old push-listener model: setters just flag
     // themselves dirty instead of eagerly triggering a re-upload, so N edits to the same
     // component within a frame collapse into a single upload at flush time.
-    bool m_dirty = false;
+    //
+    // A bitmask rather than a flag, so a component whose parts need different work can say which
+    // part moved — see MeshComponent::Aspect, where a material edit costs a buffer update and a
+    // mesh swap costs a full geometry re-pack. The bits mean whatever the component that defines
+    // them says; a consumer asks with the enum of the concrete type it is holding.
+    uint32_t m_dirtyAspects = 0;
     EditorContext *m_editorContext = nullptr;
 
 protected:
@@ -42,10 +48,15 @@ protected:
     // Null until SceneObject::addComponent adopts this component. Components that may legitimately
     // live detached from the hierarchy (see TransformComponent::worldMatrix) ask through this.
     const SceneObject *findOwningObject() const { return m_owningObject; }
-    void               markDirty() { m_dirty = true; }
+    // Flags every aspect, which is what a component that does not divide itself into aspects wants.
+    void markDirty(uint32_t aspects = allAspects) { m_dirtyAspects |= aspects; }
     EditorContext     *editorContext() const { return m_editorContext; }
 
 public:
+    // Passed to markDirty() by a component that does not divide itself into aspects, and the set
+    // isDirty()/clearDirty() cover when asked without an argument.
+    static constexpr uint32_t allAspects = ~0u;
+
     Component(std::string name = "") : m_name(std::move(name)) {}
     virtual ~Component() = default;
 
@@ -66,6 +77,19 @@ public:
     virtual std::unique_ptr<ComponentValues> copyValues() const { return nullptr; }
     virtual void                             pasteValues(const ComponentValues &values) { (void)values; }
 
+    // How to put a copy of this component's values onto an object that has no component of this
+    // type yet, for the inspector's "Paste component". Null (the default) keeps a type out of that
+    // menu entry while leaving its copy/paste onto an existing component alone — for a component
+    // that only makes sense where something else already put it.
+    virtual ComponentValuesAdder valuesAdder() const { return nullptr; }
+
+    // Whether this component can take the clipboard's values as things stand. Type agreement is
+    // already settled by ComponentClipboard; this is for a component whose answer depends on its own
+    // situation rather than its type — MeshComponent refuses while a sibling SkinComponent is
+    // matched to the mesh it would replace. A false answer disables the paste entry without
+    // disabling the copy one.
+    virtual bool acceptsPastedValues() const { return true; }
+
     // Appends editor-only geometry when this component's owning object is selected.
     // Components without a selection visualization keep the default no-op.
     virtual void onSelectGizmo(SelectionGizmoContext &) const {}
@@ -84,8 +108,12 @@ public:
     // and whatever it needs to reach is already in place by then.
     virtual void onLoaded() {}
 
-    bool isDirty() const { return m_dirty; }
-    void clearDirty() { m_dirty = false; }
+    // Whether anything is dirty, and whether any of `aspects` is.
+    bool isDirty() const { return m_dirtyAspects != 0; }
+    bool isDirty(uint32_t aspects) const { return (m_dirtyAspects & aspects) != 0; }
+
+    void clearDirty() { m_dirtyAspects = 0; }
+    void clearDirty(uint32_t aspects) { m_dirtyAspects &= ~aspects; }
 
 private:
     void drawValueClipboardMenu(EditorContext &context);

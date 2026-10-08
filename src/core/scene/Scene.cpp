@@ -1,9 +1,14 @@
 #include "Scene.hpp"
 
+#include "core/editor/EditorContext.hpp"
+#include "core/scene/TransformComponent.hpp"
+
 #include <imgui.h>
 
 #include <algorithm>
+#include <optional>
 #include <stdexcept>
+#include <typeindex>
 
 namespace
 {
@@ -335,6 +340,40 @@ void Scene::onInspectorGUI(EditorContext &context)
     ImGui::TextUnformatted(object.name.empty() ? "Unnamed Scene Object" : object.name.c_str());
     ImGui::Separator();
     object.onGUI(context);
+    // Belongs to the Inspector window itself, so it opens over the object's heading and over the
+    // space below its components. Each component draws into a child window of its own and keeps its
+    // own menu (Component::onGUI), so a right-click there offers that component's copy/paste rather
+    // than this.
+    drawComponentPasteMenu(object, context);
+}
+
+void Scene::drawComponentPasteMenu(SceneObject &object, EditorContext &context)
+{
+    if (!ImGui::BeginPopupContextWindow())
+    {
+        return;
+    }
+
+    const ComponentClipboard            &clipboard = context.componentClipboard;
+    const std::optional<std::type_index> copied    = clipboard.componentType();
+    // Addable at all, not already present, and — unless it is the transform itself — on an object
+    // that has a transform. Everything else in the engine reads its object's TransformComponent
+    // (the light and camera uploaders, the physics bodies, Camera::viewMatrix), so a component
+    // added to an object without one would throw on the following frame rather than misbehave
+    // visibly.
+    const bool addable = copied && clipboard.values() && clipboard.adder();
+    const bool allowed = addable && !object.hasComponent(*copied) &&
+                         (*copied == std::type_index(typeid(TransformComponent)) ||
+                          object.hasComponent<TransformComponent>());
+
+    ImGui::BeginDisabled(!allowed);
+    if (ImGui::MenuItem("Paste component"))
+    {
+        clipboard.adder()(object, *clipboard.values());
+        context.componentPastes.onComponentPasted(object);
+    }
+    ImGui::EndDisabled();
+    ImGui::EndPopup();
 }
 
 } // namespace lr

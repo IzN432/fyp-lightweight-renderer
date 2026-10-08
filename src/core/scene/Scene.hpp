@@ -89,6 +89,8 @@ private:
     void drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &renameRequested,
                            std::optional<SceneObjectId> &deleteRequested);
     void drawRenamePopup();
+    // The Inspector's own context menu: adds the component on the clipboard to `object`.
+    void drawComponentPasteMenu(SceneObject &object, EditorContext &context);
 
     // Finds an object whether or not it is still alive — destroySceneObject() has to reach objects
     // it is in the middle of retiring. Callers that need a live object go through getSceneObject().

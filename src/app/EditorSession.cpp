@@ -49,7 +49,7 @@ constexpr std::string_view kViewState = "view";
 constexpr std::string_view kEditState = "edit";
 } // namespace
 
-class EditorSession::Impl
+class EditorSession::Impl final : public ComponentPasteService
 {
 public:
     Impl(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,
@@ -71,7 +71,7 @@ public:
                         }),
           m_transformController(m_objectTranslationHandler, m_objectRotationHandler, m_objectScaleHandler),
           m_objectPickingReadback(viewer.context(), viewer.allocator()),
-          m_context{m_transformController, m_commandManager},
+          m_context{m_transformController, m_commandManager, *this},
           m_arapTool(m_selectionManager, m_vertexManager, m_commandManager), m_laplaceBeltramiTool(sceneManager),
           m_tools{&m_arapTool, &m_laplaceBeltramiTool}
     {
@@ -115,6 +115,21 @@ public:
     }
 
     EditorContext &context() { return m_context; }
+
+    // An object the inspector has just pasted a component onto. An object that has only now become
+    // renderable is not in SceneGpu's mesh list, and nothing else would put it there: registering it
+    // is what lets the next geometry re-pack — the one the pasted component asks for through its
+    // Geometry dirty aspect — upload it. addMeshObject ignores an object it already holds, so a
+    // paste of anything else costs nothing.
+    void onComponentPasted(SceneObject &object) override
+    {
+        // Both components, because the geometry gather reads the object's transform as its model
+        // matrix and would throw on an object without one.
+        if (object.hasComponent<MeshComponent>() && object.hasComponent<TransformComponent>())
+        {
+            m_sceneManager.addMeshObject(object);
+        }
+    }
 
     bool allowsViewportNavigation() const { return m_inputRouter.viewportNavigationAllowed(); }
 
