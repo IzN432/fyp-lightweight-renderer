@@ -123,6 +123,7 @@ add_library(lr_core STATIC
     src/core/scene/Scene.cpp
     src/core/scene/SceneObject.cpp
     src/core/scene/SceneManager.cpp
+    src/core/scene/SceneDrawList.cpp
     src/core/scene/SceneGpu.cpp
     src/core/scene/EngineConventions.cpp
 

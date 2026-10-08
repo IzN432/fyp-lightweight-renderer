@@ -1,9 +1,6 @@
 #include "GeometryPass.hpp"
 
 #include "core/Paths.hpp"
-#include "core/scene/Scene.hpp"
-
-#include <stdexcept>
 
 namespace lr
 {
@@ -24,24 +21,6 @@ struct GeometryPC
 } // namespace
 
 GeometryPass::GeometryPass(Config cfg) : m_cfg(std::move(cfg)) {}
-
-void GeometryPass::setSceneGeometry(VertexBufferUploadResult vertices, IndexBufferUploadResult indices,
-                                    std::vector<const TransformComponent *> transforms,
-                                    std::vector<SceneObject *> objects, std::vector<SkinDrawInfo> skins)
-{
-    if (vertices.singleMeshResults.size() != indices.singleMeshResults.size() ||
-        vertices.singleMeshResults.size() != transforms.size() ||
-        vertices.singleMeshResults.size() != objects.size() ||
-        vertices.singleMeshResults.size() != skins.size())
-    {
-        throw std::invalid_argument("GeometryPass::setSceneGeometry: draw arrays must be parallel");
-    }
-    m_cfg.vertexBufferUploadResult = std::move(vertices);
-    m_cfg.indexBufferUploadResult  = std::move(indices);
-    m_cfg.meshTransforms           = std::move(transforms);
-    m_cfg.meshObjects              = std::move(objects);
-    m_cfg.skinDrawInfos            = std::move(skins);
-}
 
 void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
 {
@@ -83,27 +62,20 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         .depthAttachment(fg.image("gbufferDepth"), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,
                          {.depthStencil = {1.0f, 0}})
         .execute([&](PassContext &ctx) {
-            for (size_t i = 0; i < m_cfg.vertexBufferUploadResult.singleMeshResults.size(); ++i)
+            for (size_t i = 0; i < m_cfg.draws.size(); ++i)
             {
-                if (!m_cfg.meshObjects[i]->scene().contains(m_cfg.meshObjects[i]->id()))
+                if (!m_cfg.draws.isLive(i))
                 {
                     continue;
                 }
-                const auto &singleMesh      = m_cfg.vertexBufferUploadResult.singleMeshResults[i];
-                const auto &singleMeshIndex = m_cfg.indexBufferUploadResult.singleMeshResults[i];
-
-                const TransformComponent *transform = m_cfg.meshTransforms[i];
-                const glm::mat4 model = transform ? transform->worldMatrix() : glm::mat4(1.0f);
-
-                const SkinDrawInfo &skin = m_cfg.skinDrawInfos[i];
-                const GeometryPC pc{.model             = model,
-                                    .primitiveIdOffset = singleMeshIndex.firstIndex / 3,
-                                    .paletteOffset     = skin.paletteOffset,
-                                    .skinEnabled       = skin.skinEnabled && m_skinningEnabled ? 1u : 0u};
+                const SceneDraw  draw = m_cfg.draws.at(i, m_skinningEnabled);
+                const GeometryPC pc{.model             = draw.model,
+                                    .primitiveIdOffset = draw.primitiveIdOffset,
+                                    .paletteOffset     = draw.paletteOffset,
+                                    .skinEnabled       = draw.skinEnabled};
                 ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                         pc);
-                ctx.cmd().drawIndexed(singleMeshIndex.indexCount, 1, singleMeshIndex.firstIndex,
-                                      singleMesh.vertexOffset, 0);
+                ctx.cmd().drawIndexed(draw.indexCount, 1, draw.firstIndex, draw.vertexOffset, 0);
             }
         });
 }

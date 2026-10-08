@@ -17,9 +17,7 @@ public:
 
     void uploadResources(ResourceRegistry &resources) const;
     void build(FrameGraph &frameGraph, const GpuMeshLayout &layout) const;
-    void setSceneGeometry(VertexBufferUploadResult vertices, IndexBufferUploadResult indices,
-                          std::vector<const TransformComponent *> transforms, std::vector<SceneObject *> objects,
-                          std::vector<SkinDrawInfo> skins);
+    void setSceneGeometry(SceneDrawList draws) { m_config.draws = std::move(draws); }
 
 private:
     GeometryPass::Config m_config;

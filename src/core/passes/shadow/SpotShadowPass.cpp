@@ -81,17 +81,6 @@ SpotShadowGpuData SpotShadowPass::shadowData() const
     return result;
 }
 
-void SpotShadowPass::setSceneGeometry(VertexBufferUploadResult vertices, IndexBufferUploadResult indices,
-                                      std::vector<const TransformComponent *> transforms,
-                                      std::vector<SceneObject *> objects, std::vector<SkinDrawInfo> skins)
-{
-    m_cfg.geometry.vertexBufferUploadResult = std::move(vertices);
-    m_cfg.geometry.indexBufferUploadResult  = std::move(indices);
-    m_cfg.geometry.meshTransforms           = std::move(transforms);
-    m_cfg.geometry.meshObjects              = std::move(objects);
-    m_cfg.geometry.skinDrawInfos            = std::move(skins);
-}
-
 void SpotShadowPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
 {
     auto pass = fg.addPass("spotShadow").type(PassType::Geometry).vertexLayout(layout);
@@ -121,22 +110,19 @@ void SpotShadowPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
             m_resources.updateBuffer(m_cfg.paramsBuffer, &data, sizeof(data));
             if (data.header.x == 0)
                 return;
-            const auto &g = m_cfg.geometry;
-            for (size_t i = 0; i < g.vertexBufferUploadResult.singleMeshResults.size(); ++i)
+            const SceneDrawList &draws = m_cfg.geometry.draws;
+            for (size_t i = 0; i < draws.size(); ++i)
             {
-                if (!g.meshObjects[i]->scene().contains(g.meshObjects[i]->id()))
+                if (!draws.isLive(i))
                     continue;
-                const auto &mesh  = g.vertexBufferUploadResult.singleMeshResults[i];
-                const auto &range = g.indexBufferUploadResult.singleMeshResults[i];
-                const auto *transform = g.meshTransforms[i];
-                const auto &skin = g.skinDrawInfos[i];
-                const ShadowPC pc{.model             = transform ? transform->worldMatrix() : glm::mat4(1.0f),
-                                  .primitiveIdOffset = range.firstIndex / 3,
-                                  .paletteOffset     = skin.paletteOffset,
-                                  .skinEnabled       = skin.skinEnabled ? 1u : 0u};
+                const SceneDraw draw = draws.at(i);
+                const ShadowPC  pc{.model             = draw.model,
+                                   .primitiveIdOffset = draw.primitiveIdOffset,
+                                   .paletteOffset     = draw.paletteOffset,
+                                   .skinEnabled       = draw.skinEnabled};
                 ctx.cmd().pushConstants(ctx.pipelineLayout(),
                                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
-                ctx.cmd().drawIndexed(range.indexCount, data.header.x, range.firstIndex, mesh.vertexOffset, 0);
+                ctx.cmd().drawIndexed(draw.indexCount, data.header.x, draw.firstIndex, draw.vertexOffset, 0);
             }
         });
 }

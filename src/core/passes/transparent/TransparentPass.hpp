@@ -54,11 +54,9 @@ public:
 
     void build(FrameGraph &fg, const GpuMeshLayout &layout) const;
 
-    // The same draw arrays as GeometryPass::setSceneGeometry, plus each draw's mesh (for its bounds and
-    // materials). All must be parallel.
-    void setSceneGeometry(VertexBufferUploadResult vertices, IndexBufferUploadResult indices,
-                          std::vector<const TransformComponent *> transforms, std::vector<SceneObject *> objects,
-                          std::vector<SkinDrawInfo> skins, const std::vector<const Mesh *> &meshes);
+    // The same draw list as GeometryPass::setSceneGeometry, plus each draw's mesh (for its bounds and
+    // materials). `meshes` must be parallel to `draws`.
+    void setSceneGeometry(SceneDrawList draws, const std::vector<const Mesh *> &meshes);
 
     void setNumLights(uint32_t numLights) { m_cfg.numLights = numLights; }
     void setSkinningEnabled(bool enabled) { m_skinningEnabled = enabled; }

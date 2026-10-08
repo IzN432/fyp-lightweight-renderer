@@ -35,16 +35,12 @@ TransparentPass::TransparentPass(Config cfg) : m_cfg(std::move(cfg))
     }
 }
 
-void TransparentPass::setSceneGeometry(VertexBufferUploadResult vertices, IndexBufferUploadResult indices,
-                                       std::vector<const TransformComponent *> transforms,
-                                       std::vector<SceneObject *> objects, std::vector<SkinDrawInfo> skins,
-                                       const std::vector<const Mesh *> &meshes)
+void TransparentPass::setSceneGeometry(SceneDrawList draws, const std::vector<const Mesh *> &meshes)
 {
-    const size_t count = vertices.singleMeshResults.size();
-    if (indices.singleMeshResults.size() != count || transforms.size() != count || objects.size() != count ||
-        skins.size() != count || meshes.size() != count)
+    const size_t count = draws.size();
+    if (meshes.size() != count)
     {
-        throw std::invalid_argument("TransparentPass::setSceneGeometry: draw arrays must be parallel");
+        throw std::invalid_argument("TransparentPass::setSceneGeometry: meshes must be parallel to draws");
     }
 
     m_draws.clear();
@@ -70,11 +66,7 @@ void TransparentPass::setSceneGeometry(VertexBufferUploadResult vertices, IndexB
         m_draws.push_back(std::move(draw));
     }
 
-    m_cfg.geometry.vertexBufferUploadResult = std::move(vertices);
-    m_cfg.geometry.indexBufferUploadResult  = std::move(indices);
-    m_cfg.geometry.meshTransforms           = std::move(transforms);
-    m_cfg.geometry.meshObjects              = std::move(objects);
-    m_cfg.geometry.skinDrawInfos            = std::move(skins);
+    m_cfg.geometry.draws = std::move(draws);
 }
 
 void TransparentPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
@@ -142,22 +134,18 @@ void TransparentPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         // Reads m_cfg/m_draws when the pass runs, so geometry, light count and material edits take effect
         // without rebuilding the graph.
         .execute([this](PassContext &ctx) {
-            const GeometryPass::Config &geometry = m_cfg.geometry;
-            const glm::vec3             eye      = m_cfg.eyePosition ? m_cfg.eyePosition() : glm::vec3(0.0f);
+            const SceneDrawList &geometry = m_cfg.geometry.draws;
+            const glm::vec3      eye      = m_cfg.eyePosition ? m_cfg.eyePosition() : glm::vec3(0.0f);
 
             m_order.clear();
             for (size_t i = 0; i < m_draws.size(); ++i)
             {
-                SceneObject *object = geometry.meshObjects[i];
-                if (!object->scene().contains(object->id()) ||
-                    !std::ranges::any_of(m_draws[i].materials, m_cfg.isBlendMaterial))
+                if (!geometry.isLive(i) || !std::ranges::any_of(m_draws[i].materials, m_cfg.isBlendMaterial))
                 {
                     continue;
                 }
-                const TransformComponent *transform = geometry.meshTransforms[i];
-                const glm::vec3           center =
-                    transform ? glm::vec3(transform->worldMatrix() * glm::vec4(m_draws[i].localCenter, 1.0f))
-                              : m_draws[i].localCenter;
+                const glm::vec3 center =
+                    glm::vec3(geometry.at(i).model * glm::vec4(m_draws[i].localCenter, 1.0f));
                 const glm::vec3 offset = center - eye;
                 m_order.emplace_back(glm::dot(offset, offset), i);
             }
@@ -166,20 +154,17 @@ void TransparentPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
 
             for (const auto &[distance, i] : m_order)
             {
-                const auto               &mesh      = geometry.vertexBufferUploadResult.singleMeshResults[i];
-                const auto               &range     = geometry.indexBufferUploadResult.singleMeshResults[i];
-                const TransformComponent *transform = geometry.meshTransforms[i];
-                const SkinDrawInfo       &skin      = geometry.skinDrawInfos[i];
-                const TransparentPC       pc{
-                    .model             = transform ? transform->worldMatrix() : glm::mat4(1.0f),
-                    .primitiveIdOffset = range.firstIndex / 3,
-                    .paletteOffset     = skin.paletteOffset,
-                    .skinEnabled       = skin.skinEnabled && m_skinningEnabled ? 1u : 0u,
+                const SceneDraw     draw = geometry.at(i, m_skinningEnabled);
+                const TransparentPC pc{
+                    .model             = draw.model,
+                    .primitiveIdOffset = draw.primitiveIdOffset,
+                    .paletteOffset     = draw.paletteOffset,
+                    .skinEnabled       = draw.skinEnabled,
                     .numLights         = m_cfg.numLights,
                     .pfMips            = m_cfg.pfMips,
                 };
                 ctx.cmd().pushConstants(ctx.pipelineLayout(), kVertFrag, pc);
-                ctx.cmd().drawIndexed(range.indexCount, 1, range.firstIndex, mesh.vertexOffset, 0);
+                ctx.cmd().drawIndexed(draw.indexCount, 1, draw.firstIndex, draw.vertexOffset, 0);
             }
         });
 }

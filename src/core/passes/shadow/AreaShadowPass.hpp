@@ -45,9 +45,7 @@ public:
 
     AreaShadowPass(ResourceRegistry &resources, Config cfg);
     void build(FrameGraph &fg, const GpuMeshLayout &layout) const;
-    void setSceneGeometry(VertexBufferUploadResult vertices, IndexBufferUploadResult indices,
-                          std::vector<const TransformComponent *> transforms, std::vector<SceneObject *> objects,
-                          std::vector<SkinDrawInfo> skins);
+    void setSceneGeometry(SceneDrawList draws) { m_cfg.geometry.draws = std::move(draws); }
     void setLightObjects(std::vector<SceneObject *> lights) { m_cfg.lightObjects = std::move(lights); }
     Config            &config() { return m_cfg; }
     const Config      &config() const { return m_cfg; }

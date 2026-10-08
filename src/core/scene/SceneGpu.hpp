@@ -10,6 +10,7 @@
 #include "EngineConventions.hpp"
 #include "MeshStore.hpp"
 #include "Scene.hpp"
+#include "SceneDrawList.hpp"
 #include "SceneObject.hpp"
 
 #include "core/framegraph/ResourceRegistry.hpp"
@@ -169,6 +170,10 @@ public:
     const std::string &meshVertexBufferName() const { return m_meshVertexBufferName; }
     const std::string &meshIndexBufferName() const { return m_meshIndexBufferName; }
     const std::string &meshFaceGroupBufferName() const { return m_meshFaceGroupBufferName; }
+
+    // The per-mesh draw state every geometry-replaying pass needs. Valid after initialize(); call
+    // again after rebuildGeometry() (onGeometryRebuilt fires for exactly that reason).
+    SceneDrawList drawList() const;
 
     const VertexBufferUploadResult                &meshPositions() const { return m_meshPositions; }
     const IndexBufferUploadResult                 &indexBuffer() const { return m_indexBuffer; }

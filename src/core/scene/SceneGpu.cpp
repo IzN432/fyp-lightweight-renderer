@@ -484,17 +484,19 @@ const IndexBufferUploadPerMeshResult &SceneGpu::indexRange(const Mesh &mesh) con
     return m_indexBuffer.singleMeshResults.at(static_cast<size_t>(std::distance(m_geometryMeshes.begin(), it)));
 }
 
+SceneDrawList SceneGpu::drawList() const
+{
+    return SceneDrawList{m_meshPositions, m_indexBuffer, m_meshTransforms, m_geometryObjects,
+                         m_skinUploadResult.drawInfos};
+}
+
 GeometryPass::Config SceneGpu::geometryPassConfig() const
 {
     const auto &textures = m_materialUploadResult.textureNameMap;
     return GeometryPass::Config{
         .cameraBufferResourceName                  = cameraBufferName(),
         .vertexBufferResourceNames                 = {{0, m_meshPositionBufferName}, {1, m_meshVertexBufferName}},
-        .vertexBufferUploadResult                  = m_meshPositions,
-        .indexBufferUploadResult                   = m_indexBuffer,
-        .meshTransforms                            = m_meshTransforms,
-        .meshObjects                               = m_geometryObjects,
-        .skinDrawInfos                             = m_skinUploadResult.drawInfos,
+        .draws                                     = drawList(),
         .indexBufferResourceName                   = m_meshIndexBufferName,
         .faceGroupBufferResourceName               = m_meshFaceGroupBufferName,
         .diffuseTextureArrayResourceName           = textures.at(conventions::baseColorTexture),

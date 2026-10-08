@@ -2378,8 +2378,7 @@ void bindBuildingBlocks(nb::module_ &m)
                     self->pass->build(fg, lr::conventions::geometryMeshLayout());
                 });
                 self->geometryRebuilt = gpu.onGeometryRebuilt([pass = self->pass.get()](const lr::SceneGpu &rebuilt) {
-                    pass->setSceneGeometry(rebuilt.meshPositions(), rebuilt.indexBuffer(), rebuilt.meshTransforms(),
-                                           rebuilt.geometryObjects(), rebuilt.skinUploadResult().drawInfos);
+                    pass->setSceneGeometry(rebuilt.drawList());
                 });
                 holdWhileViewerRuns(viewer, self); // the pass's execute callback reads self->pass
             },

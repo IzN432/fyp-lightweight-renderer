@@ -232,8 +232,7 @@ void Engine::run()
             },
     });
     const auto          setTransparentGeometry = [&](const lr::SceneGpu &gpu) {
-        transparentPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
-                                         gpu.geometryObjects(), gpu.skinUploadResult().drawInfos, gpu.geometryMeshes());
+        transparentPass.setSceneGeometry(gpu.drawList(), gpu.geometryMeshes());
     };
     setTransparentGeometry(sceneManager.gpu());
     transparentPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
@@ -375,18 +374,14 @@ void Engine::run()
     // Whenever SceneGpu re-packs geometry (an import, lights added or removed) or re-uploads the lights,
     // keep the passes' draw lists and light count in step.
     appConnections.push_back(sceneManager.gpu().onGeometryRebuilt([&](const lr::SceneGpu &gpu) {
-        geometryPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
-                                      gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
-        objectPickingPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
-                                           gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
-        spotShadowPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
-                                        gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
+        const lr::SceneDrawList draws = gpu.drawList();
+        geometryPass.setSceneGeometry(draws);
+        objectPickingPass.setSceneGeometry(draws);
+        spotShadowPass.setSceneGeometry(draws);
         spotShadowPass.setLightObjects(gpu.lightObjects());
-        cascadedShadowPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
-                                            gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
+        cascadedShadowPass.setSceneGeometry(draws);
         cascadedShadowPass.setLightObjects(gpu.lightObjects());
-        areaShadowPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
-                                        gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
+        areaShadowPass.setSceneGeometry(draws);
         areaShadowPass.setLightObjects(gpu.lightObjects());
         setTransparentGeometry(gpu);
     }));

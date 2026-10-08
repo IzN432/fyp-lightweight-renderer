@@ -22,7 +22,7 @@ public:
         std::vector<uint32_t>    vertexCounts;
 
         // The mesh's TransformComponent, read fresh every frame so the points stay aligned with the mesh
-        // as it moves — same reasoning as GeometryPass::Config::meshTransforms. Null means draw
+        // as it moves — same reasoning as SceneDrawList::transforms(). Null means draw
         // with an identity model matrix.
         const TransformComponent *meshTransform = nullptr;
     };

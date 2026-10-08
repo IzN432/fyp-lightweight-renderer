@@ -31,7 +31,7 @@ public:
         // the "nothing selected" state: the pass draws nothing until setMeshSource() supplies one.
         IndexBufferUploadPerMeshResult indexRange;
 
-        // Read fresh every frame, same as GeometryPass::Config::meshTransforms — dragging the
+        // Read fresh every frame, same as SceneDrawList::transforms() — dragging the
         // mesh's TransformComponent moves the heatmap surface immediately with no pass rebuild.
         const TransformComponent *meshTransform = nullptr;
     };
