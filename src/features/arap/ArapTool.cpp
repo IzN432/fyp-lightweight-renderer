@@ -62,6 +62,13 @@ void ArapTool::registerWith(EditorServices &services)
     // The key belongs to the feature, not to whatever hosts it, so the host never learns that ARAP
     // is reachable by pressing A.
     services.shortcuts().add({.key = GLFW_KEY_A}, [this] {
+        // With no editable target there is nothing to deform, and the state's vertex points and
+        // vertex selection would have no mesh behind them, so entering is refused the way the
+        // editor refuses TAB. Leaving stays available unconditionally.
+        if (!m_mesh && !m_states->isActive(kArapStateId))
+        {
+            return;
+        }
         m_states->toggle(kArapStateId);
     });
 }
@@ -157,7 +164,8 @@ void ArapTool::drawPanel()
 {
     if (!m_states || !m_states->isActive(kArapStateId))
     {
-        ImGui::TextDisabled("Press A to enable ARAP mode.");
+        ImGui::TextDisabled(m_mesh ? "Press A to enable ARAP mode."
+                                   : "Select a mesh object to use ARAP deformation.");
         return;
     }
 

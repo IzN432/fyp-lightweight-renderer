@@ -95,10 +95,6 @@ SceneObject &SceneManager::load(const std::filesystem::path &path, const SceneLo
     }
 
     gpu().addLoaded(imported);
-    if (!m_editedMeshObject && !gpu().meshObjects().empty())
-    {
-        m_editedMeshObject = gpu().meshObjects().front();
-    }
     return target.getSceneObject(imported.rootObject);
 }
 
@@ -126,7 +122,10 @@ std::vector<SceneObjectId> SceneManager::loadScene(const std::filesystem::path &
     // their IDs must be released before the saved objects are recreated.
     target.purgeDestroyedSceneObjects();
     gpu().clearSceneResources();
-    m_editedMeshObject = nullptr;
+    // Before the stores go, so the SelectionManager stops referencing a Mesh that is about to be
+    // destroyed. A loaded scene starts with nothing being vertex-edited; the Scene Hierarchy
+    // selection is what picks a target.
+    clearEditedMeshObject();
     m_meshStore.clear();
     m_materialStore.clear();
 
@@ -197,30 +196,40 @@ std::vector<SceneObjectId> SceneManager::loadScene(const std::filesystem::path &
 void SceneManager::addMeshObject(SceneObject &object)
 {
     gpu().addMeshObject(object);
-    if (!m_editedMeshObject)
-    {
-        m_editedMeshObject = &object;
-    }
 }
 
-SceneObject *SceneManager::removeSceneObjects(std::span<const SceneObjectId> ids)
+bool SceneManager::removeSceneObjects(std::span<const SceneObjectId> ids)
 {
     gpu().removeSceneObjects(ids);
 
-    if (m_editedMeshObject && std::ranges::find(ids, m_editedMeshObject->id()) != ids.end())
+    if (!m_editedMeshObject || std::ranges::find(ids, m_editedMeshObject->id()) == ids.end())
     {
-        const auto  &meshObjects = gpu().meshObjects();
-        SceneObject *replacement = meshObjects.empty() ? nullptr : meshObjects.front();
-        m_editedMeshObject       = nullptr;
-        if (replacement && m_selectionManager)
-        {
-            setEditedMeshObject(*replacement);
-        } else
-        {
-            m_editedMeshObject = replacement;
-        }
+        return false;
     }
-    return m_editedMeshObject;
+    clearEditedMeshObject();
+    return true;
+}
+
+void SceneManager::clearEditedMeshObject()
+{
+    if (!m_editedMeshObject)
+    {
+        return;
+    }
+    // Nulled first: the rebind below fires the selection's colors-changed callback, which must find
+    // no edited mesh rather than write a placeholder-sized color array onto the outgoing one.
+    m_editedMeshObject = nullptr;
+
+    ensureSelectedMeshAttributes(m_unboundMesh);
+    if (m_selectionManager)
+    {
+        m_selectionManager->rebind(m_unboundMesh.positions(), m_unboundMeshTransform);
+    }
+    // The stamp belongs to whichever mesh is bound, so it moves with it (see onGeometryRebuilt).
+    m_selectedTopologyRevision = m_unboundMesh.topologyRevision();
+    // The overlay buffers keep the outgoing mesh's contents. Every presentation that draws them
+    // requires an edited mesh, and synchronizeSelectedMeshBuffers() skips them while there is none,
+    // so nothing samples them until setEditedMeshObject() replaces them for a real target.
 }
 
 void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualConfig,
@@ -239,8 +248,8 @@ void SceneManager::initialize(const AreaLightVisualConfig    &areaLightVisualCon
     // selected mesh's Mesh/TransformComponent, which only exist once the meshes are uploaded. The
     // highlight-changed callback updates the CPU color attribute; late synchronization updates the
     // GPU. The application layer still owns wiring up a SelectionTool and its own UI on top of it.
-    // With no mesh registered this binds to the placeholder (see editedMesh()) and rebinds on the
-    // first import.
+    // This binds to the placeholder (see editedMesh()) and rebinds when the application picks an
+    // edited mesh via setEditedMeshObject(); loading geometry alone does not pick one.
     m_selectionManager =
         std::make_unique<SelectionManager>(editedMesh().positions(), editedMeshTransform(), input);
     m_connections.push_back(m_selectionManager->registerColorsChangedCallback([this]() {

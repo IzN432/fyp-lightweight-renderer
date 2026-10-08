@@ -58,15 +58,19 @@ public:
     // Saves the complete authored scene and its referenced assets as a single .lrscene file.
     void save(const std::filesystem::path &path) const;
 
-    // Registers renderable scene geometry (see SceneGpu::addMeshObject). The first registered object
-    // becomes the initial edited mesh; load() registers imported meshes automatically. Later
-    // position/attribute edits are detected from the mesh's revisions.
-    void         addMeshObject(SceneObject &object);
-    SceneObject *removeSceneObjects(std::span<const SceneObjectId> ids);
+    // Registers renderable scene geometry (see SceneGpu::addMeshObject). Registering does not make
+    // the object the edited mesh — only setEditedMeshObject() does, so adding geometry never binds a
+    // vertex-editing target the user did not choose. load() registers imported meshes automatically.
+    // Later position/attribute edits are detected from the mesh's revisions.
+    void addMeshObject(SceneObject &object);
+
+    // Returns true if the edited mesh was among `ids`, in which case it has been cleared (see
+    // clearEditedMeshObject()) and the caller should drop whatever it bound against that target.
+    bool removeSceneObjects(std::span<const SceneObjectId> ids);
 
     // The object currently targeted by vertex editing (SelectionManager, the vertex-picking
-    // overlay's points buffer and heatmap analysis). The caller drives this from Scene Hierarchy
-    // selection. Defaults to the first registered mesh.
+    // overlay's points buffer and heatmap analysis). Set only by setEditedMeshObject(), which the
+    // caller drives from Scene Hierarchy selection; null until something is selected.
     SceneObject *editedMeshObject() { return m_editedMeshObject; }
 
     // The Mesh and TransformComponent the overlay buffers, SelectionManager and the editor's
@@ -91,6 +95,11 @@ public:
     // Also replaces the selected heatmap buffer. Throws if `object` isn't isEditable(). No-op if
     // `object` is already selected.
     void setEditedMeshObject(SceneObject &object);
+
+    // Drops the vertex-editing target, rebinding the SelectionManager onto the placeholder mesh so
+    // nothing keeps referencing a Mesh that is about to be destroyed. Called when the edited mesh is
+    // deleted or the whole scene is replaced. No-op if there is no edited mesh.
+    void clearEditedMeshObject();
 
     // The camera whose Camera/TransformComponent state drives the camera UBO. Must be set before
     // initialize().
@@ -215,6 +224,10 @@ private:
 
     // After SceneGpu re-packs geometry: replaces the overlays, and rebinds the selection if the
     // selected mesh's topology changed (importing unrelated assets keeps the current selection).
+    // Mesh revisions are per-mesh counters, so that comparison is only meaningful while
+    // m_selectedTopologyRevision belongs to the currently bound mesh — which holds because every
+    // write to m_editedMeshObject goes through setEditedMeshObject()/clearEditedMeshObject() and
+    // restamps it.
     void onGeometryRebuilt();
 
     void ensureSelectedMeshAttributes(Mesh &mesh);

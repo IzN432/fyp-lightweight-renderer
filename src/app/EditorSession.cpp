@@ -91,8 +91,8 @@ public:
 
         m_stateController.activate(kViewState);
         applyPresentation(m_sceneManager.editorPresentation());
-        // An empty scene is a valid starting point: the editor opens with no target and binds one
-        // on the first import, exactly as it does after the last editable object is deleted.
+        // The editor always opens with no target — loading or importing geometry does not pick one,
+        // only Scene Hierarchy selection does — so an empty scene is just the ordinary case.
         if (m_meshObject)
         {
             notifyTargetChanged(*m_meshObject);
@@ -312,19 +312,16 @@ private:
             }
             m_transformController.onObjectsDestroyed(ids);
 
-            SceneObject *replacement = m_sceneManager.removeSceneObjects(ids);
+            m_sceneManager.removeSceneObjects(ids);
             m_sceneManager.uploadLights();
             if (!editedMeshDestroyed)
             {
                 return;
             }
-            if (!replacement)
-            {
-                m_stateController.activateDefault();
-                notifyTargetCleared();
-                return;
-            }
-            rebindEditableTarget(*replacement, false);
+            // Deleting the edited mesh leaves nothing being vertex-edited rather than silently
+            // moving the target to another object: a target comes from Scene Hierarchy selection.
+            m_stateController.activateDefault();
+            notifyTargetCleared();
         }));
     }
 
@@ -406,8 +403,10 @@ private:
 
     void rebindEditableTarget(SceneObject &object, bool sceneManagerAlreadyRebound)
     {
-        if (!sceneManagerAlreadyRebound && m_sceneManager.editedMeshObject() != &object)
+        if (!sceneManagerAlreadyRebound)
         {
+            // Unconditional: setEditedMeshObject() no-ops when `object` is already the target, and
+            // because it is the only thing that sets one, already-the-target means already rebound.
             m_sceneManager.setEditedMeshObject(object);
         }
         m_meshObject = &object;
