@@ -24,8 +24,12 @@
 #include "core/framegraph/ImageReadback.hpp"
 #include "core/passes/objectpicking/ObjectPickingPass.hpp"
 #include "core/scene/Camera.hpp"
+#include "core/scene/ComponentCatalog.hpp"
+#include "core/scene/Light.hpp"
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneManager.hpp"
+#include "features/rigid_body/ColliderComponent.hpp"
+#include "features/rigid_body/RigidBodyComponent.hpp"
 #include "features/arap/ArapTool.hpp"
 #include "features/laplace_beltrami/LaplaceBeltramiTool.hpp"
 
@@ -47,9 +51,27 @@ namespace
 {
 constexpr std::string_view kViewState = "view";
 constexpr std::string_view kEditState = "edit";
+
+// What the Inspector's "Add Component" offers, in the order it lists them. A component earns a
+// place here by having a blank state worth starting from: a mesh does not (it needs geometry, which
+// arrives by import or by pasting a mesh component), and neither do skins or animators, whose
+// contents address a particular rig or set of clips. SphericalCameraController is left out
+// deliberately too — it drives its object's transform, so adding one would take the object over.
+ComponentCatalog makeComponentCatalog()
+{
+    ComponentCatalog catalog;
+    catalog.add<TransformComponent>("Transform");
+    catalog.add<Camera>("Camera");
+    catalog.add<Light>("Light", [](SceneObject &object) {
+        object.addComponent<Light>(PointLight{});
+    });
+    catalog.add<ColliderComponent>("Collider");
+    catalog.add<RigidBodyComponent>("Rigid Body");
+    return catalog;
+}
 } // namespace
 
-class EditorSession::Impl final : public ComponentPasteService
+class EditorSession::Impl final : public ComponentAddService
 {
 public:
     Impl(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,
@@ -71,7 +93,8 @@ public:
                         }),
           m_transformController(m_objectTranslationHandler, m_objectRotationHandler, m_objectScaleHandler),
           m_objectPickingReadback(viewer.context(), viewer.allocator()),
-          m_context{m_transformController, m_commandManager, *this},
+          m_componentCatalog(makeComponentCatalog()),
+          m_context{m_transformController, m_commandManager, *this, m_componentCatalog},
           m_arapTool(m_selectionManager, m_vertexManager, m_commandManager), m_laplaceBeltramiTool(sceneManager),
           m_tools{&m_arapTool, &m_laplaceBeltramiTool}
     {
@@ -116,12 +139,12 @@ public:
 
     EditorContext &context() { return m_context; }
 
-    // An object the inspector has just pasted a component onto. An object that has only now become
+    // An object the Inspector has just added a component to. An object that has only now become
     // renderable is not in SceneGpu's mesh list, and nothing else would put it there: registering it
-    // is what lets the next geometry re-pack — the one the pasted component asks for through its
-    // Geometry dirty aspect — upload it. addMeshObject ignores an object it already holds, so a
-    // paste of anything else costs nothing.
-    void onComponentPasted(SceneObject &object) override
+    // is what lets the next geometry re-pack — the one the new component asks for through its
+    // Geometry dirty aspect — upload it. addMeshObject ignores an object it already holds, so
+    // adding anything else costs nothing.
+    void onComponentAdded(SceneObject &object) override
     {
         // Both components, because the geometry gather reads the object's transform as its model
         // matrix and would throw on an object without one.
@@ -558,6 +581,8 @@ private:
     SceneObjectTransformController m_transformController;
     ImageReadback                  m_objectPickingReadback;
     std::optional<glm::dvec2>      m_objectPickPress;
+    // Declared before m_context, which holds a reference to it.
+    ComponentCatalog               m_componentCatalog;
     EditorContext                  m_context;
     ArapTool                       m_arapTool;
     LaplaceBeltramiTool            m_laplaceBeltramiTool;

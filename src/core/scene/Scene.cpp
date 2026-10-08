@@ -340,12 +340,30 @@ void Scene::onInspectorGUI(EditorContext &context)
     ImGui::TextUnformatted(object.name.empty() ? "Unnamed Scene Object" : object.name.c_str());
     ImGui::Separator();
     object.onGUI(context);
+    drawAddComponentPanel(object, context);
     // Belongs to the Inspector window itself, so it opens over the object's heading and over the
     // space below its components. Each component draws into a child window of its own and keeps its
     // own menu (Component::onGUI), so a right-click there offers that component's copy/paste rather
     // than this.
     drawComponentPasteMenu(object, context);
 }
+
+namespace
+{
+// Whether `object` can be given a component of `type` at all: it must not already have one, and —
+// unless the component is the transform itself — it must have a transform. Everything else in the
+// engine reads its object's TransformComponent (the light and camera uploaders, the physics bodies,
+// Camera::viewMatrix), so a component added to an object without one would throw on the following
+// frame rather than misbehave visibly.
+bool canTakeComponent(const SceneObject &object, std::type_index type)
+{
+    if (object.hasComponent(type))
+    {
+        return false;
+    }
+    return type == std::type_index(typeid(TransformComponent)) || object.hasComponent<TransformComponent>();
+}
+} // namespace
 
 void Scene::drawComponentPasteMenu(SceneObject &object, EditorContext &context)
 {
@@ -356,24 +374,48 @@ void Scene::drawComponentPasteMenu(SceneObject &object, EditorContext &context)
 
     const ComponentClipboard            &clipboard = context.componentClipboard;
     const std::optional<std::type_index> copied    = clipboard.componentType();
-    // Addable at all, not already present, and — unless it is the transform itself — on an object
-    // that has a transform. Everything else in the engine reads its object's TransformComponent
-    // (the light and camera uploaders, the physics bodies, Camera::viewMatrix), so a component
-    // added to an object without one would throw on the following frame rather than misbehave
-    // visibly.
     const bool addable = copied && clipboard.values() && clipboard.adder();
-    const bool allowed = addable && !object.hasComponent(*copied) &&
-                         (*copied == std::type_index(typeid(TransformComponent)) ||
-                          object.hasComponent<TransformComponent>());
 
-    ImGui::BeginDisabled(!allowed);
+    ImGui::BeginDisabled(!addable || !canTakeComponent(object, *copied));
     if (ImGui::MenuItem("Paste component"))
     {
         clipboard.adder()(object, *clipboard.values());
-        context.componentPastes.onComponentPasted(object);
+        context.componentAdds.onComponentAdded(object);
     }
     ImGui::EndDisabled();
     ImGui::EndPopup();
+}
+
+void Scene::drawAddComponentPanel(SceneObject &object, EditorContext &context)
+{
+    // A window of its own below the components, so the Inspector reads as the object's components
+    // followed by the way to add another.
+    const bool visible = ImGui::BeginChild("add_component", ImVec2(0.0f, 0.0f),
+                                           ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
+    if (visible)
+    {
+        if (ImGui::Button("Add Component"))
+        {
+            ImGui::OpenPopup("add_component_list");
+        }
+        if (ImGui::BeginPopup("add_component_list"))
+        {
+            // Every type the editor offers is listed, with the ones this object cannot take disabled
+            // rather than missing, so the list reads the same way on every object.
+            for (const ComponentCatalog::Entry &entry : context.componentCatalog.entries())
+            {
+                ImGui::BeginDisabled(!canTakeComponent(object, entry.type));
+                if (ImGui::MenuItem(entry.name.c_str()))
+                {
+                    entry.add(object);
+                    context.componentAdds.onComponentAdded(object);
+                }
+                ImGui::EndDisabled();
+            }
+            ImGui::EndPopup();
+        }
+    }
+    ImGui::EndChild();
 }
 
 } // namespace lr

@@ -91,6 +91,8 @@ private:
     void drawRenamePopup();
     // The Inspector's own context menu: adds the component on the clipboard to `object`.
     void drawComponentPasteMenu(SceneObject &object, EditorContext &context);
+    // The panel below `object`'s components, offering the editor's component catalog.
+    void drawAddComponentPanel(SceneObject &object, EditorContext &context);
 
     // Finds an object whether or not it is still alive — destroySceneObject() has to reach objects
     // it is in the middle of retiring. Callers that need a live object go through getSceneObject().
