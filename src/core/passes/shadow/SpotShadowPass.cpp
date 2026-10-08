@@ -19,6 +19,7 @@ constexpr float kMaxShadowFovDegrees    = 179.0f;
 struct ShadowPC
 {
     glm::mat4 model;
+    uint32_t  primitiveIdOffset;
     uint32_t  paletteOffset;
     uint32_t  skinEnabled;
 };
@@ -93,8 +94,12 @@ void SpotShadowPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         .cull(VK_CULL_MODE_BACK_BIT)
         .depthBias(1.25f, 1.75f)
         .renderingLayers(SpotShadowGpuData::maxShadows)
-        .pushConstantSize(sizeof(ShadowPC), VK_SHADER_STAGE_VERTEX_BIT)
+        .pushConstantSize(sizeof(ShadowPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, fg.buffer(m_cfg.paramsBuffer), VK_SHADER_STAGE_VERTEX_BIT)
+        .sampledImageArray(1, fg.image(m_cfg.geometry.diffuseTextureArrayResourceName), m_cfg.geometry.materialCount,
+                           VK_SHADER_STAGE_FRAGMENT_BIT)
+        .storageBufferRead(5, fg.buffer(m_cfg.geometry.faceGroupBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .storageBufferRead(6, fg.buffer(m_cfg.geometry.materialBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(7, fg.buffer(m_cfg.geometry.skinInfluenceEntriesBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
         .storageBufferRead(8, fg.buffer(m_cfg.geometry.skinInfluenceOffsetsBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
         .storageBufferRead(9, fg.buffer(m_cfg.geometry.skinPositionIndicesBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
@@ -115,9 +120,12 @@ void SpotShadowPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                 const auto &range = g.indexBufferUploadResult.singleMeshResults[i];
                 const auto *transform = g.meshTransforms[i];
                 const auto &skin = g.skinDrawInfos[i];
-                const ShadowPC pc{transform ? transform->worldMatrix() : glm::mat4(1.0f), skin.paletteOffset,
-                                  skin.skinEnabled ? 1u : 0u};
-                ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, pc);
+                const ShadowPC pc{.model             = transform ? transform->worldMatrix() : glm::mat4(1.0f),
+                                  .primitiveIdOffset = range.firstIndex / 3,
+                                  .paletteOffset     = skin.paletteOffset,
+                                  .skinEnabled       = skin.skinEnabled ? 1u : 0u};
+                ctx.cmd().pushConstants(ctx.pipelineLayout(),
+                                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
                 ctx.cmd().drawIndexed(range.indexCount, data.header.x, range.firstIndex, mesh.vertexOffset, 0);
             }
         });

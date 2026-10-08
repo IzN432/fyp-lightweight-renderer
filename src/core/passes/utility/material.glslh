@@ -14,4 +14,11 @@ struct MaterialData
     float _pad[3];
 };
 
+bool shouldDiscardOpaqueFragment(MaterialData material, float baseColorAlpha, bool frontFacing)
+{
+    return material.alphaBlend > 0.5 ||
+           baseColorAlpha < material.alphaCutoff ||
+           (!frontFacing && material.doubleSided < 0.5);
+}
+
 #endif

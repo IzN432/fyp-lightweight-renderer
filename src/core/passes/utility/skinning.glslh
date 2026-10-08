@@ -1,45 +1,25 @@
 #ifndef LR_SKINNING_GLSLH
 #define LR_SKINNING_GLSLH
 
-struct SkinInfluence
-{
-    uint jointIndex;
-    float weight;
-};
+#include "skinning_types.glslh"
 
-layout(std430, set = 0, binding = 7) readonly buffer SkinInfluenceEntries
-{
-    SkinInfluence entries[];
-} skinInfluences;
-
-layout(std430, set = 0, binding = 8) readonly buffer SkinInfluenceOffsets
-{
-    uint offsets[];
-} skinInfluenceOffsets;
-
-layout(std430, set = 0, binding = 9) readonly buffer SkinPositionIndices
-{
-    uint indices[];
-} skinPositionIndices;
-
-layout(std430, set = 0, binding = 10) readonly buffer SkinJointMatrices
-{
-    mat4 matrices[];
-} skinJointMatrices;
+#if !defined(LR_SKIN_INFLUENCES) || !defined(LR_SKIN_INFLUENCE_OFFSETS) || \
+    !defined(LR_SKIN_POSITION_INDICES) || !defined(LR_SKIN_JOINT_MATRICES)
+#error "Define the LR_SKIN_* array aliases before including skinning.glslh"
+#endif
 
 mat4 calculateSkinMatrix(uint vertexIndex, uint paletteOffset)
 {
-    uint uniquePosition = skinPositionIndices.indices[vertexIndex];
-    uint begin = skinInfluenceOffsets.offsets[uniquePosition];
-    uint end = skinInfluenceOffsets.offsets[uniquePosition + 1];
+    uint uniquePosition = LR_SKIN_POSITION_INDICES[vertexIndex];
+    uint begin = LR_SKIN_INFLUENCE_OFFSETS[uniquePosition];
+    uint end = LR_SKIN_INFLUENCE_OFFSETS[uniquePosition + 1];
 
     mat4 skinMatrix = mat4(0.0);
     float weightSum = 0.0;
     for (uint influenceIndex = begin; influenceIndex < end; ++influenceIndex)
     {
-        SkinInfluence influence = skinInfluences.entries[influenceIndex];
-        skinMatrix += influence.weight *
-                      skinJointMatrices.matrices[paletteOffset + influence.jointIndex];
+        SkinInfluence influence = LR_SKIN_INFLUENCES[influenceIndex];
+        skinMatrix += influence.weight * LR_SKIN_JOINT_MATRICES[paletteOffset + influence.jointIndex];
         weightSum += influence.weight;
     }
 

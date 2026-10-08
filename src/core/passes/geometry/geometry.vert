@@ -1,6 +1,6 @@
 #version 450
 
-#include "../utility/skinning.glslh"
+#include "../utility/skinning_types.glslh"
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -17,6 +17,32 @@ layout(set = 0, binding = 0) uniform CameraUbo
     vec3 cameraPosition;
     float padding;
 } cameraUbo;
+
+layout(std430, set = 0, binding = 7) readonly buffer SkinInfluenceEntries
+{
+    SkinInfluence entries[];
+} skinInfluences;
+
+layout(std430, set = 0, binding = 8) readonly buffer SkinInfluenceOffsets
+{
+    uint offsets[];
+} skinInfluenceOffsets;
+
+layout(std430, set = 0, binding = 9) readonly buffer SkinPositionIndices
+{
+    uint indices[];
+} skinPositionIndices;
+
+layout(std430, set = 0, binding = 10) readonly buffer SkinJointMatrices
+{
+    mat4 matrices[];
+} skinJointMatrices;
+
+#define LR_SKIN_INFLUENCES skinInfluences.entries
+#define LR_SKIN_INFLUENCE_OFFSETS skinInfluenceOffsets.offsets
+#define LR_SKIN_POSITION_INDICES skinPositionIndices.indices
+#define LR_SKIN_JOINT_MATRICES skinJointMatrices.matrices
+#include "../utility/skinning.glslh"
 
 layout(location = 0) out vec3 outWorldPos;
 layout(location = 1) out vec3 outNormal;

@@ -1,0 +1,10 @@
+#ifndef LR_SKINNING_TYPES_GLSLH
+#define LR_SKINNING_TYPES_GLSLH
+
+struct SkinInfluence
+{
+    uint jointIndex;
+    float weight;
+};
+
+#endif

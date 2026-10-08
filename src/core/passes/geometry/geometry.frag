@@ -54,16 +54,10 @@ void main()
 {
 	uint faceGroupIndex = faceGroupIndices.values[pc.primitiveIdOffset + gl_PrimitiveID];
 	MaterialData mat = materials.data[faceGroupIndex];
-	// BLEND surfaces are shaded and composited by TransparentPass; keeping them out of the G-buffer
-	// leaves what is behind them visible there.
-	if (mat.alphaBlend > 0.5)
-	{
-		discard;
-	}
 	vec4 baseColor = texture(diffuseTex[nonuniformEXT(faceGroupIndex)], inUv) * mat.baseColorFactor;
 
-	// glTF MASK materials are still opaque: rejected texels write neither the G-buffer nor depth.
-	if (baseColor.a < mat.alphaCutoff || (!gl_FrontFacing && mat.doubleSided < 0.5))
+	// BLEND surfaces belong to TransparentPass; MASK and one-sided backfaces write neither G-buffer nor depth.
+	if (shouldDiscardOpaqueFragment(mat, baseColor.a, gl_FrontFacing))
 	{
 		discard;
 	}
