@@ -73,6 +73,35 @@ public:
 
     template <typename T> bool hasComponent() const { return components.contains(std::type_index(typeid(T))); };
 
+    // Finds a component by interface as well as by its concrete stored type. Components are keyed by
+    // their concrete type, so editor-facing contracts such as CameraController need the polymorphic
+    // fallback when the object actually stores a SphericalCameraController.
+    template <typename T> T *findComponent()
+    {
+        static_assert(std::is_base_of_v<Component, T>, "T must derive from Component");
+        for (auto &entry : components)
+        {
+            if (auto *match = dynamic_cast<T *>(entry.second.get()))
+            {
+                return match;
+            }
+        }
+        return nullptr;
+    }
+
+    template <typename T> const T *findComponent() const
+    {
+        static_assert(std::is_base_of_v<Component, T>, "T must derive from Component");
+        for (const auto &entry : components)
+        {
+            if (const auto *match = dynamic_cast<const T *>(entry.second.get()))
+            {
+                return match;
+            }
+        }
+        return nullptr;
+    }
+
     // Runtime component types, primarily for persistence/diagnostics. Components remain owned and
     // accessed through the typed API above.
     std::vector<std::type_index> componentTypes() const

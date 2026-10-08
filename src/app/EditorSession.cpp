@@ -18,6 +18,7 @@
 #include "core/editor/SceneObjectTransformController.hpp"
 #include "core/editor/VertexManager.hpp"
 #include "core/editor/command/CommandManager.hpp"
+#include "core/editor/camera/CameraController.hpp"
 #include "core/editor/gizmo/GizmoController.hpp"
 #include "core/editor/selection/SelectionGestureTool.hpp"
 #include "core/scene/Camera.hpp"
@@ -377,6 +378,17 @@ private:
     // The editor's own shortcuts. Registered before any tool's, so a feature cannot shadow them.
     void registerEditorShortcuts()
     {
+        m_shortcuts.add({.key = GLFW_KEY_R}, [this] {
+            SceneObject *camera = m_sceneManager.gpu().camera();
+            if (camera)
+            {
+                if (CameraController *controller = camera->findComponent<CameraController>())
+                {
+                    controller->resetTransformation();
+                }
+            }
+        });
+
         m_shortcuts.add({.key = GLFW_KEY_TAB}, [this] {
             const bool nowEditing = !m_stateController.isActive(kEditState);
             if (nowEditing)

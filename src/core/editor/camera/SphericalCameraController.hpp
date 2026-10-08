@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/scene/Component.hpp"
+#include "CameraController.hpp"
 
 #include <glm/glm.hpp>
 
@@ -9,10 +9,10 @@ namespace lr
 
 class InputHandler;
 
-class SphericalCameraController : public Component
+class SphericalCameraController final : public CameraController
 {
 public:
-    SphericalCameraController() : Component("Spherical Camera Controller") {}
+    SphericalCameraController() : CameraController("Spherical Camera Controller") {}
 
     // Decides for itself whether the UI has the pointer. For a host that arbitrates pointer
     // priority — see EditorInputRouter::viewportNavigationAllowed() — use the overload below.
@@ -34,6 +34,7 @@ public:
     };
     OrbitState orbitState() const { return {m_orbitTarget, m_orbitRadius, m_orbitAzimuth, m_orbitElevation}; }
     void       setOrbitState(const OrbitState &state);
+    void       resetTransformation() override;
 
     // Restores the orbit without placing the camera, for loading a scene: the object's
     // TransformComponent may not exist yet. onLoaded() applies the pose once it does.

@@ -81,6 +81,16 @@ int main()
     camera.fovYDegrees = 73; camera.nearPlane = 0.25f; camera.farPlane = 400; camera.orthoHeight = 22;
     auto &cameraController = root.addComponent<lr::SphericalCameraController>();
     cameraController.setOrbitState({{4, 5, 6}, 12.0f, 0.75f, -0.25f});
+
+    lr::CameraController *controllerContract = root.findComponent<lr::CameraController>();
+    assert(controllerContract == &cameraController);
+    controllerContract->resetTransformation();
+    const auto resetTransformation = cameraController.orbitState();
+    assert(resetTransformation.target == glm::vec3(0.0f));
+    assert(resetTransformation.radius == 5.0f && resetTransformation.azimuth == 0.0f &&
+           resetTransformation.elevation == 0.0f);
+
+    cameraController.setOrbitState({{4, 5, 6}, 12.0f, 0.75f, -0.25f});
     const glm::vec3 authoredCameraPosition = root.getComponent<lr::TransformComponent>().transform().position();
     // Push the transform away from the orbit-derived pose, so the saved file holds a transform that
     // disagrees with the saved orbit. Nothing in the controller's own deserialization touches the

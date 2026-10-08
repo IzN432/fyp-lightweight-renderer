@@ -25,15 +25,6 @@ void SphericalCameraController::update(InputHandler &input, float, bool navigati
     bool   mmb    = input.isMouseButtonPressed(GLFW_MOUSE_BUTTON_MIDDLE);
     bool   shift  = input.isKeyPressed(GLFW_KEY_LEFT_SHIFT) || input.isKeyPressed(GLFW_KEY_RIGHT_SHIFT);
 
-    bool reset = input.isKeyPressed(GLFW_KEY_R);
-    if (reset)
-    {
-        m_orbitTarget    = glm::vec3(0.0f);
-        m_orbitRadius    = 5.0f;
-        m_orbitAzimuth   = 0.0f;
-        m_orbitElevation = 0.0f;
-    }
-
     if (navigationAllowed)
     {
         if (mmb && shift)
@@ -82,6 +73,8 @@ void SphericalCameraController::setOrbitState(const OrbitState &state)
     restoreOrbitState(state);
     applyPose();
 }
+
+void SphericalCameraController::resetTransformation() { setOrbitState({}); }
 
 void SphericalCameraController::restoreOrbitState(const OrbitState &state)
 {
