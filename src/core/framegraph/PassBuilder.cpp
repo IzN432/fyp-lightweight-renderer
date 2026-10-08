@@ -183,25 +183,29 @@ PassBuilder &PassBuilder::depthBias(float constant, float slope)
     return *this;
 }
 
-PassBuilder &PassBuilder::sampledImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages)
+PassBuilder &PassBuilder::sampledImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages,
+                                       SamplerDesc sampler)
 {
     requireShaderStages(stages, "sampled image");
     desc().imageUses.push_back({.image   = image,
                                 .usage   = ImageUsage::Sampled,
                                 .access  = AccessMode::Read,
                                 .binding = binding,
-                                .stages  = stages});
+                                .stages  = stages,
+                                .sampler = sampler});
     return *this;
 }
 
-PassBuilder &PassBuilder::sampledDepth(uint32_t binding, ImageHandle image, VkShaderStageFlags stages)
+PassBuilder &PassBuilder::sampledDepth(uint32_t binding, ImageHandle image, VkShaderStageFlags stages,
+                                       SamplerDesc sampler)
 {
     requireShaderStages(stages, "sampled depth image");
     desc().imageUses.push_back({.image   = image,
                                 .usage   = ImageUsage::SampledDepth,
                                 .access  = AccessMode::Read,
                                 .binding = binding,
-                                .stages  = stages});
+                                .stages  = stages,
+                                .sampler = sampler});
     return *this;
 }
 
@@ -217,7 +221,7 @@ PassBuilder &PassBuilder::sampledMultisampleImage(uint32_t binding, ImageHandle 
 }
 
 PassBuilder &PassBuilder::sampledImageArray(uint32_t binding, ImageHandle images, uint32_t count,
-                                            VkShaderStageFlags stages)
+                                            VkShaderStageFlags stages, SamplerDesc sampler)
 {
     requireShaderStages(stages, "sampled image array");
     if (count == 0)
@@ -229,7 +233,8 @@ PassBuilder &PassBuilder::sampledImageArray(uint32_t binding, ImageHandle images
                                 .access          = AccessMode::Read,
                                 .binding         = binding,
                                 .descriptorCount = count,
-                                .stages          = stages});
+                                .stages          = stages,
+                                .sampler         = sampler});
     return *this;
 }
 

@@ -59,6 +59,42 @@ enum class BlendMode
     Additive,           // src + dst
 };
 
+// Value-type sampler state carried by a sampled image declaration. CompiledFrameGraph owns and
+// deduplicates the VkSampler objects, so passes never manage Vulkan sampler lifetimes directly.
+struct SamplerDesc
+{
+    VkFilter             magFilter    = VK_FILTER_LINEAR;
+    VkFilter             minFilter    = VK_FILTER_LINEAR;
+    VkSamplerMipmapMode  mipmapMode   = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    VkSamplerAddressMode addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    VkSamplerAddressMode addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    VkSamplerAddressMode addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    float                 mipLodBias   = 0.0f;
+    bool                  anisotropyEnable = false;
+    float                 maxAnisotropy    = 1.0f;
+    bool                  compareEnable = false;
+    VkCompareOp           compareOp     = VK_COMPARE_OP_NEVER;
+    float                 minLod        = 0.0f;
+    float                 maxLod        = VK_LOD_CLAMP_NONE;
+    VkBorderColor         borderColor   = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+
+    static SamplerDesc shadowComparison()
+    {
+        SamplerDesc result;
+        result.mipmapMode  = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        result.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        result.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        result.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        result.compareEnable = true;
+        result.compareOp     = VK_COMPARE_OP_LESS_OR_EQUAL;
+        result.maxLod        = 0.0f;
+        result.borderColor   = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+        return result;
+    }
+
+    friend bool operator==(const SamplerDesc &, const SamplerDesc &) = default;
+};
+
 // Fixed-function state for Geometry/Fullscreen passes. Unset values keep the defaults the engine's
 // own passes rely on: back-face culling for Geometry passes (none for Fullscreen), and depth test +
 // write exactly when the pass has a depth attachment.
@@ -107,6 +143,7 @@ struct ImageUse
     VkShaderStageFlags stages          = 0;
     uint32_t           boundMip        = allImageMips;
     uint32_t           boundLayer      = allImageLayers;
+    SamplerDesc         sampler{};
 
     VkFormat            format  = VK_FORMAT_UNDEFINED;
     ExtentSpec          extent  = ExtentSpec::swapchain();

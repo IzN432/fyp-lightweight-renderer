@@ -223,7 +223,7 @@ void FrameGraphCompiler::buildDescriptorSets(CompiledFrameGraph &graph) const
                 const bool             storage = use.usage == ImageUsage::Storage;
                 const VkDescriptorType type =
                     storage ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                const VkSampler     sampler = storage ? VK_NULL_HANDLE : graph.m_defaultSampler;
+                const VkSampler     sampler = storage ? VK_NULL_HANDLE : graph.sampler(use.sampler);
                 const VkImageLayout layout =
                     storage ? VK_IMAGE_LAYOUT_GENERAL
                             : (use.usage == ImageUsage::SampledDepth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL

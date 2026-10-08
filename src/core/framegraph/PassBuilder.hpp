@@ -40,11 +40,14 @@ public:
     PassBuilder &depth(bool test, bool write, VkCompareOp compare = VK_COMPARE_OP_LESS);
     PassBuilder &depthBias(float constant, float slope = 0.0f);
 
-    PassBuilder &sampledImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages);
-    PassBuilder &sampledDepth(uint32_t binding, ImageHandle image, VkShaderStageFlags stages);
+    PassBuilder &sampledImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages,
+                              SamplerDesc sampler = {});
+    PassBuilder &sampledDepth(uint32_t binding, ImageHandle image, VkShaderStageFlags stages,
+                              SamplerDesc sampler = {});
     // Bind the unresolved attachment produced by an earlier MSAA pass (GLSL sampler2DMS).
     PassBuilder &sampledMultisampleImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages);
-    PassBuilder &sampledImageArray(uint32_t binding, ImageHandle images, uint32_t count, VkShaderStageFlags stages);
+    PassBuilder &sampledImageArray(uint32_t binding, ImageHandle images, uint32_t count, VkShaderStageFlags stages,
+                                   SamplerDesc sampler = {});
     PassBuilder &storageImageRead(uint32_t binding, ImageView image, VkShaderStageFlags stages);
     PassBuilder &storageImageWrite(uint32_t binding, ImageView image, VkShaderStageFlags stages);
     PassBuilder &storageImageReadWrite(uint32_t binding, ImageView image, VkShaderStageFlags stages);

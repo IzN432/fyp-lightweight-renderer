@@ -97,12 +97,18 @@ private:
     void                        bindVertexAndIndexBuffers(CommandBuffer &cmd, const PassDesc &pass);
     VkRenderingInfo             prepareRenderingInfo(const PassDesc &pass, VkExtent2D extent,
                                                      const ExternalImageBindings &externalImages);
+    VkSampler                   sampler(const SamplerDesc &desc);
 
     const VulkanContext       &m_ctx;
     ResourceRegistry          &m_registry;
     const FrameGraphDefinition m_definition;
     DescriptorAllocator        m_descriptorAllocator;
-    VkSampler                  m_defaultSampler = VK_NULL_HANDLE;
+    struct CachedSampler
+    {
+        SamplerDesc desc;
+        VkSampler   sampler = VK_NULL_HANDLE;
+    };
+    std::vector<CachedSampler> m_samplers;
 
     std::unordered_map<std::string, ExternalImage> m_externalImages;
     std::vector<size_t>                            m_sortedIndices;

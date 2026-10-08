@@ -15,17 +15,34 @@ CompiledFrameGraph::CompiledFrameGraph(const VulkanContext &ctx, ResourceRegistr
                                        FrameGraphDefinition definition)
     : m_ctx(ctx), m_registry(registry), m_definition(std::move(definition)), m_descriptorAllocator(ctx.getDevice())
 {
+}
+
+VkSampler CompiledFrameGraph::sampler(const SamplerDesc &desc)
+{
+    for (const CachedSampler &cached : m_samplers)
+        if (cached.desc == desc) return cached.sampler;
+
     VkSamplerCreateInfo info{};
-    info.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    info.magFilter    = VK_FILTER_LINEAR;
-    info.minFilter    = VK_FILTER_LINEAR;
-    info.mipmapMode   = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    info.minLod       = 0.0f;
-    info.maxLod       = VK_LOD_CLAMP_NONE;
-    checkVk(vkCreateSampler(m_ctx.getDevice(), &info, nullptr, &m_defaultSampler), "FrameGraph: vkCreateSampler");
+    info.sType             = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    info.magFilter         = desc.magFilter;
+    info.minFilter         = desc.minFilter;
+    info.mipmapMode        = desc.mipmapMode;
+    info.addressModeU      = desc.addressModeU;
+    info.addressModeV      = desc.addressModeV;
+    info.addressModeW      = desc.addressModeW;
+    info.mipLodBias        = desc.mipLodBias;
+    info.anisotropyEnable  = desc.anisotropyEnable;
+    info.maxAnisotropy     = desc.maxAnisotropy;
+    info.compareEnable     = desc.compareEnable;
+    info.compareOp         = desc.compareOp;
+    info.minLod            = desc.minLod;
+    info.maxLod            = desc.maxLod;
+    info.borderColor       = desc.borderColor;
+
+    CachedSampler cached{.desc = desc};
+    checkVk(vkCreateSampler(m_ctx.getDevice(), &info, nullptr, &cached.sampler), "FrameGraph: vkCreateSampler");
+    m_samplers.push_back(cached);
+    return cached.sampler;
 }
 
 CompiledFrameGraph::~CompiledFrameGraph()
@@ -36,7 +53,8 @@ CompiledFrameGraph::~CompiledFrameGraph()
     {
         m_registry.allocator().destroy(image);
     }
-    vkDestroySampler(m_ctx.getDevice(), m_defaultSampler, nullptr);
+    for (const CachedSampler &cached : m_samplers)
+        vkDestroySampler(m_ctx.getDevice(), cached.sampler, nullptr);
 }
 
 const AllocatedImage *CompiledFrameGraph::multisampleImage(const std::string &name) const
