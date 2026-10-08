@@ -281,6 +281,10 @@ void PhysicsWorld::simulateStep(float deltaTime)
     for (Impl::BodyRecord &record : m_impl->bodies)
     {
         SceneObject &object = m_scene->getSceneObject(record.objectId);
+        // The component can be deleted from the Inspector between two rebuilds of the backend, which
+        // leaves this record describing a body nothing drives any more. Skipped rather than read, as
+        // reset() already does.
+        if (!object.hasComponent<RigidBodyComponent>()) continue;
         RigidBodyComponent &body = object.getComponent<RigidBodyComponent>();
         record.body->setType(body.isStatic() ? rp3d::BodyType::STATIC : rp3d::BodyType::DYNAMIC);
         record.body->setMass(body.mass());
@@ -305,6 +309,7 @@ void PhysicsWorld::simulateStep(float deltaTime)
     for (Impl::BodyRecord &record : m_impl->bodies)
     {
         SceneObject &object = m_scene->getSceneObject(record.objectId);
+        if (!object.hasComponent<RigidBodyComponent>()) continue;
         RigidBodyComponent &body = object.getComponent<RigidBodyComponent>();
         record.lastLinearVelocity = toGlm(record.body->getLinearVelocity());
         record.lastAngularVelocity = toGlm(record.body->getAngularVelocity());

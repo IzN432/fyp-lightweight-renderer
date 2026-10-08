@@ -152,6 +152,11 @@ struct Light : public Component
         };
     }
 
+    // Nothing holds a light beyond the frame: SceneGpu compares the scene's live lights against the
+    // visuals it built every flush (lightsChanged), so one going away drops its visual and
+    // re-uploads the light buffer by itself.
+    bool allowsRemoval() const override { return true; }
+
     void onGUIImpl() override
     {
         bool changed = false;

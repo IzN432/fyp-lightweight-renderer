@@ -71,6 +71,14 @@ public:
         markDirty();
     }
 
+    // The mirror of the rule the Inspector applies when adding one: every other component reads
+    // its object's transform, so this may only go while there is nothing left to read it.
+    bool allowsRemoval() const override
+    {
+        const SceneObject *owner = findOwningObject();
+        return owner != nullptr && owner->componentCount() == 1;
+    }
+
     // The one component with no prerequisite of its own, so it can be given to a bare object.
     ComponentValuesAdder valuesAdder() const override
     {

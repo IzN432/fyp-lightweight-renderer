@@ -76,6 +76,11 @@ public:
         markDirty();
     }
 
+    // PhysicsWorld builds its bodies from whatever has a collider and a rigid body when it starts
+    // or resets, and its step skips a record whose component has since gone, so removing one costs
+    // at most a phantom body in the backend until the next rebuild.
+    bool allowsRemoval() const override { return true; }
+
     ComponentValuesAdder valuesAdder() const override
     {
         return [](SceneObject &object, const ComponentValues &values) {

@@ -68,6 +68,10 @@ public:
     void                             pasteValues(const ComponentValues &values) override;
     ComponentValuesAdder             valuesAdder() const override;
 
+    // See ColliderComponent::allowsRemoval: the physics backend is rebuilt from the scene, and its
+    // step tolerates a body whose component has gone since.
+    bool allowsRemoval() const override { return true; }
+
     void onGUIImpl() override;
 
 private:

@@ -6,7 +6,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <typeindex>
 #include <imgui.h>
 
 namespace lr
@@ -60,7 +62,10 @@ public:
     Component(std::string name = "") : m_name(std::move(name)) {}
     virtual ~Component() = default;
 
-    void onGUI(EditorContext &context);
+    // `removalRequest` is how this component's menu asks to be deleted: it is set rather than acted
+    // on, because the caller is iterating its object's components and a component cannot erase
+    // itself from inside its own method. SceneObject::onGUI performs it after the loop.
+    void onGUI(EditorContext &context, std::optional<std::type_index> &removalRequest);
 
     virtual void onGUIImpl() {}
 
@@ -82,6 +87,11 @@ public:
     // menu entry while leaving its copy/paste onto an existing component alone — for a component
     // that only makes sense where something else already put it.
     virtual ComponentValuesAdder valuesAdder() const { return nullptr; }
+
+    // Whether the Inspector may delete this component off its object. False by default, so a
+    // component takes part only once removing it is known to leave the rest of the engine in a
+    // state it can handle — the component types nothing else depends on, in practice.
+    virtual bool allowsRemoval() const { return false; }
 
     // Whether this component can take the clipboard's values as things stand. Type agreement is
     // already settled by ComponentClipboard; this is for a component whose answer depends on its own
@@ -116,7 +126,7 @@ public:
     void clearDirty(uint32_t aspects) { m_dirtyAspects &= ~aspects; }
 
 private:
-    void drawValueClipboardMenu(EditorContext &context);
+    void drawComponentMenu(EditorContext &context, std::optional<std::type_index> &removalRequest);
 };
 
 } // namespace lr

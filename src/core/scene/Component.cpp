@@ -5,6 +5,7 @@
 #include <imgui.h>
 
 #include <memory>
+#include <optional>
 #include <typeindex>
 
 namespace lr
@@ -14,7 +15,7 @@ namespace
 constexpr float kDisabledMenuTextAlpha = 0.40f;
 } // namespace
 
-void Component::onGUI(EditorContext &context)
+void Component::onGUI(EditorContext &context, std::optional<std::type_index> &removalRequest)
 {
     m_editorContext = &context;
     // Each component draws into its own bordered child window. That separates the components in the
@@ -27,13 +28,13 @@ void Component::onGUI(EditorContext &context)
     {
         ImGui::Text("Component: %s", m_name.c_str());
         onGUIImpl();
-        drawValueClipboardMenu(context);
+        drawComponentMenu(context, removalRequest);
     }
     ImGui::EndChild();
     m_editorContext = nullptr;
 }
 
-void Component::drawValueClipboardMenu(EditorContext &context)
+void Component::drawComponentMenu(EditorContext &context, std::optional<std::type_index> &removalRequest)
 {
     // typeid on a polymorphic reference gives the concrete component type, which is also the key
     // SceneObject stores the component under, so copying and pasting agree on identity.
@@ -62,6 +63,14 @@ void Component::drawValueClipboardMenu(EditorContext &context)
     if (ImGui::MenuItem("Paste component values"))
     {
         pasteValues(*context.componentClipboard.valuesFor(type));
+    }
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
+    ImGui::BeginDisabled(!allowsRemoval());
+    if (ImGui::MenuItem("Delete component"))
+    {
+        removalRequest = type;
     }
     ImGui::EndDisabled();
 

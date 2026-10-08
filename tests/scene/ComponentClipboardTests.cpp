@@ -167,4 +167,17 @@ int main()
     staleTarget.addComponent<lr::TransformComponent>();
     clipboard.adder()(staleTarget, *clipboard.values());
     assert(!staleTarget.hasComponent(meshType));
+
+    // Deletion is opt-in per component type. A light takes part; a mesh does not, because the
+    // object would stay registered as renderable with no mesh to gather.
+    assert(spotLight.allowsRemoval());
+    assert(!sourceMeshComponent.allowsRemoval());
+    assert(!sourceCamera.allowsRemoval());
+
+    // A transform may only go once nothing is left to read it.
+    lr::SceneObject &soleTransformObject = scene.createSceneObject();
+    auto            &soleTransform       = soleTransformObject.addComponent<lr::TransformComponent>();
+    assert(soleTransform.allowsRemoval());
+    soleTransformObject.addComponent<lr::Camera>();
+    assert(!soleTransform.allowsRemoval());
 }

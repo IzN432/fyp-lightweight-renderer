@@ -106,6 +106,8 @@ public:
         return nullptr;
     }
 
+    size_t componentCount() const { return components.size(); }
+
     // Runtime component types, primarily for persistence/diagnostics. Components remain owned and
     // accessed through the typed API above.
     std::vector<std::type_index> componentTypes() const
@@ -121,12 +123,20 @@ public:
 
     void onGUI(EditorContext &context)
     {
-        int id = 0;
+        int                            id = 0;
+        std::optional<std::type_index> removalRequest;
         for (auto &[type, component] : components)
         {
             ImGui::PushID(id++);
-            component->onGUI(context);
+            component->onGUI(context, removalRequest);
             ImGui::PopID();
+        }
+        // Erased only once the loop is over. A component's own context menu is what asks for this,
+        // so erasing where it was asked would invalidate this iteration and destroy the component
+        // whose method is still running.
+        if (removalRequest)
+        {
+            components.erase(*removalRequest);
         }
     }
 
