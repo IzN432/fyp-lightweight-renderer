@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -45,8 +46,9 @@ public:
     ArapSolver(const ArapSolver &)            = delete;
     ArapSolver &operator=(const ArapSolver &) = delete;
 
-    // anchorIndices/handleIndices index into mesh.positions() (the deduped vertex space). Returns
-    // false on failure (e.g. a free-vertex component that can't reach any anchor/handle).
+    // anchorIndices/handleIndices index into mesh.positions() (the deduped vertex space). Only
+    // components containing handles are solved; other disconnected components stay unchanged.
+    // Returns false if an active component has no anchor or backend precomputation fails.
     bool precompute(const Mesh &mesh, const std::vector<uint32_t> &anchorIndices,
                     const std::vector<uint32_t> &handleIndices);
 
@@ -58,17 +60,24 @@ public:
 
     // handleTargets: absolute target position for every handle vertex this call (b-indices not
     // present are assumed to be anchors, held fixed at their precompute-time rest position).
-    // warmStart: current position for every vertex in the mesh (size == mesh vertex count) — seeds
-    // the iterative solve. iterations is forwarded to the selected backend for this call only.
-    // Returns the solved position for every vertex (size == warmStart.size()). No-op (returns
-    // warmStart unchanged) if not currently precomputed.
+    // initialPositions: current position for every vertex in the mesh (size == mesh vertex count) —
+    // the iterative solve starts from these values. iterations is forwarded to the selected backend
+    // for this call only. Returns the solved position for every vertex (size ==
+    // initialPositions.size()). No-op (returns initialPositions unchanged) if not precomputed.
     std::vector<glm::vec3> solve(const std::unordered_map<uint32_t, glm::vec3> &handleTargets,
-                                 const std::vector<glm::vec3> &warmStart, int iterations);
+                                 const std::vector<glm::vec3> &initialPositions, int iterations);
 
 private:
-    std::unique_ptr<ArapBackend> m_backend;
-    Eigen::MatrixXd m_restPositions; // V at precompute time — anchor bc targets are read from here
-    Eigen::VectorXi m_b;             // sorted anchor+handle indices, as passed to arap_precomputation
+    struct Component
+    {
+        std::unique_ptr<ArapBackend> backend;
+        std::vector<uint32_t>        globalIndices;
+        Eigen::MatrixXd              restPositions;
+        Eigen::VectorXi              constrainedLocalIndices;
+    };
+
+    std::vector<Component> m_components;
+    std::string            m_backendName;
     bool                 m_precomputed = false;
     ArapPerformanceStats m_stats;
     double               m_totalSolveMs = 0.0;

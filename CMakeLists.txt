@@ -498,6 +498,10 @@ if(BUILD_TESTING)
     target_link_libraries(editor_tool_target_tests PRIVATE lr_arap_feature)
     add_test(NAME editor.tool_target COMMAND editor_tool_target_tests)
 
+    add_executable(arap_solver_tests tests/arap/ArapSolverTests.cpp)
+    target_link_libraries(arap_solver_tests PRIVATE lr_arap_feature)
+    add_test(NAME arap.solver COMMAND arap_solver_tests)
+
     add_executable(scene_hierarchy_tests
         tests/scene/SceneHierarchyTests.cpp
     )

@@ -189,7 +189,7 @@ void ArapTool::drawPanel()
     if (m_lastSolveFailed)
     {
         ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
-                           "Solve failed - every free vertex must be able to reach an anchor or handle");
+                           "Solve failed - every component with a handle must also have an anchor");
     }
 
     const ArapPerformanceStats &stats = m_solver.performanceStats();
