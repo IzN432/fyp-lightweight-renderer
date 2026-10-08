@@ -106,14 +106,20 @@ json encodeLight(const LightVariant &variant)
             result["outer_cone_degrees"] = light.outerConeAngleDegrees;
             result["range"] = light.range;
             result["shadow_near_plane"] = light.shadowNearPlane;
+            result["source_radius"] = light.sourceRadius;
         }
         else if constexpr (std::is_same_v<T, AreaLight>)
         {
             result["type"] = "area";
             result["size"] = vec2(light.size);
             result["two_sided"] = light.twoSided;
+            result["spread_angle_degrees"] = light.spreadAngleDegrees;
         }
-        else if constexpr (std::is_same_v<T, DirectionalLight>) result["type"] = "directional";
+        else if constexpr (std::is_same_v<T, DirectionalLight>)
+        {
+            result["type"] = "directional";
+            result["angular_radius_degrees"] = light.angularRadiusDegrees;
+        }
         else result["type"] = "image";
         return result;
     }, variant);
@@ -125,7 +131,12 @@ LightVariant decodeLight(const json &value, const std::string &where)
     const glm::vec3 color = readVector<3, float>(required(value, "color", where), where + ".color");
     const float intensity = required(value, "intensity", where).get<float>();
     if (type == "point") return PointLight{{color, intensity}};
-    if (type == "directional") return DirectionalLight{{color, intensity}};
+    if (type == "directional")
+    {
+        DirectionalLight result{{color, intensity}};
+        result.angularRadiusDegrees = value.value("angular_radius_degrees", 0.0f);
+        return result;
+    }
     if (type == "image") return ImageLight{{color, intensity}};
     if (type == "spot")
     {
@@ -134,6 +145,7 @@ LightVariant decodeLight(const json &value, const std::string &where)
         result.outerConeAngleDegrees = required(value, "outer_cone_degrees", where).get<float>();
         result.range = value.value("range", 100.0f);
         result.shadowNearPlane = value.value("shadow_near_plane", 0.1f);
+        result.sourceRadius = value.value("source_radius", 0.0f);
         return result;
     }
     if (type == "area")
@@ -141,6 +153,7 @@ LightVariant decodeLight(const json &value, const std::string &where)
         AreaLight result{{color, intensity}};
         result.size = readVector<2, float>(required(value, "size", where), where + ".size");
         result.twoSided = required(value, "two_sided", where).get<bool>();
+        result.spreadAngleDegrees = value.value("spread_angle_degrees", 60.0f);
         return result;
     }
     throw std::runtime_error("SceneSerializer: unknown light type '" + type + "' at " + where + ".type");

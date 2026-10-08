@@ -91,7 +91,7 @@ int main()
     const lr::LightVariant lights[] = {
         lr::PointLight{{{1, 0, 0}, 2}},
         lr::SpotLight{{{0, 1, 0}, 3}, 12, 34},
-        lr::AreaLight{{{0, 0, 1}, 4}, {5, 6}, false},
+        lr::AreaLight{{{0, 0, 1}, 4}, {5, 6}, false, 47.0f},
         lr::DirectionalLight{{{0.2f, 0.3f, 0.4f}, 5}},
         lr::ImageLight{{{0.7f, 0.8f, 0.9f}, 6}},
     };
@@ -223,6 +223,9 @@ int main()
         assert(object.parent() == loadedRoot.id());
         assert(object.getComponent<lr::Light>().light.index() == lights[i].index());
     }
+    assert(std::get<lr::AreaLight>(loaded->scene.getSceneObject(lightObjectIds[2])
+                                       .getComponent<lr::Light>().light)
+               .spreadAngleDegrees == 47.0f);
     const auto &meshA = loaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::MeshComponent>();
     const auto &meshB = loaded->scene.getSceneObject(meshObjectIds[1]).getComponent<lr::MeshComponent>();
     assert(meshA.meshHandle() == meshB.meshHandle());

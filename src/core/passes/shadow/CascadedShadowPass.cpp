@@ -108,6 +108,8 @@ CascadedShadowGpuData CascadedShadowPass::shadowData() const
             !std::holds_alternative<DirectionalLight>(object->getComponent<Light>().light))
             continue;
         const glm::vec3 lightDirection = object->getComponent<TransformComponent>().transform().forward();
+        const auto &directional = std::get<DirectionalLight>(object->getComponent<Light>().light);
+        const float tanAngularRadius = std::tan(glm::radians(directional.angularRadiusDegrees));
         const uint32_t lightIndex = result.header.x++;
         for (uint32_t cascade = 0; cascade < CascadedShadowGpuData::cascadeCount; ++cascade)
         {
@@ -141,6 +143,12 @@ CascadedShadowGpuData CascadedShadowPass::shadowData() const
             clip[3][2] = 0.5f;
             const uint32_t layer = lightIndex * CascadedShadowGpuData::cascadeCount + cascade;
             result.lightViewProj[layer] = clip * projection * view;
+            // An orthographic depth buffer is linear, so a stored-depth difference between blocker
+            // and receiver scales straight to a world distance by the cascade's depth range. The
+            // penumbra that distance subtends converts to UV through the cascade's own ortho width,
+            // which is what keeps the filter the same world size across cascades of different extent.
+            const float depthRange = 2.0f * radius + 2.0f * m_cfg.depthPadding - 0.01f;
+            result.pcss[layer].x = depthRange * tanAngularRadius / (2.0f * radius);
         }
         if (result.header.x == CascadedShadowGpuData::maxLights) break;
     }

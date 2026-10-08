@@ -8,6 +8,7 @@ layout(set = 0, binding = 0) uniform ShadowData
 {
     mat4 lightViewProj[4];
     vec4 splitDepths;
+    vec4 pcss[4];
     uvec4 header;
 } shadow;
 layout(std430, set = 0, binding = 7) readonly buffer SkinInfluenceEntries { SkinInfluence entries[]; } skinInfluences;

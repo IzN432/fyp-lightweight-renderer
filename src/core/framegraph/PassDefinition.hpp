@@ -92,6 +92,24 @@ struct SamplerDesc
         return result;
     }
 
+    // Reads stored depth rather than comparing it, for PCSS's blocker search. Filtering is NEAREST
+    // on purpose: a bilinear blend of two depths is a surface that is not in the scene, and averaging
+    // it into the blocker estimate biases every penumbra near a depth discontinuity. The white border
+    // reads as the far plane outside the map, so no blocker is found there.
+    static SamplerDesc depthFetch()
+    {
+        SamplerDesc result;
+        result.magFilter    = VK_FILTER_NEAREST;
+        result.minFilter    = VK_FILTER_NEAREST;
+        result.mipmapMode   = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        result.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        result.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        result.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        result.maxLod       = 0.0f;
+        result.borderColor  = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+        return result;
+    }
+
     friend bool operator==(const SamplerDesc &, const SamplerDesc &) = default;
 };
 

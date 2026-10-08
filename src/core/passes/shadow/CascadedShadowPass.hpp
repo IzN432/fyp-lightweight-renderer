@@ -14,6 +14,11 @@ struct alignas(16) CascadedShadowGpuData
     static constexpr uint32_t maxLayers = cascadeCount * maxLights;
     glm::mat4 lightViewProj[maxLayers]{};
     glm::vec4 splitDepths{};
+    // Per-layer PCSS inputs, declared as vec4[] in the shader for the same std140 reason as
+    // SpotShadowGpuData::pcss. x converts a stored-depth difference straight into a penumbra radius
+    // in UV (it folds in the cascade's depth range, the sun's angular radius and the ortho extent);
+    // 0 disables PCSS. y/z/w are reserved.
+    glm::vec4 pcss[maxLayers]{};
     glm::uvec4 header{}; // x = active directional lights, y = cascades per light
 };
 

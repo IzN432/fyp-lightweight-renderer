@@ -55,6 +55,7 @@ layout(set = 0, binding = 17) uniform sampler2DArrayShadow spotShadowMap;
 layout(set = 0, binding = 18) uniform SpotShadowData
 {
     mat4 lightViewProj[16];
+    vec4 pcss[16];
     uvec4 header;
 } spotShadow;
 layout(set = 0, binding = 19) uniform sampler2DArrayShadow cascadedShadowMap;
@@ -62,8 +63,21 @@ layout(set = 0, binding = 20) uniform CascadedShadowData
 {
     mat4 lightViewProj[4];
     vec4 splitDepths;
+    vec4 pcss[4];
     uvec4 header;
 } cascadedShadow;
+// See pbr.frag: the blocker search reads stored depth, so the maps are bound again uncompared.
+layout(set = 0, binding = 21) uniform sampler2DArray spotShadowMapDepth;
+layout(set = 0, binding = 22) uniform sampler2DArray cascadedShadowMapDepth;
+// See pbr.frag: area light shadows, compared and uncompared.
+layout(set = 0, binding = 23) uniform sampler2DArrayShadow areaShadowMap;
+layout(set = 0, binding = 24) uniform AreaShadowData
+{
+    mat4 lightViewProj[8];
+    vec4 pcss[8];
+    uvec4 header;
+} areaShadow;
+layout(set = 0, binding = 25) uniform sampler2DArray areaShadowMapDepth;
 
 #include "../utility/shadow_sampling.glslh"
 
@@ -109,14 +123,18 @@ void main()
     T = normalize(T - dot(T, N) * N);
     vec3 B = cross(N, T) * inTangent.w;
     vec3 tangentNormal = texture(normalTex[nonuniformEXT(faceGroupIndex)], inUv).rgb * 2.0 - 1.0;
-    vec3 normal = normalize(mat3(cameraUbo.view) * (mat3(T, B, N) * tangentNormal));
+    // Kept in world space as well: the shadow lookups need it there for their receiver-plane threshold.
+    vec3 worldNormal = normalize(mat3(T, B, N) * tangentNormal);
+    vec3 normal = normalize(mat3(cameraUbo.view) * worldNormal);
     vec3 position = (cameraUbo.view * vec4(inWorldPos, 1.0)).xyz;
 
     // HBAO only sees the G-buffer, so transparent surfaces are unoccluded (ao = 0).
     vec3 color = emissive;
     for (uint i = 0; i < pc.numLights; ++i)
     {
-        float visibility = lightShadowVisibility(lights[i], position, inWorldPos);
+        // 0: this pass shades once per fragment, so there is no second evaluation to decorrelate.
+        float visibility = lightShadowVisibility(lights[i], position, inWorldPos, worldNormal,
+                                                 gl_FragCoord.xy, 0u);
         color += visibility * ShadeLight(lights[i], position, normal, baseColor.rgb, roughness, metallic, 0.0,
                                          pc.pfMips);
     }

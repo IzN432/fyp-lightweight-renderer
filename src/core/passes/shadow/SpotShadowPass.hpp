@@ -10,6 +10,10 @@ struct alignas(16) SpotShadowGpuData
 {
     static constexpr uint32_t maxShadows = 16;
     glm::mat4  lightViewProj[maxShadows]{};
+    // Per-shadow PCSS inputs, one vec4 per shadow.
+    // x = the emitter's radius projected into shadow-map UV at the near plane (0 disables PCSS),
+    // y = near plane, z = far plane; w is reserved.
+    glm::vec4  pcss[maxShadows]{};
     glm::uvec4 header{}; // x = active shadow count
 };
 

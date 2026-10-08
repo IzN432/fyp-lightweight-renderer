@@ -11,6 +11,7 @@
 #include "core/passes/pbr/PbrPass.hpp"
 #include "core/passes/shadow/SpotShadowPass.hpp"
 #include "core/passes/shadow/CascadedShadowPass.hpp"
+#include "core/passes/shadow/AreaShadowPass.hpp"
 #include "core/passes/transparent/TransparentPass.hpp"
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
 #include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
@@ -152,6 +153,12 @@ void Engine::run()
     });
     cascadedShadowPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
 
+    lr::AreaShadowPass areaShadowPass(viewer.resources(), {
+        .geometry = sceneManager.gpu().geometryPassConfig(),
+        .lightObjects = sceneManager.gpu().lightObjects(),
+    });
+    areaShadowPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
+
     // Mesh-independent sources and layout: the scene starts empty, and EditorRenderBridge
     // repoints the pass (setMeshSource) whenever the edited mesh changes.
     lr::HeatmapPass heatmapPass({
@@ -181,6 +188,8 @@ void Engine::run()
         .shadowParamsBufferResourceName = spotShadowPass.paramsBufferName(),
         .cascadedShadowImageResourceName = cascadedShadowPass.shadowImageName(),
         .cascadedShadowParamsBufferResourceName = cascadedShadowPass.paramsBufferName(),
+        .areaShadowImageResourceName = areaShadowPass.shadowImageName(),
+        .areaShadowParamsBufferResourceName = areaShadowPass.paramsBufferName(),
     });
     pbrPass.uploadResources(viewer.resources());
     pbrPass.build(viewer.frameGraph());
@@ -197,6 +206,8 @@ void Engine::run()
         .spotShadowParamsBufferResourceName = spotShadowPass.paramsBufferName(),
         .cascadedShadowImageResourceName = cascadedShadowPass.shadowImageName(),
         .cascadedShadowParamsBufferResourceName = cascadedShadowPass.paramsBufferName(),
+        .areaShadowImageResourceName = areaShadowPass.shadowImageName(),
+        .areaShadowParamsBufferResourceName = areaShadowPass.paramsBufferName(),
         .eyePosition =
             [&sceneManager] {
                 const lr::Camera &camera = sceneManager.gpu().camera()->getComponent<lr::Camera>();
@@ -280,6 +291,9 @@ void Engine::run()
         cascadedShadowPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
                                             gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
         cascadedShadowPass.setLightObjects(gpu.lightObjects());
+        areaShadowPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
+                                        gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
+        areaShadowPass.setLightObjects(gpu.lightObjects());
         setTransparentGeometry(gpu);
     }));
     appConnections.push_back(sceneManager.gpu().onLightsUploaded([&](uint32_t numLights) {

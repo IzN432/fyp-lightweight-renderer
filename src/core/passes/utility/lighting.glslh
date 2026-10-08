@@ -21,7 +21,7 @@ struct LightData
     float intensity;
     
     float innerConeAngle;
-    float outerConeAngle;
+    float outerConeAngle; // spot cone or area spread half-angle
     vec2 areaSize;
 
     uint flags; // bit 0: two-sided (area lights)
@@ -176,6 +176,18 @@ vec3 CalcAreaLight(LightData light, vec3 position, vec3 normal, vec3 albedo, flo
     // The light is a quad centered at light.position, spanning light.areaSize along its local
     // right/up axes, emitting towards its local forward direction.
     vec3 lightViewPos = (cameraUbo.view * vec4(light.position, 1.0)).xyz;
+    vec3 lightForward = normalize((cameraUbo.view * vec4(quaternionToForwardVector(light.rotation), 0.0)).xyz);
+    vec3 lightToReceiver = normalize(position - lightViewPos);
+    const bool twoSided = (light.flags & LIGHT_FLAG_TWO_SIDED) != 0u;
+    float directionCosine = dot(lightToReceiver, lightForward);
+    if (twoSided)
+        directionCosine = abs(directionCosine);
+
+    // The spread is only a support boundary matching the shadow projection. Do not reshape the LTC
+    // distribution inside it: LTC already supplies the rectangular emitter's angular response.
+    if (directionCosine < cos(light.outerConeAngle))
+        return vec3(0.0);
+
     vec3 right = (cameraUbo.view * vec4(quaternionToRightVector(light.rotation), 0.0)).xyz * (light.areaSize.x * 0.5);
     vec3 up = (cameraUbo.view * vec4(quaternionToUpVector(light.rotation), 0.0)).xyz * (light.areaSize.y * 0.5);
 
@@ -206,7 +218,6 @@ vec3 CalcAreaLight(LightData light, vec3 position, vec3 normal, vec3 albedo, flo
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
-    const bool twoSided = (light.flags & LIGHT_FLAG_TWO_SIDED) != 0u;
     vec3 specular = LTC_Evaluate(N, V, position, Minv, points, twoSided);
     specular *= F0 * t2.x + (vec3(1.0) - F0) * t2.y;
 

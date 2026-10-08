@@ -1,28 +1,279 @@
 #ifndef SHADOW_SAMPLING_GLSLH
 #define SHADOW_SAMPLING_GLSLH
 
-float sampleShadowPcf(sampler2DArrayShadow shadowMap, vec3 shadowCoord, uint layer)
+// Percentage-Closer Soft Shadows (Fernando 2005). Each lookup runs in two stages: a blocker search
+// over raw depth that answers "how far in front of this receiver is the geometry shadowing it", and
+// a comparison filter whose kernel is widened by the penumbra that separation subtends for a light
+// of finite size. A light with zero size reports no penumbra and collapses to the fixed one-texel
+// kernel this file used to do, so the soft path costs nothing until a light asks for it.
+//
+// Both stages need the shadow map bound twice: once as sampler2DArrayShadow for the hardware
+// comparison filter, and once as a plain sampler2DArray, because a comparison sampler can only ever
+// return the result of a comparison and the blocker search needs the depth value itself.
+//
+// The shadow passes reach the same filter by two routes. SpotShadowPass and AreaShadowPass both
+// project perspectively, so their stored depth has to be linearised before the similar-triangles
+// ratio means anything, and their emitters have a world-space radius: a spot's is a free parameter,
+// an area light's is its own quad. CascadedShadowPass projects orthographically, so depth is already
+// linear, but each cascade covers a different world extent and the sun's size is angular rather than
+// linear; both of those are folded into a per-layer scale on the CPU.
+//
+// Taking that orthographic case as the limit of the perspective one is instructive: holding the
+// emitter's angle fixed rather than its radius turns R*(d_r - d_b)/d_b into (d_r - d_b)*tan(alpha),
+// and the distance to the light cancels out entirely. That is why the cascade path needs no
+// linearisation, no division and no receiver distance -- only the depth difference survives.
+
+const uint kShadowBlockerSamples = 16u;
+const uint kShadowFilterSamples  = 16u;
+
+// Bounds on both radii, in texels. The search bound keeps a very soft light's cost finite and caps
+// how far outside the projection a blocker may sit before the estimate starts missing it; the filter
+// bound stops a near-contact caster from fanning the kernel across the map and smearing unrelated
+// geometry into the penumbra.
+const float kShadowMaxSearchTexels = 24.0;
+const float kShadowMaxFilterTexels = 32.0;
+
+// Ceiling on the receiver-plane correction below, in stored-depth units. The correction itself is
+// exact, so this is not a tolerance for the maths: it guards against the normal being a *shading*
+// normal. PbrPass reads the G-buffer normal, which carries normal mapping, so a strongly mapped
+// surface can describe a plane the geometry does not have, and an unbounded correction would then
+// push the threshold past real casters and leak light.
+//
+// Sized from the measured worst case: at 80 degrees of tilt a 32-texel offset needs 0.022 on the
+// orthographic path (0.009 on the perspective one). This covers that with margin and only binds
+// past roughly 85 degrees, where N.L is under 0.1 and the surface is barely lit.
+const float kShadowMaxPlaneAdjust = 0.03;
+
+// Constant floor under every comparison, for depth quantisation and the hashed alpha dither.
+const float kShadowConstantBias = 0.0005;
+
+// Spiral of 16 roughly Poisson-distributed points in the unit disc, rotated per pixel below. A
+// spiral serves the blocker search as well, where only even coverage of the disc matters.
+const vec2 kShadowDisc[16] = vec2[16](
+    vec2( 0.2165,  0.0625), vec2(-0.1294,  0.3062), vec2(-0.2706, -0.3372), vec2( 0.4619, -0.1913),
+    vec2( 0.1294, -0.5532), vec2(-0.5543,  0.2286), vec2( 0.5000,  0.4330), vec2(-0.0872, -0.6964),
+    vec2(-0.4830,  0.5567), vec2( 0.7605,  0.0670), vec2(-0.6964,  0.4019), vec2( 0.0872,  0.8457),
+    vec2( 0.5543, -0.6603), vec2(-0.8660, -0.2241), vec2( 0.3536, -0.8601), vec2(-0.3214,  0.9063));
+
+// Interleaved gradient noise (Jimenez 2014): a cheap per-pixel angle that decorrelates the disc
+// between neighbouring pixels, so undersampling shows up as fine dither instead of banding.
+//
+// ditherIndex decorrelates repeat evaluations of the same pixel as well. PbrPass shades each MSAA
+// coverage sample separately and averages the results, so without this the four evaluations inside
+// one pixel rotate the disc identically and average four copies of the same answer -- four times the
+// taps are already being paid for and none of the variance reduction collected. Stepping by the
+// golden angle puts successive samples as far apart on the circle as the previous ones allow, so the
+// union of the four sets is a well-spread 64 taps. A single-sampled caller passes 0 and is unchanged.
+mat2 shadowRotation(vec2 pixel, uint ditherIndex)
 {
-    vec2 uv = shadowCoord.xy * 0.5 + 0.5;
-    if (shadowCoord.z < 0.0 || shadowCoord.z > 1.0 || any(lessThan(uv, vec2(0.0))) ||
-        any(greaterThan(uv, vec2(1.0))))
+    float angle = fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715)))) * 6.28318531;
+    angle += float(ditherIndex) * 2.39996323;
+    float s = sin(angle);
+    float c = cos(angle);
+    return mat2(c, s, -s, c);
+}
+
+// The receiver's own tangent plane, as a gradient of stored depth with respect to shadow-map UV.
+//
+// Without this, both the blocker search and the comparison filter test a whole wide kernel against
+// the single depth at its centre. On a surface tilted away from the light the lightward side of that
+// kernel genuinely is closer, so the surface finds itself: the search reports a false blocker (which
+// also defeats the no-blockers early-out) and the filter shadows the surface with its own geometry.
+// The passes' polygon offset covers about two texels of slope, which was enough for the fixed
+// one-texel kernel this file used to use and is nowhere near enough for 24 to 32.
+//
+// Built from the surface normal rather than from dFdx/dFdy of the shadow coordinate, which is the
+// usual trick: PbrPass shades a G-buffer in a fullscreen pass, where screen-space derivatives
+// straddle silhouettes and would invent a wild plane for every pixel along an edge.
+vec2 shadowReceiverGradient(mat4 lightViewProj, vec3 worldNormal, vec4 shadowClip)
+{
+    // Any two directions spanning the tangent plane will do; the gradient does not depend on which.
+    vec3 helper = abs(worldNormal.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangentA = normalize(cross(worldNormal, helper));
+    vec3 tangentB = cross(worldNormal, tangentA);
+
+    // Exact derivative of the projective map along each tangent (quotient rule on xyz/w), so no
+    // finite-difference epsilon has to be picked against the scene's unknown scale. A direction has
+    // w = 0 in world space but picks one up through the projection, which is the dw term.
+    vec4  clipA = lightViewProj * vec4(tangentA, 0.0);
+    vec4  clipB = lightViewProj * vec4(tangentB, 0.0);
+    float invW2 = 1.0 / (shadowClip.w * shadowClip.w);
+
+    // 0.5 because uv is the ndc range mapped to [0, 1].
+    vec2  duvA = 0.5 * (clipA.xy * shadowClip.w - shadowClip.xy * clipA.w) * invW2;
+    vec2  duvB = 0.5 * (clipB.xy * shadowClip.w - shadowClip.xy * clipB.w) * invW2;
+    float dzA  = (clipA.z * shadowClip.w - shadowClip.z * clipA.w) * invW2;
+    float dzB  = (clipB.z * shadowClip.w - shadowClip.z * clipB.w) * invW2;
+
+    // Edge-on to the light the uv span collapses and the plane says nothing useful, so fall back to
+    // a flat threshold.
+    float det = duvA.x * duvB.y - duvA.y * duvB.x;
+    if (abs(det) < 1e-12)
+        return vec2(0.0);
+
+    // Solve [duvA; duvB] * gradient = [dzA; dzB] for the gradient.
+    return vec2(dzA * duvB.y - dzB * duvA.y, dzB * duvA.x - dzA * duvB.x) / det;
+}
+
+// Depth to test a tap at this offset against: the receiver plane's own depth there, biased.
+float shadowTapThreshold(float centreDepth, vec2 gradient, vec2 offset)
+{
+    float adjust = clamp(dot(gradient, offset), -kShadowMaxPlaneAdjust, kShadowMaxPlaneAdjust);
+    return centreDepth + adjust - kShadowConstantBias;
+}
+
+// Averages the samples lying in front of the receiver plane. Returns false when none do, which is
+// the common case over open lit ground and lets the caller skip the filter entirely.
+bool findAverageBlocker(sampler2DArray depthMap, vec2 uv, float centreDepth, vec2 gradient, uint layer,
+                        float searchRadius, mat2 rotation, out float averageBlockerDepth)
+{
+    float total = 0.0;
+    uint  count = 0u;
+    for (uint i = 0u; i < kShadowBlockerSamples; ++i)
+    {
+        vec2  offset = rotation * kShadowDisc[i] * searchRadius;
+        float depth  = texture(depthMap, vec3(uv + offset, float(layer))).r;
+        if (depth < shadowTapThreshold(centreDepth, gradient, offset))
+        {
+            total += depth;
+            count += 1u;
+        }
+    }
+    averageBlockerDepth = count > 0u ? total / float(count) : 0.0;
+    return count > 0u;
+}
+
+// Comparison filter over a disc of the given UV radius. Every tap is itself a hardware 2x2 bilinear
+// comparison, which is what makes a one-texel radius already smoother than a single point test.
+float sampleShadowDisc(sampler2DArrayShadow shadowMap, vec2 uv, float centreDepth, vec2 gradient,
+                       uint layer, float radius, mat2 rotation)
+{
+    float visibility = 0.0;
+    for (uint i = 0u; i < kShadowFilterSamples; ++i)
+    {
+        vec2 offset = rotation * kShadowDisc[i] * radius;
+        visibility += texture(shadowMap,
+                              vec4(uv + offset, float(layer), shadowTapThreshold(centreDepth, gradient, offset)));
+    }
+    return visibility / float(kShadowFilterSamples);
+}
+
+// Shared entry guard. Outside the map (or behind the light) nothing was rendered, so the receiver is
+// unshadowed; for a cascade this is also what hands a fragment past the last split to full light.
+bool shadowCoordInRange(vec3 shadowCoord, out vec2 uv)
+{
+    uv = shadowCoord.xy * 0.5 + 0.5;
+    return shadowCoord.z >= 0.0 && shadowCoord.z <= 1.0 && all(greaterThanEqual(uv, vec2(0.0))) &&
+           all(lessThanEqual(uv, vec2(1.0)));
+}
+
+// Spot and area lights: both project perspectively, so both reach the filter the same way.
+// receiverDistance is the receiver's linear distance from the light along the projection's forward
+// axis, which a perspective projection hands over for free as the clip-space w. nearPlane/farPlane
+// come from the pass's own params buffer, so the linearisation below always inverts the exact
+// projection that produced the map.
+float perspectiveShadowVisibility(sampler2DArrayShadow shadowMap, sampler2DArray depthMap, vec3 shadowCoord,
+                                  vec2 gradient, uint layer, float lightSizeUv, float nearPlane,
+                                  float farPlane, float receiverDistance, mat2 rotation)
+{
+    vec2 uv;
+    if (!shadowCoordInRange(shadowCoord, uv))
         return 1.0;
 
     vec2 texel = 1.0 / vec2(textureSize(shadowMap, 0).xy);
-    float visibility = 0.0;
-    for (int y = -1; y <= 1; ++y)
-        for (int x = -1; x <= 1; ++x)
-            visibility += texture(shadowMap, vec4(uv + vec2(x, y) * texel, float(layer),
-                                                  shadowCoord.z - 0.0005));
-    return visibility / 9.0;
+
+    // A zero-radius emitter has no penumbra to estimate: keep the fixed one-texel kernel.
+    if (lightSizeUv <= 0.0)
+        return sampleShadowDisc(shadowMap, uv, shadowCoord.z, gradient, layer, texel.x, rotation);
+
+    // The region of the near plane that can see any part of the emitter, in UV.
+    float searchRadius = lightSizeUv * max(receiverDistance - nearPlane, 0.0) / receiverDistance;
+    searchRadius = clamp(searchRadius, texel.x, kShadowMaxSearchTexels * texel.x);
+
+    float blockerDepth;
+    if (!findAverageBlocker(depthMap, uv, shadowCoord.z, gradient, layer, searchRadius, rotation, blockerDepth))
+        return 1.0;
+
+    // Undo the projection: the similar-triangles ratio below is only the penumbra of a finite
+    // emitter in linear distance from the light.
+    float blockerDistance = (farPlane * nearPlane) /
+                            (farPlane - blockerDepth * (farPlane - nearPlane));
+
+    // lightSizeUv is measured at the near plane, so rescaling it to the receiver's plane carries the
+    // extra factor of near / receiverDistance.
+    float penumbraRadius = lightSizeUv * nearPlane * max(receiverDistance - blockerDistance, 0.0) /
+                           (blockerDistance * receiverDistance);
+    penumbraRadius = clamp(penumbraRadius, texel.x, kShadowMaxFilterTexels * texel.x);
+
+    return sampleShadowDisc(shadowMap, uv, shadowCoord.z, gradient, layer, penumbraRadius, rotation);
 }
 
-float lightShadowVisibility(LightData light, vec3 viewPosition, vec3 worldPosition)
+// Directional lights. An orthographic depth buffer is linear, so the blocker-to-receiver separation
+// is a plain stored-depth difference and penumbraScale (built per cascade on the CPU) turns it
+// straight into a UV radius. The penumbra grows with absolute separation rather than with a ratio,
+// which is what an angular light size means.
+float cascadeShadowVisibility(sampler2DArrayShadow shadowMap, sampler2DArray depthMap, vec3 shadowCoord,
+                              vec2 gradient, uint layer, float penumbraScale, mat2 rotation)
 {
+    vec2 uv;
+    if (!shadowCoordInRange(shadowCoord, uv))
+        return 1.0;
+
+    vec2 texel = 1.0 / vec2(textureSize(shadowMap, 0).xy);
+
+    if (penumbraScale <= 0.0)
+        return sampleShadowDisc(shadowMap, uv, shadowCoord.z, gradient, layer, texel.x, rotation);
+
+    // Nothing projective shrinks the search here, so the bound is the widest penumbra the cascade's
+    // own depth range can produce: penumbraScale at a full stored-depth separation of 1.
+    float searchRadius = clamp(penumbraScale, texel.x, kShadowMaxSearchTexels * texel.x);
+
+    float blockerDepth;
+    if (!findAverageBlocker(depthMap, uv, shadowCoord.z, gradient, layer, searchRadius, rotation, blockerDepth))
+        return 1.0;
+
+    float penumbraRadius = penumbraScale * max(shadowCoord.z - blockerDepth, 0.0);
+    // Clamping in texels is also what hides the cascade seams: texel density roughly doubles at each
+    // split, so an unclamped world-constant radius would visibly change tap count across the border.
+    penumbraRadius = clamp(penumbraRadius, texel.x, kShadowMaxFilterTexels * texel.x);
+
+    return sampleShadowDisc(shadowMap, uv, shadowCoord.z, gradient, layer, penumbraRadius, rotation);
+}
+
+// worldNormal is the receiver's shading normal, used for the receiver-plane threshold. pixel seeds
+// the disc rotation (callers pass gl_FragCoord.xy) and ditherIndex decorrelates repeat evaluations of
+// that same pixel -- the MSAA coverage sample index in PbrPass, 0 for a caller shaded once.
+float lightShadowVisibility(LightData light, vec3 viewPosition, vec3 worldPosition, vec3 worldNormal,
+                            vec2 pixel, uint ditherIndex)
+{
+    mat2 rotation = shadowRotation(pixel, ditherIndex);
+
     if (light.type == LIGHT_TYPE_SPOT && light.shadowIndex < spotShadow.header.x)
     {
-        vec4 lightClip = spotShadow.lightViewProj[light.shadowIndex] * vec4(worldPosition, 1.0);
-        return sampleShadowPcf(spotShadowMap, lightClip.xyz / lightClip.w, light.shadowIndex);
+        mat4 lightViewProj = spotShadow.lightViewProj[light.shadowIndex];
+        vec4 lightClip = lightViewProj * vec4(worldPosition, 1.0);
+        vec4 params = spotShadow.pcss[light.shadowIndex];
+        vec2 gradient = shadowReceiverGradient(lightViewProj, worldNormal, lightClip);
+        return perspectiveShadowVisibility(spotShadowMap, spotShadowMapDepth, lightClip.xyz / lightClip.w,
+                                           gradient, light.shadowIndex, params.x, params.y, params.z,
+                                           lightClip.w, rotation);
+    }
+
+    if (light.type == LIGHT_TYPE_AREA && light.shadowIndex < areaShadow.header.x)
+    {
+        // The quad lights two disjoint half-spaces and this fragment is in exactly one of them, so
+        // pick that face's map. A one-sided quad's back face is sampled too, but LTC already returns
+        // zero there, so whatever it reports is multiplied away.
+        vec3 forward = quaternionToForwardVector(light.rotation);
+        uint side = dot(worldPosition - light.position, forward) < 0.0 ? 1u : 0u;
+        uint layer = light.shadowIndex * areaShadow.header.y + side;
+        mat4 lightViewProj = areaShadow.lightViewProj[layer];
+        vec4 lightClip = lightViewProj * vec4(worldPosition, 1.0);
+        vec4 params = areaShadow.pcss[layer];
+        vec2 gradient = shadowReceiverGradient(lightViewProj, worldNormal, lightClip);
+        return perspectiveShadowVisibility(areaShadowMap, areaShadowMapDepth, lightClip.xyz / lightClip.w,
+                                           gradient, layer, params.x, params.y, params.z, lightClip.w,
+                                           rotation);
     }
 
     if (light.type == LIGHT_TYPE_DIRECTIONAL && light.shadowIndex < cascadedShadow.header.x)
@@ -33,8 +284,12 @@ float lightShadowVisibility(LightData light, vec3 viewPosition, vec3 worldPositi
         cascade += viewDepth > cascadedShadow.splitDepths.y ? 1u : 0u;
         cascade += viewDepth > cascadedShadow.splitDepths.z ? 1u : 0u;
         uint layer = light.shadowIndex * cascadedShadow.header.y + cascade;
-        vec4 lightClip = cascadedShadow.lightViewProj[layer] * vec4(worldPosition, 1.0);
-        return sampleShadowPcf(cascadedShadowMap, lightClip.xyz / lightClip.w, layer);
+        mat4 lightViewProj = cascadedShadow.lightViewProj[layer];
+        vec4 lightClip = lightViewProj * vec4(worldPosition, 1.0);
+        vec2 gradient = shadowReceiverGradient(lightViewProj, worldNormal, lightClip);
+        return cascadeShadowVisibility(cascadedShadowMap, cascadedShadowMapDepth,
+                                       lightClip.xyz / lightClip.w, gradient, layer,
+                                       cascadedShadow.pcss[layer].x, rotation);
     }
 
     return 1.0;

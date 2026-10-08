@@ -18,7 +18,7 @@ struct alignas(16) LightGpuData
     float     intensity; // 4 bytes
 
     float     innerConeAngle; // 4 bytes (spot lights)
-    float     outerConeAngle; // 4 bytes (spot lights)
+    float     outerConeAngle; // 4 bytes (spot cone or area spread half-angle)
     glm::vec2 areaSize;       // 8 bytes (area lights)
 
     uint32_t flags; // 4 bytes: bit 0 = two-sided (area lights); padded to 16 by alignas

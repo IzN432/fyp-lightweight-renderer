@@ -7,6 +7,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace lr
@@ -64,6 +65,15 @@ SpotShadowGpuData SpotShadowPass::shadowData() const
             clip[3][2] = 0.5f;
             const uint32_t shadowIndex = result.header.x++;
             result.lightViewProj[shadowIndex] = clip * projection * view;
+            // PCSS works in shadow-map UV, so express the emitter's radius there. The near plane
+            // spans 2 * tan(halfFov) * near world units across the full [0, 1] UV range, and the
+            // shadow projection's half-FOV is the cone angle widened above, not the cone angle.
+            const float tanHalfShadowFov = std::tan(glm::radians(shadowFov) * 0.5f);
+            // The near/far travel with the matrix rather than being re-read from the light, so the
+            // shader's depth linearisation cannot drift from the projection it has to invert.
+            result.pcss[shadowIndex] =
+                glm::vec4(spot->sourceRadius / (2.0f * tanHalfShadowFov * spot->shadowNearPlane),
+                          spot->shadowNearPlane, spot->range, 0.0f);
             if (result.header.x == SpotShadowGpuData::maxShadows)
                 break;
         }

@@ -85,7 +85,7 @@ demonstrates all of these.
 | Buffer (`gpu.buffers` key) | Name | Contents |
 |---|---|---|
 | `camera` | `camera_cb` | Uniform, std140, 336 bytes: `mat4 view, proj, viewProj, invView, invProj; vec3 position; float pad`. Vulkan clip space: depth in [0, 1], Y flipped. |
-| `lights` | `lights_lb` | Storage buffer, one 80-byte entry per light: `vec3 position; uint type; vec4 rotation (quaternion xyzw); vec3 color; float intensity; float innerCone, outerCone (radians); vec2 areaSize; uint flags` (bit 0: two-sided area light), padded to 80. The type is 0 point, 1 spot, 2 area, 3 directional, 4 image. `gpu.num_lights` gives the count. |
+| `lights` | `lights_lb` | Storage buffer, one 80-byte entry per light: `vec3 position; uint type; vec4 rotation (quaternion xyzw); vec3 color; float intensity; float innerCone, outerCone (radians; outerCone is the area-light spread); vec2 areaSize; uint flags` (bit 0: two-sided area light), padded to 80. The type is 0 point, 1 spot, 2 area, 3 directional, 4 image. `gpu.num_lights` gives the count. |
 | `positions` | `meshPositionBuffer` | Vertex buffer, binding 0: `vec3` position per render vertex, all meshes back to back. |
 | `attributes` | `meshVertexBuffer` | Vertex buffer, binding 1: interleaved `vec3 normal, vec4 tangent (w = handedness), vec2 uv`. |
 | `indices` | `meshIndexBuffer` | `uint32` triangle indices. |

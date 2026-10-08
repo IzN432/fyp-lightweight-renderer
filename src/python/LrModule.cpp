@@ -1416,8 +1416,11 @@ struct LightInfo
     std::optional<float>                outerConeDegrees;
     std::optional<float>                range;
     std::optional<float>                shadowNearPlane;
+    std::optional<float>                sourceRadius;
+    std::optional<float>                angularRadiusDegrees;
     std::optional<std::array<float, 2>> areaSize;
     std::optional<bool>                 twoSided;
+    std::optional<float>                spreadAngleDegrees;
 };
 
 LightInfo describeLight(const lr::Light &light)
@@ -1438,14 +1441,17 @@ LightInfo describeLight(const lr::Light &light)
                 info.outerConeDegrees = l.outerConeAngleDegrees;
                 info.range            = l.range;
                 info.shadowNearPlane  = l.shadowNearPlane;
+                info.sourceRadius     = l.sourceRadius;
             } else if constexpr (std::is_same_v<T, lr::AreaLight>)
             {
                 info.type     = "area";
                 info.areaSize = std::array<float, 2>{l.size.x, l.size.y};
                 info.twoSided = l.twoSided;
+                info.spreadAngleDegrees = l.spreadAngleDegrees;
             } else if constexpr (std::is_same_v<T, lr::DirectionalLight>)
             {
-                info.type = "directional";
+                info.type                 = "directional";
+                info.angularRadiusDegrees = l.angularRadiusDegrees;
             } else
             {
                 info.type = "image";
@@ -1465,8 +1471,11 @@ struct LightSpec
     float                outerConeDegrees = 30.0f;
     float                range            = 100.0f;
     float                shadowNearPlane  = 0.1f;
+    float                sourceRadius     = 0.0f;
+    float                angularRadius    = 0.0f;
     std::array<float, 2> size{1.0f, 1.0f};
     bool                 twoSided = true;
+    float                spreadAngleDegrees = 60.0f;
 };
 
 lr::LightVariant makeLight(const char *function, const LightSpec &spec)
@@ -1481,15 +1490,19 @@ lr::LightVariant makeLight(const char *function, const LightSpec &spec)
         lr::SpotLight light{base, spec.innerConeDegrees, spec.outerConeDegrees};
         light.range = spec.range;
         light.shadowNearPlane = spec.shadowNearPlane;
+        light.sourceRadius = spec.sourceRadius;
         return light;
     }
     if (spec.type == "area")
     {
-        return lr::AreaLight{base, glm::vec2(spec.size[0], spec.size[1]), spec.twoSided};
+        return lr::AreaLight{base, glm::vec2(spec.size[0], spec.size[1]), spec.twoSided,
+                             spec.spreadAngleDegrees};
     }
     if (spec.type == "directional")
     {
-        return lr::DirectionalLight{base};
+        lr::DirectionalLight light{base};
+        light.angularRadiusDegrees = spec.angularRadius;
+        return light;
     }
     if (spec.type == "image")
     {
@@ -1550,6 +1563,11 @@ void bindScene(nb::module_ &m)
         .def_ro("outer_cone_degrees", &LightInfo::outerConeDegrees, "Spot lights only.")
         .def_ro("range", &LightInfo::range, "Spot lights only: lighting and shadow far distance.")
         .def_ro("shadow_near_plane", &LightInfo::shadowNearPlane, "Spot lights only.")
+        .def_ro("source_radius", &LightInfo::sourceRadius,
+                "Spot lights only: emitter radius in world units, which widens the shadow penumbra.")
+        .def_ro("angular_radius_degrees", &LightInfo::angularRadiusDegrees,
+                "Directional lights only: half the angle the emitter subtends, which widens the "
+                "shadow penumbra with distance from the caster.")
         .def_prop_ro(
             "area_size",
             [](const LightInfo &light) -> nb::object {
@@ -1561,7 +1579,9 @@ void bindScene(nb::module_ &m)
             },
             "Area lights only: (width, height) in world units.")
         .def_ro("two_sided", &LightInfo::twoSided,
-                "Area lights only: emits from both faces (True) or only along its forward axis.");
+                "Area lights only: emits from both faces (True) or only along its forward axis.")
+        .def_ro("spread_angle_degrees", &LightInfo::spreadAngleDegrees,
+                "Area lights only: emission and shadow half-angle.");
 
     nb::class_<lr::Material>(m, "Material",
                              "A material from the scene's material store (see EngineConventions.hpp "
@@ -1782,7 +1802,8 @@ void bindScene(nb::module_ &m)
                std::optional<float> intensity, std::optional<std::array<float, 2>> size,
                std::optional<float> innerConeDegrees, std::optional<float> outerConeDegrees,
                std::optional<float> range, std::optional<float> shadowNearPlane,
-               std::optional<bool> twoSided) {
+               std::optional<float> sourceRadius, std::optional<float> angularRadiusDegrees,
+               std::optional<bool> twoSided, std::optional<float> spreadAngleDegrees) {
                 if (!object.hasComponent<lr::Light>())
                 {
                     throw std::logic_error("set_light: scene object '" + object.name + "' has no light");
@@ -1798,13 +1819,20 @@ void bindScene(nb::module_ &m)
                 spec.outerConeDegrees = outerConeDegrees.value_or(current.outerConeDegrees.value_or(30.0f));
                 spec.range            = range.value_or(current.range.value_or(100.0f));
                 spec.shadowNearPlane  = shadowNearPlane.value_or(current.shadowNearPlane.value_or(0.1f));
+                spec.sourceRadius     = sourceRadius.value_or(current.sourceRadius.value_or(0.0f));
+                spec.angularRadius =
+                    angularRadiusDegrees.value_or(current.angularRadiusDegrees.value_or(0.0f));
                 spec.size             = size.value_or(current.areaSize.value_or(std::array<float, 2>{1.0f, 1.0f}));
                 spec.twoSided         = twoSided.value_or(current.twoSided.value_or(true));
+                spec.spreadAngleDegrees =
+                    spreadAngleDegrees.value_or(current.spreadAngleDegrees.value_or(60.0f));
                 light.set(makeLight("set_light", spec));
             },
             "type"_a = nb::none(), "color"_a = nb::none(), "intensity"_a = nb::none(), "size"_a = nb::none(),
             "inner_cone_degrees"_a = nb::none(), "outer_cone_degrees"_a = nb::none(),
-            "range"_a = nb::none(), "shadow_near_plane"_a = nb::none(), "two_sided"_a = nb::none(),
+            "range"_a = nb::none(), "shadow_near_plane"_a = nb::none(), "source_radius"_a = nb::none(),
+            "angular_radius_degrees"_a = nb::none(), "two_sided"_a = nb::none(),
+            "spread_angle_degrees"_a = nb::none(),
             "Change this object's light; parameters left as None keep their current values. Move or turn it "
             "with position/rotation. A SceneGpu showing the scene picks the change up on the next frame.")
         .def_prop_ro(
@@ -1889,15 +1917,19 @@ void bindScene(nb::module_ &m)
             "add_light",
             [](lr::SceneAssets &assets, const std::string &type, std::array<float, 3> color, float intensity,
                std::array<float, 3> position, std::array<float, 4> rotation, std::array<float, 2> size,
-               float innerConeDegrees, float outerConeDegrees, float range, float shadowNearPlane, bool twoSided,
-               const std::string &name) -> lr::SceneObject & {
+               float innerConeDegrees, float outerConeDegrees, float range, float shadowNearPlane,
+               float sourceRadius, float angularRadiusDegrees, bool twoSided,
+               float spreadAngleDegrees, const std::string &name) -> lr::SceneObject & {
                 LightSpec spec{.type = type, .color = color, .intensity = intensity};
                 spec.innerConeDegrees = innerConeDegrees;
                 spec.outerConeDegrees = outerConeDegrees;
                 spec.range = range;
                 spec.shadowNearPlane = shadowNearPlane;
+                spec.sourceRadius = sourceRadius;
+                spec.angularRadius = angularRadiusDegrees;
                 spec.size = size;
                 spec.twoSided = twoSided;
+                spec.spreadAngleDegrees = spreadAngleDegrees;
                 const lr::LightVariant light = makeLight("add_light", spec);
                 lr::SceneObject &object = assets.scene.createSceneObject();
                 object.name             = name;
@@ -1911,7 +1943,9 @@ void bindScene(nb::module_ &m)
             "position"_a = std::array<float, 3>{0.0f, 0.0f, 0.0f},
             "rotation"_a = std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}, "size"_a = std::array<float, 2>{1.0f, 1.0f},
             "inner_cone_degrees"_a = 15.0f, "outer_cone_degrees"_a = 30.0f,
-            "range"_a = 100.0f, "shadow_near_plane"_a = 0.1f, "two_sided"_a = true, "name"_a = "Light",
+            "range"_a = 100.0f, "shadow_near_plane"_a = 0.1f, "source_radius"_a = 0.0f,
+            "angular_radius_degrees"_a = 0.0f, "two_sided"_a = true,
+            "spread_angle_degrees"_a = 60.0f, "name"_a = "Light",
             ref,
             "Add a light object: 'point', 'spot', 'area', 'directional' or 'image' (environment lighting from an Ibl, "
             "scaled by color * intensity). It shines along its rotation's forward axis (spot, area, directional; "

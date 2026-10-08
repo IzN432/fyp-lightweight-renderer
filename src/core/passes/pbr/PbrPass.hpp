@@ -21,6 +21,8 @@ public:
         std::string shadowParamsBufferResourceName = "pbrFallbackSpotShadowParams";
         std::string cascadedShadowImageResourceName = "pbrFallbackCascadedShadowMap";
         std::string cascadedShadowParamsBufferResourceName = "pbrFallbackCascadedShadowParams";
+        std::string areaShadowImageResourceName = "pbrFallbackAreaShadowMap";
+        std::string areaShadowParamsBufferResourceName = "pbrFallbackAreaShadowParams";
     };
 
     explicit PbrPass(Config cfg);

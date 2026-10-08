@@ -8,10 +8,13 @@ layout(location = 3) in vec2 inUv;
 
 layout(location = 0) out vec2 outUv;
 
+// AreaShadowGpuData. Identical in shape to the spot pass's block but sized for two layers per
+// area light, which is why this pass cannot simply reuse spot_shadow.vert: the declared block must
+// match the buffer it is handed, not just the fields it reads.
 layout(set = 0, binding = 0) uniform ShadowData
 {
-    mat4 lightViewProj[16];
-    vec4 pcss[16];
+    mat4 lightViewProj[8];
+    vec4 pcss[8];
     uvec4 header;
 } shadow;
 

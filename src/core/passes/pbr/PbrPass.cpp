@@ -4,6 +4,7 @@
 #include "core/passes/pbr/LtcMatrix.hpp"
 #include "core/passes/shadow/SpotShadowPass.hpp"
 #include "core/passes/shadow/CascadedShadowPass.hpp"
+#include "core/passes/shadow/AreaShadowPass.hpp"
 #include "core/upload/CameraUploader.hpp"
 
 namespace lr
@@ -59,6 +60,21 @@ void PbrPass::uploadResources(ResourceRegistry &resources) const
         const CascadedShadowGpuData disabled{};
         resources.updateBuffer(m_cfg.cascadedShadowParamsBufferResourceName, &disabled, sizeof(disabled));
     }
+    if (!resources.hasImage(m_cfg.areaShadowImageResourceName))
+    {
+        resources.registerPersistentImageArray(m_cfg.areaShadowImageResourceName, VK_FORMAT_D32_SFLOAT,
+                                               VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+                                                   VK_IMAGE_USAGE_SAMPLED_BIT,
+                                               {1, 1}, AreaShadowGpuData::maxLayers,
+                                               VK_IMAGE_ASPECT_DEPTH_BIT);
+    }
+    if (!resources.hasBuffer(m_cfg.areaShadowParamsBufferResourceName))
+    {
+        resources.registerDynamicBuffer(m_cfg.areaShadowParamsBufferResourceName, sizeof(AreaShadowGpuData),
+                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        const AreaShadowGpuData disabled{};
+        resources.updateBuffer(m_cfg.areaShadowParamsBufferResourceName, &disabled, sizeof(disabled));
+    }
 }
 
 void PbrPass::build(FrameGraph &fg) const
@@ -89,6 +105,16 @@ void PbrPass::build(FrameGraph &fg) const
         .sampledDepth(15, fg.image(m_cfg.cascadedShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
                       SamplerDesc::shadowComparison())
         .uniformBuffer(16, fg.buffer(m_cfg.cascadedShadowParamsBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
+        // Both shadow maps a second time, uncompared, for the PCSS blocker search.
+        .sampledDepth(17, fg.image(m_cfg.shadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
+                      SamplerDesc::depthFetch())
+        .sampledDepth(18, fg.image(m_cfg.cascadedShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
+                      SamplerDesc::depthFetch())
+        .sampledDepth(19, fg.image(m_cfg.areaShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
+                      SamplerDesc::shadowComparison())
+        .uniformBuffer(20, fg.buffer(m_cfg.areaShadowParamsBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledDepth(21, fg.image(m_cfg.areaShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
+                      SamplerDesc::depthFetch())
         .colorAttachment(fg.image("pbr"), VK_FORMAT_R16G16B16A16_SFLOAT)
         // Reads m_cfg when the pass runs, so setNumLights() takes effect without rebuilding the graph.
         .execute([this](PassContext &ctx) {

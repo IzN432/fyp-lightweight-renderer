@@ -39,6 +39,7 @@ layout(set = 0, binding = 13) uniform sampler2DArrayShadow spotShadowMap;
 layout(set = 0, binding = 14) uniform SpotShadowData
 {
     mat4 lightViewProj[16];
+    vec4 pcss[16];
     uvec4 header;
 } spotShadow;
 layout(set = 0, binding = 15) uniform sampler2DArrayShadow cascadedShadowMap;
@@ -46,8 +47,23 @@ layout(set = 0, binding = 16) uniform CascadedShadowData
 {
     mat4 lightViewProj[4];
     vec4 splitDepths;
+    vec4 pcss[4];
     uvec4 header;
 } cascadedShadow;
+// The same two images again without the comparison sampler: PCSS's blocker search needs the stored
+// depth, which a sampler2DArrayShadow can never hand back.
+layout(set = 0, binding = 17) uniform sampler2DArray spotShadowMapDepth;
+layout(set = 0, binding = 18) uniform sampler2DArray cascadedShadowMapDepth;
+// Area light shadows: one layer per quad face (see AreaShadowPass), plus the uncompared view for
+// the blocker search.
+layout(set = 0, binding = 19) uniform sampler2DArrayShadow areaShadowMap;
+layout(set = 0, binding = 20) uniform AreaShadowData
+{
+    mat4 lightViewProj[8];
+    vec4 pcss[8];
+    uvec4 header;
+} areaShadow;
+layout(set = 0, binding = 21) uniform sampler2DArray areaShadowMapDepth;
 
 #include "../utility/shadow_sampling.glslh"
 
@@ -78,11 +94,18 @@ vec3 ShadeSample(ivec2 pixel, int sampleIndex, out bool covered)
     vec3 position = depthToViewPosition(depth, inUV, cameraUbo.invProj);
     float occlusion = texture(ao, inUV).r;
 
+    // The shadow lookups need the normal in world space for their receiver-plane threshold. The view
+    // matrix is rigid, so its upper 3x3 rotates normals correctly without an inverse transpose.
+    vec3 worldNormal = normalize(mat3(cameraUbo.invView) * normal);
+
     vec3 color = vec3(0.0);
     for (uint i = 0; i < pc.numLights; ++i)
     {
         vec3 worldPosition = (cameraUbo.invView * vec4(position, 1.0)).xyz;
-        float visibility = lightShadowVisibility(lights[i], position, worldPosition);
+        // sampleIndex decorrelates the shadow dither between this pixel's coverage samples, which
+        // main() averages — without it all of them rotate the filter the same way.
+        float visibility = lightShadowVisibility(lights[i], position, worldPosition, worldNormal,
+                                                 gl_FragCoord.xy, uint(sampleIndex));
         color += visibility * ShadeLight(lights[i], position, normal, albedo, roughness, metallic, occlusion, pc.pfMips);
     }
 

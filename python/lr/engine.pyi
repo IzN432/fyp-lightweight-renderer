@@ -42,12 +42,25 @@ class Light:
     @property
     def shadow_near_plane(self) -> float | None: ...
     @property
+    def source_radius(self) -> float | None:
+        """Spot lights only: emitter radius in world units, which widens the shadow penumbra."""
+        ...
+    @property
+    def angular_radius_degrees(self) -> float | None:
+        """Directional lights only: half the angle the emitter subtends, which widens the shadow
+        penumbra with distance from the caster."""
+        ...
+    @property
     def area_size(self) -> tuple[float, float] | None:
         """Area lights only: (width, height) in world units."""
         ...
     @property
     def two_sided(self) -> bool | None:
         """Area lights only: emits from both faces (True) or only along its forward axis."""
+        ...
+    @property
+    def spread_angle_degrees(self) -> float | None:
+        """Area lights only: emission and shadow half-angle."""
         ...
 
 class Material:
@@ -176,7 +189,10 @@ class SceneObject:
         outer_cone_degrees: float | None = None,
         range: float | None = None,
         shadow_near_plane: float | None = None,
+        source_radius: float | None = None,
+        angular_radius_degrees: float | None = None,
         two_sided: bool | None = None,
+        spread_angle_degrees: float | None = None,
     ) -> None:
         """Change this object's light; parameters left as None keep their current values. Move or turn
         it with position/rotation. A SceneGpu showing the scene picks the change up on the next frame."""
@@ -226,7 +242,10 @@ class Scene:
         outer_cone_degrees: float = 30.0,
         range: float = 100.0,
         shadow_near_plane: float = 0.1,
+        source_radius: float = 0.0,
+        angular_radius_degrees: float = 0.0,
         two_sided: bool = True,
+        spread_angle_degrees: float = 60.0,
         name: str = "Light",
     ) -> SceneObject:
         """Add a light object: 'point', 'spot', 'area', 'directional' or 'image' (environment lighting
