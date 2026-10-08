@@ -80,6 +80,7 @@ void ArapTool::onTargetChanged(const EditableMeshContext &target)
     retreatFromArapMode();
     m_object = &target.object;
     m_mesh   = &target.mesh;
+    m_arapHandler.setTargetTransform(&target.object.getComponent<TransformComponent>());
     m_solver.invalidate();
     m_lastSolveFailed = false;
 }
@@ -89,6 +90,7 @@ void ArapTool::onTargetCleared()
     retreatFromArapMode();
     m_object = nullptr;
     m_mesh   = nullptr;
+    m_arapHandler.setTargetTransform(nullptr);
     m_solver.invalidate();
     m_lastSolveFailed = false;
 }

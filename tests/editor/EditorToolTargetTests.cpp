@@ -8,6 +8,7 @@
 
 #include "core/app/InputHandler.hpp"
 #include "core/editor/EditableMeshContext.hpp"
+#include "core/editor/DefaultVertexDragHandler.hpp"
 #include "core/editor/EditorShortcuts.hpp"
 #include "core/editor/EditorStateController.hpp"
 #include "core/editor/EditorTool.hpp"
@@ -23,6 +24,8 @@
 #include "features/arap/ArapTool.hpp"
 
 #include <cassert>
+#include <glm/gtc/epsilon.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <string>
 #include <vector>
 
@@ -251,6 +254,32 @@ void aToolsShortcutSurvivesTargetChanges()
     assert(harness.states.isActive(lr::ArapTool::stateId()));
 }
 
+// The translate gizmo reports a world-space displacement, but mesh positions and their undo
+// command are object-local. A rotated/scaled target makes a missing conversion immediately visible.
+void vertexDraggingConvertsWorldDeltaToObjectLocalSpace()
+{
+    Harness harness;
+    auto &transform = harness.first.getComponent<lr::TransformComponent>();
+    transform.setRotation(glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)));
+    transform.setScale(glm::vec3(2.0f));
+    harness.selectionManager.getSelectedIndices().insert(0u);
+
+    lr::DefaultVertexDragHandler handler(harness.vertexManager, harness.selectionManager,
+                                         harness.commandManager);
+    handler.setTargetTransform(&transform);
+    handler.beginDrag();
+    handler.translate(glm::vec3(0.0f, 2.0f, 0.0f));
+    handler.endDrag(glm::vec3(0.0f, 2.0f, 0.0f));
+
+    const auto &positions = harness.vertexManager.getPositions();
+    assert(glm::all(glm::epsilonEqual(positions[0], glm::vec3(1.0f, 0.0f, 0.0f), 0.0001f)));
+
+    harness.commandManager.undo();
+    assert(glm::all(glm::epsilonEqual(positions[0], glm::vec3(0.0f), 0.0001f)));
+    harness.commandManager.redo();
+    assert(glm::all(glm::epsilonEqual(positions[0], glm::vec3(1.0f, 0.0f, 0.0f), 0.0001f)));
+}
+
 } // namespace
 
 int main()
@@ -259,5 +288,6 @@ int main()
     anUnsupportedTargetForcesASafeStateTransition();
     rebindingDropsSelectionFromThePreviousMesh();
     aToolsShortcutSurvivesTargetChanges();
+    vertexDraggingConvertsWorldDeltaToObjectLocalSpace();
     return 0;
 }

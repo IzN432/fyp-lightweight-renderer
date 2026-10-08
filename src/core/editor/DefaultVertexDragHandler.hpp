@@ -20,7 +20,7 @@ public:
     {}
 
     const std::unordered_set<uint32_t> &indices() const override { return m_selectionManager.getSelectedIndices(); }
-    void                                beginDrag() override {}
+    void                                beginDrag() override { m_accumulatedLocalDelta = glm::vec3(0.0f); }
     void                                translate(const glm::vec3 &frameDelta) override;
     void                                endDrag(const glm::vec3 &totalDelta) override;
 
@@ -28,6 +28,7 @@ private:
     VertexManager    &m_vertexManager;
     SelectionManager &m_selectionManager;
     CommandManager   &m_commandManager;
+    glm::vec3          m_accumulatedLocalDelta{0.0f};
 };
 
 } // namespace lr

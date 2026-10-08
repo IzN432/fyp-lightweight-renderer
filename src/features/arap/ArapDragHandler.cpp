@@ -23,6 +23,7 @@ void ArapDragHandler::translate(const glm::vec3 &frameDelta)
     const auto interactionStart = std::chrono::steady_clock::now();
     const auto &positions     = m_vertexManager.getPositions();
     const auto &handleIndices = indices();
+    const glm::vec3 localDelta = worldDeltaToLocal(frameDelta);
 
     if (positions.size() < m_liveSolveVertexThreshold)
     {
@@ -31,7 +32,7 @@ void ArapDragHandler::translate(const glm::vec3 &frameDelta)
         std::unordered_map<uint32_t, glm::vec3> targets;
         for (uint32_t idx : handleIndices)
         {
-            targets[idx] = positions[idx] + frameDelta;
+            targets[idx] = positions[idx] + localDelta;
         }
 
         std::vector<glm::vec3> result = m_solver.solve(targets, positions, /*iterations=*/1);
@@ -54,7 +55,7 @@ void ArapDragHandler::translate(const glm::vec3 &frameDelta)
         for (uint32_t idx : handleIndices)
         {
             handleIndicesVec.push_back(idx);
-            newHandlePositions.push_back(positions[idx] + frameDelta);
+            newHandlePositions.push_back(positions[idx] + localDelta);
         }
         m_vertexManager.setPositions(handleIndicesVec, newHandlePositions);
     }

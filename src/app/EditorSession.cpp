@@ -219,6 +219,7 @@ private:
     // mean adding a line here.
     void notifyTargetChanged(SceneObject &object)
     {
+        m_defaultVertexHandler.setTargetTransform(&object.getComponent<TransformComponent>());
         const EditableMeshContext target{
             .object = object,
             .mesh   = object.getComponent<MeshComponent>().mesh(),
@@ -233,6 +234,7 @@ private:
     void notifyTargetCleared()
     {
         m_meshObject = nullptr;
+        m_defaultVertexHandler.setTargetTransform(nullptr);
         for (EditorTool *tool : m_tools)
         {
             tool->onTargetCleared();
