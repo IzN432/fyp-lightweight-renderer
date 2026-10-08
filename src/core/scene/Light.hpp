@@ -22,6 +22,8 @@ struct SpotLight : public BaseLight
 {
     float innerConeAngleDegrees = 15.0f;
     float outerConeAngleDegrees = 30.0f;
+    float range                 = 100.0f;
+    float shadowNearPlane       = 0.1f;
 };
 
 struct AreaLight : public BaseLight
@@ -71,6 +73,9 @@ struct LightGUICallbacks
         if (outerChanged && light.outerConeAngleDegrees < light.innerConeAngleDegrees)
             light.innerConeAngleDegrees = light.outerConeAngleDegrees;
         changed |= innerChanged || outerChanged;
+        changed |= ImGui::DragFloat("Range", &light.range, 0.25f, 0.1f, 10000.0f);
+        changed |= ImGui::DragFloat("Shadow Near Plane", &light.shadowNearPlane, 0.01f, 0.01f,
+                                    std::max(0.01f, light.range - 0.01f));
         return changed;
     }
 
@@ -166,6 +171,8 @@ private:
             spot->outerConeAngleDegrees = std::clamp(spot->outerConeAngleDegrees, 0.0f, 90.0f);
             spot->innerConeAngleDegrees = std::clamp(spot->innerConeAngleDegrees, 0.0f,
                                                      spot->outerConeAngleDegrees);
+            spot->range = std::max(spot->range, 0.02f);
+            spot->shadowNearPlane = std::clamp(spot->shadowNearPlane, 0.01f, spot->range - 0.01f);
         }
     }
 };

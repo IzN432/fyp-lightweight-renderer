@@ -214,7 +214,7 @@ VkRenderingInfo CompiledFrameGraph::prepareRenderingInfo(const PassDesc &pass, V
     VkRenderingInfo rendering{};
     rendering.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
     rendering.renderArea           = {{0, 0}, extent};
-    rendering.layerCount           = 1;
+    rendering.layerCount           = pass.graphics.renderingLayers;
     rendering.colorAttachmentCount = static_cast<uint32_t>(m_scratchColorAttachments.size());
     rendering.pColorAttachments    = m_scratchColorAttachments.data();
     rendering.pDepthAttachment     = hasDepth ? &m_scratchDepthAttachment : nullptr;

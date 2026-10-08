@@ -326,15 +326,15 @@ void SceneGpu::rebuildGeometry()
 
 void SceneGpu::uploadLights()
 {
-    std::vector<SceneObject *> lights;
+    m_lightObjects.clear();
     for (const auto &object : m_scene.sceneObjects())
     {
         if (isLiveLight(*object))
         {
-            lights.push_back(object.get());
+            m_lightObjects.push_back(object.get());
         }
     }
-    m_lightUploader.upload(lights);
+    m_lightUploader.upload(m_lightObjects);
     m_lightsUploadedCallbacks.invoke(numLights());
 }
 

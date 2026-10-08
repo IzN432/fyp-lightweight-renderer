@@ -15,7 +15,6 @@ namespace
 {
 
 constexpr float kDirectionalLength = 1.5f;
-constexpr float kSpotLength        = 2.0f;
 constexpr int   kCircleSegments    = 24;
 constexpr glm::vec3 kGizmoColor{234.0f / 255.0f, 145.0f / 255.0f, 40.0f / 255.0f};
 
@@ -38,10 +37,11 @@ void addSpot(OverlayLineBuilder &builder, const glm::vec3 &origin, const glm::qu
     const glm::vec3 direction = glm::normalize(rotation * glm::vec3(0.0f, 0.0f, -1.0f));
     const glm::vec3 right     = glm::normalize(rotation * glm::vec3(1.0f, 0.0f, 0.0f));
     const glm::vec3 up        = glm::normalize(rotation * glm::vec3(0.0f, 1.0f, 0.0f));
-    const glm::vec3 lowerCenter = origin + direction * kSpotLength;
+    const float spotLength = light.range;
+    const glm::vec3 lowerCenter = origin + direction * spotLength;
     const float coneSlope = std::tan(glm::radians(glm::clamp(light.outerConeAngleDegrees, 0.0f, 89.0f)));
-    const float lowerRadius = kSpotLength * coneSlope;
-    const float innerRadius = kSpotLength *
+    const float lowerRadius = spotLength * coneSlope;
+    const float innerRadius = spotLength *
                               std::tan(glm::radians(glm::clamp(light.innerConeAngleDegrees, 0.0f, 89.0f)));
 
     addCircle(builder, lowerCenter, right, up, lowerRadius, style);

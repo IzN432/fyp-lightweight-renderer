@@ -16,6 +16,9 @@ public:
         std::string lightBufferResourceName;
         uint32_t    numLights;
         uint32_t    pfMips;
+        // Composable users may omit SpotShadowPass; uploadResources then creates disabled fallbacks.
+        std::string shadowImageResourceName        = "pbrFallbackSpotShadowMap";
+        std::string shadowParamsBufferResourceName = "pbrFallbackSpotShadowParams";
     };
 
     explicit PbrPass(Config cfg);

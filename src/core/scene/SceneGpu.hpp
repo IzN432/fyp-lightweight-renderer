@@ -157,6 +157,7 @@ public:
     const std::string &lightBufferName() const { return m_lightUploader.bufferName(); }
     uint32_t           numLights() const { return m_lightUploader.numLights(); }
     uint32_t           maxLights() const { return m_lightUploader.maxLights(); }
+    const std::vector<SceneObject *> &lightObjects() const { return m_lightObjects; }
 
     const SkinUploadResult &skinUploadResult() const { return m_skinUploadResult; }
     const std::string &skinInfluenceEntriesBufferName() const { return m_skinUploader.influenceEntriesBufferName(); }
@@ -222,6 +223,7 @@ private:
     bool                       m_cameraAspectDirty = false;
     bool                       m_initialized = false;
     std::vector<SceneObject *> m_meshObjects;
+    std::vector<SceneObject *> m_lightObjects;
     std::vector<LightVisual>   m_lightVisuals;
     AreaLightVisualConfig      m_areaLightVisualConfig;
 

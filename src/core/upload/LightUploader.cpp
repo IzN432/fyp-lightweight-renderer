@@ -4,6 +4,7 @@
 #include "core/scene/SceneObject.hpp"
 
 #include <stdexcept>
+#include <limits>
 #include <string>
 
 namespace lr
@@ -26,6 +27,7 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
     }
     std::vector<LightGpuData> data;
     data.reserve(lights.size());
+    uint32_t nextSpotShadow = 0;
 
     for (const auto &lightObject : lights)
     {
@@ -34,7 +36,7 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
         LightGpuData &gpuData = data.emplace_back();
 
         std::visit(
-            [&gpuData, &lightObject](auto &&l) {
+            [&gpuData, &lightObject, &nextSpotShadow](auto &&l) {
                 using T = std::decay_t<decltype(l)>;
 
                 gpuData.color          = l.color;
@@ -45,6 +47,9 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
                 gpuData.outerConeAngle = 0.0f;            // default for point and directional
                 gpuData.areaSize       = glm::vec2(0.0f); // default for point and directional
                 gpuData.flags          = 0;
+                gpuData.range           = 0.0f;
+                gpuData.shadowNearPlane = 0.0f;
+                gpuData.shadowIndex     = std::numeric_limits<uint32_t>::max();
 
                 if constexpr (std::is_same_v<T, PointLight>)
                 {
@@ -59,6 +64,9 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
                     gpuData.type           = 1;
                     gpuData.innerConeAngle = glm::radians(l.innerConeAngleDegrees);
                     gpuData.outerConeAngle = glm::radians(l.outerConeAngleDegrees);
+                    gpuData.range           = l.range;
+                    gpuData.shadowNearPlane = l.shadowNearPlane;
+                    gpuData.shadowIndex     = nextSpotShadow++;
                 } else if constexpr (std::is_same_v<T, AreaLight>)
                 {
                     TransformComponent &transform = lightObject->getComponent<TransformComponent>();

@@ -113,6 +113,9 @@ struct GraphicsState
     VkCompareOp                    depthCompare      = VK_COMPARE_OP_LESS;
     float                          depthBiasConstant = 0.0f;
     float                          depthBiasSlope    = 0.0f;
+    // Number of layers addressed through a layered attachment view. Vertex/geometry shaders select
+    // the destination with gl_Layer; 1 preserves ordinary non-layered rendering.
+    uint32_t                       renderingLayers  = 1;
 };
 
 inline constexpr uint32_t noDescriptorBinding = std::numeric_limits<uint32_t>::max();

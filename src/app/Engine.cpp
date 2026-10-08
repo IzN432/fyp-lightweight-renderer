@@ -9,6 +9,7 @@
 #include "core/passes/heatmap/HeatmapPass.hpp"
 #include "core/passes/ibl/IblPass.hpp"
 #include "core/passes/pbr/PbrPass.hpp"
+#include "core/passes/shadow/SpotShadowPass.hpp"
 #include "core/passes/transparent/TransparentPass.hpp"
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
 #include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
@@ -137,6 +138,12 @@ void Engine::run()
     lr::GeometryPass geometryPass(sceneManager.gpu().geometryPassConfig());
     geometryPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
 
+    lr::SpotShadowPass spotShadowPass(viewer.resources(), {
+        .geometry = sceneManager.gpu().geometryPassConfig(),
+        .lightObjects = sceneManager.gpu().lightObjects(),
+    });
+    spotShadowPass.build(viewer.frameGraph(), lr::conventions::geometryMeshLayout());
+
     // Mesh-independent sources and layout: the scene starts empty, and EditorRenderBridge
     // repoints the pass (setMeshSource) whenever the edited mesh changes.
     lr::HeatmapPass heatmapPass({
@@ -162,6 +169,8 @@ void Engine::run()
         .lightBufferResourceName  = sceneManager.lightBufferName(),
         .numLights                = sceneManager.numLights(),
         .pfMips                   = 8,
+        .shadowImageResourceName = spotShadowPass.shadowImageName(),
+        .shadowParamsBufferResourceName = spotShadowPass.paramsBufferName(),
     });
     pbrPass.uploadResources(viewer.resources());
     pbrPass.build(viewer.frameGraph());
@@ -251,6 +260,9 @@ void Engine::run()
     appConnections.push_back(sceneManager.gpu().onGeometryRebuilt([&](const lr::SceneGpu &gpu) {
         geometryPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
                                       gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
+        spotShadowPass.setSceneGeometry(gpu.meshPositions(), gpu.indexBuffer(), gpu.meshTransforms(),
+                                        gpu.geometryObjects(), gpu.skinUploadResult().drawInfos);
+        spotShadowPass.setLightObjects(gpu.lightObjects());
         setTransparentGeometry(gpu);
     }));
     appConnections.push_back(sceneManager.gpu().onLightsUploaded([&](uint32_t numLights) {

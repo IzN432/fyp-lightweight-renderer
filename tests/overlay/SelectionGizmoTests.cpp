@@ -44,7 +44,9 @@ int main()
 
     auto &spot = scene.createSceneObject();
     spot.addComponent<lr::TransformComponent>(glm::vec3(-1.0f, 0.0f, 1.0f));
-    spot.addComponent<lr::Light>(lr::SpotLight{{}, 15.0f, 30.0f});
+    lr::SpotLight spotLight{{}, 15.0f, 30.0f};
+    spotLight.range = 6.0f;
+    spot.addComponent<lr::Light>(spotLight);
 
     lr::OverlayLineBuilder spotBuilder;
     lr::SelectionGizmoContext spotContext{.lines = spotBuilder, .cameraPosition = glm::vec3(4.0f, 0.0f, 2.0f)};
@@ -52,10 +54,11 @@ int main()
     const auto &spotLines = spotBuilder.lines();
     assert(spotLines.size() == 50); // Outer + inner circles, then two outer-cone tangent sides.
     assert(glm::all(glm::epsilonEqual(spotLines[0].start,
-                                     glm::vec3(-1.0f + 2.0f * glm::tan(glm::radians(30.0f)), 0.0f, -1.0f),
+                                     glm::vec3(-1.0f + spotLight.range * glm::tan(glm::radians(30.0f)), 0.0f,
+                                               1.0f - spotLight.range),
                                      0.0001f)));
     const float slope = glm::tan(glm::radians(30.0f));
-    const float lowerRadius = 2.0f * slope;
+    const float lowerRadius = spotLight.range * slope;
     const glm::vec3 apex(-1.0f, 0.0f, 1.0f);
     const glm::vec3 axis(0.0f, 0.0f, -1.0f);
     const glm::vec3 toCamera = spotContext.cameraPosition - apex;
@@ -66,11 +69,12 @@ int main()
     const float offset = slope * axial / glm::length(radialView);
     const glm::vec3 expectedRadial = offset * towardCamera + std::sqrt(1.0f - offset * offset) * sideways;
     assert(glm::all(glm::epsilonEqual(spotLines[24].start,
-                                     glm::vec3(-1.0f + 2.0f * glm::tan(glm::radians(15.0f)), 0.0f, -1.0f),
+                                     glm::vec3(-1.0f + spotLight.range * glm::tan(glm::radians(15.0f)), 0.0f,
+                                               1.0f - spotLight.range),
                                      0.0001f)));
     assert(spotLines[48].start == apex);
     assert(glm::all(glm::epsilonEqual(spotLines[48].end,
-                                     glm::vec3(-1.0f, 0.0f, -1.0f) + expectedRadial * lowerRadius, 0.0001f)));
+                                     apex + axis * spotLight.range + expectedRadial * lowerRadius, 0.0001f)));
 
     // Looking down the cone axis hides only the tangent sides; both angle circles remain.
     lr::OverlayLineBuilder nestedBuilder;

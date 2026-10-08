@@ -470,6 +470,11 @@ void VulkanContext::createDevice()
     features12.descriptorIndexing                        = VK_TRUE;
     features12.runtimeDescriptorArray                    = VK_TRUE;
     features12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    if (!m_deviceFeatures12.shaderOutputViewportIndex || !m_deviceFeatures12.shaderOutputLayer)
+        throw std::runtime_error(
+            "VulkanContext: VK_EXT_shader_viewport_index_layer requires shaderOutputViewportIndex and shaderOutputLayer");
+    features12.shaderOutputViewportIndex                 = VK_TRUE;
+    features12.shaderOutputLayer                         = VK_TRUE;
 
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType                      = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;

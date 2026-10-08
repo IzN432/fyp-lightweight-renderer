@@ -39,6 +39,7 @@ public:
     PassBuilder &cull(VkCullModeFlags mode, VkFrontFace frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE);
     PassBuilder &depth(bool test, bool write, VkCompareOp compare = VK_COMPARE_OP_LESS);
     PassBuilder &depthBias(float constant, float slope = 0.0f);
+    PassBuilder &renderingLayers(uint32_t count);
 
     PassBuilder &sampledImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages,
                               SamplerDesc sampler = {});

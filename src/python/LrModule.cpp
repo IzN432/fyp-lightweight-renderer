@@ -406,6 +406,20 @@ void bindEnums(nb::module_ &m)
         .value("GREATER_OR_EQUAL", VK_COMPARE_OP_GREATER_OR_EQUAL)
         .value("ALWAYS", VK_COMPARE_OP_ALWAYS);
 
+    nb::enum_<VkFilter>(m, "Filter").value("NEAREST", VK_FILTER_NEAREST).value("LINEAR", VK_FILTER_LINEAR);
+    nb::enum_<VkSamplerMipmapMode>(m, "SamplerMipmapMode")
+        .value("NEAREST", VK_SAMPLER_MIPMAP_MODE_NEAREST)
+        .value("LINEAR", VK_SAMPLER_MIPMAP_MODE_LINEAR);
+    nb::enum_<VkSamplerAddressMode>(m, "SamplerAddressMode")
+        .value("REPEAT", VK_SAMPLER_ADDRESS_MODE_REPEAT)
+        .value("MIRRORED_REPEAT", VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT)
+        .value("CLAMP_TO_EDGE", VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+        .value("CLAMP_TO_BORDER", VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER);
+    nb::enum_<VkBorderColor>(m, "BorderColor")
+        .value("FLOAT_TRANSPARENT_BLACK", VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK)
+        .value("FLOAT_OPAQUE_BLACK", VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK)
+        .value("FLOAT_OPAQUE_WHITE", VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE);
+
     nb::enum_<PassType>(m, "PassType")
         .value("GEOMETRY", PassType::Geometry)
         .value("FULLSCREEN", PassType::Fullscreen)
@@ -420,6 +434,24 @@ void bindEnums(nb::module_ &m)
 
 void bindValueTypes(nb::module_ &m)
 {
+    nb::class_<lr::SamplerDesc>(m, "SamplerDesc")
+        .def(nb::init<>())
+        .def_static("shadow_comparison", &lr::SamplerDesc::shadowComparison)
+        .def_rw("mag_filter", &lr::SamplerDesc::magFilter)
+        .def_rw("min_filter", &lr::SamplerDesc::minFilter)
+        .def_rw("mipmap_mode", &lr::SamplerDesc::mipmapMode)
+        .def_rw("address_mode_u", &lr::SamplerDesc::addressModeU)
+        .def_rw("address_mode_v", &lr::SamplerDesc::addressModeV)
+        .def_rw("address_mode_w", &lr::SamplerDesc::addressModeW)
+        .def_rw("mip_lod_bias", &lr::SamplerDesc::mipLodBias)
+        .def_rw("anisotropy_enable", &lr::SamplerDesc::anisotropyEnable)
+        .def_rw("max_anisotropy", &lr::SamplerDesc::maxAnisotropy)
+        .def_rw("compare_enable", &lr::SamplerDesc::compareEnable)
+        .def_rw("compare_op", &lr::SamplerDesc::compareOp)
+        .def_rw("min_lod", &lr::SamplerDesc::minLod)
+        .def_rw("max_lod", &lr::SamplerDesc::maxLod)
+        .def_rw("border_color", &lr::SamplerDesc::borderColor);
+
     nb::class_<ImageHandle>(m, "ImageHandle")
         .def("__bool__",
              [](ImageHandle h) {
@@ -734,10 +766,14 @@ void bindPasses(nb::module_ &m)
              "Default: test and write on (compare LESS) exactly when the pass has a depth attachment.")
         .def("depth_bias", &PassBuilder::depthBias, "constant"_a, "slope"_a = 0.0f, ref,
              "Offset rasterized depth, e.g. negative values to draw a wireframe over its own solid surface.")
-        .def("sampled_image", &PassBuilder::sampledImage, "binding"_a, "image"_a, "stages"_a, ref)
-        .def("sampled_depth", &PassBuilder::sampledDepth, "binding"_a, "image"_a, "stages"_a, ref)
+        .def("rendering_layers", &PassBuilder::renderingLayers, "count"_a, ref,
+             "Render through a layered attachment view; the shader selects layers with gl_Layer.")
+        .def("sampled_image", &PassBuilder::sampledImage, "binding"_a, "image"_a, "stages"_a,
+             "sampler"_a = lr::SamplerDesc{}, ref)
+        .def("sampled_depth", &PassBuilder::sampledDepth, "binding"_a, "image"_a, "stages"_a,
+             "sampler"_a = lr::SamplerDesc{}, ref)
         .def("sampled_image_array", &PassBuilder::sampledImageArray, "binding"_a, "images"_a, "count"_a, "stages"_a,
-             ref,
+             "sampler"_a = lr::SamplerDesc{}, ref,
              "Bind the first `count` elements of an image array (see ResourceRegistry.upload_array_image) as "
              "`uniform sampler2D name[count]`.")
         .def(
@@ -1378,6 +1414,8 @@ struct LightInfo
     float                               intensity = 0.0f;
     std::optional<float>                innerConeDegrees;
     std::optional<float>                outerConeDegrees;
+    std::optional<float>                range;
+    std::optional<float>                shadowNearPlane;
     std::optional<std::array<float, 2>> areaSize;
     std::optional<bool>                 twoSided;
 };
@@ -1398,6 +1436,8 @@ LightInfo describeLight(const lr::Light &light)
                 info.type             = "spot";
                 info.innerConeDegrees = l.innerConeAngleDegrees;
                 info.outerConeDegrees = l.outerConeAngleDegrees;
+                info.range            = l.range;
+                info.shadowNearPlane  = l.shadowNearPlane;
             } else if constexpr (std::is_same_v<T, lr::AreaLight>)
             {
                 info.type     = "area";
@@ -1423,6 +1463,8 @@ struct LightSpec
     float                intensity        = 1.0f;
     float                innerConeDegrees = 15.0f;
     float                outerConeDegrees = 30.0f;
+    float                range            = 100.0f;
+    float                shadowNearPlane  = 0.1f;
     std::array<float, 2> size{1.0f, 1.0f};
     bool                 twoSided = true;
 };
@@ -1436,7 +1478,10 @@ lr::LightVariant makeLight(const char *function, const LightSpec &spec)
     }
     if (spec.type == "spot")
     {
-        return lr::SpotLight{base, spec.innerConeDegrees, spec.outerConeDegrees};
+        lr::SpotLight light{base, spec.innerConeDegrees, spec.outerConeDegrees};
+        light.range = spec.range;
+        light.shadowNearPlane = spec.shadowNearPlane;
+        return light;
     }
     if (spec.type == "area")
     {
@@ -1503,6 +1548,8 @@ void bindScene(nb::module_ &m)
         .def_ro("intensity", &LightInfo::intensity)
         .def_ro("inner_cone_degrees", &LightInfo::innerConeDegrees, "Spot lights only.")
         .def_ro("outer_cone_degrees", &LightInfo::outerConeDegrees, "Spot lights only.")
+        .def_ro("range", &LightInfo::range, "Spot lights only: lighting and shadow far distance.")
+        .def_ro("shadow_near_plane", &LightInfo::shadowNearPlane, "Spot lights only.")
         .def_prop_ro(
             "area_size",
             [](const LightInfo &light) -> nb::object {
@@ -1734,6 +1781,7 @@ void bindScene(nb::module_ &m)
             [](lr::SceneObject &object, std::optional<std::string> type, std::optional<std::array<float, 3>> color,
                std::optional<float> intensity, std::optional<std::array<float, 2>> size,
                std::optional<float> innerConeDegrees, std::optional<float> outerConeDegrees,
+               std::optional<float> range, std::optional<float> shadowNearPlane,
                std::optional<bool> twoSided) {
                 if (!object.hasComponent<lr::Light>())
                 {
@@ -1748,12 +1796,15 @@ void bindScene(nb::module_ &m)
                                .intensity = intensity.value_or(current.intensity)};
                 spec.innerConeDegrees = innerConeDegrees.value_or(current.innerConeDegrees.value_or(15.0f));
                 spec.outerConeDegrees = outerConeDegrees.value_or(current.outerConeDegrees.value_or(30.0f));
+                spec.range            = range.value_or(current.range.value_or(100.0f));
+                spec.shadowNearPlane  = shadowNearPlane.value_or(current.shadowNearPlane.value_or(0.1f));
                 spec.size             = size.value_or(current.areaSize.value_or(std::array<float, 2>{1.0f, 1.0f}));
                 spec.twoSided         = twoSided.value_or(current.twoSided.value_or(true));
                 light.set(makeLight("set_light", spec));
             },
             "type"_a = nb::none(), "color"_a = nb::none(), "intensity"_a = nb::none(), "size"_a = nb::none(),
-            "inner_cone_degrees"_a = nb::none(), "outer_cone_degrees"_a = nb::none(), "two_sided"_a = nb::none(),
+            "inner_cone_degrees"_a = nb::none(), "outer_cone_degrees"_a = nb::none(),
+            "range"_a = nb::none(), "shadow_near_plane"_a = nb::none(), "two_sided"_a = nb::none(),
             "Change this object's light; parameters left as None keep their current values. Move or turn it "
             "with position/rotation. A SceneGpu showing the scene picks the change up on the next frame.")
         .def_prop_ro(
@@ -1838,10 +1889,16 @@ void bindScene(nb::module_ &m)
             "add_light",
             [](lr::SceneAssets &assets, const std::string &type, std::array<float, 3> color, float intensity,
                std::array<float, 3> position, std::array<float, 4> rotation, std::array<float, 2> size,
-               float innerConeDegrees, float outerConeDegrees, bool twoSided,
+               float innerConeDegrees, float outerConeDegrees, float range, float shadowNearPlane, bool twoSided,
                const std::string &name) -> lr::SceneObject & {
-                const lr::LightVariant light = makeLight(
-                    "add_light", {type, color, intensity, innerConeDegrees, outerConeDegrees, size, twoSided});
+                LightSpec spec{.type = type, .color = color, .intensity = intensity};
+                spec.innerConeDegrees = innerConeDegrees;
+                spec.outerConeDegrees = outerConeDegrees;
+                spec.range = range;
+                spec.shadowNearPlane = shadowNearPlane;
+                spec.size = size;
+                spec.twoSided = twoSided;
+                const lr::LightVariant light = makeLight("add_light", spec);
                 lr::SceneObject &object = assets.scene.createSceneObject();
                 object.name             = name;
                 auto &transform =
@@ -1853,7 +1910,8 @@ void bindScene(nb::module_ &m)
             "type"_a, "color"_a = std::array<float, 3>{1.0f, 1.0f, 1.0f}, "intensity"_a = 1.0f,
             "position"_a = std::array<float, 3>{0.0f, 0.0f, 0.0f},
             "rotation"_a = std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}, "size"_a = std::array<float, 2>{1.0f, 1.0f},
-            "inner_cone_degrees"_a = 15.0f, "outer_cone_degrees"_a = 30.0f, "two_sided"_a = true, "name"_a = "Light",
+            "inner_cone_degrees"_a = 15.0f, "outer_cone_degrees"_a = 30.0f,
+            "range"_a = 100.0f, "shadow_near_plane"_a = 0.1f, "two_sided"_a = true, "name"_a = "Light",
             ref,
             "Add a light object: 'point', 'spot', 'area', 'directional' or 'image' (environment lighting from an Ibl, "
             "scaled by color * intensity). It shines along its rotation's forward axis (spot, area, directional; "

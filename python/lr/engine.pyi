@@ -38,6 +38,10 @@ class Light:
         """Spot lights only."""
         ...
     @property
+    def range(self) -> float | None: ...
+    @property
+    def shadow_near_plane(self) -> float | None: ...
+    @property
     def area_size(self) -> tuple[float, float] | None:
         """Area lights only: (width, height) in world units."""
         ...
@@ -170,6 +174,8 @@ class SceneObject:
         size: Sequence[float] | None = None,
         inner_cone_degrees: float | None = None,
         outer_cone_degrees: float | None = None,
+        range: float | None = None,
+        shadow_near_plane: float | None = None,
         two_sided: bool | None = None,
     ) -> None:
         """Change this object's light; parameters left as None keep their current values. Move or turn
@@ -218,6 +224,8 @@ class Scene:
         size: Sequence[float] = (1.0, 1.0),
         inner_cone_degrees: float = 15.0,
         outer_cone_degrees: float = 30.0,
+        range: float = 100.0,
+        shadow_near_plane: float = 0.1,
         two_sided: bool = True,
         name: str = "Light",
     ) -> SceneObject:

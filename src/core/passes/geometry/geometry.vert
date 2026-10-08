@@ -1,5 +1,7 @@
 #version 450
 
+#include "../utility/skinning.glslh"
+
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec4 inTangent;
@@ -15,32 +17,6 @@ layout(set = 0, binding = 0) uniform CameraUbo
     vec3 cameraPosition;
     float padding;
 } cameraUbo;
-
-struct Influence
-{
-    uint jointIndex;
-    float weight;
-};
-
-layout(std430, set = 0, binding = 7) readonly buffer SkinInfluenceEntries
-{
-    Influence entries[];
-} skinInfluences;
-
-layout(std430, set = 0, binding = 8) readonly buffer SkinInfluenceOffsets
-{
-    uint offsets[];
-} skinInfluenceOffsets;
-
-layout(std430, set = 0, binding = 9) readonly buffer SkinPositionIndices
-{
-    uint indices[];
-} skinPositionIndices;
-
-layout(std430, set = 0, binding = 10) readonly buffer SkinJointMatrices
-{
-    mat4 matrices[];
-} skinJointMatrices;
 
 layout(location = 0) out vec3 outWorldPos;
 layout(location = 1) out vec3 outNormal;
@@ -66,27 +42,10 @@ void main()
 
     if (pc.skinEnabled != 0)
     {
-        uint uniquePosition = skinPositionIndices.indices[gl_VertexIndex];
-        uint begin = skinInfluenceOffsets.offsets[uniquePosition];
-        uint end = skinInfluenceOffsets.offsets[uniquePosition + 1];
-
-        mat4 skinMatrix = mat4(0.0);
-        float weightSum = 0.0;
-        for (uint influenceIndex = begin; influenceIndex < end; ++influenceIndex)
-        {
-            Influence influence = skinInfluences.entries[influenceIndex];
-            skinMatrix += influence.weight *
-                          skinJointMatrices.matrices[pc.paletteOffset + influence.jointIndex];
-            weightSum += influence.weight;
-        }
-
-        if (weightSum > 0.0)
-        {
-            skinMatrix /= weightSum;
-            position = (skinMatrix * vec4(position, 1.0)).xyz;
-            normal = transpose(inverse(mat3(skinMatrix))) * normal;
-            tangent = mat3(skinMatrix) * tangent;
-        }
+        mat4 skinMatrix = calculateSkinMatrix(gl_VertexIndex, pc.paletteOffset);
+        position = (skinMatrix * vec4(position, 1.0)).xyz;
+        normal = transpose(inverse(mat3(skinMatrix))) * normal;
+        tangent = mat3(skinMatrix) * tangent;
     }
 
     vec4 worldPos = pc.model * vec4(position, 1.0);

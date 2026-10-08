@@ -182,6 +182,13 @@ PassBuilder &PassBuilder::depthBias(float constant, float slope)
     desc().graphics.depthBiasSlope    = slope;
     return *this;
 }
+PassBuilder &PassBuilder::renderingLayers(uint32_t count)
+{
+    if (count == 0)
+        throw std::invalid_argument("FrameGraph: rendering layer count must be non-zero");
+    desc().graphics.renderingLayers = count;
+    return *this;
+}
 
 PassBuilder &PassBuilder::sampledImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages,
                                        SamplerDesc sampler)

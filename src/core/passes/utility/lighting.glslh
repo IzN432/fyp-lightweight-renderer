@@ -25,6 +25,9 @@ struct LightData
     vec2 areaSize;
 
     uint flags; // bit 0: two-sided (area lights)
+    float range;
+    float shadowNearPlane;
+    uint shadowIndex;
 };
 
 #define LIGHT_FLAG_TWO_SIDED 1u
@@ -133,6 +136,8 @@ vec3 CalcDirectionalLight(LightData light, vec3 position, vec3 normal, vec3 albe
 vec3 CalcSpotLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic)
 {
     vec3 lightViewPos = (cameraUbo.view * vec4(light.position, 1.0)).xyz;
+    if (distance(lightViewPos, position) >= light.range)
+        return vec3(0.0);
     vec3 L = normalize(lightViewPos - position);
     vec3 N = normal;
     

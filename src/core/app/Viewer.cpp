@@ -28,7 +28,9 @@ Viewer::Viewer(const Config &config)
         .enableValidation        = config.enableValidation,
         .enableDebugNames        = config.enableValidation,
         .extraInstanceExtensions = extensions,
-        .extraDeviceExtensions   = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME},
+        .extraDeviceExtensions   = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+                                    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+                                    VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME},
     });
 
     spdlog::info("Device: {}", m_ctx->getDeviceProperties().properties.deviceName);

@@ -104,6 +104,8 @@ json encodeLight(const LightVariant &variant)
             result["type"] = "spot";
             result["inner_cone_degrees"] = light.innerConeAngleDegrees;
             result["outer_cone_degrees"] = light.outerConeAngleDegrees;
+            result["range"] = light.range;
+            result["shadow_near_plane"] = light.shadowNearPlane;
         }
         else if constexpr (std::is_same_v<T, AreaLight>)
         {
@@ -130,6 +132,8 @@ LightVariant decodeLight(const json &value, const std::string &where)
         SpotLight result{{color, intensity}};
         result.innerConeAngleDegrees = required(value, "inner_cone_degrees", where).get<float>();
         result.outerConeAngleDegrees = required(value, "outer_cone_degrees", where).get<float>();
+        result.range = value.value("range", 100.0f);
+        result.shadowNearPlane = value.value("shadow_near_plane", 0.1f);
         return result;
     }
     if (type == "area")
