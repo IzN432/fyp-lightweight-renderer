@@ -332,6 +332,7 @@ add_library(lr_editor_app STATIC
     src/app/Engine.cpp
     src/app/EditorRenderBridge.cpp
     src/app/EditorSession.cpp
+    src/app/Settings.cpp
 )
 target_include_directories(lr_editor_app PUBLIC src)
 target_link_libraries(lr_editor_app PUBLIC lr_core lr_arap_feature lr_laplace_beltrami_feature
@@ -463,6 +464,10 @@ if(LR_BUILD_PYTHON)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(settings_tests tests/app/SettingsTests.cpp)
+    target_link_libraries(settings_tests PRIVATE lr_editor_app)
+    add_test(NAME app.settings COMMAND settings_tests)
+
     add_executable(callback_list_tests tests/utility/CallbackListTests.cpp)
     target_include_directories(callback_list_tests PRIVATE src)
     add_test(NAME utility.callback_list COMMAND callback_list_tests)

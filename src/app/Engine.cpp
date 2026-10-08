@@ -1,6 +1,7 @@
 #include "Engine.hpp"
 #include "app/EditorSession.hpp"
 #include "app/EditorRenderBridge.hpp"
+#include "app/Settings.hpp"
 #include "core/app/Viewer.hpp"
 #include "core/loaders/Material.hpp"
 #include "core/loaders/MaterialStore.hpp"
@@ -272,11 +273,95 @@ void Engine::run()
     // -------------------------------------------------------------------------
 
     glm::vec3               environmentBackgroundColor(0.0f);
+    bool                    showHdri = true;
     std::string             environmentLoadError;
     bool                    environmentDirty = false;
     std::string             sceneImportError;
     std::optional<fs::path> sceneDocumentPath;
     std::string             scenePersistenceError;
+    lr::Settings            settings;
+
+    auto showHdriSetting = Setting::bind("show_hdri", "showHDRI", SettingEditor::Checkbox, showHdri);
+    auto background = Setting::bind("background_color", "Background color", SettingEditor::Color3,
+                                    environmentBackgroundColor);
+    background.enabled = [&] { return !showHdri || !scene.hdriPath().has_value(); };
+    settings.add({
+        .key         = "environment",
+        .title       = "Environment",
+        .defaultOpen = true,
+        .settings    = {std::move(showHdriSetting), std::move(background)},
+        .drawExtra   = [&] {
+            ImGui::TextUnformatted("HDRI");
+            ImGui::SameLine();
+            if (scene.hdriPath()) ImGui::TextWrapped("%s", scene.hdriPath()->filename().string().c_str());
+            else ImGui::TextDisabled("None (background color)");
+
+            if (ImGui::Button("Load HDRI..."))
+            {
+                IGFD::FileDialogConfig dialogConfig;
+                dialogConfig.path  = scene.hdriPath() ? scene.hdriPath()->parent_path().string() : ".";
+                dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_ReadOnlyFileNameField |
+                                     ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
+                                     ImGuiFileDialogFlags_ShowDevicesButton;
+                ImGuiFileDialog::Instance()->OpenDialog("ChooseEnvironmentHdri", "Select HDRI", ".hdr", dialogConfig);
+            }
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!scene.hdriPath().has_value());
+            if (ImGui::Button("Clear"))
+            {
+                scene.setHdriPath(std::nullopt);
+                environmentLoadError.clear();
+                environmentDirty = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::Spacing();
+            ImGui::TextDisabled("Supported format: Radiance HDR (.hdr)");
+            if (!environmentLoadError.empty())
+                ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Load failed: %s",
+                                   environmentLoadError.c_str());
+        },
+        .onChanged = [&] {
+            finalPass.setBackground(glm::vec4(environmentBackgroundColor, 1.0f),
+                                    showHdri && scene.hdriPath().has_value());
+        },
+    });
+    auto sphereRadius = Setting::bind("sphere_radius", "Sphere Radius", SettingEditor::Slider,
+                                      aoPass.config().sphereRadius);
+    sphereRadius.minimum = 0.0005f; sphereRadius.maximum = 0.2f; sphereRadius.format = "%.4f";
+    sphereRadius.logarithmic = true;
+    auto numSteps = Setting::bind("num_steps", "Num Steps", SettingEditor::Slider, aoPass.config().numSteps);
+    numSteps.minimum = 1.0f; numSteps.maximum = 128.0f;
+    auto numDirs = Setting::bind("num_directions", "Num Directions", SettingEditor::Slider, aoPass.config().numDirs);
+    numDirs.minimum = 1.0f; numDirs.maximum = 128.0f;
+    auto angleBias = Setting::bind("tan_angle_bias", "Tan Angle Bias", SettingEditor::Slider,
+                                   aoPass.config().tanAngleBias);
+    angleBias.minimum = 0.0f; angleBias.maximum = 1.0f;
+    auto aoScalar = Setting::bind("ao_scalar", "AO Scalar", SettingEditor::Slider, aoPass.config().aoScalar);
+    aoScalar.minimum = 0.0f; aoScalar.maximum = 5.0f;
+    settings.add({.key = "hbao", .title = "HBAO",
+                  .settings = {std::move(sphereRadius), std::move(numSteps), std::move(numDirs),
+                               std::move(angleBias), std::move(aoScalar)},
+                  .onChanged = [&] { aoPass.updateParams(viewer.resources()); }});
+
+    auto shadowDistance = Setting::bind("shadow_distance", "Shadow Distance", SettingEditor::Drag,
+                                        cascadedShadowPass.config().shadowDistance);
+    shadowDistance.minimum = 1.0f; shadowDistance.maximum = 10000.0f; shadowDistance.speed = 1.0f;
+    shadowDistance.format = "%.1f";
+    auto splitLambda = Setting::bind("split_lambda", "Split Lambda", SettingEditor::Slider,
+                                     cascadedShadowPass.config().splitLambda);
+    splitLambda.minimum = 0.0f; splitLambda.maximum = 1.0f; splitLambda.format = "%.2f";
+    auto depthPadding = Setting::bind("depth_padding", "Depth Padding", SettingEditor::Drag,
+                                      cascadedShadowPass.config().depthPadding);
+    depthPadding.minimum = 0.0f; depthPadding.maximum = 10000.0f; depthPadding.speed = 1.0f;
+    depthPadding.format = "%.1f";
+    settings.add({.key = "cascaded_shadows", .title = "Cascaded Shadows",
+                  .settings = {std::move(shadowDistance), std::move(splitLambda), std::move(depthPadding)},
+                  .drawExtra = [&] {
+                      ImGui::TextDisabled("Cascades: %u", lr::CascadedShadowGpuData::cascadeCount);
+                      ImGui::TextDisabled("Resolution: %u x %u per cascade", cascadedShadowPass.config().resolution,
+                                          cascadedShadowPass.config().resolution);
+                      ImGui::TextDisabled("Cascade count and resolution require a framegraph rebuild.");
+                  }});
     // Constructed after everything its callbacks capture, so all registrations disconnect first.
     std::vector<lr::CallbackConnection> appConnections;
 
@@ -371,94 +456,7 @@ void Engine::run()
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
         ImGui::Begin("Settings");
 
-        if (ImGui::CollapsingHeader("Environment", ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            ImGui::Indent();
-
-            ImGui::TextUnformatted("HDRI");
-            ImGui::SameLine();
-            if (scene.hdriPath())
-            {
-                ImGui::TextWrapped("%s", scene.hdriPath()->filename().string().c_str());
-            } else
-            {
-                ImGui::TextDisabled("None (background color)");
-            }
-
-            if (ImGui::Button("Load HDRI..."))
-            {
-                IGFD::FileDialogConfig dialogConfig;
-                dialogConfig.path  = scene.hdriPath() ? scene.hdriPath()->parent_path().string() : ".";
-                dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_ReadOnlyFileNameField |
-                                     ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
-                                     ImGuiFileDialogFlags_ShowDevicesButton;
-                ImGuiFileDialog::Instance()->OpenDialog("ChooseEnvironmentHdri", "Select HDRI", ".hdr", dialogConfig);
-            }
-            ImGui::SameLine();
-
-            ImGui::BeginDisabled(!scene.hdriPath().has_value());
-            if (ImGui::Button("Clear"))
-            {
-                scene.setHdriPath(std::nullopt);
-                environmentLoadError.clear();
-                environmentDirty = true;
-            }
-            ImGui::EndDisabled();
-
-            ImGui::Spacing();
-            ImGui::BeginDisabled(scene.hdriPath().has_value());
-            if (ImGui::ColorEdit3("Background color", &environmentBackgroundColor.x))
-            {
-                finalPass.setBackground(glm::vec4(environmentBackgroundColor, 1.0f), false);
-            }
-            ImGui::EndDisabled();
-            if (scene.hdriPath() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            {
-                ImGui::SetTooltip("Clear the HDRI to use the background color");
-            }
-
-            ImGui::Spacing();
-            ImGui::TextDisabled("Supported format: Radiance HDR (.hdr)");
-            if (!environmentLoadError.empty())
-            {
-                ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Load failed: %s", environmentLoadError.c_str());
-            }
-
-            ImGui::Unindent();
-        }
-
-        if (ImGui::CollapsingHeader("HBAO"))
-        {
-            ImGui::Indent();
-            lr::AmbientOcclusionPass::Config &aoConfig = aoPass.config();
-            bool                              aoDirty  = false;
-            aoDirty |= ImGui::SliderFloat("Sphere Radius", &aoConfig.sphereRadius, 0.0005f, 0.2f, "%.4f",
-                                          ImGuiSliderFlags_Logarithmic);
-            aoDirty |= ImGui::SliderInt("Num Steps", &aoConfig.numSteps, 1, 128);
-            aoDirty |= ImGui::SliderInt("Num Directions", &aoConfig.numDirs, 1, 128);
-            aoDirty |= ImGui::SliderFloat("Tan Angle Bias", &aoConfig.tanAngleBias, 0.0f, 1.0f);
-            aoDirty |= ImGui::SliderFloat("AO Scalar", &aoConfig.aoScalar, 0.0f, 5.0f);
-            if (aoDirty)
-            {
-                aoPass.updateParams(viewer.resources());
-            }
-            ImGui::Unindent();
-        }
-
-        if (ImGui::CollapsingHeader("Cascaded Shadows"))
-        {
-            ImGui::Indent();
-            lr::CascadedShadowPass::Config &shadowConfig = cascadedShadowPass.config();
-            ImGui::DragFloat("Shadow Distance", &shadowConfig.shadowDistance, 1.0f, 1.0f, 10000.0f, "%.1f");
-            ImGui::SliderFloat("Split Lambda", &shadowConfig.splitLambda, 0.0f, 1.0f, "%.2f");
-            ImGui::DragFloat("Depth Padding", &shadowConfig.depthPadding, 1.0f, 0.0f, 10000.0f, "%.1f");
-            ImGui::Spacing();
-            ImGui::TextDisabled("Cascades: %u", lr::CascadedShadowGpuData::cascadeCount);
-            ImGui::TextDisabled("Resolution: %u x %u per cascade", shadowConfig.resolution,
-                                shadowConfig.resolution);
-            ImGui::TextDisabled("Cascade count and resolution require a framegraph rebuild.");
-            ImGui::Unindent();
-        }
+        drawSettings(settings);
 
         if (ImGuiFileDialog::Instance()->Display("ChooseEnvironmentHdri", ImGuiWindowFlags_NoCollapse,
                                                  ImVec2(640.0f, 360.0f)))
@@ -641,7 +639,7 @@ void Engine::run()
             });
 
             finalPass.setBackground(glm::vec4(environmentBackgroundColor, 1.0f),
-                                    scene.hdriPath().has_value());
+                                    showHdri && scene.hdriPath().has_value());
 
             environmentLoadError.clear();
         } catch (const std::exception &e)
