@@ -5,6 +5,26 @@
 #include <algorithm>
 #include <stdexcept>
 
+namespace
+{
+
+int resizeStringInput(ImGuiInputTextCallbackData *data)
+{
+    auto &value = *static_cast<std::string *>(data->UserData);
+    value.resize(static_cast<size_t>(data->BufTextLen));
+    data->Buf = value.data();
+    return 0;
+}
+
+bool inputText(const char *label, std::string &value, ImGuiInputTextFlags flags)
+{
+    flags |= ImGuiInputTextFlags_CallbackResize;
+    return ImGui::InputText(label, value.data(), value.capacity() + 1, flags, resizeStringInput,
+                            &value);
+}
+
+} // namespace
+
 namespace lr
 {
 
@@ -171,7 +191,8 @@ void Scene::setParent(SceneObjectId childId, std::optional<SceneObjectId> parent
     }
 }
 
-void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &deleteRequested)
+void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &renameRequested,
+                              std::optional<SceneObjectId> &deleteRequested)
 {
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
                                ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -197,6 +218,10 @@ void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> 
 
     if (ImGui::BeginPopupContextItem())
     {
+        if (ImGui::MenuItem("Rename"))
+        {
+            renameRequested = object.id();
+        }
         ImGui::BeginDisabled(!canDestroySceneObject(object.id()));
         if (ImGui::MenuItem("Delete"))
         {
@@ -210,22 +235,80 @@ void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> 
     {
         for (SceneObjectId childId : object.children())
         {
-            drawHierarchyNode(getSceneObject(childId), deleteRequested);
+            drawHierarchyNode(getSceneObject(childId), renameRequested, deleteRequested);
         }
         ImGui::TreePop();
     }
 }
 
+void Scene::drawRenamePopup()
+{
+    if (!m_renamingObject)
+    {
+        return;
+    }
+
+    bool closePopup = false;
+    if (ImGui::BeginPopupModal("Rename Scene Object", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        if (!contains(*m_renamingObject))
+        {
+            closePopup = true;
+        }
+        else
+        {
+            if (ImGui::IsWindowAppearing())
+            {
+                ImGui::SetKeyboardFocusHere();
+            }
+
+            const bool submitted = inputText("Name", m_renameBuffer,
+                                             ImGuiInputTextFlags_EnterReturnsTrue);
+            if (submitted || ImGui::Button("Rename"))
+            {
+                getSceneObject(*m_renamingObject).name = m_renameBuffer;
+                closePopup                            = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+            {
+                closePopup = true;
+            }
+        }
+
+        if (closePopup)
+        {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (closePopup)
+    {
+        m_renamingObject.reset();
+        m_renameBuffer.clear();
+    }
+}
+
 void Scene::onHierarchyGUI()
 {
+    std::optional<SceneObjectId> renameRequested;
     std::optional<SceneObjectId> deleteRequested;
     for (auto &object : m_sceneObjects)
     {
         if (object->m_alive && !object->parent())
         {
-            drawHierarchyNode(*object, deleteRequested);
+            drawHierarchyNode(*object, renameRequested, deleteRequested);
         }
     }
+
+    if (renameRequested)
+    {
+        m_renamingObject = renameRequested;
+        m_renameBuffer   = getSceneObject(*renameRequested).name;
+        ImGui::OpenPopup("Rename Scene Object");
+    }
+    drawRenamePopup();
 
     if (deleteRequested)
     {

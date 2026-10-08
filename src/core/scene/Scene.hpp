@@ -86,7 +86,9 @@ public:
     }
 
 private:
-    void drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &deleteRequested);
+    void drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &renameRequested,
+                           std::optional<SceneObjectId> &deleteRequested);
+    void drawRenamePopup();
 
     // Finds an object whether or not it is still alive — destroySceneObject() has to reach objects
     // it is in the middle of retiring. Callers that need a live object go through getSceneObject().
@@ -101,6 +103,8 @@ private:
     std::optional<std::filesystem::path>       m_hdriPath;
     std::vector<std::byte>                     m_hdriData;
     std::optional<SceneObjectId>               m_selectedObject;
+    std::optional<SceneObjectId>               m_renamingObject;
+    std::string                                m_renameBuffer;
     CallbackList<SceneObjectId>                     m_selectionChangedCallbacks;
     CallbackList<std::span<const SceneObjectId>>    m_objectsDestroyedCallbacks;
     std::unordered_set<SceneObjectId> m_protectedObjects;
