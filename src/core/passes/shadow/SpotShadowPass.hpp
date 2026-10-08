@@ -34,6 +34,10 @@ public:
     void setSceneGeometry(SceneDrawList draws) { m_cfg.geometry.draws = std::move(draws); }
     void setLightObjects(std::vector<SceneObject *> lights) { m_cfg.lightObjects = std::move(lights); }
 
+    // Mirrors GeometryPass::setSkinningEnabled, so the pose this pass replays matches the one the
+    // G-buffer draws. EditorRenderBridge drives both from EditorPresentation::skinningEnabled.
+    void setSkinningEnabled(bool enabled) { m_skinningEnabled = enabled; }
+
     const std::string &shadowImageName() const { return m_cfg.shadowImage; }
     const std::string &paramsBufferName() const { return m_cfg.paramsBuffer; }
 
@@ -42,6 +46,7 @@ private:
 
     ResourceRegistry &m_resources;
     Config            m_cfg;
+    bool              m_skinningEnabled = true;
 };
 
 } // namespace lr

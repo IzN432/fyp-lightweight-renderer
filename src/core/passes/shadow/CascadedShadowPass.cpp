@@ -187,7 +187,7 @@ void CascadedShadowPass::build(FrameGraph &fg, const GpuMeshLayout &layout) cons
             for (size_t i = 0; i < draws.size(); ++i)
             {
                 if (!draws.isLive(i)) continue;
-                const SceneDraw draw = draws.at(i);
+                const SceneDraw draw = draws.at(i, m_skinningEnabled);
                 const ShadowPC  pc{.model             = draw.model,
                                    .primitiveIdOffset = draw.primitiveIdOffset,
                                    .paletteOffset     = draw.paletteOffset,

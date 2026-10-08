@@ -55,7 +55,7 @@ void ObjectPickingPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
                 {
                     continue;
                 }
-                const SceneDraw       draw = m_config.draws.at(i);
+                const SceneDraw       draw = m_config.draws.at(i, m_skinningEnabled);
                 const ObjectPickingPC pc{
                     .model             = draw.model,
                     .primitiveIdOffset = draw.primitiveIdOffset,

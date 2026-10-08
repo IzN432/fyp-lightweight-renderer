@@ -115,7 +115,7 @@ void SpotShadowPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
             {
                 if (!draws.isLive(i))
                     continue;
-                const SceneDraw draw = draws.at(i);
+                const SceneDraw draw = draws.at(i, m_skinningEnabled);
                 const ShadowPC  pc{.model             = draw.model,
                                    .primitiveIdOffset = draw.primitiveIdOffset,
                                    .paletteOffset     = draw.paletteOffset,

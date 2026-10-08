@@ -270,8 +270,18 @@ void Engine::run()
     finalPass.build(viewer.frameGraph());
 
     // Editor interaction stays behind one facade while Engine owns it alongside the render pipeline.
-    lr::EditorRenderBridge editorRendering(sceneManager, geometryPass, transparentPass, heatmapPass,
-                                           overlayPointsPass, overlayLinesPass);
+    const lr::EditorRenderBridge::Passes editorPasses{
+        .geometry       = &geometryPass,
+        .transparent    = &transparentPass,
+        .objectPicking  = &objectPickingPass,
+        .spotShadow     = &spotShadowPass,
+        .cascadedShadow = &cascadedShadowPass,
+        .areaShadow     = &areaShadowPass,
+        .heatmap        = &heatmapPass,
+        .overlayPoints  = &overlayPointsPass,
+        .overlayLines   = &overlayLinesPass,
+    };
+    lr::EditorRenderBridge editorRendering(sceneManager, editorPasses);
     lr::EditorSession editor(viewer, sceneManager, *camera, editorRendering);
 
     // -------------------------------------------------------------------------

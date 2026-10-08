@@ -5,12 +5,16 @@
 namespace lr
 {
 
+class AreaShadowPass;
+class CascadedShadowPass;
 class GeometryPass;
 class HeatmapPass;
+class ObjectPickingPass;
 class OverlayLinesPass;
 class OverlayPointsPass;
 class Scene;
 class SceneManager;
+class SpotShadowPass;
 class TransparentPass;
 struct EditableMeshContext;
 struct EditorFrameContext;
@@ -21,21 +25,31 @@ struct EditorFrameContext;
 class EditorRenderBridge
 {
 public:
-    EditorRenderBridge(SceneManager &sceneManager, GeometryPass &geometryPass,
-                       TransparentPass &transparentPass, HeatmapPass &heatmapPass,
-                       OverlayPointsPass &overlayPointsPass, OverlayLinesPass &overlayLinesPass);
+    // The passes the bridge drives. A struct rather than ten positional parameters, so the call
+    // site names each one.
+    struct Passes
+    {
+        GeometryPass       *geometry       = nullptr;
+        TransparentPass    *transparent    = nullptr;
+        ObjectPickingPass  *objectPicking  = nullptr;
+        SpotShadowPass     *spotShadow     = nullptr;
+        CascadedShadowPass *cascadedShadow = nullptr;
+        AreaShadowPass     *areaShadow     = nullptr;
+        HeatmapPass        *heatmap        = nullptr;
+        OverlayPointsPass  *overlayPoints  = nullptr;
+        OverlayLinesPass   *overlayLines   = nullptr;
+    };
+
+    // Every member of `passes` must be non-null.
+    EditorRenderBridge(SceneManager &sceneManager, Passes passes);
 
     void apply(const EditorPresentation &presentation);
     void setEditableTarget(const EditableMeshContext &target);
     void updateSceneOverlays(const Scene &scene, const EditorFrameContext &frame);
 
 private:
-    SceneManager       &m_sceneManager;
-    GeometryPass       &m_geometryPass;
-    TransparentPass    &m_transparentPass;
-    HeatmapPass        &m_heatmapPass;
-    OverlayPointsPass  &m_overlayPointsPass;
-    OverlayLinesPass   &m_overlayLinesPass;
+    SceneManager &m_sceneManager;
+    Passes        m_passes;
 };
 
 } // namespace lr
