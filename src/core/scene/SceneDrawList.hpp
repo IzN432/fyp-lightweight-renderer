@@ -54,8 +54,8 @@ public:
 
     // A mesh with no transform has its positions already baked into world space (e.g.
     // AreaLightVisual's quads), and gets an identity model matrix rather than being
-    // double-transformed. `skinningEnabled` is the pass's own global toggle, ANDed with the mesh's
-    // own skinEnabled.
+    // double-transformed. `skinningEnabled` is the pass's own global toggle, ANDed with the skin's
+    // own Skin::skinningEnabled, so a single mesh can opt out without affecting the rest of the scene.
     SceneDraw at(size_t i, bool skinningEnabled = true) const;
 
 private:

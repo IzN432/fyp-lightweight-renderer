@@ -1,6 +1,7 @@
 #include "core/scene/SceneDrawList.hpp"
 
 #include "core/scene/Scene.hpp"
+#include "features/linear_blend_skinning/Skin.hpp"
 
 #include <stdexcept>
 
@@ -40,7 +41,7 @@ SceneDraw SceneDrawList::at(size_t i, bool skinningEnabled) const
         .model             = transform ? transform->worldMatrix() : glm::mat4(1.0f),
         .primitiveIdOffset = range.firstIndex / 3,
         .paletteOffset     = skin.paletteOffset,
-        .skinEnabled       = skin.skinEnabled && skinningEnabled ? 1u : 0u,
+        .skinEnabled       = skin.skin && skin.skin->skinningEnabled() && skinningEnabled ? 1u : 0u,
         .indexCount        = range.indexCount,
         .firstIndex        = range.firstIndex,
         .vertexOffset      = static_cast<int32_t>(mesh.vertexOffset),

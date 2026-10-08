@@ -20,11 +20,12 @@ public:
     std::type_index componentType() const override { return typeid(SkinComponent); }
     json encode(const SceneObject &object, const ComponentSaveContext &) const override
     {
-        json joints = json::array();
-        for (const Joint &joint : object.getComponent<SkinComponent>().skin().joints())
+        const Skin &skin = object.getComponent<SkinComponent>().skin();
+        json        joints = json::array();
+        for (const Joint &joint : skin.joints())
             joints.push_back({{"object", toString(joint.sceneObject)},
                               {"inverse_bind_matrix", mat4(joint.inverseBindMatrix)}});
-        return {{"joints", std::move(joints)}};
+        return {{"joints", std::move(joints)}, {"skinning_enabled", skin.skinningEnabled()}};
     }
     void decode(const json &value, SceneObject &object, ComponentLoadContext &context,
                 const std::string &where) const override
@@ -43,7 +44,9 @@ public:
             joints.push_back({jointObject, readMat4(required(joint, "inverse_bind_matrix", jointWhere),
                                                     jointWhere + ".inverse_bind_matrix")});
         }
-        object.addComponent<SkinComponent>(Skin(context.scene, std::move(joints)));
+        auto &component = object.addComponent<SkinComponent>(Skin(context.scene, std::move(joints)));
+        // Absent in scenes saved before the per-skin toggle existed, where skinning was always on.
+        component.skin().setSkinningEnabled(value.value("skinning_enabled", true));
     }
 };
 } // namespace

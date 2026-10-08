@@ -12,10 +12,13 @@ namespace lr
 class Mesh;
 class Skin;
 
+// Null `skin` means the draw has no joint palette at all. A non-null one is borrowed for as long as
+// the upload result lives, and is read rather than snapshotted so Skin::setSkinningEnabled takes
+// effect on the next frame instead of waiting for a geometry rebuild.
 struct SkinDrawInfo
 {
-    uint32_t paletteOffset = 0;
-    bool     skinEnabled   = false;
+    uint32_t    paletteOffset = 0;
+    const Skin *skin          = nullptr;
 };
 
 struct SkinUploadResult

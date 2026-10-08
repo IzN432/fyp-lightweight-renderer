@@ -25,6 +25,21 @@ public:
 
     void onGUIImpl() override
     {
+        bool skinningEnabled = m_skin.skinningEnabled();
+        if (ImGui::Checkbox("Skinning enabled", &skinningEnabled))
+        {
+            m_skin.setSkinningEnabled(skinningEnabled);
+            markDirty();
+        }
+        if (!skinningEnabled)
+        {
+            // Worth spelling out, because the mesh usually appears to jump somewhere unrelated. Its
+            // positions are stored in bind space, and the joint palette is what cancels this
+            // object's world matrix out of the skinned result (see Skin::evaluate), so without
+            // skinning that matrix applies for real to coordinates that never pass through it.
+            ImGui::TextDisabled("Drawing bind-pose positions through this object's transform.");
+        }
+
         ImGui::Text("Joint count: %zu", m_skin.joints().size());
         ImGui::TextDisabled("Vertex joint indices address this palette order.");
 

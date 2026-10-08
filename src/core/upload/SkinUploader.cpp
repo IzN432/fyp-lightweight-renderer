@@ -54,7 +54,7 @@ SkinUploadResult SkinUploader::upload(const std::vector<const Mesh *> &meshes,
         }
 
         const uint32_t jointCount = static_cast<uint32_t>(skins[i]->jointMatrices().size());
-        result.drawInfos[i]       = {.paletteOffset = totalJointCount, .skinEnabled = true};
+        result.drawInfos[i]       = {.paletteOffset = totalJointCount, .skin = skins[i]};
         m_expectedJointCounts[i]  = jointCount;
         totalJointCount += jointCount;
         totalEntryCount += static_cast<uint32_t>(mesh.rawGroupEntries().size());
