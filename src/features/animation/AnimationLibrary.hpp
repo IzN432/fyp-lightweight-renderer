@@ -38,6 +38,11 @@ public:
     size_t size() const { return m_clips.size(); }
     bool empty() const { return m_clips.empty(); }
     bool contains(AnimationClipHandle handle) const { return handle < m_clips.size(); }
+    void erase(AnimationClipHandle handle)
+    {
+        if (!contains(handle)) throw std::out_of_range("Animation clip handle is out of range");
+        m_clips.erase(m_clips.begin() + handle);
+    }
     void clear() { m_clips.clear(); }
 
 private:

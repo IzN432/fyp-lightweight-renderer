@@ -80,6 +80,34 @@ void AnimationSystem::stop(AnimationClipHandle clip)
     release(clip);
 }
 
+void AnimationSystem::remove(AnimationClipHandle clip)
+{
+    if (!m_library.contains(clip)) throw std::out_of_range("Animation clip handle is out of range");
+    stop(clip);
+    m_library.erase(clip);
+    for (Playback &playback : m_playing)
+    {
+        if (playback.clip > clip) --playback.clip;
+    }
+    for (auto &[_, handle] : m_runningTracks)
+    {
+        if (handle > clip) --handle;
+    }
+}
+
+void AnimationSystem::removeTrack(AnimationClipHandle clip, size_t track)
+{
+    if (!m_library.contains(clip)) throw std::out_of_range("Animation clip handle is out of range");
+    AnimationClip &animation = m_library.get(clip);
+    if (track >= animation.tracks().size())
+        throw std::out_of_range("Animation track index is out of range");
+
+    // Releasing all of this clip's bindings before changing its channels keeps the playback
+    // conflict table consistent. The user can explicitly restart the edited clip afterwards.
+    stop(clip);
+    animation.tracks().erase(animation.tracks().begin() + static_cast<std::ptrdiff_t>(track));
+}
+
 void AnimationSystem::stopAll()
 {
     m_playing.clear();

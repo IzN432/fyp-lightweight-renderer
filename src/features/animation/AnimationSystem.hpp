@@ -32,6 +32,10 @@ public:
 
     AnimationPlayResult play(AnimationClipHandle clip, bool loop = true, float speed = 1.0f);
     void stop(AnimationClipHandle clip);
+    // Removes a clip and compacts the library while preserving the meaning of every live runtime
+    // handle above it.
+    void remove(AnimationClipHandle clip);
+    void removeTrack(AnimationClipHandle clip, size_t track);
     void stopAll();
     void update(float deltaSeconds);
     bool isPlaying(AnimationClipHandle clip) const;

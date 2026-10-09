@@ -85,6 +85,23 @@ int main()
     assert(!animationSystem.isPlaying(clipHandle));
     assert(!animationSystem.playbackTime(clipHandle).has_value());
 
+    // Removing a clip compacts numeric handles, including handles held by active playback.
+    assert(animationSystem.play(independentHandle).started);
+    animationSystem.remove(conflictingHandle);
+    assert(animations.size() == 2);
+    assert(animations.get(1).name() == "Independent");
+    assert(animationSystem.isPlaying(1));
+    animationSystem.stop(1);
+
+    // A second track on the same object has to claim a different property, or the clip
+    // conflicts with itself and never starts.
+    animations.get(1).tracks().emplace_back(lr::RotationTrack(target.id()));
+    assert(animations.get(1).tracks().size() == 2);
+    assert(animationSystem.play(1).started);
+    animationSystem.removeTrack(1, 0);
+    assert(animations.get(1).tracks().size() == 1);
+    assert(!animationSystem.isPlaying(1));
+
     bool rejectedInvalidTime = false;
     try
     {

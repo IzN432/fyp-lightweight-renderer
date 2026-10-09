@@ -270,7 +270,7 @@ public:
         ImGui::BeginChild("AnimationClips", ImVec2(180.0f, 0.0f), ImGuiChildFlags_Borders);
         for (AnimationClipHandle handle = 0; handle < library.size(); ++handle)
         {
-            const bool selected = m_selectedAnimation == handle;
+            const bool selected = m_deleter.selected(animationDeletionKey(handle));
             ImGui::PushID(static_cast<int>(handle));
             if (ImGui::Selectable(library.get(handle).name().c_str(), selected))
             {
@@ -280,6 +280,11 @@ public:
         }
         if (library.empty()) {
             ImGui::TextDisabled("No animation clips.");
+        }
+        if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+            !ImGui::IsAnyItemHovered())
+        {
+            m_scene.clearHierarchySelection();
         }
         ImGui::EndChild();
         ImGui::SameLine();
@@ -347,10 +352,12 @@ public:
                 for (size_t index = 0; index < clip.tracks().size(); ++index)
                 {
                     const std::string label = trackLabel(clip.tracks()[index]);
-                    if (ImGui::Selectable(label.c_str(), index == m_selectedAnimationTrack))
+                    if (ImGui::Selectable(label.c_str(),
+                                          m_deleter.selected(animationTrackDeletionKey(
+                                              *m_selectedAnimation, index))))
                     {
                         m_selectedAnimationTrack = index;
-                        selectTrackTarget(clip.tracks()[index]);
+                        selectTrack(*m_selectedAnimation, index);
                     }
                 }
                 ImGui::EndChild();
@@ -416,6 +423,22 @@ private:
     {
         m_selectedAnimation = handle;
         m_scene.clearHierarchySelection();
+        m_deleter.select(animationDeletionKey(handle), [this, handle] {
+            AnimationLibrary &library = m_sceneManager.animations();
+            if (!library.contains(handle)) return;
+            m_sceneManager.animationSystem().remove(handle);
+            if (m_selectedAnimation == handle)
+            {
+                m_selectedAnimation.reset();
+                m_selectedAnimationTrack = 0;
+                m_animationSeconds = 0.0f;
+                m_animationPlaybackWarning.clear();
+            }
+            else if (m_selectedAnimation && *m_selectedAnimation > handle)
+            {
+                --*m_selectedAnimation;
+            }
+        });
         m_selectedAnimationTrack = 0;
         m_animationSeconds = 0.0f;
     }
@@ -440,9 +463,20 @@ private:
         }, channel);
     }
 
-    void selectTrackTarget(const AnimationChannel &channel)
+    void selectTrack(AnimationClipHandle handle, size_t index)
     {
         m_scene.clearHierarchySelection();
+        m_deleter.select(animationTrackDeletionKey(handle, index), [this, handle, index] {
+            AnimationLibrary &library = m_sceneManager.animations();
+            if (!library.contains(handle) || index >= library.get(handle).tracks().size()) return;
+            m_sceneManager.animationSystem().removeTrack(handle, index);
+            if (m_selectedAnimation == handle)
+            {
+                const size_t trackCount = library.get(handle).tracks().size();
+                m_selectedAnimationTrack = trackCount == 0 ? 0 : std::min(index, trackCount - 1);
+            }
+        });
+        const AnimationChannel &channel = m_sceneManager.animations().get(handle).tracks()[index];
         std::visit([&](const auto &track) {
             if (!m_scene.contains(track.target())) return;
             m_scene.selectObject(track.target());
@@ -889,6 +923,14 @@ private:
     static std::string sceneObjectDeletionKey(SceneObjectId id)
     {
         return "scene:" + toString(id);
+    }
+    static std::string animationDeletionKey(AnimationClipHandle handle)
+    {
+        return "animation:" + std::to_string(handle);
+    }
+    static std::string animationTrackDeletionKey(AnimationClipHandle handle, size_t track)
+    {
+        return "animation-track:" + std::to_string(handle) + ":" + std::to_string(track);
     }
 
     Deleter                            m_deleter;
