@@ -68,8 +68,23 @@ public:
 
     void pasteValues(const ComponentValues &values) override
     {
+        Transform previousTransform = m_transform;
         m_transform = componentValuesAs<Transform>(values);
         markDirty();
+
+        // Component-value paste is initiated by the Inspector, so report it through the same
+        // commit path as completing each of the three transform controls. Consumers such as Auto
+        // Key otherwise see the new pose on screen but never learn that the edit was committed.
+        if (const SceneObject *owner = findOwningObject(); owner && editorContext())
+        {
+            SceneObject &object = const_cast<SceneObject &>(*owner);
+            if (previousTransform.position() != m_transform.position())
+                editorContext()->transformCommits.onTransformCommitted(object, TransformTool::Translate);
+            if (previousTransform.rotation() != m_transform.rotation())
+                editorContext()->transformCommits.onTransformCommitted(object, TransformTool::Rotate);
+            if (previousTransform.scale() != m_transform.scale())
+                editorContext()->transformCommits.onTransformCommitted(object, TransformTool::Scale);
+        }
     }
 
     // The mirror of the rule the Inspector applies when adding one: every other component reads
