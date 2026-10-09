@@ -40,20 +40,28 @@ namespace MaterialParam
 struct ColorRGBA
 {
     glm::vec4 value;
+
+    bool operator==(const ColorRGBA &) const = default;
 };
 struct ColorRGB
 {
     glm::vec3 value;
+
+    bool operator==(const ColorRGB &) const = default;
 };
 struct NormalizedFloat
 {
     float value;
+
+    bool operator==(const NormalizedFloat &) const = default;
 };
 struct RangedFloat
 {
     float value;
     float floor;
     float ceiling;
+
+    bool operator==(const RangedFloat &) const = default;
 };
 } // namespace MaterialParam
 

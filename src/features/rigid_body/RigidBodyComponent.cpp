@@ -164,6 +164,25 @@ ComponentValuesAdder RigidBodyComponent::valuesAdder() const
     };
 }
 
+std::unique_ptr<ComponentValues> RigidBodyComponent::undoValues() const
+{
+    return std::make_unique<ComponentValueSnapshot<EditedValues>>(
+        EditedValues{Values{m_type, m_mass, m_inertiaDiagonal, m_linearDrag, m_angularDrag, m_linearVelocity,
+                            m_angularVelocity},
+                     m_accumulatedForce, m_accumulatedTorque});
+}
+
+void RigidBodyComponent::restoreUndoValues(const ComponentValues &values)
+{
+    const EditedValues &edited = componentValuesAs<EditedValues>(values);
+    // Through pasteValues, so a restored body passes the same clamps and derived-quantity updates
+    // as a pasted one.
+    pasteValues(ComponentValueSnapshot<Values>(edited.values));
+    m_accumulatedForce  = edited.accumulatedForce;
+    m_accumulatedTorque = edited.accumulatedTorque;
+    markDirty();
+}
+
 void RigidBodyComponent::onGUIImpl()
 {
     bool changed = false;

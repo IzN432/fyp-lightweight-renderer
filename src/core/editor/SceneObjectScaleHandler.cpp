@@ -56,6 +56,8 @@ void SceneObjectScaleHandler::endDrag()
         return;
     }
 
+    // See SceneObjectDragHandler::endDrag: the drag and its commit are one undo.
+    CommandTransaction transaction(m_commandManager);
     m_commandManager.appendCommandWithoutExecuting(
         std::make_unique<ScaleSceneObjectCommand>(*m_target, m_beforeScale, afterScale));
     if (m_commitCallback) m_commitCallback(*m_target);

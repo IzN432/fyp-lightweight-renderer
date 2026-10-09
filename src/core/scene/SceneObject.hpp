@@ -77,6 +77,19 @@ public:
     // object already has whatever is on the component clipboard.
     bool hasComponent(std::type_index type) const { return components.contains(type); }
 
+    // The component stored under `type`, or null if this object has none. For the undo commands,
+    // which name their target by type because the component they were recorded against may have
+    // been deleted and re-added since.
+    Component *componentOfType(std::type_index type)
+    {
+        const auto it = components.find(type);
+        return it == components.end() ? nullptr : it->second.get();
+    }
+
+    // Erases the component stored under `type`, if there is one. Never call this from inside a
+    // component's own method: see onGUI, which defers its removals until after the draw loop.
+    void removeComponent(std::type_index type) { components.erase(type); }
+
     // Finds a component by interface as well as by its concrete stored type. Components are keyed by
     // their concrete type, so editor-facing contracts such as CameraController need the polymorphic
     // fallback when the object actually stores a SphericalCameraController.
@@ -121,24 +134,9 @@ public:
         return result;
     }
 
-    void onGUI(EditorContext &context)
-    {
-        int                            id = 0;
-        std::optional<std::type_index> removalRequest;
-        for (auto &[type, component] : components)
-        {
-            ImGui::PushID(id++);
-            component->onGUI(context, removalRequest);
-            ImGui::PopID();
-        }
-        // Erased only once the loop is over. A component's own context menu is what asks for this,
-        // so erasing where it was asked would invalidate this iteration and destroy the component
-        // whose method is still running.
-        if (removalRequest)
-        {
-            components.erase(*removalRequest);
-        }
-    }
+    // Draws every component's inspector block. Defined in the .cpp, because performing a removal
+    // asked for here goes through the editor's command history.
+    void onGUI(EditorContext &context);
 
     // Runs Component::onLoaded on every component. Called by scene loading once the whole scene
     // exists, so a component may reach its siblings here.

@@ -9,6 +9,8 @@ struct PhysicsMaterial
 {
     float restitution = 0.5f;
     float friction    = 0.3f;
+
+    bool operator==(const PhysicsMaterial &) const = default;
 };
 
 } // namespace lr

@@ -82,6 +82,8 @@ struct Camera : public Component
         float          nearPlane      = 0.1f;
         float          farPlane       = 1000.0f;
         float          orthoHeight    = 10.0f;
+
+        bool operator==(const Projection &) const = default;
     };
 
     std::unique_ptr<ComponentValues> copyValues() const override

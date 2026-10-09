@@ -26,6 +26,11 @@ class ComponentValues
 {
 public:
     virtual ~ComponentValues() = default;
+
+    // Whether `other`, always a snapshot taken from the same component type, holds the same values.
+    // Asked by the inspector's undo recording to tell an edit that moved something from an
+    // interaction that put it back where it was, so the history only grows on real changes.
+    virtual bool equals(const ComponentValues &other) const = 0;
 };
 
 // Payload for the common case, which is most of them: a component whose editable state is one
@@ -35,6 +40,12 @@ public:
 template <typename T> struct ComponentValueSnapshot final : public ComponentValues
 {
     explicit ComponentValueSnapshot(T value) : value(std::move(value)) {}
+
+    bool equals(const ComponentValues &other) const override
+    {
+        const auto *typed = dynamic_cast<const ComponentValueSnapshot<T> *>(&other);
+        return typed != nullptr && value == typed->value;
+    }
 
     T value;
 };

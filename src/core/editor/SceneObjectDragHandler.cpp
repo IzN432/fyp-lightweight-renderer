@@ -47,6 +47,9 @@ void SceneObjectDragHandler::endDrag(const glm::vec3 &)
         return;
     }
 
+    // The drag and whatever its commit sets off — an Auto Key keyframe, in practice — are one
+    // gesture, so they are one undo.
+    CommandTransaction transaction(m_commandManager);
     m_commandManager.appendCommandWithoutExecuting(
         std::make_unique<TranslateSceneObjectCommand>(*m_target, m_accumulatedLocalDelta));
     if (m_commitCallback) m_commitCallback(*m_target);

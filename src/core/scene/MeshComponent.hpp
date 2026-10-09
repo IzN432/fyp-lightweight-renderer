@@ -7,6 +7,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace lr
@@ -57,6 +60,20 @@ public:
     // has bound against the outgoing Mesh, and break the vertex-group-to-joint pairing any sibling
     // SkinComponent depends on — none of which an inspector paste should be quietly doing.
     bool acceptsPastedValues() const override { return false; }
+
+    // The parameters of every material this mesh uses. These are what the inspector edits, and they
+    // are not what copyValues carries: materials live in the shared store, so a mesh component
+    // copied onto another object points at the same ones rather than duplicating them. Undo has the
+    // opposite need — it has to put the numbers back — so it takes its own snapshot.
+    struct MaterialParameters
+    {
+        std::vector<std::pair<MaterialHandle, std::unordered_map<std::string, MaterialValue>>> materials;
+
+        bool operator==(const MaterialParameters &) const = default;
+    };
+
+    std::unique_ptr<ComponentValues> undoValues() const override;
+    void                             restoreUndoValues(const ComponentValues &values) override;
 
     void onGUIImpl() override;
 

@@ -33,6 +33,8 @@ public:
         float     radius    = 5.0f;
         float     azimuth   = 0.0f;
         float     elevation = 0.0f;
+
+        bool operator==(const OrbitState &) const = default;
     };
     OrbitState orbitState() const { return {m_orbitTarget, m_orbitRadius, m_orbitAzimuth, m_orbitElevation}; }
     void       setOrbitState(const OrbitState &state);

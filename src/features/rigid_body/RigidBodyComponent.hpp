@@ -62,11 +62,28 @@ public:
         float         angularDrag = 0.05f;
         glm::vec3     linearVelocity{0.0f};
         glm::vec3     angularVelocity{0.0f};
+
+        bool operator==(const Values &) const = default;
+    };
+
+    // What a copy carries plus the force and torque accumulators. The inspector drives those, so
+    // undo has to put them back, even though copying them onto another object would paste a value
+    // that has already expired (see Values).
+    struct EditedValues
+    {
+        Values    values;
+        glm::vec3 accumulatedForce{0.0f};
+        glm::vec3 accumulatedTorque{0.0f};
+
+        bool operator==(const EditedValues &) const = default;
     };
 
     std::unique_ptr<ComponentValues> copyValues() const override;
     void                             pasteValues(const ComponentValues &values) override;
     ComponentValuesAdder             valuesAdder() const override;
+
+    std::unique_ptr<ComponentValues> undoValues() const override;
+    void                             restoreUndoValues(const ComponentValues &values) override;
 
     // See ColliderComponent::allowsRemoval: the physics backend is rebuilt from the scene, and its
     // step tolerates a body whose component has gone since.

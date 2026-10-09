@@ -130,6 +130,26 @@ void MeshComponent::addPasted(SceneObject &object, MeshStore &meshStore, Materia
     added.markDirty(Aspect::Geometry);
 }
 
+std::unique_ptr<ComponentValues> MeshComponent::undoValues() const
+{
+    MaterialParameters snapshot;
+    snapshot.materials.reserve(m_materialHandles.size());
+    for (MaterialHandle handle : m_materialHandles)
+    {
+        snapshot.materials.emplace_back(handle, m_materialStore->get(handle).parameters);
+    }
+    return std::make_unique<ComponentValueSnapshot<MaterialParameters>>(std::move(snapshot));
+}
+
+void MeshComponent::restoreUndoValues(const ComponentValues &values)
+{
+    for (const auto &[handle, parameters] : componentValuesAs<MaterialParameters>(values).materials)
+    {
+        m_materialStore->get(handle).parameters = parameters;
+    }
+    markDirty(Aspect::Materials);
+}
+
 void MeshComponent::onGUIImpl()
 {
     const Mesh &mesh = m_meshStore->get(m_meshHandle);

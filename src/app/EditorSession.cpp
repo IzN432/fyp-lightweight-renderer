@@ -35,6 +35,7 @@
 #include "features/arap/ArapTool.hpp"
 #include "features/laplace_beltrami/LaplaceBeltramiTool.hpp"
 #include "features/animation/AnimationTrack.hpp"
+#include "features/animation/AnimationTrackCommands.hpp"
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -402,12 +403,18 @@ public:
                     {
                         SceneObject &target = m_scene.getSceneObject(
                             std::visit([](const auto &track) { return track.target(); }, channel));
+                        const AnimationChannel before = channel;
                         setCurrentTransformKey(channel, target, m_animationSeconds);
+                        recordTrackEdit(m_selectedAnimationTrack, before, channel);
                     }
                     break;
                 case Action::Delete:
+                {
+                    const AnimationChannel before = channel;
                     std::visit([&](auto &track) { track.removeKeyframe(m_animationSeconds); }, channel);
+                    recordTrackEdit(m_selectedAnimationTrack, before, channel);
                     break;
+                }
                 default: break;
                 }
                 ImGui::EndChild();
@@ -503,12 +510,30 @@ private:
                 return track.target() == object.id() && track.property() == property;
             }, channel);
             if (!matches) continue;
+            // Recorded, so that undoing the transform that triggered this takes the key with it.
+            // Both land in the transaction the gizmo handler or the inspector opened around the
+            // commit, which is what makes the pair one undo.
+            const AnimationChannel before = channel;
             setCurrentTransformKey(channel, object, m_animationSeconds);
+            recordTrackEdit(index, before, channel);
             m_selectedAnimationTrack = index;
             return;
         }
         m_pendingTrack = PendingTrack{object.id(), property};
         m_openAddTrackPopup = true;
+    }
+
+    // Records a keyframe edit the Track Editor's buttons have already applied. Both buttons are
+    // disabled in the case where they would leave the track as it was — Add while a key sits on the
+    // playhead, Delete while none does — so whatever reaches here is a real edit.
+    void recordTrackEdit(size_t track, AnimationChannel before, const AnimationChannel &after)
+    {
+        if (!m_selectedAnimation)
+        {
+            return;
+        }
+        m_commandManager.appendCommandWithoutExecuting(std::make_unique<EditAnimationTrackCommand>(
+            m_sceneManager.animations(), *m_selectedAnimation, track, std::move(before), after));
     }
 
     static void setCurrentTransformKey(AnimationChannel &channel, SceneObject &object, float seconds)
@@ -536,14 +561,20 @@ private:
         ImGui::Text("Add %s track for %s?", property, object.name.c_str());
         if (ImGui::Button("Add Track"))
         {
-            AnimationClip &clip = m_sceneManager.animations().get(*m_selectedAnimation);
-            if (m_pendingTrack->property == AnimationTargetProperty::Translation)
-                clip.tracks().emplace_back(TranslationTrack(object.id()));
-            else if (m_pendingTrack->property == AnimationTargetProperty::Rotation)
-                clip.tracks().emplace_back(RotationTrack(object.id()));
-            else clip.tracks().emplace_back(ScaleTrack(object.id()));
-            m_selectedAnimationTrack = clip.tracks().size() - 1;
-            setCurrentTransformKey(clip.tracks().back(), object, m_animationSeconds);
+            // Built and seeded here, then handed to the command, so that adding the track is the
+            // command's own doing and redoing it produces the same track with the same first key.
+            AnimationChannel channel =
+                m_pendingTrack->property == AnimationTargetProperty::Translation
+                    ? AnimationChannel(TranslationTrack(object.id()))
+                    : m_pendingTrack->property == AnimationTargetProperty::Rotation
+                          ? AnimationChannel(RotationTrack(object.id()))
+                          : AnimationChannel(ScaleTrack(object.id()));
+            setCurrentTransformKey(channel, object, m_animationSeconds);
+            m_commandManager.executeCommand(std::make_unique<AddAnimationTrackCommand>(
+                m_sceneManager.animationSystem(), m_sceneManager.animations(), *m_selectedAnimation,
+                std::move(channel)));
+            const size_t trackCount = m_sceneManager.animations().get(*m_selectedAnimation).tracks().size();
+            m_selectedAnimationTrack = trackCount == 0 ? 0 : trackCount - 1;
             m_pendingTrack.reset(); ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();

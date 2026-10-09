@@ -15,10 +15,14 @@ struct BaseLight
 {
     glm::vec3 color{1.0f, 1.0f, 1.0f};
     float     intensity = 1.0f;
+
+    bool operator==(const BaseLight &) const = default;
 };
 
 struct PointLight : public BaseLight
-{};
+{
+    bool operator==(const PointLight &) const = default;
+};
 
 struct SpotLight : public BaseLight
 {
@@ -29,6 +33,8 @@ struct SpotLight : public BaseLight
     // Radius of the emitter in world units. Shading treats the light as a point regardless; this only
     // widens its shadow penumbra (see shadow_sampling.glslh). 0 gives the hard-edged PCF shadow.
     float sourceRadius          = 0.0f;
+
+    bool operator==(const SpotLight &) const = default;
 };
 
 struct AreaLight : public BaseLight
@@ -39,6 +45,8 @@ struct AreaLight : public BaseLight
     // Half-angle of the emitted cone on each active face. Keeping lighting and shadow projection to
     // the same spread prevents the unshadowed grazing-angle region outside the shadow map.
     float spreadAngleDegrees = 60.0f;
+
+    bool operator==(const AreaLight &) const = default;
 };
 
 struct DirectionalLight : public BaseLight
@@ -46,10 +54,14 @@ struct DirectionalLight : public BaseLight
     // Half the angle the emitter subtends, as seen from the scene — 0.265 for the sun. Unlike a spot
     // light's linear radius, this makes the penumbra grow with the caster-to-receiver distance.
     float angularRadiusDegrees = 0.0f;
+
+    bool operator==(const DirectionalLight &) const = default;
 };
 
 struct ImageLight : public BaseLight
-{};
+{
+    bool operator==(const ImageLight &) const = default;
+};
 
 static const char *lightTypeNames[] = {"Point", "Spot", "Area", "Directional", "Image"};
 

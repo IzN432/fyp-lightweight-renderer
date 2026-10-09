@@ -22,6 +22,8 @@ struct SphereCollider
 {
     static constexpr ColliderShapeType type = ColliderShapeType::Sphere;
     float radius = 0.5f;
+
+    bool operator==(const SphereCollider &) const = default;
 };
 
 // A finite rectangle on the local-space plane dot((0,1,0), position) = offset; orient it via the
@@ -31,12 +33,16 @@ struct PlaneCollider
     static constexpr ColliderShapeType type = ColliderShapeType::Plane;
     float     offset = 0.0f;
     glm::vec2 halfExtents{5.0f, 5.0f};
+
+    bool operator==(const PlaneCollider &) const = default;
 };
 
 struct BoxCollider
 {
     static constexpr ColliderShapeType type = ColliderShapeType::Box;
     glm::vec3 halfExtents{0.5f};
+
+    bool operator==(const BoxCollider &) const = default;
 };
 
 using ColliderShape = std::variant<SphereCollider, PlaneCollider, BoxCollider>;
@@ -66,6 +72,8 @@ struct Collider
     glm::quat localRotation{1.0f, 0.0f, 0.0f, 0.0f};
 
     PhysicsMaterial material;
+
+    bool operator==(const Collider &) const = default;
 };
 
 } // namespace lr

@@ -57,6 +57,8 @@ public:
         glm::vec3             visualizationColor   = {0.15f, 0.85f, 0.35f};
         float                 visualizationOpacity = 1.0f;
         float                 occludedOpacity      = 0.15f;
+
+        bool operator==(const Values &) const = default;
     };
 
     std::unique_ptr<ComponentValues> copyValues() const override

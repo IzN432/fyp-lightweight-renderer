@@ -553,7 +553,7 @@ void Engine::run()
             ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Import failed: %s", sceneImportError.c_str());
         }
         ImGui::Separator();
-        scene.onHierarchyGUI();
+        scene.onHierarchyGUI(editor.context());
         ImGui::EndChild();
 
         ImGui::BeginChild("SceneInspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);

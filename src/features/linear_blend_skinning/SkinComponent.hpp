@@ -4,6 +4,7 @@
 #include "core/scene/SceneObject.hpp"
 #include "features/linear_blend_skinning/Skin.hpp"
 
+#include <memory>
 #include <utility>
 
 namespace lr
@@ -20,6 +21,20 @@ public:
     void evaluate()
     {
         m_skin.evaluate(getOwningObject().worldMatrix());
+        markDirty();
+    }
+
+    // The checkbox below is this component's whole editable state. It has no copyValues — a skin
+    // addresses one particular rig, so there is nothing sensible to paste onto another object — but
+    // flipping skinning off is still an edit, and an edit the user can undo.
+    std::unique_ptr<ComponentValues> undoValues() const override
+    {
+        return std::make_unique<ComponentValueSnapshot<bool>>(m_skin.skinningEnabled());
+    }
+
+    void restoreUndoValues(const ComponentValues &values) override
+    {
+        m_skin.setSkinningEnabled(componentValuesAs<bool>(values));
         markDirty();
     }
 

@@ -82,6 +82,19 @@ public:
     virtual std::unique_ptr<ComponentValues> copyValues() const { return nullptr; }
     virtual void                             pasteValues(const ComponentValues &values) { (void)values; }
 
+    // The snapshot the inspector records for undo, and the way it is put back. These default to the
+    // clipboard pair above, which for most components is exactly right: what can be copied off a
+    // component is what its inspector edits.
+    //
+    // A component overrides them where the two differ. MeshComponent copies its mesh but edits its
+    // materials, which live in the shared store; RigidBodyComponent deliberately leaves its force
+    // accumulators out of a copy, yet its inspector drives them; SkinComponent has a checkbox but no
+    // business being pasted onto another object at all. Returning null (the default for a component
+    // that implements neither) keeps the component out of the undo history, the same way returning
+    // null from copyValues keeps it out of the clipboard menu.
+    virtual std::unique_ptr<ComponentValues> undoValues() const { return copyValues(); }
+    virtual void restoreUndoValues(const ComponentValues &values) { pasteValues(values); }
+
     // How to put a copy of this component's values onto an object that has no component of this
     // type yet, for the inspector's "Paste component". Null (the default) keeps a type out of that
     // menu entry while leaving its copy/paste onto an existing component alone — for a component
@@ -127,6 +140,15 @@ public:
 
 private:
     void drawComponentMenu(EditorContext &context, std::optional<std::type_index> &removalRequest);
+
+    // Turns whatever this component's inspector did this frame into at most one undo command. See
+    // Component.cpp for how a drag spanning many frames still becomes a single one.
+    void recordValueEdit(EditorContext &context, std::unique_ptr<ComponentValues> beforeThisFrame,
+                         bool beingRemoved);
+
+    // The values this component held when the interaction currently in progress started. Null while
+    // nothing is being edited, which is also what it is reset to once an edit has been recorded.
+    std::unique_ptr<ComponentValues> m_valuesBeforeEdit;
 };
 
 } // namespace lr

@@ -21,7 +21,7 @@ class Scene
 public:
     Scene() = default;
 
-    void onHierarchyGUI();
+    void onHierarchyGUI(EditorContext &context);
     void onInspectorGUI(EditorContext &context);
 
     SceneObject &createSceneObject();
@@ -115,7 +115,7 @@ private:
     // True while a reveal is pending and `candidate` is a proper ancestor of it. The target itself
     // is excluded: revealing a row means getting to it, not expanding its own children.
     bool isAncestorOfPendingReveal(SceneObjectId candidate) const;
-    void drawRenamePopup();
+    void drawRenamePopup(EditorContext &context);
     // The Inspector's own context menu: adds the component on the clipboard to `object`.
     void drawComponentPasteMenu(SceneObject &object, EditorContext &context);
     // The panel below `object`'s components, offering the editor's component catalog.

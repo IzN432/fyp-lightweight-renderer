@@ -127,6 +127,7 @@ add_library(lr_core STATIC
     src/features/animation/AnimationTrack.cpp
     src/features/animation/AnimationClip.cpp
     src/features/animation/AnimationSystem.cpp
+    src/features/animation/AnimationTrackCommands.cpp
     src/core/scene/SceneManager.cpp
     src/core/scene/SceneDrawList.cpp
     src/core/scene/SceneGpu.cpp
@@ -162,6 +163,10 @@ add_library(lr_core STATIC
     src/core/editor/SceneObjectScaleHandler.cpp
     src/core/editor/SceneObjectTransformController.cpp
 
+    src/core/editor/command/AddComponentCommand.cpp
+    src/core/editor/command/EditComponentValuesCommand.cpp
+    src/core/editor/command/RemoveComponentCommand.cpp
+    src/core/editor/command/RenameSceneObjectCommand.cpp
     src/core/editor/command/TranslatePointsCommand.cpp
     src/core/editor/command/TranslateSceneObjectCommand.cpp
     src/core/editor/command/RotateSceneObjectCommand.cpp
@@ -524,6 +529,18 @@ if(BUILD_TESTING)
     )
     target_link_libraries(component_clipboard_tests PRIVATE lr_core)
     add_test(NAME scene.component_clipboard COMMAND component_clipboard_tests)
+
+    add_executable(command_transaction_tests
+        tests/editor/CommandTransactionTests.cpp
+    )
+    target_link_libraries(command_transaction_tests PRIVATE lr_core)
+    add_test(NAME editor.command_transactions COMMAND command_transaction_tests)
+
+    add_executable(component_undo_command_tests
+        tests/editor/ComponentUndoCommandTests.cpp
+    )
+    target_link_libraries(component_undo_command_tests PRIVATE lr_core)
+    add_test(NAME editor.component_undo_commands COMMAND component_undo_command_tests)
 
     add_executable(scene_serialization_tests
         tests/scene/SceneSerializationTests.cpp

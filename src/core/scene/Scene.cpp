@@ -1,14 +1,19 @@
 #include "Scene.hpp"
 
 #include "core/editor/EditorContext.hpp"
+#include "core/editor/command/AddComponentCommand.hpp"
+#include "core/editor/command/CommandManager.hpp"
+#include "core/editor/command/RenameSceneObjectCommand.hpp"
 #include "core/scene/TransformComponent.hpp"
 
 #include <imgui.h>
 
 #include <algorithm>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <typeindex>
+#include <utility>
 
 namespace
 {
@@ -314,7 +319,7 @@ void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> 
     }
 }
 
-void Scene::drawRenamePopup()
+void Scene::drawRenamePopup(EditorContext &context)
 {
     if (!m_renamingObject)
     {
@@ -339,8 +344,13 @@ void Scene::drawRenamePopup()
                                              ImGuiInputTextFlags_EnterReturnsTrue);
             if (submitted || ImGui::Button("Rename"))
             {
-                getSceneObject(*m_renamingObject).name = m_renameBuffer;
-                closePopup                            = true;
+                SceneObject &renamed = getSceneObject(*m_renamingObject);
+                if (renamed.name != m_renameBuffer)
+                {
+                    context.commands.executeCommand(std::make_unique<RenameSceneObjectCommand>(
+                        *this, renamed.id(), renamed.name, m_renameBuffer));
+                }
+                closePopup = true;
             }
             ImGui::SameLine();
             if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
@@ -363,7 +373,7 @@ void Scene::drawRenamePopup()
     }
 }
 
-void Scene::onHierarchyGUI()
+void Scene::onHierarchyGUI(EditorContext &context)
 {
     std::optional<SceneObjectId> renameRequested;
     std::optional<SceneObjectId> deleteRequested;
@@ -391,7 +401,7 @@ void Scene::onHierarchyGUI()
         m_renameBuffer   = getSceneObject(*renameRequested).name;
         ImGui::OpenPopup("Rename Scene Object");
     }
-    drawRenamePopup();
+    drawRenamePopup(context);
 
     if (deleteRequested)
     {
@@ -434,6 +444,28 @@ bool canTakeComponent(const SceneObject &object, std::type_index type)
     }
     return type == std::type_index(typeid(TransformComponent)) || object.hasComponent<TransformComponent>();
 }
+
+// Records a component the Inspector has just added, reading the values back off the component
+// itself so that redoing reproduces the one the user actually got. A component that cannot be
+// rebuilt from its values — or an add that quietly did nothing, as pasting a mesh whose geometry
+// has since left the store does — is left out of the history rather than given an undo that would
+// not put things back.
+void recordComponentAdd(SceneObject &object, std::type_index type, EditorContext &context)
+{
+    Component *added = object.componentOfType(type);
+    if (!added)
+    {
+        return;
+    }
+    ComponentValuesAdder             adder  = added->valuesAdder();
+    std::unique_ptr<ComponentValues> values = added->undoValues();
+    if (!adder || !values)
+    {
+        return;
+    }
+    context.commands.appendCommandWithoutExecuting(std::make_unique<AddComponentCommand>(
+        object.scene(), object.id(), type, std::move(values), std::move(adder), context.componentAdds));
+}
 } // namespace
 
 void Scene::drawComponentPasteMenu(SceneObject &object, EditorContext &context)
@@ -452,6 +484,7 @@ void Scene::drawComponentPasteMenu(SceneObject &object, EditorContext &context)
     {
         clipboard.adder()(object, *clipboard.values());
         context.componentAdds.onComponentAdded(object);
+        recordComponentAdd(object, *copied, context);
     }
     ImGui::EndDisabled();
     ImGui::EndPopup();
@@ -480,6 +513,7 @@ void Scene::drawAddComponentPanel(SceneObject &object, EditorContext &context)
                 {
                     entry.add(object);
                     context.componentAdds.onComponentAdded(object);
+                    recordComponentAdd(object, entry.type, context);
                 }
                 ImGui::EndDisabled();
             }
