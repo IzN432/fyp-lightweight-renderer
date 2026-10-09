@@ -659,25 +659,38 @@ private:
                         m_scene.destroySceneObject(id);
                 });
             }));
-        m_connections.push_back(m_scene.registerSelectionChangedCallback([this](SceneObjectId id) {
-            SceneObject &object   = m_scene.getSceneObject(id);
-            m_transformWindowOpen = true;
-            m_transformController.setSelectedTarget(object.hasComponent<TransformComponent>() ? &object : nullptr);
-            if (!SceneManager::isEditable(object))
-            {
-                if (m_stateController.active().presentation.vertexSelectionActive)
+        m_connections.push_back(
+            m_scene.registerSelectionChangedCallback([this](std::optional<SceneObjectId> selected) {
+                if (!selected)
                 {
-                    m_stateController.activateDefault();
+                    // Nothing to transform and nothing to edit: the same teardown the destruction of a
+                    // selected object performs, minus the destruction.
+                    m_transformWindowOpen = false;
+                    m_transformController.setSelectedTarget(nullptr);
+                    if (m_stateController.active().presentation.vertexSelectionActive)
+                    {
+                        m_stateController.activateDefault();
+                    }
+                    return;
                 }
-                return;
-            }
-            if (m_sceneManager.editedMeshObject() != &object)
-            {
-                m_viewer.context().waitIdle();
-                m_sceneManager.setEditedMeshObject(object);
-                rebindEditableTarget(object, true);
-            }
-        }));
+                SceneObject &object   = m_scene.getSceneObject(*selected);
+                m_transformWindowOpen = true;
+                m_transformController.setSelectedTarget(object.hasComponent<TransformComponent>() ? &object : nullptr);
+                if (!SceneManager::isEditable(object))
+                {
+                    if (m_stateController.active().presentation.vertexSelectionActive)
+                    {
+                        m_stateController.activateDefault();
+                    }
+                    return;
+                }
+                if (m_sceneManager.editedMeshObject() != &object)
+                {
+                    m_viewer.context().waitIdle();
+                    m_sceneManager.setEditedMeshObject(object);
+                    rebindEditableTarget(object, true);
+                }
+            }));
 
         m_connections.push_back(m_scene.registerObjectsDestroyedCallback([this](std::span<const SceneObjectId> ids) {
             m_viewer.context().waitIdle();
@@ -772,13 +785,29 @@ private:
             const uint32_t pixelY = std::min(static_cast<uint32_t>(y * extent.height / display.y), extent.height - 1);
             const uint32_t pickingId = m_objectPickingReadback.readPixel(
                 m_viewer.resources(), ObjectPickingPass::imageName, pixelX, pixelY);
+            if (pickingId == ImageReadback::kNoData)
+            {
+                // Nothing was read at all. Not the same answer as "nothing is there", so the
+                // selection stands.
+                return true;
+            }
+            if (pickingId == 0)
+            {
+                // The picking target clears to 0, so this is empty space: deselect, as clicking the
+                // background does in Blender.
+                m_scene.clearSelection();
+                return true;
+            }
             const auto &objects = m_sceneManager.gpu().geometryObjects();
-            if (pickingId > 0 && pickingId <= objects.size())
+            if (pickingId <= objects.size())
             {
                 SceneObject *object = objects[pickingId - 1];
                 if (object && m_scene.contains(object->id()))
                 {
                     m_scene.selectHierarchyObject(object->id());
+                    // The click says nothing about where the object sits in the tree, so bring the
+                    // panel to it rather than leaving the new selection highlighted out of sight.
+                    m_scene.revealInHierarchy(object->id());
                 }
             }
             return true;

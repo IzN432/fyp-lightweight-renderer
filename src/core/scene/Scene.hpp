@@ -77,6 +77,11 @@ public:
     void selectHierarchyObject(SceneObjectId id);
     void clearHierarchySelection();
 
+    // Ask the hierarchy panel to expand every ancestor of `id` and scroll the row into view on its
+    // next draw. For selections made somewhere else — a viewport click — whose object may sit inside
+    // collapsed parents; a click in the panel is already looking at the row.
+    void revealInHierarchy(SceneObjectId id) { m_pendingReveal = id; }
+
     CallbackConnection registerHierarchySelectionChangedCallback(
         std::function<void(std::optional<SceneObjectId>)> callback)
     {
@@ -86,8 +91,14 @@ public:
     // Routes every selection source through the same validation and notification path.
     void selectObject(SceneObjectId id);
 
-    // Fired whenever selectObject() is called, even if the object was already selected.
-    CallbackConnection registerSelectionChangedCallback(std::function<void(SceneObjectId)> callback)
+    // Nothing selected, in both senses: the object offered to tools and the hierarchy's own row.
+    // A viewport click on empty space lands here. (The panel's own empty-space click withdraws only
+    // its row, through clearHierarchySelection, so a target another surface is presenting stays put.)
+    void clearSelection();
+
+    // Fired whenever selectObject() is called, even if the object was already selected, and with
+    // nullopt when the selection is cleared.
+    CallbackConnection registerSelectionChangedCallback(std::function<void(std::optional<SceneObjectId>)> callback)
     {
         return m_selectionChangedCallbacks.connect(std::move(callback));
     }
@@ -101,6 +112,9 @@ public:
 private:
     void drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &renameRequested,
                            std::optional<SceneObjectId> &deleteRequested);
+    // True while a reveal is pending and `candidate` is a proper ancestor of it. The target itself
+    // is excluded: revealing a row means getting to it, not expanding its own children.
+    bool isAncestorOfPendingReveal(SceneObjectId candidate) const;
     void drawRenamePopup();
     // The Inspector's own context menu: adds the component on the clipboard to `object`.
     void drawComponentPasteMenu(SceneObject &object, EditorContext &context);
@@ -121,9 +135,10 @@ private:
     std::vector<std::byte>                     m_hdriData;
     std::optional<SceneObjectId>               m_selectedObject;
     std::optional<SceneObjectId>               m_hierarchySelectedObject;
+    std::optional<SceneObjectId>               m_pendingReveal;
     std::optional<SceneObjectId>               m_renamingObject;
     std::string                                m_renameBuffer;
-    CallbackList<SceneObjectId>                     m_selectionChangedCallbacks;
+    CallbackList<std::optional<SceneObjectId>>      m_selectionChangedCallbacks;
     CallbackList<std::optional<SceneObjectId>>      m_hierarchySelectionChangedCallbacks;
     CallbackList<std::span<const SceneObjectId>>    m_objectsDestroyedCallbacks;
     std::unordered_set<SceneObjectId> m_protectedObjects;

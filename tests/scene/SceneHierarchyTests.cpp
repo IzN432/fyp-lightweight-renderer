@@ -60,11 +60,18 @@ int main()
     auto     &child = scene.createSceneObject();
     auto     &grandchild = scene.createSceneObject();
 
-    int selectionNotifications = 0;
-    auto selectionConnection = scene.registerSelectionChangedCallback([&](lr::SceneObjectId selected) {
-        assert(selected == child.id());
-        ++selectionNotifications;
-    });
+    int  selectionNotifications = 0;
+    bool sawClearedSelection     = false;
+    auto selectionConnection     = scene.registerSelectionChangedCallback(
+        [&](std::optional<lr::SceneObjectId> selected) {
+            if (!selected)
+            {
+                sawClearedSelection = true;
+                return;
+            }
+            assert(selected == child.id());
+            ++selectionNotifications;
+        });
     scene.selectObject(child.id());
     scene.selectObject(child.id());
     assert(scene.selectedObject() == child.id());
@@ -76,6 +83,14 @@ int main()
     assert(!scene.hierarchySelectedObject());
     // Withdrawing hierarchy ownership does not clear the scene-facing target.
     assert(scene.selectedObject() == child.id());
+
+    // Clearing the selection outright (a click on empty space) withdraws both, and listeners are
+    // told, so the Inspector and the selection outline let go of the object too.
+    scene.selectHierarchyObject(child.id());
+    scene.clearSelection();
+    assert(!scene.selectedObject());
+    assert(!scene.hierarchySelectedObject());
+    assert(sawClearedSelection);
 
     lr::Scene otherScene;
     auto &foreignObject = otherScene.createSceneObject();

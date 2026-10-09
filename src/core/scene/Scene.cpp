@@ -225,6 +225,35 @@ void Scene::clearHierarchySelection()
     m_hierarchySelectionChangedCallbacks.invoke(std::nullopt);
 }
 
+void Scene::clearSelection()
+{
+    m_selectedObject.reset();
+    m_hierarchySelectedObject.reset();
+    // Both lists hear about it: the hierarchy's owns the Delete target, and the tool-facing one owns
+    // the Inspector, the transform gizmo and the selection outline.
+    m_hierarchySelectionChangedCallbacks.invoke(std::nullopt);
+    m_selectionChangedCallbacks.invoke(std::nullopt);
+}
+
+bool Scene::isAncestorOfPendingReveal(SceneObjectId candidate) const
+{
+    if (!m_pendingReveal || !contains(*m_pendingReveal))
+    {
+        return false;
+    }
+    // From the target's parent upwards, so the target's own row is left however the user had it.
+    for (std::optional<SceneObjectId> step = find(*m_pendingReveal)->parent(); step;)
+    {
+        if (*step == candidate)
+        {
+            return true;
+        }
+        const SceneObject *object = find(*step);
+        step                      = object ? object->parent() : std::nullopt;
+    }
+    return false;
+}
+
 void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &renameRequested,
                               std::optional<SceneObjectId> &deleteRequested)
 {
@@ -239,6 +268,13 @@ void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> 
         flags |= ImGuiTreeNodeFlags_Selected;
     }
 
+    // An ancestor of a reveal target is forced open before it is drawn, so the recursion below
+    // actually reaches the row the panel is being asked to scroll to.
+    if (isAncestorOfPendingReveal(object.id()))
+    {
+        ImGui::SetNextItemOpen(true);
+    }
+
     const std::string identity = toString(object.id());
     const std::string label    = object.name.empty() ? "Scene Object " + identity : object.name;
     // The identity string is the ImGui ID, so a row keeps its expanded state across frames and
@@ -247,6 +283,10 @@ void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> 
     if (ImGui::IsItemClicked())
     {
         selectHierarchyObject(object.id());
+    }
+    if (m_pendingReveal == object.id())
+    {
+        ImGui::SetScrollHereY(0.5f);
     }
 
     if (ImGui::BeginPopupContextItem())
@@ -334,6 +374,10 @@ void Scene::onHierarchyGUI()
             drawHierarchyNode(*object, renameRequested, deleteRequested);
         }
     }
+
+    // Consumed by the walk above, whether or not the target was found: a request that outlived its
+    // object (deleted between the click and this draw) must not keep forcing rows open.
+    m_pendingReveal.reset();
 
     if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
         !ImGui::IsAnyItemHovered())
