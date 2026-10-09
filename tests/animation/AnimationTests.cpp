@@ -75,8 +75,15 @@ int main()
     assert(animationSystem.play(independentHandle).started);
     animationSystem.update(0.5f);
     assert(near(targetTransform.transform().position().x, 2.0f));
+    assert(animationSystem.playbackTime(clipHandle).has_value());
+    assert(near(*animationSystem.playbackTime(clipHandle), 1.0f));
+    assert(animationSystem.seek(clipHandle, 1.5f));
+    assert(near(*animationSystem.playbackTime(clipHandle), 1.5f));
+    assert(near(targetTransform.transform().position().x, 3.0f));
+    assert(!animationSystem.seek(conflictingHandle, 0.5f));
     animationSystem.stopAll();
     assert(!animationSystem.isPlaying(clipHandle));
+    assert(!animationSystem.playbackTime(clipHandle).has_value());
 
     bool rejectedInvalidTime = false;
     try

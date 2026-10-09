@@ -35,10 +35,13 @@ public:
     void stopAll();
     void update(float deltaSeconds);
     bool isPlaying(AnimationClipHandle clip) const;
+    std::optional<float> playbackTime(AnimationClipHandle clip) const;
+    bool seek(AnimationClipHandle clip, float seconds);
 
 private:
     struct Playback { AnimationClipHandle clip; float seconds; float speed; bool loop; };
     static std::string bindingKey(const AnimationTrackBinding &binding);
+    void apply(const AnimationClip &clip, float seconds);
     void release(AnimationClipHandle clip);
 
     Scene &m_scene;

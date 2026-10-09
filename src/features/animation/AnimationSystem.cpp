@@ -43,6 +43,32 @@ bool AnimationSystem::isPlaying(AnimationClipHandle clip) const
     return std::ranges::any_of(m_playing, [clip](const Playback &item) { return item.clip == clip; });
 }
 
+std::optional<float> AnimationSystem::playbackTime(AnimationClipHandle clip) const
+{
+    const auto playback = std::ranges::find_if(m_playing, [clip](const Playback &item) { return item.clip == clip; });
+    if (playback == m_playing.end()) return std::nullopt;
+    return playback->seconds;
+}
+
+bool AnimationSystem::seek(AnimationClipHandle clip, float seconds)
+{
+    if (!std::isfinite(seconds) || seconds < 0.0f)
+        throw std::invalid_argument("Animation seek time must be finite and non-negative");
+    const auto playback = std::ranges::find_if(m_playing, [clip](const Playback &item) { return item.clip == clip; });
+    if (playback == m_playing.end()) return false;
+
+    const AnimationClip &animation = m_library.get(clip);
+    playback->seconds = std::min(seconds, animation.durationSeconds());
+    apply(animation, playback->seconds);
+    return true;
+}
+
+void AnimationSystem::apply(const AnimationClip &clip, float seconds)
+{
+    for (const AnimationChannel &channel : clip.tracks())
+        std::visit([&](const auto &track) { track.apply(m_scene, seconds); }, channel);
+}
+
 void AnimationSystem::release(AnimationClipHandle clip)
 {
     std::erase_if(m_runningTracks, [clip](const auto &entry) { return entry.second == clip; });
@@ -76,8 +102,7 @@ void AnimationSystem::update(float deltaSeconds)
             if (playback.loop) playback.seconds = std::fmod(playback.seconds, duration);
             else { playback.seconds = duration; finished.push_back(playback.clip); }
         }
-        for (const AnimationChannel &channel : clip.tracks())
-            std::visit([&](const auto &track) { track.apply(m_scene, playback.seconds); }, channel);
+        apply(clip, playback.seconds);
     }
     for (AnimationClipHandle clip : finished) stop(clip);
 }

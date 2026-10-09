@@ -320,6 +320,11 @@ public:
             }
             if (!m_animationPlaybackWarning.empty())
                 ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.2f, 1.0f), "%s", m_animationPlaybackWarning.c_str());
+            if (const std::optional<float> playbackTime =
+                    m_sceneManager.animationSystem().playbackTime(*m_selectedAnimation))
+            {
+                m_animationSeconds = *playbackTime;
+            }
             const float duration = clip.durationSeconds();
             float progress = duration > 0.0f ? m_animationSeconds / duration : 0.0f;
 
@@ -363,7 +368,8 @@ public:
                     if (result.progressChanged)
                     {
                         m_animationSeconds = progress * duration;
-                        applyAnimation(clip, m_animationSeconds);
+                        if (!m_sceneManager.animationSystem().seek(*m_selectedAnimation, m_animationSeconds))
+                            applyAnimation(clip, m_animationSeconds);
                     }
                     for (size_t index = 0; index < track.keyframes().size(); ++index)
                     {
