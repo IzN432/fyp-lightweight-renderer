@@ -17,6 +17,7 @@
 #include "core/passes/ambientocclusion/AmbientOcclusionPass.hpp"
 #include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
 #include "core/passes/objectpicking/ObjectPickingPass.hpp"
+#include "core/passes/outline/OutlinePass.hpp"
 #include "core/passes/overlaylines/OverlayLinesPass.hpp"
 #include "core/passes/overlaypoints/OverlayPointsPass.hpp"
 
@@ -268,6 +269,12 @@ void Engine::run()
     });
     finalPass.build(viewer.frameGraph());
 
+    // Blender's selected-object outline, derived from the picking IDs. Blending into a LOAD
+    // attachment counts as reading the swapchain, so the compiler orders this after every pass that
+    // writes it — FinalPass included.
+    lr::OutlinePass outlinePass({.outputFormat = swapchainFormat}, viewer.resources());
+    outlinePass.build(viewer.frameGraph());
+
     // Editor interaction stays behind one facade while Engine owns it alongside the render pipeline.
     const lr::EditorRenderBridge::Passes editorPasses{
         .geometry       = &geometryPass,
@@ -279,6 +286,7 @@ void Engine::run()
         .heatmap        = &heatmapPass,
         .overlayPoints  = &overlayPointsPass,
         .overlayLines   = &overlayLinesPass,
+        .outline        = &outlinePass,
     };
     lr::EditorRenderBridge editorRendering(sceneManager, editorPasses);
     lr::EditorSession editor(viewer, sceneManager, *camera, editorRendering);

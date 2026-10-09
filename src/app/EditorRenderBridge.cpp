@@ -5,6 +5,7 @@
 #include "core/passes/geometry/GeometryPass.hpp"
 #include "core/passes/heatmap/HeatmapPass.hpp"
 #include "core/passes/objectpicking/ObjectPickingPass.hpp"
+#include "core/passes/outline/OutlinePass.hpp"
 #include "core/passes/overlaylines/OverlayLinesPass.hpp"
 #include "core/passes/overlaypoints/OverlayPointsPass.hpp"
 #include "core/passes/shadow/AreaShadowPass.hpp"
@@ -17,6 +18,7 @@
 #include "core/scene/TransformComponent.hpp"
 #include "features/rigid_body/ColliderVisual.hpp"
 
+#include <algorithm>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -24,12 +26,56 @@
 namespace lr
 {
 
+namespace
+{
+// The selected object plus its descendants. An imported model arrives as a node hierarchy whose
+// meshes often hang off children, so outlining the selected node alone would leave a hierarchy
+// selection with nothing on screen.
+void collectSubtree(const Scene &scene, SceneObjectId root, std::vector<SceneObjectId> &out)
+{
+    if (!scene.contains(root))
+    {
+        return;
+    }
+    out.push_back(root);
+    for (const SceneObjectId child : scene.getSceneObject(root).children())
+    {
+        collectSubtree(scene, child, out);
+    }
+}
+
+// Picking IDs are draw indices + 1 — the identity ObjectPickingPass writes and the editor already
+// reads back for click selection (see SceneDrawList).
+std::vector<uint32_t> selectedPickingIds(const Scene &scene, const std::vector<SceneObject *> &geometryObjects)
+{
+    const std::optional<SceneObjectId> selected = scene.selectedObject();
+    if (!selected)
+    {
+        return {};
+    }
+
+    std::vector<SceneObjectId> subtree;
+    collectSubtree(scene, *selected, subtree);
+
+    std::vector<uint32_t> ids;
+    for (size_t i = 0; i < geometryObjects.size(); ++i)
+    {
+        const SceneObject *object = geometryObjects[i];
+        if (object && std::find(subtree.begin(), subtree.end(), object->id()) != subtree.end())
+        {
+            ids.push_back(static_cast<uint32_t>(i + 1));
+        }
+    }
+    return ids;
+}
+} // namespace
+
 EditorRenderBridge::EditorRenderBridge(SceneManager &sceneManager, Passes passes)
     : m_sceneManager(sceneManager), m_passes(passes)
 {
     if (!m_passes.geometry || !m_passes.transparent || !m_passes.objectPicking || !m_passes.spotShadow ||
         !m_passes.cascadedShadow || !m_passes.areaShadow || !m_passes.heatmap || !m_passes.overlayPoints ||
-        !m_passes.overlayLines)
+        !m_passes.overlayLines || !m_passes.outline)
     {
         throw std::invalid_argument("EditorRenderBridge: every pass is required");
     }
@@ -50,6 +96,9 @@ void EditorRenderBridge::apply(const EditorPresentation &presentation)
 
     m_passes.overlayPoints->setEnabled(presentation.vertexPointsVisible);
     m_passes.heatmap->setEnabled(presentation.heatmapVisible);
+    // The object outline belongs to states that select objects. Blender likewise drops it in edit
+    // mode, where the vertex overlays describe the selection instead.
+    m_passes.outline->setEnabled(presentation.objectSelectionActive);
 }
 
 void EditorRenderBridge::setEditableTarget(const EditableMeshContext &target)
@@ -78,6 +127,7 @@ void EditorRenderBridge::updateSceneOverlays(const Scene &scene, const EditorFra
         overlayLines.insert(overlayLines.end(), selectionLines.begin(), selectionLines.end());
     }
     m_passes.overlayLines->setLines(overlayLines);
+    m_passes.outline->setSelection(selectedPickingIds(scene, m_sceneManager.geometryObjects()));
 }
 
 } // namespace lr

@@ -18,8 +18,11 @@ struct ObjectPickingPC
 
 void ObjectPickingPass::uploadResources(ResourceRegistry &resources) const
 {
+    // SAMPLED_BIT is for OutlinePass, which derives the selection outline from these IDs rather
+    // than redrawing the selected geometry.
     resources.registerImage(imageName, VK_FORMAT_R32_UINT,
-                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                VK_IMAGE_USAGE_SAMPLED_BIT);
 }
 
 void ObjectPickingPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const

@@ -91,12 +91,19 @@ std::vector<uint32_t> ImageReadback::readRect(const ResourceRegistry &resources,
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         checkVk(vkBeginCommandBuffer(cmd, &bi), "ImageReadback: vkBeginCommandBuffer");
 
+        // Whichever layout the last frame left the image in — a pass that samples it (for example
+        // OutlinePass reading the picking IDs) ends the frame in SHADER_READ_ONLY_OPTIMAL rather than
+        // COLOR_ATTACHMENT_OPTIMAL. A barrier that names the wrong old layout is invalid, so take it
+        // from the registry, which records what each frame leaves behind (see
+        // CompiledFrameGraph::execute). ALL_COMMANDS covers whichever pass that last writer was.
+        const VkImageLayout sourceLayout = resources.getImageLayout(imageName);
+
         VkImageMemoryBarrier2 toSrc{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-        toSrc.srcStageMask     = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        toSrc.srcAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        toSrc.srcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        toSrc.srcAccessMask    = VK_ACCESS_2_MEMORY_WRITE_BIT;
         toSrc.dstStageMask     = VK_PIPELINE_STAGE_2_COPY_BIT;
         toSrc.dstAccessMask    = VK_ACCESS_2_TRANSFER_READ_BIT;
-        toSrc.oldLayout        = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        toSrc.oldLayout        = sourceLayout;
         toSrc.newLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         toSrc.image            = img->image;
         toSrc.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
@@ -112,15 +119,22 @@ std::vector<uint32_t> ImageReadback::readRect(const ResourceRegistry &resources,
         region.imageExtent      = {width, height, 1};
         vkCmdCopyImageToBuffer(cmd, img->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_staging.buffer, 1, &region);
 
-        VkImageMemoryBarrier2 toAttach = toSrc;
-        toAttach.srcStageMask          = VK_PIPELINE_STAGE_2_COPY_BIT;
-        toAttach.srcAccessMask         = VK_ACCESS_2_TRANSFER_READ_BIT;
-        toAttach.dstStageMask          = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        toAttach.dstAccessMask         = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        toAttach.oldLayout             = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        toAttach.newLayout             = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        dep.pImageMemoryBarriers       = &toAttach;
-        vkCmdPipelineBarrier2(cmd, &dep);
+        // Hand the image back in the layout it arrived in, so the registry's record stays true and the
+        // next frame's barriers still describe reality. A source layout of UNDEFINED has nothing to
+        // restore (and is not a legal newLayout): the graph's first barrier for such an image declares
+        // UNDEFINED as its old layout anyway, which accepts whatever layout the image is in.
+        if (sourceLayout != VK_IMAGE_LAYOUT_UNDEFINED)
+        {
+            VkImageMemoryBarrier2 restore = toSrc;
+            restore.srcStageMask          = VK_PIPELINE_STAGE_2_COPY_BIT;
+            restore.srcAccessMask         = VK_ACCESS_2_TRANSFER_READ_BIT;
+            restore.dstStageMask          = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            restore.dstAccessMask         = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+            restore.oldLayout             = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            restore.newLayout             = sourceLayout;
+            dep.pImageMemoryBarriers      = &restore;
+            vkCmdPipelineBarrier2(cmd, &dep);
+        }
 
         checkVk(vkEndCommandBuffer(cmd), "ImageReadback: vkEndCommandBuffer");
 

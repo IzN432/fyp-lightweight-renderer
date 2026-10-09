@@ -11,6 +11,7 @@ class GeometryPass;
 class HeatmapPass;
 class ObjectPickingPass;
 class OverlayLinesPass;
+class OutlinePass;
 class OverlayPointsPass;
 class Scene;
 class SceneManager;
@@ -38,6 +39,7 @@ public:
         HeatmapPass        *heatmap        = nullptr;
         OverlayPointsPass  *overlayPoints  = nullptr;
         OverlayLinesPass   *overlayLines   = nullptr;
+        OutlinePass        *outline        = nullptr;
     };
 
     // Every member of `passes` must be non-null.

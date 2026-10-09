@@ -101,6 +101,7 @@ add_library(lr_core STATIC
     src/core/passes/objectpicking/ObjectPickingPass.cpp
     src/core/passes/heatmap/HeatmapPass.cpp
     src/core/passes/overlaygeometry/OverlayGeometryPass.cpp
+    src/core/passes/outline/OutlinePass.cpp
     src/core/passes/overlaylines/OverlayLine.cpp
     src/core/passes/overlaylines/OverlayLinesPass.cpp
     src/core/passes/overlaypoints/OverlayPointsPass.cpp
@@ -238,6 +239,7 @@ add_shaders(lr_core
     src/core/passes/overlaypoints/overlay_points.frag
     src/core/passes/heatmap/heatmap.vert
     src/core/passes/heatmap/heatmap.frag
+    src/core/passes/outline/outline.frag
     src/core/passes/overlaylines/overlay_lines.vert
     src/core/passes/overlaylines/overlay_lines.frag
 
