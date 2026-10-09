@@ -28,6 +28,7 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
     std::vector<LightGpuData> data;
     data.reserve(lights.size());
     uint32_t nextSpotShadow = 0;
+    uint32_t nextPointShadow = 0;
     uint32_t nextDirectionalShadow = 0;
     uint32_t nextAreaShadow = 0;
 
@@ -38,7 +39,7 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
         LightGpuData &gpuData = data.emplace_back();
 
         std::visit(
-            [&gpuData, &lightObject, &nextSpotShadow, &nextDirectionalShadow, &nextAreaShadow](auto &&l) {
+            [&gpuData, &lightObject, &nextSpotShadow, &nextPointShadow, &nextDirectionalShadow, &nextAreaShadow](auto &&l) {
                 using T = std::decay_t<decltype(l)>;
 
                 gpuData.color          = l.color;
@@ -58,6 +59,9 @@ void LightUploader::upload(std::vector<SceneObject *> &lights)
                     TransformComponent &transform = lightObject->getComponent<TransformComponent>();
                     gpuData.position     = transform.transform().position();
                     gpuData.type         = 0;
+                    gpuData.range           = l.range;
+                    gpuData.shadowNearPlane = l.shadowNearPlane;
+                    gpuData.shadowIndex     = nextPointShadow++;
                 } else if constexpr (std::is_same_v<T, SpotLight>)
                 {
                     TransformComponent &transform   = lightObject->getComponent<TransformComponent>();

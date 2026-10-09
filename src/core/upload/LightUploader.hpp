@@ -22,9 +22,9 @@ struct alignas(16) LightGpuData
     glm::vec2 areaSize;       // 8 bytes (area lights)
 
     uint32_t flags; // 4 bytes: bit 0 = two-sided (area lights); padded to 16 by alignas
-    float    range;           // spot lights
-    float    shadowNearPlane; // spot lights
-    uint32_t shadowIndex;     // spot/directional type-local shadow index; UINT32_MAX means no shadow
+    float    range;           // point/spot shadow far plane
+    float    shadowNearPlane; // point/spot shadow near plane
+    uint32_t shadowIndex;     // type-local shadow index; UINT32_MAX means no shadow
 };
 
 inline constexpr uint32_t kLightFlagTwoSided = 1u;

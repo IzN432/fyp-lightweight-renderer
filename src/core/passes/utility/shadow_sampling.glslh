@@ -248,6 +248,26 @@ float lightShadowVisibility(LightData light, vec3 viewPosition, vec3 worldPositi
 {
     mat2 rotation = shadowRotation(pixel, ditherIndex);
 
+    if (light.type == LIGHT_TYPE_POINT && light.shadowIndex < pointShadow.header.x)
+    {
+        vec3 direction = worldPosition - light.position;
+        vec3 magnitude = abs(direction);
+        uint face;
+        if (magnitude.x >= magnitude.y && magnitude.x >= magnitude.z)
+            face = direction.x >= 0.0 ? 0u : 1u;
+        else if (magnitude.y >= magnitude.z)
+            face = direction.y >= 0.0 ? 2u : 3u;
+        else
+            face = direction.z >= 0.0 ? 4u : 5u;
+        uint layer = light.shadowIndex * pointShadow.header.y + face;
+        mat4 lightViewProj = pointShadow.lightViewProj[layer];
+        vec4 lightClip = lightViewProj * vec4(worldPosition, 1.0);
+        vec4 params = pointShadow.pcss[layer];
+        vec2 gradient = shadowReceiverGradient(lightViewProj, worldNormal, lightClip);
+        return perspectiveShadowVisibility(pointShadowMap, pointShadowMapDepth, lightClip.xyz / lightClip.w,
+                                           gradient, layer, params.x, params.y, params.z, lightClip.w, rotation);
+    }
+
     if (light.type == LIGHT_TYPE_SPOT && light.shadowIndex < spotShadow.header.x)
     {
         mat4 lightViewProj = spotShadow.lightViewProj[light.shadowIndex];

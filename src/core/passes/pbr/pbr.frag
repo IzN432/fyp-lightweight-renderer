@@ -64,6 +64,14 @@ layout(set = 0, binding = 20) uniform AreaShadowData
     uvec4 header;
 } areaShadow;
 layout(set = 0, binding = 21) uniform sampler2DArray areaShadowMapDepth;
+layout(set = 0, binding = 22) uniform sampler2DArrayShadow pointShadowMap;
+layout(set = 0, binding = 23) uniform PointShadowData
+{
+    mat4 lightViewProj[24];
+    vec4 pcss[24];
+    uvec4 header;
+} pointShadow;
+layout(set = 0, binding = 24) uniform sampler2DArray pointShadowMapDepth;
 
 #include "../utility/shadow_sampling.glslh"
 

@@ -5,6 +5,7 @@
 #include "core/passes/shadow/SpotShadowPass.hpp"
 #include "core/passes/shadow/CascadedShadowPass.hpp"
 #include "core/passes/shadow/AreaShadowPass.hpp"
+#include "core/passes/shadow/PointShadowPass.hpp"
 #include "core/upload/CameraUploader.hpp"
 
 namespace lr
@@ -75,6 +76,17 @@ void PbrPass::uploadResources(ResourceRegistry &resources) const
         const AreaShadowGpuData disabled{};
         resources.updateBuffer(m_cfg.areaShadowParamsBufferResourceName, &disabled, sizeof(disabled));
     }
+    if (!resources.hasImage(m_cfg.pointShadowImageResourceName))
+        resources.registerPersistentImageArray(m_cfg.pointShadowImageResourceName, VK_FORMAT_D32_SFLOAT,
+            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            {1, 1}, PointShadowGpuData::maxLayers, VK_IMAGE_ASPECT_DEPTH_BIT);
+    if (!resources.hasBuffer(m_cfg.pointShadowParamsBufferResourceName))
+    {
+        resources.registerDynamicBuffer(m_cfg.pointShadowParamsBufferResourceName, sizeof(PointShadowGpuData),
+                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        const PointShadowGpuData disabled{};
+        resources.updateBuffer(m_cfg.pointShadowParamsBufferResourceName, &disabled, sizeof(disabled));
+    }
 }
 
 void PbrPass::build(FrameGraph &fg) const
@@ -114,6 +126,11 @@ void PbrPass::build(FrameGraph &fg) const
                       SamplerDesc::shadowComparison())
         .uniformBuffer(20, fg.buffer(m_cfg.areaShadowParamsBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledDepth(21, fg.image(m_cfg.areaShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
+                      SamplerDesc::depthFetch())
+        .sampledDepth(22, fg.image(m_cfg.pointShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
+                      SamplerDesc::shadowComparison())
+        .uniformBuffer(23, fg.buffer(m_cfg.pointShadowParamsBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledDepth(24, fg.image(m_cfg.pointShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
                       SamplerDesc::depthFetch())
         .colorAttachment(fg.image("pbr"), VK_FORMAT_R16G16B16A16_SFLOAT)
         // Reads m_cfg when the pass runs, so setNumLights() takes effect without rebuilding the graph.

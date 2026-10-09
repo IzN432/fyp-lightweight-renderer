@@ -11,6 +11,7 @@
 #include "core/passes/shadow/AreaShadowPass.hpp"
 #include "core/passes/shadow/CascadedShadowPass.hpp"
 #include "core/passes/shadow/SpotShadowPass.hpp"
+#include "core/passes/shadow/PointShadowPass.hpp"
 #include "core/passes/transparent/TransparentPass.hpp"
 #include "core/scene/Mesh.hpp"
 #include "core/scene/Scene.hpp"
@@ -73,7 +74,7 @@ std::vector<uint32_t> selectedPickingIds(const Scene &scene, const std::vector<S
 EditorRenderBridge::EditorRenderBridge(SceneManager &sceneManager, Passes passes)
     : m_sceneManager(sceneManager), m_passes(passes)
 {
-    if (!m_passes.geometry || !m_passes.transparent || !m_passes.objectPicking || !m_passes.spotShadow ||
+    if (!m_passes.geometry || !m_passes.transparent || !m_passes.objectPicking || !m_passes.spotShadow || !m_passes.pointShadow ||
         !m_passes.cascadedShadow || !m_passes.areaShadow || !m_passes.heatmap || !m_passes.overlayPoints ||
         !m_passes.overlayLines || !m_passes.outline)
     {
@@ -91,6 +92,7 @@ void EditorRenderBridge::apply(const EditorPresentation &presentation)
     m_passes.transparent->setSkinningEnabled(presentation.skinningEnabled);
     m_passes.objectPicking->setSkinningEnabled(presentation.skinningEnabled);
     m_passes.spotShadow->setSkinningEnabled(presentation.skinningEnabled);
+    m_passes.pointShadow->setSkinningEnabled(presentation.skinningEnabled);
     m_passes.cascadedShadow->setSkinningEnabled(presentation.skinningEnabled);
     m_passes.areaShadow->setSkinningEnabled(presentation.skinningEnabled);
 

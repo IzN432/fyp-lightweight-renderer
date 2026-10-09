@@ -126,6 +126,11 @@ void TransparentPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         .uniformBuffer(24, fg.buffer(m_cfg.areaShadowParamsBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledDepth(25, fg.image(m_cfg.areaShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
                       SamplerDesc::depthFetch())
+        .sampledDepth(26, fg.image(m_cfg.pointShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
+                      SamplerDesc::shadowComparison())
+        .uniformBuffer(27, fg.buffer(m_cfg.pointShadowParamsBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledDepth(28, fg.image(m_cfg.pointShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,
+                      SamplerDesc::depthFetch())
         // GeometryPass's sample count, so the depth below is its unresolved, per-sample depth.
         .samples(VK_SAMPLE_COUNT_4_BIT)
         .colorAttachment(fg.image(m_cfg.outputImage), VK_FORMAT_R16G16B16A16_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,

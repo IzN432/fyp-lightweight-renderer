@@ -98,7 +98,13 @@ json encodeLight(const LightVariant &variant)
     return std::visit([](const auto &light) {
         json result{{"color", vec3(light.color)}, {"intensity", light.intensity}};
         using T = std::decay_t<decltype(light)>;
-        if constexpr (std::is_same_v<T, PointLight>) result["type"] = "point";
+        if constexpr (std::is_same_v<T, PointLight>)
+        {
+            result["type"] = "point";
+            result["range"] = light.range;
+            result["shadow_near_plane"] = light.shadowNearPlane;
+            result["source_radius"] = light.sourceRadius;
+        }
         else if constexpr (std::is_same_v<T, SpotLight>)
         {
             result["type"] = "spot";
@@ -130,7 +136,14 @@ LightVariant decodeLight(const json &value, const std::string &where)
     const std::string type = required(value, "type", where).get<std::string>();
     const glm::vec3 color = readVector<3, float>(required(value, "color", where), where + ".color");
     const float intensity = required(value, "intensity", where).get<float>();
-    if (type == "point") return PointLight{{color, intensity}};
+    if (type == "point")
+    {
+        PointLight result{{color, intensity}};
+        result.range = value.value("range", 100.0f);
+        result.shadowNearPlane = value.value("shadow_near_plane", 0.1f);
+        result.sourceRadius = value.value("source_radius", 0.0f);
+        return result;
+    }
     if (type == "directional")
     {
         DirectionalLight result{{color, intensity}};

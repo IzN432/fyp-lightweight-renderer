@@ -109,6 +109,7 @@ add_library(lr_core STATIC
     src/core/passes/ibl/IblPass.cpp
     src/core/passes/pbr/PbrPass.cpp
     src/core/passes/shadow/SpotShadowPass.cpp
+    src/core/passes/shadow/PointShadowPass.cpp
     src/core/passes/shadow/CascadedShadowPass.cpp
     src/core/passes/shadow/AreaShadowPass.cpp
     src/core/passes/transparent/TransparentPass.cpp
@@ -230,6 +231,7 @@ add_shaders(lr_core
     src/core/passes/pbr/pbr.frag
     src/core/passes/shadow/spot_shadow.vert
     src/core/passes/shadow/spot_shadow.frag
+    src/core/passes/shadow/point_shadow.vert
     src/core/passes/shadow/cascaded_shadow.vert
     src/core/passes/shadow/cascaded_shadow.frag
     src/core/passes/shadow/area_shadow.vert

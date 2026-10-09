@@ -16,6 +16,7 @@ class OverlayPointsPass;
 class Scene;
 class SceneManager;
 class SpotShadowPass;
+class PointShadowPass;
 class TransparentPass;
 struct EditableMeshContext;
 struct EditorFrameContext;
@@ -34,6 +35,7 @@ public:
         TransparentPass    *transparent    = nullptr;
         ObjectPickingPass  *objectPicking  = nullptr;
         SpotShadowPass     *spotShadow     = nullptr;
+        PointShadowPass    *pointShadow    = nullptr;
         CascadedShadowPass *cascadedShadow = nullptr;
         AreaShadowPass     *areaShadow     = nullptr;
         HeatmapPass        *heatmap        = nullptr;

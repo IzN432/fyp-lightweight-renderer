@@ -1433,6 +1433,9 @@ LightInfo describeLight(const lr::Light &light)
             if constexpr (std::is_same_v<T, lr::PointLight>)
             {
                 info.type = "point";
+                info.range = l.range;
+                info.shadowNearPlane = l.shadowNearPlane;
+                info.sourceRadius = l.sourceRadius;
             } else if constexpr (std::is_same_v<T, lr::SpotLight>)
             {
                 info.type             = "spot";
@@ -1482,7 +1485,11 @@ lr::LightVariant makeLight(const char *function, const LightSpec &spec)
     const lr::BaseLight base{glm::vec3(spec.color[0], spec.color[1], spec.color[2]), spec.intensity};
     if (spec.type == "point")
     {
-        return lr::PointLight{base};
+        lr::PointLight light{base};
+        light.range = spec.range;
+        light.shadowNearPlane = spec.shadowNearPlane;
+        light.sourceRadius = spec.sourceRadius;
+        return light;
     }
     if (spec.type == "spot")
     {
@@ -1560,10 +1567,10 @@ void bindScene(nb::module_ &m)
         .def_ro("intensity", &LightInfo::intensity)
         .def_ro("inner_cone_degrees", &LightInfo::innerConeDegrees, "Spot lights only.")
         .def_ro("outer_cone_degrees", &LightInfo::outerConeDegrees, "Spot lights only.")
-        .def_ro("range", &LightInfo::range, "Spot lights only: lighting and shadow far distance.")
-        .def_ro("shadow_near_plane", &LightInfo::shadowNearPlane, "Spot lights only.")
+        .def_ro("range", &LightInfo::range, "Point and spot lights: shadow far distance (and spot lighting range).")
+        .def_ro("shadow_near_plane", &LightInfo::shadowNearPlane, "Point and spot lights only.")
         .def_ro("source_radius", &LightInfo::sourceRadius,
-                "Spot lights only: emitter radius in world units, which widens the shadow penumbra.")
+                "Point and spot lights only: emitter radius in world units, which widens the shadow penumbra.")
         .def_ro("angular_radius_degrees", &LightInfo::angularRadiusDegrees,
                 "Directional lights only: half the angle the emitter subtends, which widens the "
                 "shadow penumbra with distance from the caster.")

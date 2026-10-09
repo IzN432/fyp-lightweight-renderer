@@ -21,6 +21,10 @@ struct BaseLight
 
 struct PointLight : public BaseLight
 {
+    float range           = 100.0f;
+    float shadowNearPlane = 0.1f;
+    float sourceRadius    = 0.0f;
+
     bool operator==(const PointLight &) const = default;
 };
 
@@ -86,7 +90,12 @@ struct LightGUICallbacks
 
     bool operator()(PointLight &light) const
     {
-        return sharedGui(light);
+        bool changed = sharedGui(light);
+        changed |= ImGui::DragFloat("Range", &light.range, 0.25f, 0.1f, 10000.0f);
+        changed |= ImGui::DragFloat("Shadow Near Plane", &light.shadowNearPlane, 0.01f, 0.01f,
+                                    std::max(0.01f, light.range - 0.01f));
+        changed |= ImGui::DragFloat("Source Radius", &light.sourceRadius, 0.005f, 0.0f, 10.0f);
+        return changed;
     }
 
     bool operator()(DirectionalLight &light) const
@@ -220,6 +229,12 @@ struct Light : public Component
 private:
     static void enforceConeAngles(LightVariant &variant)
     {
+        if (auto *point = std::get_if<PointLight>(&variant))
+        {
+            point->range = std::max(point->range, 0.02f);
+            point->shadowNearPlane = std::clamp(point->shadowNearPlane, 0.01f, point->range - 0.01f);
+            point->sourceRadius = std::max(point->sourceRadius, 0.0f);
+        }
         if (auto *spot = std::get_if<SpotLight>(&variant))
         {
             spot->outerConeAngleDegrees = std::clamp(spot->outerConeAngleDegrees, 0.0f, 90.0f);
