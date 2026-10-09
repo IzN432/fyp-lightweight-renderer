@@ -2,7 +2,6 @@
 
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/TransformComponent.hpp"
-#include "features/animation/AnimatorComponent.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 
 #include <algorithm>
@@ -35,7 +34,7 @@ MeshLoadResult loadFile(const std::filesystem::path &path, MaterialStore &materi
 } // namespace
 
 SceneLoadResult SceneLoader::load(const std::filesystem::path &path, Scene &scene, MeshStore &meshStore,
-                                  MaterialStore &materialStore,
+                                  MaterialStore &materialStore, AnimationLibrary &animations,
                                   const SceneLoaderConfig &config)
 {
     MeshLoadResult loaded = loadFile(path, materialStore, config);
@@ -216,7 +215,8 @@ SceneLoadResult SceneLoader::load(const std::filesystem::path &path, Scene &scen
     }
     if (!clips.empty())
     {
-        importRoot.addComponent<AnimatorComponent>(std::move(clips));
+        for (AnimationClip &clip : clips)
+            animations.add(std::move(clip));
     }
 
     for (uint32_t nodeIndex = 0; nodeIndex < loaded.nodes.size(); ++nodeIndex)

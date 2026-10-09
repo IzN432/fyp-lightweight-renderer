@@ -58,6 +58,7 @@ void SceneObjectScaleHandler::endDrag()
 
     m_commandManager.appendCommandWithoutExecuting(
         std::make_unique<ScaleSceneObjectCommand>(*m_target, m_beforeScale, afterScale));
+    if (m_commitCallback) m_commitCallback(*m_target);
 }
 
 } // namespace lr

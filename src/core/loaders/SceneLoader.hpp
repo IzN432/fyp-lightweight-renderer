@@ -5,6 +5,7 @@
 #include "core/scene/Scene.hpp"
 #include "core/scene/MeshStore.hpp"
 #include "core/scene/SceneObject.hpp"
+#include "features/animation/AnimationLibrary.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -35,7 +36,7 @@ class SceneLoader
 {
 public:
     static SceneLoadResult load(const std::filesystem::path &path, Scene &scene, MeshStore &meshStore,
-                                MaterialStore &materialStore,
+                                MaterialStore &materialStore, AnimationLibrary &animations,
                                 const SceneLoaderConfig &config = {});
 };
 

@@ -3,6 +3,7 @@
 #include "MeshComponent.hpp"
 #include "SceneAssets.hpp"
 #include "core/scene/serialization/ComponentCodec.hpp"
+#include "features/animation/AnimationTrack.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -22,9 +23,9 @@ namespace
 {
 using json = nlohmann::json;
 
-// 3 — the materials array is indexed by the source MaterialHandle. Mesh face groups index that
-// table and are remapped to destination handles while loading.
-constexpr int kFormatVersion = 3;
+// 4 — animations are scene-level resources. Animator components contain handles into the global
+// table instead of embedding clip payloads.
+constexpr int kFormatVersion = 4;
 constexpr std::array<char, 8> kFileMagic{'L', 'R', 'S', 'C', 'E', 'N', 'E', '\0'};
 const json &required(const json &object, const char *key, const std::string &where);
 
@@ -136,6 +137,107 @@ Uuid readId(const json &value, const std::string &where)
     }
 }
 
+const char *interpolationName(AnimationInterpolation interpolation)
+{
+    switch (interpolation)
+    {
+    case AnimationInterpolation::Linear: return "linear";
+    case AnimationInterpolation::Step: return "step";
+    case AnimationInterpolation::CubicSpline: return "cubic_spline";
+    }
+    return "linear";
+}
+
+AnimationInterpolation readInterpolation(const json &value, const std::string &where)
+{
+    const std::string name = value.get<std::string>();
+    if (name == "linear") return AnimationInterpolation::Linear;
+    if (name == "step") return AnimationInterpolation::Step;
+    if (name == "cubic_spline") return AnimationInterpolation::CubicSpline;
+    throw std::runtime_error("SceneSerializer: invalid animation interpolation '" + name + "' at " + where);
+}
+
+json serializeAnimationClip(const AnimationClip &clip)
+{
+    json tracks = json::array();
+    for (const AnimationChannel &channel : clip.tracks())
+    {
+        tracks.push_back(std::visit([](const auto &track) {
+            using Track = std::decay_t<decltype(track)>;
+            json keyframes = json::array();
+            for (const auto &keyframe : track.keyframes())
+            {
+                const auto encode = [](const auto &value) -> json {
+                    using Value = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<Value, glm::quat>)
+                        return {value.x, value.y, value.z, value.w};
+                    else return vec3(value);
+                };
+                keyframes.push_back({{"seconds", keyframe.seconds}, {"value", encode(keyframe.value)},
+                    {"incoming_tangent", encode(keyframe.incomingTangent)},
+                    {"outgoing_tangent", encode(keyframe.outgoingTangent)}});
+            }
+            const char *property = std::is_same_v<Track, TranslationTrack> ? "translation" :
+                                   std::is_same_v<Track, RotationTrack> ? "rotation" : "scale";
+            return json{{"target", toString(track.target())}, {"property", property},
+                        {"interpolation", interpolationName(track.interpolation())},
+                        {"keyframes", std::move(keyframes)}};
+        }, channel));
+    }
+    return {{"name", clip.name()}, {"tracks", std::move(tracks)}};
+}
+
+AnimationClip deserializeAnimationClip(const json &value, const std::string &where, const Scene &scene)
+{
+    std::vector<AnimationChannel> tracks;
+    const json &serializedTracks = required(value, "tracks", where);
+    if (!serializedTracks.is_array())
+        throw std::runtime_error("SceneSerializer: " + where + ".tracks must be an array");
+    for (size_t trackIndex = 0; trackIndex < serializedTracks.size(); ++trackIndex)
+    {
+        const json &track = serializedTracks[trackIndex];
+        const std::string trackWhere = where + ".tracks[" + std::to_string(trackIndex) + "]";
+        const SceneObjectId target = readId(required(track, "target", trackWhere), trackWhere + ".target");
+        if (!scene.contains(target))
+            throw std::runtime_error("SceneSerializer: missing animation target " + toString(target) + " at " + trackWhere);
+        const auto interpolation = readInterpolation(required(track, "interpolation", trackWhere), trackWhere + ".interpolation");
+        const std::string property = required(track, "property", trackWhere).get<std::string>();
+        const json &keyframes = required(track, "keyframes", trackWhere);
+        if (!keyframes.is_array())
+            throw std::runtime_error("SceneSerializer: " + trackWhere + ".keyframes must be an array");
+        if (property == "rotation")
+        {
+            RotationTrack result(target, interpolation);
+            for (const json &key : keyframes)
+            {
+                const auto readQuaternion = [&](const char *name) {
+                    const glm::vec4 v = readVector<4, float, glm::defaultp>(
+                        required(key, name, trackWhere), trackWhere + "." + name);
+                    return glm::quat(v.w, v.x, v.y, v.z);
+                };
+                result.setKeyframe({required(key, "seconds", trackWhere).get<float>(), readQuaternion("value"),
+                                    readQuaternion("incoming_tangent"), readQuaternion("outgoing_tangent")});
+            }
+            tracks.emplace_back(std::move(result));
+        }
+        else if (property == "translation" || property == "scale")
+        {
+            auto fill = [&]<typename Track>(Track result) {
+                for (const json &key : keyframes)
+                    result.setKeyframe({required(key, "seconds", trackWhere).get<float>(),
+                        readVector<3, float, glm::defaultp>(required(key, "value", trackWhere), trackWhere + ".value"),
+                        readVector<3, float, glm::defaultp>(required(key, "incoming_tangent", trackWhere), trackWhere + ".incoming_tangent"),
+                        readVector<3, float, glm::defaultp>(required(key, "outgoing_tangent", trackWhere), trackWhere + ".outgoing_tangent")});
+                tracks.emplace_back(std::move(result));
+            };
+            if (property == "translation") fill(TranslationTrack(target, interpolation));
+            else fill(ScaleTrack(target, interpolation));
+        }
+        else throw std::runtime_error("SceneSerializer: invalid animation property '" + property + "' at " + trackWhere);
+    }
+    return AnimationClip(required(value, "name", where).get<std::string>(), std::move(tracks));
+}
+
 std::string attributeType(const MeshLayout::AttributeDesc &attribute)
 {
     if (attribute.type == typeid(float) && attribute.stride == sizeof(float)) return "f32";
@@ -245,11 +347,12 @@ Material deserializeMaterial(const json &value, const std::string &where, const 
 
 void SceneSerializer::save(const SceneAssets &assets, const std::filesystem::path &path)
 {
-    save(assets.scene, assets.meshes, assets.materials, path);
+    save(assets.scene, assets.meshes, assets.materials, assets.animations, path);
 }
 
 void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
-                           const MaterialStore &materialStore, const std::filesystem::path &path)
+                           const MaterialStore &materialStore, const AnimationLibrary &animationLibrary,
+                           const std::filesystem::path &path)
 {
     if constexpr (std::endian::native != std::endian::little)
         throw std::runtime_error("SceneSerializer: only little-endian hosts are currently supported");
@@ -307,6 +410,12 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
         meshes.push_back(std::move(item));
     }
 
+    // Unlike meshes and materials, authored clips are retained even when no Animator currently
+    // references them. The global animation editor owns this library independently of components.
+    json animations = json::array();
+    for (const AnimationClip &clip : animationLibrary.clips())
+        animations.push_back(serializeAnimationClip(clip));
+
     const ComponentCodecRegistry codecs = makeSceneComponentCodecs();
     const ComponentSaveContext componentContext{meshStore, materialStore};
     json objects = json::array();
@@ -346,7 +455,8 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
     }
     const json document{{"format", "lr.scene"}, {"version", kFormatVersion},
                         {"environment", std::move(environment)}, {"objects", std::move(objects)},
-                        {"meshes", std::move(meshes)}, {"materials", std::move(materials)}};
+                        {"meshes", std::move(meshes)}, {"materials", std::move(materials)},
+                        {"animations", std::move(animations)}};
     const std::string manifest = document.dump();
     const uint64_t manifestBytes = static_cast<uint64_t>(manifest.size());
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
@@ -363,12 +473,13 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
 std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &path)
 {
     auto result = std::make_unique<SceneAssets>();
-    load(path, result->scene, result->meshes, result->materials);
+    load(path, result->scene, result->meshes, result->materials, result->animations);
     return result;
 }
 
 std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &path, Scene &scene,
                                                  MeshStore &meshStore, MaterialStore &materialStore,
+                                                 AnimationLibrary &animationLibrary,
                                                  bool remapCameraObject)
 {
     if constexpr (std::endian::native != std::endian::little)
@@ -395,10 +506,15 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
     if (required(document, "format", "root").get<std::string>() != "lr.scene")
         throw std::runtime_error("SceneSerializer: root.format must be 'lr.scene'");
     const int version = required(document, "version", "root").get<int>();
-    if (version != 2 && version != kFormatVersion)
+    if (version < 2 || version > kFormatVersion)
         throw std::runtime_error("SceneSerializer: unsupported format version " + std::to_string(version));
     const json &objects = required(document, "objects", "root");
     if (!objects.is_array()) throw std::runtime_error("SceneSerializer: root.objects must be an array");
+
+    // Animation handles are indices into this scene-owned library. A native scene load replaces
+    // that library wholesale; retaining clips from the previous document would both leak assets
+    // into the new scene and let playback resolve stale handles.
+    animationLibrary.clear();
 
     const std::streamoff payloadOffset = static_cast<std::streamoff>(kFileMagic.size() + sizeof(manifestBytes) + manifestBytes);
     const BinaryReader binary(path, payloadOffset);
@@ -548,6 +664,18 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
         created.push_back(object.id());
     }
 
+    if (version >= 4)
+    {
+        const json &animations = required(document, "animations", "root");
+        if (!animations.is_array())
+            throw std::runtime_error("SceneSerializer: root.animations must be an array");
+        for (size_t index = 0; index < animations.size(); ++index)
+        {
+            animationLibrary.add(deserializeAnimationClip(
+                animations[index], "animations[" + std::to_string(index) + "]", scene));
+        }
+    }
+
     for (size_t index = 0; index < objects.size(); ++index)
     {
         const json &value = objects[index];
@@ -557,17 +685,9 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
         if (!components.is_object()) throw std::runtime_error("SceneSerializer: " + where + ".components must be an object");
         for (const auto &[name, component] : components.items())
         {
-            try
-            {
-                codecs.forKey(name).decode(component, object, componentContext,
-                                           where + ".components." + name);
-            }
-            catch (const std::runtime_error &error)
-            {
-                if (std::string_view(error.what()).starts_with("SceneSerializer: unknown component"))
-                    throw std::runtime_error(std::string(error.what()) + " at " + where + ".components");
-                throw;
-            }
+            const ComponentCodec *codec = codecs.findKey(name);
+            if (!codec) continue;
+            codec->decode(component, object, componentContext, where + ".components." + name);
         }
 
         const json &parent = required(value, "parent", where);

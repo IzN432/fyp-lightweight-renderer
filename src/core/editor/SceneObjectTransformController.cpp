@@ -24,49 +24,16 @@ void SceneObjectTransformController::applyTarget(SceneObject *target)
     m_scale.setTarget(target);
 }
 
-void SceneObjectTransformController::setRecordCommands(bool record)
-{
-    m_translation.setRecordCommands(record);
-    m_rotation.setRecordCommands(record);
-    m_scale.setRecordCommands(record);
-}
-
 void SceneObjectTransformController::setSelectedTarget(SceneObject *target)
 {
-    if (m_temporaryTarget && target != m_selectedTarget && m_cancelTemporaryEdit)
-    {
-        // Clear first because the callback ends the edit through this controller.
-        auto cancel = std::move(m_cancelTemporaryEdit);
-        cancel();
-    }
     m_selectedTarget = target;
-    if (!m_temporaryTarget)
-    {
-        applyTarget(target);
-        m_tool = TransformTool::None;
-    }
+    applyTarget(target);
+    m_tool = TransformTool::None;
 }
 
 SceneObject *SceneObjectTransformController::target() const
 {
-    return m_temporaryTarget ? m_temporaryTarget : m_selectedTarget;
-}
-
-void SceneObjectTransformController::beginTransformEdit(SceneObject &target, TransformTool tool,
-                                                        std::function<void()> cancel)
-{
-    m_temporaryTarget = &target;
-    m_tool            = tool;
-    m_cancelTemporaryEdit = std::move(cancel);
-    applyTarget(&target);
-}
-
-void SceneObjectTransformController::endTransformEdit()
-{
-    m_temporaryTarget = nullptr;
-    m_tool            = TransformTool::None;
-    m_cancelTemporaryEdit = {};
-    applyTarget(m_selectedTarget);
+    return m_selectedTarget;
 }
 
 void SceneObjectTransformController::onObjectsDestroyed(std::span<const SceneObjectId> ids)
@@ -77,18 +44,6 @@ void SceneObjectTransformController::onObjectsDestroyed(std::span<const SceneObj
     if (destroyed(m_selectedTarget))
     {
         m_selectedTarget = nullptr;
-    }
-    if (destroyed(m_temporaryTarget))
-    {
-        auto cancel = std::move(m_cancelTemporaryEdit);
-        if (cancel)
-        {
-            cancel();
-        }
-        else
-        {
-            m_temporaryTarget = nullptr;
-        }
     }
     applyTarget(target());
     if (!target())

@@ -26,7 +26,6 @@
 #include "core/framegraph/compiler/ShaderInterface.hpp"
 #include "core/vulkan/CommandBuffer.hpp"
 #include "core/vulkan/ShaderCompiler.hpp"
-#include "features/animation/AnimatorComponent.hpp"
 
 #include <imgui.h>
 #include <nanobind/nanobind.h>
@@ -1702,25 +1701,9 @@ void bindScene(nb::module_ &m)
             },
             "(vertex_count,) uint32: each render vertex's index into unique_positions.");
 
-    nb::class_<lr::AnimatorComponent>(m, "Animator", "Animation playback for an imported animated object.")
-        .def_prop_ro("clip_names",
-                     [](const lr::AnimatorComponent &animator) {
-                         std::vector<std::string> names;
-                         for (const auto &clip : animator.clips())
-                         {
-                             names.push_back(clip.name());
-                         }
-                         return names;
-                     })
-        .def_prop_ro("playing", &lr::AnimatorComponent::isPlaying)
-        .def("play", &lr::AnimatorComponent::play, "clip_index"_a = 0)
-        .def("pause", &lr::AnimatorComponent::pause)
-        .def("stop", &lr::AnimatorComponent::stop)
-        .def("seek", &lr::AnimatorComponent::seek, "seconds"_a);
-
     nb::class_<lr::SceneObject>(m, "SceneObject",
                                 "An object in a Scene: a name, a place in the hierarchy, a "
-                                "transform, and optionally a mesh, a light or an animator.")
+                                "transform, and optionally a mesh or light.")
         .def_prop_ro(
             "id", [](const lr::SceneObject &object) { return lr::toString(object.id()); },
             "The object's stable identity, as a UUID string. It survives saving and loading the "
@@ -1835,18 +1818,17 @@ void bindScene(nb::module_ &m)
             "spread_angle_degrees"_a = nb::none(),
             "Change this object's light; parameters left as None keep their current values. Move or turn it "
             "with position/rotation. A SceneGpu showing the scene picks the change up on the next frame.")
-        .def_prop_ro(
-            "animator",
-            [](lr::SceneObject &object) -> lr::AnimatorComponent * {
-                return object.hasComponent<lr::AnimatorComponent>() ? &object.getComponent<lr::AnimatorComponent>()
-                                                                    : nullptr;
-            },
-            ref, "The object's animation player, or None.");
+        ;
 
     nb::class_<lr::SceneAssets>(m, "Scene",
                                 "A scene loaded with the engine's loaders: objects, meshes and materials, on the CPU. "
                                 "Build GPU buffers from it with ResourceRegistry.upload_buffer()/upload_image().")
         .def(nb::init<>())
+        .def_prop_ro("animation_names", [](const lr::SceneAssets &assets) {
+            std::vector<std::string> names;
+            for (const auto &clip : assets.animations.clips()) names.push_back(clip.name());
+            return names;
+        })
         .def("save", [](const lr::SceneAssets &assets, const fs::path &path) {
                  lr::SceneSerializer::save(assets, path);
              }, "path"_a,
@@ -1901,18 +1883,6 @@ void bindScene(nb::module_ &m)
                 return assets.materials.get(handle);
             },
             "handle"_a, ref, "The material a mesh's face_materials entry refers to.")
-        .def(
-            "update",
-            [](lr::SceneAssets &assets, float dt) {
-                for (lr::SceneObject *object : liveObjects(assets.scene))
-                {
-                    if (object->hasComponent<lr::AnimatorComponent>())
-                    {
-                        object->getComponent<lr::AnimatorComponent>().update(dt);
-                    }
-                }
-            },
-            "dt"_a, "Advance every playing animation by dt seconds (moves the animated objects' transforms).")
         .def(
             "add_light",
             [](lr::SceneAssets &assets, const std::string &type, std::array<float, 3> color, float intensity,

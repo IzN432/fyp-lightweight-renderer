@@ -4,7 +4,7 @@ Everything else in ``lr`` is the general-purpose frame graph: buffers, images, p
 yourself, with no opinion on what a scene is or how it is lit. ``lr.engine`` is the engine's own, opinionated
 layer on top of it — the same pieces the C++ renderer is made of:
 
-  Scenes          load_scene, Scene, SceneObject, Mesh, Material, Light, Animator
+  Scenes          load_scene, Scene, SceneObject, Mesh, Material, Light
                   the engine's scene model, native .lrscene persistence and asset loaders, on the CPU
   GPU layout      SceneGpu
                   a scene uploaded in the engine's buffer layout and kept in sync every frame
@@ -35,7 +35,6 @@ SceneObject = _native.SceneObject
 Mesh = _native.Mesh
 Material = _native.Material
 Light = _native.Light
-Animator = _native.Animator
 load_scene = _native.load_scene
 
 # GPU layout
@@ -51,7 +50,7 @@ PbrPass = _native.PbrPass
 CompositePass = _native.CompositePass
 
 __all__ = [
-    "Scene", "SceneObject", "Mesh", "Material", "Light", "Animator", "load_scene",
+    "Scene", "SceneObject", "Mesh", "Material", "Light", "load_scene",
     "SceneGpu",
     "EnginePass", "ResourceUse", "Ibl", "GeometryPass", "AmbientOcclusionPass", "PbrPass", "CompositePass",
 ]

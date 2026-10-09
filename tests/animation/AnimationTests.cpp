@@ -1,5 +1,5 @@
 #include "features/animation/AnimationClip.hpp"
-#include "features/animation/AnimatorComponent.hpp"
+#include "features/animation/AnimationSystem.hpp"
 #include "core/scene/Scene.hpp"
 #include "core/scene/TransformComponent.hpp"
 
@@ -22,6 +22,8 @@ int main()
     // The object `track` drives has to exist before the track can name it. The tracks that are only
     // sampled, never applied, can name objects that were never created.
     lr::Scene scene;
+    lr::AnimationLibrary animations;
+    lr::AnimationSystem animationSystem(scene, animations);
     auto     &target          = scene.createSceneObject();
     auto     &targetTransform = target.addComponent<lr::TransformComponent>();
 
@@ -58,47 +60,23 @@ int main()
     lr::AnimationClip clip("Walk", {track});
     assert(near(clip.durationSeconds(), 2.0f));
 
-    auto &animatorObject = scene.createSceneObject();
-    auto &animator = animatorObject.addComponent<lr::AnimatorComponent>(std::vector<lr::AnimationClip>{clip});
-    animator.setLoop(false);
-    animator.setSpeedMultiplier(2.0f);
-    animator.play(0);
-    animator.update(0.5f);
-    assert(near(animator.playbackSeconds(), 1.0f));
+    const lr::AnimationClipHandle clipHandle = animations.add(clip);
+    lr::TranslationTrack conflictingTrack(target.id());
+    conflictingTrack.setKeyframe(0.0f, glm::vec3(1.0f));
+    const auto conflictingHandle = animations.add(
+        lr::AnimationClip("Conflicting", {conflictingTrack}));
+    lr::ScaleTrack independentTrack(target.id());
+    independentTrack.setKeyframe(0.0f, glm::vec3(1.0f));
+    const auto independentHandle = animations.add(
+        lr::AnimationClip("Independent", {independentTrack}));
+    assert(animationSystem.play(clipHandle, false, 2.0f).started);
+    const auto conflict = animationSystem.play(conflictingHandle);
+    assert(!conflict.started && conflict.conflictingClip == clipHandle);
+    assert(animationSystem.play(independentHandle).started);
+    animationSystem.update(0.5f);
     assert(near(targetTransform.transform().position().x, 2.0f));
-    animator.update(1.0f);
-    assert(!animator.isPlaying());
-    assert(near(animator.playbackSeconds(), 2.0f));
-
-    assert(animator.beginKeyframeEdit(0, 1));
-    targetTransform.setPosition(glm::vec3(9.0f, 0.0f, 0.0f));
-    animator.cancelKeyframeEdit();
-    assert(near(targetTransform.transform().position().x, 4.0f));
-    assert(near(std::get<lr::TranslationTrack>(animator.clips()[0].tracks()[0]).sample(2.0f)->x, 4.0f));
-
-    assert(animator.beginKeyframeEdit(0, 1));
-    targetTransform.setPosition(glm::vec3(7.0f, 0.0f, 0.0f));
-    animator.applyKeyframeEdit();
-    assert(!animator.keyframeEdit());
-    assert(near(std::get<lr::TranslationTrack>(animator.clips()[0].tracks()[0]).sample(2.0f)->x, 7.0f));
-
-    animator.seek(1.0f);
-    targetTransform.setPosition(glm::vec3(5.0f, 1.0f, 0.0f));
-    assert(animator.addKeyframe(0, animator.playbackSeconds()));
-    const auto &addedKeyframes = std::get<lr::TranslationTrack>(animator.clips()[0].tracks()[0]).keyframes();
-    assert(addedKeyframes.size() == 3);
-    assert(near(addedKeyframes[1].seconds, 1.0f));
-    assert(near(addedKeyframes[1].value.x, 5.0f));
-    assert(near(addedKeyframes[1].value.y, 1.0f));
-    assert(!animator.addKeyframe(1, 1.0f));
-
-    assert(animator.deleteKeyframe(0, 1));
-    const auto &remainingKeyframes =
-        std::get<lr::TranslationTrack>(animator.clips()[0].tracks()[0]).keyframes();
-    assert(remainingKeyframes.size() == 2);
-    assert(near(remainingKeyframes[0].seconds, 0.0f));
-    assert(near(remainingKeyframes[1].seconds, 2.0f));
-    assert(!animator.deleteKeyframe(0, 2));
+    animationSystem.stopAll();
+    assert(!animationSystem.isPlaying(clipHandle));
 
     bool rejectedInvalidTime = false;
     try

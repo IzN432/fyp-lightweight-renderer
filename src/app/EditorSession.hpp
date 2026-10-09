@@ -33,6 +33,7 @@ public:
 
     void drawFeaturePanel();
     void drawTransformWindow();
+    void drawAnimationWindow();
 
     // Whether camera orbit/pan/zoom may act on the pointer this frame — the editor arbitrates
     // pointer priority, so a host camera controller asks rather than guessing.

@@ -3,6 +3,7 @@
 #include "core/scene/Component.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "core/scene/Transform.hpp"
+#include "core/editor/EditorContext.hpp"
 
 #include <imgui.h>
 
@@ -99,16 +100,25 @@ public:
             m_transform.setPosition(position);
             changed = true;
         }
+        if (ImGui::IsItemDeactivatedAfterEdit() && findOwningObject() && editorContext())
+            editorContext()->transformCommits.onTransformCommitted(
+                const_cast<SceneObject &>(*findOwningObject()), TransformTool::Translate);
         if (ImGui::DragFloat3("Rotation (Degrees)", &eulerDegrees.x, 0.1f))
         {
             m_transform.setEulerDegrees(eulerDegrees);
             changed = true;
         }
+        if (ImGui::IsItemDeactivatedAfterEdit() && findOwningObject() && editorContext())
+            editorContext()->transformCommits.onTransformCommitted(
+                const_cast<SceneObject &>(*findOwningObject()), TransformTool::Rotate);
         if (ImGui::DragFloat3("Scale", &scale.x, 0.1f))
         {
             m_transform.setScale(scale);
             changed = true;
         }
+        if (ImGui::IsItemDeactivatedAfterEdit() && findOwningObject() && editorContext())
+            editorContext()->transformCommits.onTransformCommitted(
+                const_cast<SceneObject &>(*findOwningObject()), TransformTool::Scale);
         if (changed)
         {
             markDirty();

@@ -13,6 +13,7 @@ class SceneAssets;
 class Scene;
 class MeshStore;
 class MaterialStore;
+class AnimationLibrary;
 
 // Versioned, CPU-only scene persistence. A single .lrscene file contains its JSON manifest followed
 // by the bulk mesh/texture payload. Objects, meshes and materials are named by the UUIDs they
@@ -38,7 +39,7 @@ class SceneSerializer
 public:
     static void                         save(const SceneAssets &assets, const std::filesystem::path &path);
     static void                         save(const Scene &scene, const MeshStore &meshes,
-                                             const MaterialStore &materials,
+                                             const MaterialStore &materials, const AnimationLibrary &animations,
                                              const std::filesystem::path &path);
     static std::unique_ptr<SceneAssets> load(const std::filesystem::path &path);
     // Appends a saved scene to caller-owned stores, preserving existing objects and assets, and
@@ -46,6 +47,7 @@ public:
     // identity the caller's scene or stores already hold.
     static std::vector<SceneObjectId> load(const std::filesystem::path &path, Scene &scene,
                                            MeshStore &meshes, MaterialStore &materials,
+                                           AnimationLibrary &animations,
                                            bool remapCameraObject = false);
 };
 

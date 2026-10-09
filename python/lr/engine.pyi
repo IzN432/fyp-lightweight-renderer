@@ -121,21 +121,8 @@ class Mesh:
         """(vertex_count,) uint32: each render vertex's index into unique_positions."""
         ...
 
-class Animator:
-    """Animation playback for an imported animated object (advance it with Scene.update)."""
-
-    @property
-    def clip_names(self) -> list[str]: ...
-    @property
-    def playing(self) -> bool: ...
-    def play(self, clip_index: int = 0) -> None: ...
-    def pause(self) -> None: ...
-    def stop(self) -> None: ...
-    def seek(self, seconds: float) -> None: ...
-
 class SceneObject:
-    """An object in a Scene: a name, a place in the hierarchy, a transform, and optionally a mesh, a light
-    or an animator."""
+    """An object in a Scene: a name, a place in the hierarchy, a transform, and optionally a mesh or light."""
 
     @property
     def id(self) -> str:
@@ -197,16 +184,13 @@ class SceneObject:
         """Change this object's light; parameters left as None keep their current values. Move or turn
         it with position/rotation. A SceneGpu showing the scene picks the change up on the next frame."""
         ...
-    @property
-    def animator(self) -> Animator | None:
-        """The object's animation player, or None."""
-        ...
-
 class Scene:
     """A scene loaded with the engine's loaders: objects, meshes and materials, on the CPU. Build GPU
     buffers from it with ResourceRegistry.upload_buffer()/upload_image()."""
 
     def __init__(self) -> None: ...
+    @property
+    def animation_names(self) -> list[str]: ...
     def save(self, path: str | os.PathLike[str]) -> None:
         """Save this complete scene to a single .lrscene file."""
         ...
@@ -226,9 +210,6 @@ class Scene:
         ...
     def material(self, handle: int) -> Material:
         """The material a mesh's face_materials entry refers to."""
-        ...
-    def update(self, dt: float) -> None:
-        """Advance every playing animation by dt seconds (moves the animated objects' transforms)."""
         ...
     def add_light(
         self,

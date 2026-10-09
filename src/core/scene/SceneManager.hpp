@@ -9,6 +9,7 @@
 #include "SceneObject.hpp"
 #include "Scene.hpp"
 #include "SceneGpu.hpp"
+#include "SceneAssets.hpp"
 #include "AreaLightVisual.hpp"
 #include "Mesh.hpp"
 #include "MeshStore.hpp"
@@ -21,10 +22,12 @@
 #include "core/loaders/MaterialStore.hpp"
 #include "core/loaders/SceneLoader.hpp"
 #include "core/upload/MeshUploader.hpp"
+#include "features/animation/AnimationLibrary.hpp"
+#include "features/animation/AnimationSystem.hpp"
 
-// SceneManager owns the MeshStore/MaterialStore for a Scene and is the editor's view of it. Keeping the
-// GPU-facing scene buffers (meshes, materials, lights, camera, skins) in sync is SceneGpu's job — see
-// gpu() — and SceneManager adds the editor's state on top: the edited mesh, vertex selection, editor
+// SceneManager is the editor/runtime view of a SceneAssets document. Keeping the GPU-facing scene
+// buffers (meshes, materials, lights, camera, skins) in sync is SceneGpu's job — see gpu() — and
+// SceneManager adds runtime animation plus the editor's state: the edited mesh, vertex selection,
 // presentation capabilities, and the selected-mesh points/heatmap buffers editor overlays draw.
 namespace lr
 {
@@ -34,19 +37,18 @@ class Viewer;
 class SceneManager
 {
 public:
-    SceneManager(ResourceRegistry &registry, uint32_t materialCapacity,
-                 std::function<Material()> defaultMaterialFactory);
+    SceneManager(ResourceRegistry &registry, SceneAssets &assets);
 
-    // Must be called once, before anything that touches the GPU side (it creates gpu()).
-    void   setScene(Scene &scene);
     Scene &scene() { return gpu().scene(); }
 
-    // The scene's GPU buffers. Valid after setScene().
+    // The scene's GPU buffers. Available for the manager's entire lifetime.
     SceneGpu       &gpu();
     const SceneGpu &gpu() const;
 
-    MaterialStore &materialStore() { return m_materialStore; }
-    MeshStore     &meshStore() { return m_meshStore; }
+    MaterialStore &materialStore() { return m_assets.materials; }
+    MeshStore     &meshStore() { return m_assets.meshes; }
+    AnimationLibrary &animations() { return m_assets.animations; }
+    AnimationSystem &animationSystem() { return m_animationSystem; }
 
     // Loads OBJ, glTF, or GLB content into this manager's Scene and asset
     // stores. Returns an identity-transform container for the imported asset.
@@ -117,7 +119,7 @@ public:
     void initialize(const AreaLightVisualConfig &areaLightVisualConfig, const GpuMaterialLayout &materialLayout,
                     const std::vector<std::string> &vertexAttributeNames, InputHandler &input);
 
-    // Registers SceneGpu's per-frame callbacks (aspect ratio, animations, skins, flushDirty()), an
+    // Registers SceneGpu's per-frame callbacks (aspect ratio, skins, flushDirty()), an
     // onUpdate that drives the SelectionManager's mouse/drag handling, and an onLateUpdate that
     // synchronizes the selected-mesh overlay buffers (see synchronizeSelectedMeshBuffers()).
     void registerCallbacks(Viewer &viewer);
@@ -157,7 +159,6 @@ public:
     void updateLightVisuals() { gpu().updateLightVisuals(); }
     void updateCamera() { gpu().updateCamera(); }
     void updateSkins() { gpu().updateSkins(); }
-    void updateAnimations(float deltaSeconds) { gpu().updateAnimations(deltaSeconds); }
 
     // SceneGpu::uploadMeshes plus the selected mesh's points/heatmap buffers.
     void uploadMeshes(const GpuMaterialLayout &materialLayout, const std::vector<std::string> &vertexAttributeNames);
@@ -234,9 +235,9 @@ private:
 
     ResourceRegistry &m_registry;
     MeshUploader      m_meshUploader;
-    MaterialStore     m_materialStore;
-    MeshStore         m_meshStore;
-    // Declared after the stores it refers to, so it is destroyed first.
+    SceneAssets       &m_assets;
+    AnimationSystem    m_animationSystem;
+    // Destroyed before the runtime system and the externally owned scene document.
     std::unique_ptr<SceneGpu> m_gpu;
 
     std::unique_ptr<SelectionManager> m_selectionManager;

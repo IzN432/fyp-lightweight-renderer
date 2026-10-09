@@ -22,10 +22,10 @@ namespace
 const glm::vec3 kDefaultVertexColor{1.0f, 0.0f, 1.0f};
 } // namespace
 
-SceneManager::SceneManager(ResourceRegistry &registry, uint32_t materialCapacity,
-                           std::function<Material()> defaultMaterialFactory)
-    : m_registry(registry), m_meshUploader(registry),
-      m_materialStore(materialCapacity, std::move(defaultMaterialFactory))
+SceneManager::SceneManager(ResourceRegistry &registry, SceneAssets &assets)
+    : m_registry(registry), m_meshUploader(registry), m_assets(assets),
+      m_animationSystem(assets.scene, assets.animations),
+      m_gpu(std::make_unique<SceneGpu>(registry, assets.scene, assets.meshes, assets.materials))
 {
     // Establishing empty topology is what makes the placeholder a usable Mesh: per-unique-vertex
     // attributes can only be set once a topology exists (see Mesh::setPerUniqueVertexArray), and
@@ -65,21 +65,8 @@ GpuMeshLayout SceneManager::selectedMeshHeatmapLayout()
     return gpuLayout;
 }
 
-void SceneManager::setScene(Scene &scene)
-{
-    if (m_gpu)
-    {
-        throw std::logic_error("SceneManager::setScene: the scene can only be set once");
-    }
-    m_gpu = std::make_unique<SceneGpu>(m_registry, scene, m_meshStore, m_materialStore);
-}
-
 SceneGpu &SceneManager::gpu()
 {
-    if (!m_gpu)
-    {
-        throw std::logic_error("SceneManager: scene must be set first (see setScene)");
-    }
     return *m_gpu;
 }
 
@@ -88,7 +75,7 @@ const SceneGpu &SceneManager::gpu() const { return const_cast<SceneManager *>(th
 SceneObject &SceneManager::load(const std::filesystem::path &path, const SceneLoaderConfig &config)
 {
     Scene          &target   = scene();
-    SceneLoadResult imported = SceneLoader::load(path, target, m_meshStore, m_materialStore, config);
+    SceneLoadResult imported = SceneLoader::load(path, target, meshStore(), materialStore(), animations(), config);
     if (!imported.firstMeshObject)
     {
         throw std::runtime_error("SceneManager::load: imported scene does not instantiate a mesh");
@@ -100,7 +87,7 @@ SceneObject &SceneManager::load(const std::filesystem::path &path, const SceneLo
 
 void SceneManager::save(const std::filesystem::path &path) const
 {
-    SceneSerializer::save(gpu().scene(), m_meshStore, m_materialStore, path);
+    SceneSerializer::save(m_assets, path);
 }
 
 std::vector<SceneObjectId> SceneManager::loadScene(const std::filesystem::path &path)
@@ -126,11 +113,12 @@ std::vector<SceneObjectId> SceneManager::loadScene(const std::filesystem::path &
     // destroyed. A loaded scene starts with nothing being vertex-edited; the Scene Hierarchy
     // selection is what picks a target.
     clearEditedMeshObject();
-    m_meshStore.clear();
-    m_materialStore.clear();
+    meshStore().clear();
+    materialStore().clear();
 
+    m_animationSystem.stopAll();
     const std::vector<SceneObjectId> loadedObjects =
-        SceneSerializer::load(path, target, m_meshStore, m_materialStore, true);
+        SceneSerializer::load(path, target, meshStore(), materialStore(), animations(), true);
 
     std::vector<SceneObjectId> added;
     std::vector<MaterialHandle> loadedMaterials;

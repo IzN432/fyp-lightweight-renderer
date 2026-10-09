@@ -4,7 +4,6 @@
 #include "Light.hpp"
 #include "MeshComponent.hpp"
 #include "TransformComponent.hpp"
-#include "features/animation/AnimatorComponent.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 
 #include "core/app/Viewer.hpp"
@@ -193,10 +192,6 @@ void SceneGpu::registerCallbacks(Viewer &viewer)
         setAspect((extent.height == 0) ? 1.0f : static_cast<float>(extent.width) / static_cast<float>(extent.height));
     }));
 
-    m_connections.push_back(viewer.onUpdate([this](float dt, VkExtent2D) {
-        updateAnimations(dt);
-    }));
-
     m_connections.push_back(viewer.onLateUpdate([this](float, VkExtent2D) {
         updateSkins();
         flushDirty();
@@ -344,21 +339,6 @@ void SceneGpu::updateMaterials()
 }
 
 void SceneGpu::updateCamera() { m_cameraUploader.upload(*m_camera, m_aspect); }
-
-void SceneGpu::updateAnimations(float deltaSeconds)
-{
-    for (const auto &object : m_scene.sceneObjects())
-    {
-        if (!m_scene.contains(object->id()))
-        {
-            continue;
-        }
-        if (object->hasComponent<AnimatorComponent>())
-        {
-            object->getComponent<AnimatorComponent>().update(deltaSeconds);
-        }
-    }
-}
 
 void SceneGpu::updateSkins()
 {

@@ -7,6 +7,7 @@
 #include <typeindex>
 #include <vector>
 
+
 namespace lr
 {
 
@@ -47,6 +48,7 @@ public:
     void add(std::unique_ptr<ComponentCodec> codec);
     const ComponentCodec &forType(std::type_index type) const;
     const ComponentCodec &forKey(std::string_view key) const;
+    const ComponentCodec *findKey(std::string_view key) const;
 
 private:
     std::vector<std::unique_ptr<ComponentCodec>> m_codecs;
@@ -57,7 +59,6 @@ ComponentCodecRegistry makeSceneComponentCodecs();
 // Each domain contributes its codecs explicitly. This keeps registration deterministic and makes
 // the link dependency from scene serialization to optional feature libraries visible in CMake.
 void addCoreComponentCodecs(ComponentCodecRegistry &registry);
-void addAnimationComponentCodecs(ComponentCodecRegistry &registry);
 void addSkinComponentCodecs(ComponentCodecRegistry &registry);
 void addRigidBodyComponentCodecs(ComponentCodecRegistry &registry);
 

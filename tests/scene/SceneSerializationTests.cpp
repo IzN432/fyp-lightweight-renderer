@@ -5,7 +5,6 @@
 #include "core/scene/SceneSerializer.hpp"
 #include "core/scene/TransformComponent.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
-#include "features/animation/AnimatorComponent.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 #include "features/rigid_body/ColliderComponent.hpp"
 #include "features/rigid_body/RigidBodyComponent.hpp"
@@ -163,10 +162,8 @@ int main()
     translation.setKeyframe({2.0f, {10, 11, 12}, {13, 14, 15}, {16, 17, 18}});
     lr::RotationTrack rotation(meshObjectIds[1], lr::AnimationInterpolation::Step);
     rotation.setKeyframe(0.0f, glm::quat(1, 0, 0, 0));
-    auto &animator = root.addComponent<lr::AnimatorComponent>(
-        std::vector<lr::AnimationClip>{lr::AnimationClip("Edited", {translation, rotation})});
-    animator.setLoop(false);
-    animator.setSpeedMultiplier(1.5f);
+    const auto editedClip = source.animations.add(lr::AnimationClip("Edited", {translation, rotation}));
+    source.animations.add(lr::AnimationClip("Unreferenced", {}));
 
     auto &skinnedObject = source.scene.getSceneObject(meshObjectIds[0]);
     skinnedObject.addComponent<lr::SkinComponent>(lr::Skin(source.scene, {
@@ -204,8 +201,13 @@ int main()
     existingLight.addComponent<lr::Light>(lr::PointLight{});
     editorTarget.scene.destroySceneObject(existingLight.id());
     editorTarget.scene.purgeDestroyedSceneObjects();
+    editorTarget.animations.add(lr::AnimationClip("Stale clip", {}));
     const auto editorLoaded = lr::SceneSerializer::load(
-        temporary.path, editorTarget.scene, editorTarget.meshes, editorTarget.materials, true);
+        temporary.path, editorTarget.scene, editorTarget.meshes, editorTarget.materials,
+        editorTarget.animations, true);
+    assert(editorTarget.animations.size() == 2);
+    assert(editorTarget.animations.get(0).name() == "Edited");
+    assert(editorTarget.animations.get(1).name() == "Unreferenced");
     assert(editorLoaded.front() != liveCamera.id());
     const auto &temporaryCamera = editorTarget.scene.getSceneObject(editorLoaded.front());
     assert(temporaryCamera.hasComponent<lr::Camera>() && !temporaryCamera.parent());
@@ -253,11 +255,10 @@ int main()
     assert(roundTripMaterial.name == "Complete material");
     assert(std::get<lr::MaterialParam::RangedFloat>(roundTripMaterial.parameters.at("ranged")).ceiling == 5.0f);
     assert(roundTripMaterial.textures.at("albedo").pixels == std::vector<uint8_t>({1, 2, 3, 4, 5, 6, 7, 8}));
-    const auto &roundTripAnimator = loadedRoot.getComponent<lr::AnimatorComponent>();
-    assert(!roundTripAnimator.loop() && roundTripAnimator.speedMultiplier() == 1.5f);
-    assert(!roundTripAnimator.isPlaying() && !roundTripAnimator.activeClipIndex());
-    assert(roundTripAnimator.clips().size() == 1 && roundTripAnimator.clips()[0].tracks().size() == 2);
-    const auto &roundTripTranslation = std::get<lr::TranslationTrack>(roundTripAnimator.clips()[0].tracks()[0]);
+    assert(loaded->animations.size() == 2);
+    assert(loaded->animations.get(1).name() == "Unreferenced");
+    assert(loaded->animations.get(editedClip).tracks().size() == 2);
+    const auto &roundTripTranslation = std::get<lr::TranslationTrack>(loaded->animations.get(editedClip).tracks()[0]);
     assert(roundTripTranslation.target() == meshObjectIds[0] && roundTripTranslation.interpolation() == lr::AnimationInterpolation::CubicSpline);
     assert(roundTripTranslation.keyframes()[1].outgoingTangent == glm::vec3(16, 17, 18));
     const auto &roundTripSkin = loaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::SkinComponent>().skin();
@@ -276,7 +277,8 @@ int main()
     // Identities are what the file names objects by, so loading the same file into a scene that
     // already holds those objects is a collision rather than a silent duplicate.
     bool collisionRejected = false;
-    try { (void)lr::SceneSerializer::load(temporary.path, loaded->scene, loaded->meshes, loaded->materials); }
+    try { (void)lr::SceneSerializer::load(temporary.path, loaded->scene, loaded->meshes, loaded->materials,
+                                         loaded->animations); }
     catch (const std::exception &) { collisionRejected = true; }
     assert(collisionRejected);
 
@@ -296,8 +298,7 @@ int main()
     }
     const auto &reloadedSkin = reloaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::SkinComponent>().skin();
     assert(reloadedSkin.joints()[1].sceneObject == lightObjectIds[0]);
-    const auto &reloadedAnimator = reloaded->scene.getSceneObject(root.id()).getComponent<lr::AnimatorComponent>();
-    assert(std::get<lr::TranslationTrack>(reloadedAnimator.clips()[0].tracks()[0]).target() == meshObjectIds[0]);
+    assert(std::get<lr::TranslationTrack>(reloaded->animations.get(editedClip).tracks()[0]).target() == meshObjectIds[0]);
 
     // Loading is transactional: malformed input never mutates an existing SceneAssets instance.
     TempScene invalid;

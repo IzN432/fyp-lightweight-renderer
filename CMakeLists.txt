@@ -123,6 +123,9 @@ add_library(lr_core STATIC
     src/core/scene/AreaLightVisual.cpp
     src/core/scene/Scene.cpp
     src/core/scene/SceneObject.cpp
+    src/features/animation/AnimationTrack.cpp
+    src/features/animation/AnimationClip.cpp
+    src/features/animation/AnimationSystem.cpp
     src/core/scene/SceneManager.cpp
     src/core/scene/SceneDrawList.cpp
     src/core/scene/SceneGpu.cpp
@@ -299,14 +302,6 @@ add_library(lr_linear_blend_skinning_feature STATIC
 target_include_directories(lr_linear_blend_skinning_feature PUBLIC src)
 target_link_libraries(lr_linear_blend_skinning_feature PUBLIC lr_core glm::glm)
 
-add_library(lr_animation_feature STATIC
-    src/features/animation/AnimationTrack.cpp
-    src/features/animation/AnimationClip.cpp
-    src/features/animation/AnimatorComponent.cpp
-)
-target_include_directories(lr_animation_feature PUBLIC src)
-target_link_libraries(lr_animation_feature PUBLIC lr_core glm::glm)
-
 add_library(lr_rigid_body_feature STATIC
     src/features/rigid_body/ColliderComponent.cpp
     src/features/rigid_body/ColliderVisual.cpp
@@ -323,12 +318,11 @@ add_library(lr_scene_serialization STATIC
     src/core/scene/serialization/ComponentCodec.cpp
     src/core/scene/serialization/CoreComponentCodecs.cpp
     src/core/scene/serialization/JsonUtils.cpp
-    src/features/animation/AnimatorComponentCodec.cpp
     src/features/linear_blend_skinning/SkinComponentCodec.cpp
     src/features/rigid_body/RigidBodyComponentCodecs.cpp
 )
 target_include_directories(lr_scene_serialization PUBLIC src)
-target_link_libraries(lr_scene_serialization PUBLIC lr_core lr_animation_feature
+target_link_libraries(lr_scene_serialization PUBLIC lr_core
     lr_linear_blend_skinning_feature lr_rigid_body_feature nlohmann_json::nlohmann_json)
 
 # Application-level editor composition. This stays above lr_core because it combines optional
@@ -341,7 +335,7 @@ add_library(lr_editor_app STATIC
 )
 target_include_directories(lr_editor_app PUBLIC src)
 target_link_libraries(lr_editor_app PUBLIC lr_core lr_arap_feature lr_laplace_beltrami_feature
-    lr_rigid_body_feature lr_linear_blend_skinning_feature lr_animation_feature
+    lr_rigid_body_feature lr_linear_blend_skinning_feature
     lr_scene_serialization imguiFileDialog)
 
 # Application executable
@@ -368,7 +362,7 @@ if(LR_BUILD_PYTHON)
         set(LR_PYTHON_PACKAGE_DIR "${CMAKE_BINARY_DIR}/python/lr")
         nanobind_add_module(_lr src/python/LrModule.cpp)
         # The feature libraries SceneLoader (in lr_core) instantiates components from.
-        target_link_libraries(_lr PRIVATE lr_core lr_animation_feature lr_linear_blend_skinning_feature
+        target_link_libraries(_lr PRIVATE lr_core lr_linear_blend_skinning_feature
             lr_rigid_body_feature lr_scene_serialization)
         # $<0:> keeps multi-config generators from appending a per-config subdirectory.
         set_target_properties(_lr PROPERTIES
@@ -544,8 +538,7 @@ if(BUILD_TESTING)
     add_executable(gltf_skin_loader_tests
         tests/linear_blend_skinning/GltfSkinLoaderTests.cpp
     )
-    target_link_libraries(gltf_skin_loader_tests PRIVATE lr_core lr_linear_blend_skinning_feature
-        lr_animation_feature)
+    target_link_libraries(gltf_skin_loader_tests PRIVATE lr_core lr_linear_blend_skinning_feature)
     target_compile_definitions(gltf_skin_loader_tests PRIVATE
         LR_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/"
         LR_SAMPLE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/samples/models/"
@@ -555,7 +548,7 @@ if(BUILD_TESTING)
     add_executable(animation_tests
         tests/animation/AnimationTests.cpp
     )
-    target_link_libraries(animation_tests PRIVATE lr_animation_feature)
+    target_link_libraries(animation_tests PRIVATE lr_core)
     add_test(NAME animation.model COMMAND animation_tests)
 
     add_executable(rigid_body_collider_tests

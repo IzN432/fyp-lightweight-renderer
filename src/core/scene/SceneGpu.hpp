@@ -108,8 +108,8 @@ public:
                     const std::vector<std::string> &vertexAttributeNames  = conventions::geometryVertexAttributes());
     bool initialized() const { return m_initialized; }
 
-    // Per frame: tracks the swapchain aspect ratio and advances animations (onUpdate), then evaluates
-    // skins and calls flushDirty() (onLateUpdate, after everything else has changed the scene).
+    // Per frame: tracks the swapchain aspect ratio (onUpdate), then evaluates skins and calls
+    // flushDirty() (onLateUpdate, after everything else has changed the scene).
     void registerCallbacks(Viewer &viewer);
 
     // Re-uploads whatever the camera, light and mesh components have marked dirty since the last call,
@@ -145,7 +145,6 @@ public:
     void updateLightVisuals();
     void updateCamera();
     void updateSkins();
-    void updateAnimations(float deltaSeconds);
 
     // Where `mesh` landed in the shared index buffer. Throws if it isn't registered geometry.
     const IndexBufferUploadPerMeshResult &indexRange(const Mesh &mesh) const;

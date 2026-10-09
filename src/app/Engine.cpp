@@ -89,16 +89,15 @@ void Engine::run()
     // Scene setup
     // -------------------------------------------------------------------------
 
-    lr::Scene scene;
+    lr::SceneAssets sceneAssets;
+    lr::Scene &scene = sceneAssets.scene;
 
     // Attribute/texture/parameter names shared by the loaders, GeometryPass and the Python module —
     // see EngineConventions.hpp.
     const lr::GltfLoaderConfig  config          = lr::conventions::gltfLoaderConfig();
     const lr::SceneLoaderConfig sceneLoadConfig = lr::conventions::sceneLoaderConfig();
 
-    lr::SceneManager sceneManager(viewer.resources(), lr::conventions::materialCapacity,
-                                  lr::conventions::defaultMaterial);
-    sceneManager.setScene(scene);
+    lr::SceneManager sceneManager(viewer.resources(), sceneAssets);
 
     lr::SceneObject *camera = &scene.createSceneObject();
     camera->addComponent<lr::Camera>();
@@ -636,6 +635,7 @@ void Engine::run()
         editor.drawFeaturePanel();
         ImGui::End();
         editor.drawTransformWindow();
+        editor.drawAnimationWindow();
     }));
 
     // Application-level rendering policy: the C++ demo owns the IBL shaders, resource names,
@@ -678,6 +678,7 @@ void Engine::run()
     }));
 
     appConnections.push_back(viewer.onUpdate([&](float dt, VkExtent2D) {
+        sceneManager.animationSystem().update(dt);
         physicsWorld.update(dt);
     }));
 

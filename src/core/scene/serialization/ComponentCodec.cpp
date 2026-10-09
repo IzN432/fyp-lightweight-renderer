@@ -29,16 +29,21 @@ const ComponentCodec &ComponentCodecRegistry::forType(std::type_index type) cons
 
 const ComponentCodec &ComponentCodecRegistry::forKey(std::string_view key) const
 {
-    for (const auto &codec : m_codecs)
-        if (codec->key() == key) return *codec;
+    if (const ComponentCodec *codec = findKey(key)) return *codec;
     throw std::runtime_error("SceneSerializer: unknown component '" + std::string(key) + "'");
+}
+
+const ComponentCodec *ComponentCodecRegistry::findKey(std::string_view key) const
+{
+    for (const auto &codec : m_codecs)
+        if (codec->key() == key) return codec.get();
+    return nullptr;
 }
 
 ComponentCodecRegistry makeSceneComponentCodecs()
 {
     ComponentCodecRegistry registry;
     addCoreComponentCodecs(registry);
-    addAnimationComponentCodecs(registry);
     addSkinComponentCodecs(registry);
     addRigidBodyComponentCodecs(registry);
     return registry;

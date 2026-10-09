@@ -19,13 +19,13 @@ enum class TransformTool
     Scale,
 };
 
-class TransformEditService
+// Lets component-owned editor controls report a completed transform interaction without knowing
+// which higher-level editor feature (such as Auto Key) is listening.
+class TransformCommitService
 {
 public:
-    virtual ~TransformEditService() = default;
-    virtual void beginTransformEdit(SceneObject &target, TransformTool tool,
-                                    std::function<void()> cancel) = 0;
-    virtual void endTransformEdit() = 0;
+    virtual ~TransformCommitService() = default;
+    virtual void onTransformCommitted(SceneObject &target, TransformTool tool) = 0;
 };
 
 // Receives a component the Inspector has just added to an object, whether pasted or picked from the
@@ -41,7 +41,7 @@ public:
 
 struct EditorContext
 {
-    TransformEditService &transformEdits;
+    TransformCommitService &transformCommits;
     CommandManager       &commands;
     ComponentAddService  &componentAdds;
     // The component types the Inspector's "Add Component" offers.

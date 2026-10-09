@@ -205,22 +205,6 @@ int main()
     commandManager.redo();
     assert(glm::abs(glm::dot(childTransform.transform().rotation(), desiredRotation)) > 1.0f - 0.0001f);
 
-    // Temporary edits (such as animation keyframe editing) still apply the gizmo result while
-    // suppressing creation of a separate undo command.
-    const glm::quat temporaryRotation =
-        glm::angleAxis(glm::radians(65.0f), glm::normalize(glm::vec3(0.0f, 1.0f, 1.0f)));
-    const glm::quat temporaryWorldRotation =
-        glm::normalize(rotationParent.worldRotation() * temporaryRotation);
-    const glm::mat4 temporaryWorld =
-        glm::translate(glm::mat4(1.0f), glm::vec3(rotationChild.worldMatrix()[3])) *
-        glm::mat4_cast(temporaryWorldRotation);
-    rotationHandler.setRecordCommands(false);
-    rotationHandler.beginDrag();
-    rotationHandler.rotateToWorld(temporaryWorld);
-    rotationHandler.endDrag();
-    rotationHandler.setRecordCommands(true);
-    assert(glm::abs(glm::dot(childTransform.transform().rotation(), temporaryRotation)) > 1.0f - 0.0001f);
-
     const glm::vec3 beforeScale = childTransform.transform().scale();
     const glm::vec3 desiredScale(-2.5f, 1.25f, 0.5f);
     const glm::mat4 desiredScaledLocal =

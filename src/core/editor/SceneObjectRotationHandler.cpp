@@ -50,6 +50,7 @@ void SceneObjectRotationHandler::endDrag()
 
     m_commandManager.appendCommandWithoutExecuting(
         std::make_unique<RotateSceneObjectCommand>(*m_target, m_beforeRotation, afterRotation));
+    if (m_commitCallback) m_commitCallback(*m_target);
 }
 
 } // namespace lr
