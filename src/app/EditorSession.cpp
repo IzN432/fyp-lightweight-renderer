@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <cmath>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace lr
@@ -846,7 +847,8 @@ private:
     // The editor's own shortcuts. Registered before any tool's, so a feature cannot shadow them.
     void registerEditorShortcuts()
     {
-        m_shortcuts.add({.key = GLFW_KEY_R}, [this] {
+        // The camera reset used to own R, which the transform shortcuts below now take, as in Blender.
+        m_shortcuts.add({.key = GLFW_KEY_HOME}, [this] {
             SceneObject *camera = m_sceneManager.gpu().camera();
             if (camera)
             {
@@ -856,6 +858,20 @@ private:
                 }
             }
         });
+
+        // G / R / S pick the gizmo the Transform window's radio buttons pick, so they stay disabled
+        // in the same case the buttons are: nothing selected to transform.
+        for (const auto &[key, tool] : {std::pair{GLFW_KEY_G, TransformTool::Translate},
+                                        std::pair{GLFW_KEY_R, TransformTool::Rotate},
+                                        std::pair{GLFW_KEY_S, TransformTool::Scale}})
+        {
+            m_shortcuts.add({.key = key}, [this, tool = tool] {
+                if (m_transformController.target())
+                {
+                    m_transformController.toggleTool(tool);
+                }
+            });
+        }
 
         m_shortcuts.add({.key = GLFW_KEY_TAB}, [this] {
             const bool nowEditing = !m_stateController.isActive(kEditState);

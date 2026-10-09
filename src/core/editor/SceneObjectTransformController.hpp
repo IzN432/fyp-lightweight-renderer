@@ -25,6 +25,10 @@ public:
 
     TransformTool tool() const { return m_tool; }
     void setTool(TransformTool tool) { m_tool = tool; }
+
+    // Selects `tool`, or drops back to no tool if it is already the active one. Gives a keyboard
+    // shortcut a way to put the gizmo away again, which the radio buttons cannot express.
+    void toggleTool(TransformTool tool) { m_tool = m_tool == tool ? TransformTool::None : tool; }
     void onObjectsDestroyed(std::span<const SceneObjectId> ids);
 
 private:
