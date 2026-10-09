@@ -5,6 +5,7 @@
 #include "core/app/Viewer.hpp"
 #include "core/app/ImGuiWidgets.hpp"
 #include "core/editor/DefaultVertexDragHandler.hpp"
+#include "core/editor/Deleter.hpp"
 #include "core/editor/EditableMeshContext.hpp"
 #include "core/editor/EditorContext.hpp"
 #include "core/editor/EditorFrameContext.hpp"
@@ -179,6 +180,9 @@ public:
 
     void onSceneContentChanged()
     {
+        // Imports and full scene replacements can invalidate either kind of captured delete action.
+        m_scene.clearHierarchySelection();
+        m_deleter.clear();
         SceneObject *editedMesh = m_sceneManager.editedMeshObject();
         if (!editedMesh)
         {
@@ -411,6 +415,7 @@ private:
     void selectAnimation(AnimationClipHandle handle)
     {
         m_selectedAnimation = handle;
+        m_scene.clearHierarchySelection();
         m_selectedAnimationTrack = 0;
         m_animationSeconds = 0.0f;
     }
@@ -437,6 +442,7 @@ private:
 
     void selectTrackTarget(const AnimationChannel &channel)
     {
+        m_scene.clearHierarchySelection();
         std::visit([&](const auto &track) {
             if (!m_scene.contains(track.target())) return;
             m_scene.selectObject(track.target());
@@ -606,6 +612,19 @@ private:
 
     void registerSceneCallbacks()
     {
+        m_connections.push_back(m_scene.registerHierarchySelectionChangedCallback(
+            [this](std::optional<SceneObjectId> selected) {
+                if (!selected)
+                {
+                    m_deleter.clear();
+                    return;
+                }
+                const SceneObjectId id = *selected;
+                m_deleter.select(sceneObjectDeletionKey(id), [this, id] {
+                    if (m_scene.contains(id) && m_scene.canDestroySceneObject(id))
+                        m_scene.destroySceneObject(id);
+                });
+            }));
         m_connections.push_back(m_scene.registerSelectionChangedCallback([this](SceneObjectId id) {
             SceneObject &object   = m_scene.getSceneObject(id);
             m_transformWindowOpen = true;
@@ -725,7 +744,7 @@ private:
                 SceneObject *object = objects[pickingId - 1];
                 if (object && m_scene.contains(object->id()))
                 {
-                    m_scene.selectObject(object->id());
+                    m_scene.selectHierarchyObject(object->id());
                 }
             }
             return true;
@@ -793,11 +812,7 @@ private:
         });
 
         m_shortcuts.add({.key = GLFW_KEY_DELETE}, [this] {
-            const auto selected = m_scene.selectedObject();
-            if (selected && m_scene.canDestroySceneObject(*selected))
-            {
-                m_scene.destroySceneObject(*selected);
-            }
+            m_deleter.erase();
         });
     }
 
@@ -871,6 +886,12 @@ private:
     // Every registered tool, in panel order. Declared after the tools it points at.
     std::vector<EditorTool *> m_tools;
     bool                      m_transformWindowOpen = false;
+    static std::string sceneObjectDeletionKey(SceneObjectId id)
+    {
+        return "scene:" + toString(id);
+    }
+
+    Deleter                            m_deleter;
     std::optional<AnimationClipHandle> m_selectedAnimation;
     float                              m_animationSeconds = 0.0f;
     size_t                             m_selectedAnimationTrack = 0;

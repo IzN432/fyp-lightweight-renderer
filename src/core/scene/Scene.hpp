@@ -67,8 +67,21 @@ public:
         m_hdriData = std::move(data);
     }
 
-    // The object currently selected by any editor surface (hierarchy, viewport picking, ...).
+    // The object currently presented to scene-facing editor tools. Other surfaces (for example an
+    // animation track) may drive this without claiming ownership of destructive actions.
     std::optional<SceneObjectId> selectedObject() const { return m_selectedObject; }
+
+    // The resource selected by the hierarchy/viewport. Kept separate from selectedObject() so an
+    // animation track can present its target in the scene without making Delete destroy it.
+    std::optional<SceneObjectId> hierarchySelectedObject() const { return m_hierarchySelectedObject; }
+    void selectHierarchyObject(SceneObjectId id);
+    void clearHierarchySelection();
+
+    CallbackConnection registerHierarchySelectionChangedCallback(
+        std::function<void(std::optional<SceneObjectId>)> callback)
+    {
+        return m_hierarchySelectionChangedCallbacks.connect(std::move(callback));
+    }
 
     // Routes every selection source through the same validation and notification path.
     void selectObject(SceneObjectId id);
@@ -107,9 +120,11 @@ private:
     std::optional<std::filesystem::path>       m_hdriPath;
     std::vector<std::byte>                     m_hdriData;
     std::optional<SceneObjectId>               m_selectedObject;
+    std::optional<SceneObjectId>               m_hierarchySelectedObject;
     std::optional<SceneObjectId>               m_renamingObject;
     std::string                                m_renameBuffer;
     CallbackList<SceneObjectId>                     m_selectionChangedCallbacks;
+    CallbackList<std::optional<SceneObjectId>>      m_hierarchySelectionChangedCallbacks;
     CallbackList<std::span<const SceneObjectId>>    m_objectsDestroyedCallbacks;
     std::unordered_set<SceneObjectId> m_protectedObjects;
 };

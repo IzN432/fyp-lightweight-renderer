@@ -1,4 +1,5 @@
 #include "core/editor/EditorStateController.hpp"
+#include "core/editor/Deleter.hpp"
 
 #include "core/editor/EditorInputRouter.hpp"
 #include "core/editor/EditorPresentationState.hpp"
@@ -642,6 +643,24 @@ void activeThrowsBeforeAnyActivation()
     assert(threw);
 }
 
+void deleterOwnsOnlyTheLatestTarget()
+{
+    lr::Deleter deleter;
+    int deleted = 0;
+    deleter.select("scene:first", [&] { deleted = 1; });
+    deleter.select("animation:second", [&] { deleted = 2; });
+    assert(!deleter.selected("scene:first"));
+    assert(deleter.selected("animation:second"));
+    deleter.erase();
+    assert(deleted == 2);
+    assert(!deleter.hasSelection());
+
+    deleter.select("scene:third", [&] { deleted = 3; });
+    deleter.clear();
+    deleter.erase();
+    assert(deleted == 2);
+}
+
 } // namespace
 
 int main()
@@ -660,5 +679,6 @@ int main()
     activatingAStatePublishesItsPresentationOnce();
     aNewStateNeedsNoConsumerChange();
     activeThrowsBeforeAnyActivation();
+    deleterOwnsOnlyTheLatestTarget();
     return 0;
 }

@@ -70,6 +70,13 @@ int main()
     assert(scene.selectedObject() == child.id());
     assert(selectionNotifications == 2);
 
+    scene.selectHierarchyObject(child.id());
+    assert(scene.hierarchySelectedObject() == child.id());
+    scene.clearHierarchySelection();
+    assert(!scene.hierarchySelectedObject());
+    // Withdrawing hierarchy ownership does not clear the scene-facing target.
+    assert(scene.selectedObject() == child.id());
+
     lr::Scene otherScene;
     auto &foreignObject = otherScene.createSceneObject();
     bool rejectedForeignSelection = false;

@@ -146,6 +146,11 @@ void Scene::destroySceneObject(SceneObjectId id)
     {
         m_selectedObject.reset();
     }
+    if (m_hierarchySelectedObject &&
+        std::ranges::find(destroyed, *m_hierarchySelectedObject) != destroyed.end())
+    {
+        clearHierarchySelection();
+    }
     m_objectsDestroyedCallbacks.invoke(destroyed);
 }
 
@@ -204,6 +209,22 @@ void Scene::selectObject(SceneObjectId id)
     m_selectionChangedCallbacks.invoke(id);
 }
 
+void Scene::selectHierarchyObject(SceneObjectId id)
+{
+    // Validate before replacing the current owner so a bad external ID cannot withdraw a valid
+    // hierarchy selection. selectObject validates again at its public API boundary.
+    (void)getSceneObject(id);
+    m_hierarchySelectedObject = id;
+    m_hierarchySelectionChangedCallbacks.invoke(id);
+    selectObject(id);
+}
+
+void Scene::clearHierarchySelection()
+{
+    m_hierarchySelectedObject.reset();
+    m_hierarchySelectionChangedCallbacks.invoke(std::nullopt);
+}
+
 void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> &renameRequested,
                               std::optional<SceneObjectId> &deleteRequested)
 {
@@ -213,7 +234,7 @@ void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> 
     {
         flags |= ImGuiTreeNodeFlags_Leaf;
     }
-    if (m_selectedObject == object.id())
+    if (m_hierarchySelectedObject == object.id())
     {
         flags |= ImGuiTreeNodeFlags_Selected;
     }
@@ -225,7 +246,7 @@ void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> 
     const bool open = ImGui::TreeNodeEx(identity.c_str(), flags, "%s", label.c_str());
     if (ImGui::IsItemClicked())
     {
-        selectObject(object.id());
+        selectHierarchyObject(object.id());
     }
 
     if (ImGui::BeginPopupContextItem())
@@ -312,6 +333,12 @@ void Scene::onHierarchyGUI()
         {
             drawHierarchyNode(*object, renameRequested, deleteRequested);
         }
+    }
+
+    if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        !ImGui::IsAnyItemHovered())
+    {
+        clearHierarchySelection();
     }
 
     if (renameRequested)
