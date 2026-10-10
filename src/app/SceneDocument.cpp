@@ -1,8 +1,10 @@
 #include "SceneDocument.hpp"
 #include "EditorSession.hpp"
 
+#include "core/Paths.hpp"
 #include "core/app/Viewer.hpp"
 #include "core/scene/SceneManager.hpp"
+#include "core/scene/SceneObject.hpp"
 #include "features/rigid_body/PhysicsWorld.hpp"
 
 #include <ImGuiFileDialog.h>
@@ -10,6 +12,7 @@
 #include <spdlog/spdlog.h>
 
 #include <exception>
+#include <string>
 #include <utility>
 
 namespace lr
@@ -66,6 +69,25 @@ void SceneDocument::openImportDialog()
     dialogConfig.flags = commonDialogFlags() | ImGuiFileDialogFlags_ReadOnlyFileNameField;
     ImGuiFileDialog::Instance()->OpenDialog(kImportDialog, "Import Mesh or Animated Mesh", ".obj,.gltf,.glb",
                                             dialogConfig);
+}
+
+void SceneDocument::importPrimitive(const std::string &fileName, const std::string &objectName)
+{
+    try
+    {
+        const fs::path primitivePath = paths::assetDir / "runtime" / "primitives" / fileName;
+        m_viewer.context().waitIdle();
+        SceneObject &root = m_sceneManager.load(primitivePath, m_importConfig);
+        // The loader names the root after the file; the menu offered a shape, so the hierarchy says
+        // the shape. Named unconditionally because every primitive file holds exactly one object.
+        root.name = objectName;
+        resettleAfterSceneChange();
+        m_importError.clear();
+    } catch (const std::exception &e)
+    {
+        m_importError = e.what();
+        spdlog::error("Failed to add primitive '{}': {}", objectName, e.what());
+    }
 }
 
 void SceneDocument::save()

@@ -49,6 +49,13 @@ public:
     void openSaveAsDialog();
     void openImportDialog();
 
+    // Imports one of the built-in primitives shipped in assets/runtime/primitives/, naming its root
+    // after the shape rather than after the file. Takes the same path as a user import — including
+    // the device idle and the resettle afterwards — so a primitive is an ordinary imported object
+    // from then on, editable and deletable like any other. Failures land in importError() as an
+    // import does.
+    void importPrimitive(const std::string &fileName, const std::string &objectName);
+
     // Saves to path() without prompting. Only valid when path() has a value; the menu item that
     // calls this is disabled otherwise.
     void save();

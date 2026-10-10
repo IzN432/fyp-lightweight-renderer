@@ -45,6 +45,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <unordered_set>
 #include <utility>
@@ -57,6 +58,26 @@ namespace
 {
 constexpr std::string_view kViewState = "view";
 constexpr std::string_view kEditState = "edit";
+
+// The shapes "Add Primitive" offers, paired with the file each one imports from
+// assets/runtime/primitives/. The menu shows the shape, not the filename, so the list reads as
+// geometry rather than as assets — and the name the new object takes in the hierarchy is the same
+// label. Adding a shape means dropping its .glb beside the others and adding a row here.
+struct Primitive
+{
+    const char *label;
+    const char *fileName;
+};
+
+constexpr std::array kPrimitives{
+    Primitive{"Plane", "plane.glb"},
+    Primitive{"Cube", "cube.glb"},
+    Primitive{"Sphere", "sphere.glb"},
+    Primitive{"Cylinder", "cylinder.glb"},
+    Primitive{"Cone", "cone.glb"},
+    Primitive{"Torus", "torus.glb"},
+    Primitive{"Monkey", "monkey.glb"},
+};
 
 // What the Inspector's "Add Component" offers, in the order it lists them. A component earns a
 // place here by having a blank state worth starting from: a mesh does not (it needs geometry, which
@@ -455,13 +476,31 @@ public:
     }
 
 private:
-    // Import, plus the two objects worth creating from nothing. Light is capped by what the light
-    // SSBO can hold, so the button reports the limit rather than silently refusing.
+    // Import and the built-in primitives, plus the two objects worth creating from nothing. Light is
+    // capped by what the light SSBO can hold, so the button reports the limit rather than silently
+    // refusing.
     void drawSceneCreationButtons(SceneDocument &document)
     {
         if (ImGui::Button("Import..."))
         {
             document.openImportDialog();
+        }
+        ImGui::SameLine();
+
+        if (ImGui::Button("Add Primitive"))
+        {
+            ImGui::OpenPopup("add_primitive_list");
+        }
+        if (ImGui::BeginPopup("add_primitive_list"))
+        {
+            for (const auto &[label, fileName] : kPrimitives)
+            {
+                if (ImGui::MenuItem(label))
+                {
+                    document.importPrimitive(fileName, label);
+                }
+            }
+            ImGui::EndPopup();
         }
         ImGui::SameLine();
 
