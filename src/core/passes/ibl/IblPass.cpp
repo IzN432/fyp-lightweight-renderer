@@ -30,6 +30,11 @@ struct PrefilterPC
     uint32_t sampleCount;
 };
 
+struct BrdfLutPC
+{
+    uint32_t sampleCount;
+};
+
 LoadedHdrImage loadConfiguredHdri(const IBLPass::Config &config)
 {
     if (!config.hdriData.empty()) return loadHdrFromMemory(config.hdriData, config.hdriPath.string());
@@ -68,9 +73,15 @@ void IBLPass::uploadResources(ResourceRegistry &resources) const
 
     resources.uploadImage("hdri", hdri.pixels, hdri.width, hdri.height, LoadedHdrImage::format);
 
-    // This LUT is used in the PBR shader, but we upload it here since it is most relevant...
-    LoadedImage lut = loadImageFromFile(paths::brdfLutPath, glm::vec4(1.0f, 0.0f, 1.0f, 1.0f));
-    resources.uploadImage("ibl_brdf_lut", lut.pixels, lut.width, lut.height, VK_FORMAT_R8G8B8A8_UNORM);
+    // This LUT is used in the PBR shader, but we register it here since it is most relevant...
+    // It is integrated on the GPU rather than loaded from an 8-bit PNG: the bias term is added
+    // straight into the specular result, so 1/255 steps in it read as rings on smooth surfaces.
+    // TRANSFER_SRC is not needed to render; it lets the table be copied back and diffed against a
+    // reference integrator (see tests/vulkan/BrdfLutGpuSmoke.cpp).
+    resources.registerPersistentImage("ibl_brdf_lut", VK_FORMAT_R32G32_SFLOAT,
+                                      VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                      {m_cfg.lutRes, m_cfg.lutRes});
 
     resources.registerCubemap("ibl_env", VK_FORMAT_R16G16B16A16_SFLOAT, m_cfg.envRes, 1,
                               VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
@@ -98,6 +109,21 @@ void IBLPass::build(FrameGraph &fg) const
     const uint32_t irrRes = m_cfg.irrRes;
     const uint32_t pfRes  = m_cfg.pfRes;
     const uint32_t pfMips = m_cfg.pfMips;
+    const uint32_t lutRes = m_cfg.lutRes;
+
+    // Independent of the HDRI — it only depends on the BRDF — but it costs a fraction of a
+    // millisecond once at startup, so it rides along with the rest of the preprocessing graph.
+    const BrdfLutPC lutPC = {.sampleCount = 1024};
+
+    fg.addPass("ibl_brdf_lut")
+        .type(PassType::Compute)
+        .computeShader((paths::shaderDir / "brdflut.comp.spv").string())
+        .pushConstantSize(sizeof(BrdfLutPC))
+        .storageImageWrite(0, fg.image("ibl_brdf_lut"), VK_SHADER_STAGE_COMPUTE_BIT)
+        .execute([lutPC, lutRes](PassContext &ctx) {
+            ctx.cmd().pushConstants(ctx.pipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, lutPC);
+            ctx.cmd().dispatch((lutRes + 15) / 16, (lutRes + 15) / 16, 1);
+        });
 
     fg.addPass("ibl_hdri_to_cube")
         .type(PassType::Compute)

@@ -2331,6 +2331,7 @@ void bindBuildingBlocks(nb::module_ &m)
                               {"ibl_env"});
                 nb::gil_scoped_release release; // the precompute waits for the GPU
                 graph.executeAndWait({
+                    {"ibl_brdf_lut", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                     {"ibl_irradiance", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                     {"ibl_prefiltered", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 });

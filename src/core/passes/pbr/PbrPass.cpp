@@ -99,7 +99,7 @@ void PbrPass::build(FrameGraph &fg) const
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(1, fg.image("ibl_irradiance"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(2, fg.image("ibl_prefiltered"), VK_SHADER_STAGE_FRAGMENT_BIT)
-        .sampledImage(3, fg.image("ibl_brdf_lut"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledImage(3, fg.image("ibl_brdf_lut"), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::clampToEdge())
         .sampledImage(4, fg.image("ltc1"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(5, fg.image("ltc2"), VK_SHADER_STAGE_FRAGMENT_BIT)
         // PBR shades each G-buffer coverage sample independently. Reading the unresolved attachments

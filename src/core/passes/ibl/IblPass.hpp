@@ -21,6 +21,9 @@ public:
         uint32_t              irrRes = 32;
         uint32_t              pfRes  = 2048;
         uint32_t              pfMips = 8;
+        // The environment BRDF is a smooth 2D function; 256 is the usual size. Precision matters
+        // far more than resolution here, so it is integrated into rg32f (see brdflut.comp).
+        uint32_t              lutRes = 256;
     };
 
     explicit IBLPass(Config cfg);

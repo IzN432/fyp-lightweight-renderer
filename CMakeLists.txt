@@ -223,6 +223,7 @@ add_shaders(lr_core
     src/core/passes/geometry/geometry.frag
     src/core/passes/objectpicking/object_picking.frag
     src/core/passes/objectpicking/object_picking.vert
+    src/core/passes/ibl/brdflut.comp
     src/core/passes/ibl/hdritocubemap.comp
     src/core/passes/ibl/irradiance.comp
     src/core/passes/ibl/prefilter.comp
@@ -498,6 +499,10 @@ if(BUILD_TESTING)
     # Keep hardware requirements out of the ordinary CPU-only CTest suite.
     add_executable(mesh_gpu_sync_smoke EXCLUDE_FROM_ALL tests/upload/MeshGpuSyncSmoke.cpp)
     target_link_libraries(mesh_gpu_sync_smoke PRIVATE lr_core)
+
+    add_executable(brdf_lut_gpu_smoke EXCLUDE_FROM_ALL tests/vulkan/BrdfLutGpuSmoke.cpp)
+    target_link_libraries(brdf_lut_gpu_smoke PRIVATE lr_core)
+    add_dependencies(brdf_lut_gpu_smoke lr_core_shaders)
 
     add_executable(editor_state_controller_tests
         tests/editor/EditorStateControllerTests.cpp

@@ -107,7 +107,7 @@ void TransparentPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         .storageBufferRead(11, fg.buffer(m_cfg.lightBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(12, fg.image("ibl_irradiance"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(13, fg.image("ibl_prefiltered"), VK_SHADER_STAGE_FRAGMENT_BIT)
-        .sampledImage(14, fg.image("ibl_brdf_lut"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledImage(14, fg.image("ibl_brdf_lut"), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::clampToEdge())
         .sampledImage(15, fg.image("ltc1"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(16, fg.image("ltc2"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledDepth(17, fg.image(m_cfg.spotShadowImageResourceName), VK_SHADER_STAGE_FRAGMENT_BIT,

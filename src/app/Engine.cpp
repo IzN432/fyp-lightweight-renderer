@@ -82,6 +82,7 @@ void Engine::run()
         lr::FrameGraph iblGraph(viewer.context(), viewer.resources());
         iblPass.build(iblGraph);
         iblGraph.executeAndWait({
+            {"ibl_brdf_lut", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             {"ibl_irradiance", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             {"ibl_prefiltered", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         });
@@ -562,6 +563,7 @@ void Engine::run()
             emptyObject.name             = "Scene Object";
             emptyObject.addComponent<lr::TransformComponent>();
         }
+
         if (!sceneImportError.empty())
         {
             ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Import failed: %s", sceneImportError.c_str());
@@ -682,6 +684,7 @@ void Engine::run()
             lr::FrameGraph iblGraph(viewer.context(), viewer.resources());
             iblPass.build(iblGraph);
             iblGraph.executeAndWait({
+                {"ibl_brdf_lut", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {"ibl_irradiance", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
                 {"ibl_prefiltered", VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
             });

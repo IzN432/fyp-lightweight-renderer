@@ -110,6 +110,18 @@ struct SamplerDesc
         return result;
     }
 
+    // For lookup tables indexed by a bounded parameter. The default REPEAT mode wraps the last
+    // texel into the first, so a bilinear fetch at u close to 1 blends in the u = 0 end of the
+    // table; clamping keeps the edge rows reading what they are supposed to.
+    static SamplerDesc clampToEdge()
+    {
+        SamplerDesc result;
+        result.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        result.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        result.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        return result;
+    }
+
     friend bool operator==(const SamplerDesc &, const SamplerDesc &) = default;
 };
 

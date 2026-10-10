@@ -1,0 +1,128 @@
+#version 450
+
+// Split-sum environment BRDF (the "DFG" term), integrated once at startup.
+//
+// This used to ship as an 8-bit PNG. That cost real image quality: the bias term is added straight
+// into the specular result and scaled by the prefiltered environment radiance, so its 1/255
+// quantisation step showed up as concentric rings on smooth surfaces — N_dot_V maps to the u axis,
+// so a step in the LUT is a ring on a sphere, and the rings are widest near the centre where
+// N_dot_V changes slowest across the screen. Integrating into rg32f removes the staircase.
+//
+// Output orientation matches the sampling convention in lighting.glslh: v = 1 - roughness.
+
+layout(set = 0, binding = 0, rg32f) writeonly uniform image2D brdfLut;
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(push_constant) uniform PC {
+    uint sampleCount;
+} pc;
+
+const float PI = 3.14159265359;
+
+vec2 Hammersley(uint i, uint N);
+
+vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness);
+
+float GeometrySmith(float N_dot_V, float N_dot_L, float roughness);
+
+// https://learnopengl.com/PBR/IBL/Specular-IBL
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(brdfLut);
+    if (coord.x >= size.x || coord.y >= size.y)
+        return;
+
+    vec2 uv = (vec2(coord) + 0.5) / vec2(size);
+
+    // u is N_dot_V. Clamped away from 0 because the G_Vis denominator carries a 1 / N_dot_V.
+    float N_dot_V = max(uv.x, 1e-3);
+    float roughness = 1.0 - uv.y;
+
+    // Same Y-up tangent frame as prefilter.comp, so both halves of the split sum agree.
+    vec3 N = vec3(0.0, 1.0, 0.0);
+    vec3 V = vec3(sqrt(1.0 - N_dot_V * N_dot_V), N_dot_V, 0.0);
+
+    uint total = pc.sampleCount;
+
+    float A = 0.0;
+    float B = 0.0;
+
+    for (uint i = 0; i < total; ++i)
+    {
+        vec2 Xi = Hammersley(i, total);
+        vec3 H = ImportanceSampleGGX(Xi, N, roughness);
+        vec3 L = normalize(2.0 * dot(V, H) * H - V);
+
+        float N_dot_L = max(L.y, 0.0);
+        float N_dot_H = max(H.y, 0.0);
+        float V_dot_H = max(dot(V, H), 0.0);
+
+        if (N_dot_L > 0.0)
+        {
+            float G = GeometrySmith(N_dot_V, N_dot_L, roughness);
+            float G_Vis = (G * V_dot_H) / max(N_dot_H * N_dot_V, 1e-6);
+            // Fresnel is factored out of the integral so the shader can apply any F0 to the result:
+            // A is the part scaled by F0, B the part added on top.
+            float Fc = pow(1.0 - V_dot_H, 5.0);
+
+            A += (1.0 - Fc) * G_Vis;
+            B += Fc * G_Vis;
+        }
+    }
+
+    imageStore(brdfLut, coord, vec4(A / float(total), B / float(total), 0.0, 0.0));
+}
+
+float RadicalInverse_VdC(uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10; // / 0x100000000
+}
+
+vec2 Hammersley(uint i, uint N)
+{
+    return vec2(float(i) / float(N), RadicalInverse_VdC(i));
+}
+
+vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness)
+{
+    float a = roughness * roughness;
+
+    float phi = 2.0 * PI * Xi.x;
+    float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a * a - 1.0) * Xi.y));
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+
+    // We tweak learn opengl's method to use y as the up vector instead of z
+    // Spherical to Cartesian
+    vec3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = cosTheta;
+    H.z = sin(phi) * sinTheta;
+
+    // Tangent space to world space
+    vec3 up        = abs(N.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent   = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+
+    vec3 sampleVec = tangent * H.x + bitangent * H.z + N * H.y;
+    return normalize(sampleVec);
+}
+
+float GeometrySchlickGGX(float N_dot_X, float roughness)
+{
+    // The IBL remapping of k, not the direct-lighting one: k = alpha / 2 with alpha = roughness^2.
+    float k = (roughness * roughness) / 2.0;
+    return N_dot_X / (N_dot_X * (1.0 - k) + k);
+}
+
+float GeometrySmith(float N_dot_V, float N_dot_L, float roughness)
+{
+    return GeometrySchlickGGX(N_dot_V, roughness) * GeometrySchlickGGX(N_dot_L, roughness);
+}
