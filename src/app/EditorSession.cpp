@@ -1,5 +1,6 @@
 #include "EditorSession.hpp"
 #include "EditorRenderBridge.hpp"
+#include "SceneDocument.hpp"
 #include "core/editor/EditorStateController.hpp"
 
 #include "core/app/Viewer.hpp"
@@ -220,6 +221,33 @@ public:
         }
     }
 
+    void drawScenePanel(SceneDocument &document)
+    {
+        const float hierarchyHeight = ImGui::GetContentRegionAvail().y * 0.55f;
+        ImGui::BeginChild("SceneHierarchy", ImVec2(0.0f, hierarchyHeight),
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY);
+        ImGui::SeparatorText("Hierarchy");
+        if (!document.persistenceError().empty())
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Scene file error: %s",
+                               document.persistenceError().c_str());
+        }
+        ImGui::Separator();
+        drawSceneCreationButtons(document);
+        if (!document.importError().empty())
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Import failed: %s", document.importError().c_str());
+        }
+        ImGui::Separator();
+        m_scene.onHierarchyGUI(m_context);
+        ImGui::EndChild();
+
+        ImGui::BeginChild("SceneInspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+        ImGui::SeparatorText("Inspector");
+        m_scene.onInspectorGUI(m_context);
+        ImGui::EndChild();
+    }
+
     void drawTransformWindow()
     {
         if (!m_transformWindowOpen || !m_scene.selectedObject())
@@ -427,6 +455,46 @@ public:
     }
 
 private:
+    // Import, plus the two objects worth creating from nothing. Light is capped by what the light
+    // SSBO can hold, so the button reports the limit rather than silently refusing.
+    void drawSceneCreationButtons(SceneDocument &document)
+    {
+        if (ImGui::Button("Import..."))
+        {
+            document.openImportDialog();
+        }
+        ImGui::SameLine();
+
+        const uint32_t maxLights   = m_sceneManager.gpu().maxLights();
+        const bool     lightsAtCap = m_sceneManager.numLights() >= maxLights;
+        ImGui::BeginDisabled(lightsAtCap);
+        if (ImGui::Button("Add Light"))
+        {
+            SceneObject &lightObject = m_scene.createSceneObject();
+            lightObject.name         = "Light";
+            lightObject.addComponent<TransformComponent>();
+            lightObject.addComponent<Light>(PointLight{});
+        }
+        ImGui::EndDisabled();
+        if (lightsAtCap && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip("The scene already contains the maximum of %u lights", maxLights);
+        }
+
+        // Added after the tooltip above, which reads the last item and would otherwise attach to
+        // this button instead of the disabled one it explains.
+        ImGui::SameLine();
+        if (ImGui::Button("Add Scene Object"))
+        {
+            // Empty but for a transform, which every other component reads as its object's place in
+            // the world — so the object is ready to receive one straight away. What it becomes is
+            // then decided in the Inspector.
+            SceneObject &emptyObject = m_scene.createSceneObject();
+            emptyObject.name         = "Scene Object";
+            emptyObject.addComponent<TransformComponent>();
+        }
+    }
+
     void selectAnimation(AnimationClipHandle handle)
     {
         m_selectedAnimation = handle;
@@ -1038,6 +1106,7 @@ EditorSession::~EditorSession() = default;
 EditorContext &EditorSession::context() { return m_impl->context(); }
 void           EditorSession::onSceneContentChanged() { m_impl->onSceneContentChanged(); }
 void           EditorSession::drawFeaturePanel() { m_impl->drawFeaturePanel(); }
+void           EditorSession::drawScenePanel(SceneDocument &document) { m_impl->drawScenePanel(document); }
 void           EditorSession::drawTransformWindow() { m_impl->drawTransformWindow(); }
 void           EditorSession::drawAnimationWindow() { m_impl->drawAnimationWindow(); }
 bool           EditorSession::allowsViewportNavigation() const { return m_impl->allowsViewportNavigation(); }

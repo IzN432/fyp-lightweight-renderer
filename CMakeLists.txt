@@ -341,6 +341,7 @@ add_library(lr_editor_app STATIC
     src/app/Engine.cpp
     src/app/EditorRenderBridge.cpp
     src/app/EditorSession.cpp
+    src/app/SceneDocument.cpp
     src/app/Settings.cpp
 )
 target_include_directories(lr_editor_app PUBLIC src)

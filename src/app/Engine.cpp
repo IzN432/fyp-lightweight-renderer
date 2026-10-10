@@ -1,5 +1,6 @@
 #include "Engine.hpp"
 #include "app/EditorSession.hpp"
+#include "app/SceneDocument.hpp"
 #include "app/EditorRenderBridge.hpp"
 #include "app/Settings.hpp"
 #include "core/app/Viewer.hpp"
@@ -24,7 +25,6 @@
 
 #include "core/scene/AreaLightVisual.hpp"
 #include "core/scene/Camera.hpp"
-#include "core/scene/Light.hpp"
 #include "core/scene/Mesh.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
@@ -41,9 +41,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <filesystem>
-#include <optional>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -312,10 +311,13 @@ void Engine::run()
     bool                    showHdri = true;
     std::string             environmentLoadError;
     bool                    environmentDirty = false;
-    std::string             sceneImportError;
-    std::optional<fs::path> sceneDocumentPath;
-    std::string             scenePersistenceError;
     lr::Settings            settings;
+
+    // Owns the scene document's path, its load/save/import sequencing, and the errors from it.
+    lr::SceneDocument sceneDocument(viewer, sceneManager, editor, physicsWorld, sceneLoadConfig);
+    // A loaded scene brings its own authored HDRI path, so the environment has to be rebuilt from
+    // it. Which passes that touches stays here — see the onLateUpdate below.
+    sceneDocument.setSceneLoadedCallback([&environmentDirty] { environmentDirty = true; });
 
     auto showHdriSetting = Setting::bind("show_hdri", "showHDRI", SettingEditor::Checkbox, showHdri);
     auto background = Setting::bind("background_color", "Background color", SettingEditor::Color3,
@@ -432,40 +434,15 @@ void Engine::run()
             {
                 if (ImGui::MenuItem("Load Scene..."))
                 {
-                    IGFD::FileDialogConfig dialogConfig;
-                    dialogConfig.path = sceneDocumentPath ? sceneDocumentPath->parent_path().string() : ".";
-                    dialogConfig.flags = ImGuiFileDialogFlags_Modal |
-                                         ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
-                                         ImGuiFileDialogFlags_ShowDevicesButton;
-                    ImGuiFileDialog::Instance()->OpenDialog("LoadNativeScene", "Load Scene", ".lrscene",
-                                                             dialogConfig);
+                    sceneDocument.openLoadDialog();
                 }
-
-                if (ImGui::MenuItem("Save", nullptr, false, sceneDocumentPath.has_value()))
+                if (ImGui::MenuItem("Save", nullptr, false, sceneDocument.path().has_value()))
                 {
-                    try
-                    {
-                        sceneManager.save(*sceneDocumentPath);
-                        scenePersistenceError.clear();
-                    }
-                    catch (const std::exception &e)
-                    {
-                        scenePersistenceError = e.what();
-                        spdlog::error("Failed to save scene: {}", e.what());
-                    }
+                    sceneDocument.save();
                 }
-
                 if (ImGui::MenuItem("Save As..."))
                 {
-                    IGFD::FileDialogConfig dialogConfig;
-                    dialogConfig.path = sceneDocumentPath ? sceneDocumentPath->parent_path().string() : ".";
-                    dialogConfig.fileName = sceneDocumentPath ? sceneDocumentPath->filename().string()
-                                                                : "scene.lrscene";
-                    dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_ConfirmOverwrite |
-                                         ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
-                                         ImGuiFileDialogFlags_ShowDevicesButton;
-                    ImGuiFileDialog::Instance()->OpenDialog("SaveNativeScene", "Save Scene As", ".lrscene",
-                                                             dialogConfig);
+                    sceneDocument.openSaveAsDialog();
                 }
                 ImGui::EndMenu();
             }
@@ -515,143 +492,11 @@ void Engine::run()
         ImGui::SetNextWindowPos(topRight, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(panelSize.x, viewport->WorkSize.y * 0.64f), ImGuiCond_FirstUseEver);
         ImGui::Begin("Scene");
-        const float hierarchyHeight = ImGui::GetContentRegionAvail().y * 0.55f;
-        ImGui::BeginChild("SceneHierarchy", ImVec2(0.0f, hierarchyHeight),
-                          ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY);
-        ImGui::SeparatorText("Hierarchy");
-        if (!scenePersistenceError.empty())
-        {
-            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Scene file error: %s",
-                               scenePersistenceError.c_str());
-        }
-        ImGui::Separator();
-        if (ImGui::Button("Import..."))
-        {
-            IGFD::FileDialogConfig dialogConfig;
-            dialogConfig.path  = ".";
-            dialogConfig.flags = ImGuiFileDialogFlags_Modal | ImGuiFileDialogFlags_ReadOnlyFileNameField |
-                                 ImGuiFileDialogFlags_CaseInsensitiveExtentionFiltering |
-                                 ImGuiFileDialogFlags_ShowDevicesButton;
-            ImGuiFileDialog::Instance()->OpenDialog("ImportScene", "Import Mesh or Animated Mesh",
-                                                     ".obj,.gltf,.glb", dialogConfig);
-        }
-        ImGui::SameLine();
-        ImGui::BeginDisabled(sceneManager.numLights() >= sceneManager.gpu().maxLights());
-        if (ImGui::Button("Add Light"))
-        {
-            lr::SceneObject &lightObject = scene.createSceneObject();
-            lightObject.name             = "Light";
-            lightObject.addComponent<lr::TransformComponent>();
-            lightObject.addComponent<lr::Light>(lr::PointLight{});
-        }
-        ImGui::EndDisabled();
-        if (sceneManager.numLights() >= sceneManager.gpu().maxLights() &&
-            ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        {
-            ImGui::SetTooltip("The scene already contains the maximum of %u lights",
-                              sceneManager.gpu().maxLights());
-        }
-        // Added after the tooltip above, which reads the last item and would otherwise attach to
-        // this button instead of the disabled one it explains.
-        ImGui::SameLine();
-        if (ImGui::Button("Add Scene Object"))
-        {
-            // Empty but for a transform, which every other component reads as its object's place in
-            // the world — so the object is ready to receive one straight away. What it becomes is
-            // then decided in the Inspector.
-            lr::SceneObject &emptyObject = scene.createSceneObject();
-            emptyObject.name             = "Scene Object";
-            emptyObject.addComponent<lr::TransformComponent>();
-        }
-
-        if (!sceneImportError.empty())
-        {
-            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Import failed: %s", sceneImportError.c_str());
-        }
-        ImGui::Separator();
-        scene.onHierarchyGUI(editor.context());
-        ImGui::EndChild();
-
-        ImGui::BeginChild("SceneInspector", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
-        ImGui::SeparatorText("Inspector");
-        scene.onInspectorGUI(editor.context());
-        ImGui::EndChild();
+        editor.drawScenePanel(sceneDocument);
         ImGui::End();
 
-        if (ImGuiFileDialog::Instance()->Display("LoadNativeScene", ImGuiWindowFlags_NoCollapse,
-                                                  ImVec2(640.0f, 360.0f)))
-        {
-            if (ImGuiFileDialog::Instance()->IsOk())
-            {
-                try
-                {
-                    fs::path selectedPath(ImGuiFileDialog::Instance()->GetFilePathName());
-                    const fs::path scenePath = selectedPath;
-                    viewer.context().waitIdle();
-                    sceneManager.loadScene(scenePath);
-                    environmentDirty = true;
-                    sceneManager.rebuildGeometry();
-                    editor.onSceneContentChanged();
-                    physicsWorld.onSceneChanged();
-                    viewer.frameGraph().compile();
-                    sceneDocumentPath = scenePath;
-                    scenePersistenceError.clear();
-                }
-                catch (const std::exception &e)
-                {
-                    scenePersistenceError = e.what();
-                    spdlog::error("Failed to load scene: {}", e.what());
-                }
-            }
-            ImGuiFileDialog::Instance()->Close();
-        }
-
-        if (ImGuiFileDialog::Instance()->Display("SaveNativeScene", ImGuiWindowFlags_NoCollapse,
-                                                  ImVec2(640.0f, 360.0f)))
-        {
-            if (ImGuiFileDialog::Instance()->IsOk())
-            {
-                try
-                {
-                    fs::path selectedPath(ImGuiFileDialog::Instance()->GetFilePathName());
-                    if (selectedPath.extension() != ".lrscene") selectedPath += ".lrscene";
-                    sceneManager.save(selectedPath);
-                    sceneDocumentPath = std::move(selectedPath);
-                    scenePersistenceError.clear();
-                }
-                catch (const std::exception &e)
-                {
-                    scenePersistenceError = e.what();
-                    spdlog::error("Failed to save scene: {}", e.what());
-                }
-            }
-            ImGuiFileDialog::Instance()->Close();
-        }
-
-        if (ImGuiFileDialog::Instance()->Display("ImportScene", ImGuiWindowFlags_NoCollapse,
-                                                  ImVec2(640.0f, 360.0f)))
-        {
-            if (ImGuiFileDialog::Instance()->IsOk())
-            {
-                try
-                {
-                    const fs::path selectedPath(ImGuiFileDialog::Instance()->GetFilePathName());
-                    viewer.context().waitIdle();
-                    sceneManager.load(selectedPath, sceneLoadConfig);
-                    sceneManager.rebuildGeometry(); // refreshes geometryPass via onGeometryRebuilt
-                    editor.onSceneContentChanged();
-                    physicsWorld.onSceneChanged();
-                    viewer.frameGraph().compile();
-                    sceneImportError.clear();
-                }
-                catch (const std::exception &e)
-                {
-                    sceneImportError = e.what();
-                    spdlog::error("Failed to import scene: {}", e.what());
-                }
-            }
-            ImGuiFileDialog::Instance()->Close();
-        }
+        // Outside every window above: a modal cannot be opened from inside one.
+        sceneDocument.drawDialogs();
 
         ImGui::SetNextWindowPos(bottomRight, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);

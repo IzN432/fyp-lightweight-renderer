@@ -7,6 +7,7 @@ namespace lr
 
 struct EditorContext;
 class EditorRenderBridge;
+class SceneDocument;
 class SceneManager;
 class SceneObject;
 class Viewer;
@@ -32,6 +33,13 @@ public:
     void onSceneContentChanged();
 
     void drawFeaturePanel();
+
+    // The Scene window's contents: Hierarchy (document errors, the import/create buttons, the object
+    // tree) above Inspector. The caller owns the window itself — where it sits and how big it is are
+    // the host application's layout decisions, not the editor's. `document` supplies the error text
+    // and receives the Import button's dialog request; the caller resolves that dialog by calling
+    // SceneDocument::drawDialogs() outside any window.
+    void drawScenePanel(SceneDocument &document);
     void drawTransformWindow();
     void drawAnimationWindow();
 
