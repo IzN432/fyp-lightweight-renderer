@@ -170,8 +170,8 @@ inline OverlayMeshData makeSphereSurface(int latCount = 12, int lonCount = 16)
             uint32_t v1 = v0 + 1;
             uint32_t v2 = v0 + static_cast<uint32_t>(lonCount + 1);
             uint32_t v3 = v2 + 1;
-            data.faces.push_back({v0, v2, v1});
-            data.faces.push_back({v1, v2, v3});
+            data.faces.push_back({v0, v1, v2});
+            data.faces.push_back({v1, v3, v2});
         }
     }
     return data;

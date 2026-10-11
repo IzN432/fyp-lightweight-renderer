@@ -16,6 +16,23 @@ int main()
     assert(lr::primitives::cube.outline.edges.size() == 12);
     assert(!lr::primitives::sphere.surface.faces.empty());
     assert(lr::primitives::sphere.outline.edges.size() == 128);
+    // Every sphere triangle must wind counter-clockwise when seen from outside, so its
+    // geometric normal points the same way as the outward radial direction. The pole rings
+    // collapse to a single point, and in float arithmetic sin(pi) is ~1e-7 rather than 0, so
+    // those triangles keep a tiny nonzero area whose normal is pure rounding noise. Skip
+    // anything below a real-area threshold instead of testing for exactly zero.
+    constexpr float kMinFaceAreaSquared = 1e-6f;
+    for (const glm::uvec3 &face : lr::primitives::sphere.surface.faces)
+    {
+        const glm::vec3 &a = lr::primitives::sphere.surface.positions[face.x];
+        const glm::vec3 &b = lr::primitives::sphere.surface.positions[face.y];
+        const glm::vec3 &c = lr::primitives::sphere.surface.positions[face.z];
+        const glm::vec3  normal = glm::cross(b - a, c - a);
+        if (glm::dot(normal, normal) > kMinFaceAreaSquared)
+        {
+            assert(glm::dot(normal, a + b + c) > 0.0f);
+        }
+    }
 
     lr::Scene scene;
     auto     &object = scene.createSceneObject();
