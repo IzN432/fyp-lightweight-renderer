@@ -3,6 +3,7 @@
 
 #include "core/scene/Scene.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
+#include "features/linear_blend_skinning/SkinStore.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -25,7 +26,8 @@ public:
         for (const Joint &joint : skin.joints())
             joints.push_back({{"object", toString(joint.sceneObject)},
                               {"inverse_bind_matrix", mat4(joint.inverseBindMatrix)}});
-        return {{"joints", std::move(joints)}, {"skinning_enabled", skin.skinningEnabled()}};
+        return {{"id", toString(skin.id())}, {"joints", std::move(joints)},
+                {"skinning_enabled", skin.skinningEnabled()}};
     }
     void decode(const json &value, SceneObject &object, ComponentLoadContext &context,
                 const std::string &where) const override
@@ -44,7 +46,15 @@ public:
             joints.push_back({jointObject, readMat4(required(joint, "inverse_bind_matrix", jointWhere),
                                                     jointWhere + ".inverse_bind_matrix")});
         }
-        auto &component = object.addComponent<SkinComponent>(Skin(context.scene, std::move(joints)));
+        // A binding identity is required to preserve sharing between components. Legacy skin
+        // components without one are rejected rather than silently becoming independent bindings.
+        const SkinId id = readId(required(value, "id", where), where + ".id");
+        std::optional<SkinHandle> handle = context.skins.find(id);
+        if (!handle)
+        {
+            handle = context.skins.add(context.scene, std::move(joints), id);
+        }
+        auto &component = object.addComponent<SkinComponent>(Skin(context.skins, *handle));
         // Absent in scenes saved before the per-skin toggle existed, where skinning was always on.
         component.skin().setSkinningEnabled(value.value("skinning_enabled", true));
     }

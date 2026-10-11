@@ -47,6 +47,7 @@ public:
 
     MaterialStore &materialStore() { return m_assets.materials; }
     MeshStore     &meshStore() { return m_assets.meshes; }
+    SkinStore     &skinStore() { return m_assets.skins; }
     AnimationLibrary &animations() { return m_assets.animations; }
     AnimationSystem &animationSystem() { return m_animationSystem; }
 

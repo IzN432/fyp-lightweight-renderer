@@ -2,6 +2,7 @@
 #include "core/scene/TransformComponent.hpp"
 #include "features/linear_blend_skinning/Joint.hpp"
 #include "features/linear_blend_skinning/Skin.hpp"
+#include "features/linear_blend_skinning/SkinStore.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/epsilon.hpp>
@@ -23,7 +24,13 @@ int main()
     scene.setParent(jointObject.id(), root.id());
 
     const lr::Joint joint{.sceneObject = jointObject.id(), .inverseBindMatrix = glm::mat4(1.0f)};
-    lr::Skin        skin(scene, {joint});
+    lr::SkinStore   skins;
+    const lr::SkinHandle sharedHandle = skins.add(scene, {joint});
+    lr::Skin        skin(skins, sharedHandle);
+    lr::Skin        secondInstance(skins, sharedHandle);
+    assert(skins.size() == 1);
+    assert(skin.handle() == secondInstance.handle());
+    assert(&skin.binding() == &secondInstance.binding());
     assert(skin.joints().size() == 1);
     assert(skin.joints()[0].sceneObject == jointObject.id());
 
@@ -44,10 +51,18 @@ int main()
     assert(glm::all(glm::epsilonEqual(glm::vec3(skin.jointMatrices()[0][3]),
                                      glm::vec3(5.0f, 2.0f, 3.0f), 0.0001f)));
 
+    // Evaluation and UI state belong to each mesh attachment, not the shared definition.
+    secondInstance.evaluate(glm::mat4(1.0f));
+    assert(glm::all(glm::epsilonEqual(glm::vec3(secondInstance.jointMatrices()[0][3]),
+                                     glm::vec3(6.0f, 2.0f, 3.0f), 0.0001f)));
+    secondInstance.setSkinningEnabled(false);
+    assert(skin.skinningEnabled());
+    assert(!secondInstance.skinningEnabled());
+
     bool invalidJointRejected = false;
     try
     {
-        lr::Skin invalid(scene, {{.sceneObject = lr::generateUuid()}});
+        skins.add(scene, {{.sceneObject = lr::generateUuid()}});
     }
     catch (const std::invalid_argument &)
     {

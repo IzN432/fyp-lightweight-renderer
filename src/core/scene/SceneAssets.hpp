@@ -7,6 +7,7 @@
 #include "core/loaders/MaterialStore.hpp"
 #include "core/loaders/SceneLoader.hpp"
 #include "features/animation/AnimationLibrary.hpp"
+#include "features/linear_blend_skinning/SkinStore.hpp"
 
 #include <filesystem>
 
@@ -33,12 +34,13 @@ public:
     SceneLoadResult load(const std::filesystem::path &path,
                          const SceneLoaderConfig     &config = conventions::sceneLoaderConfig())
     {
-        return SceneLoader::load(path, scene, meshes, materials, animations, config);
+        return SceneLoader::load(path, scene, meshes, materials, skins, animations, config);
     }
 
     Scene         scene;
     MeshStore     meshes;
     MaterialStore materials;
+    SkinStore     skins;
     AnimationLibrary animations;
 };
 

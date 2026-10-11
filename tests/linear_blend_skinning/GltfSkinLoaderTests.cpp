@@ -2,6 +2,7 @@
 #include "core/loaders/SceneLoader.hpp"
 #include "core/scene/MeshComponent.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
+#include "features/linear_blend_skinning/SkinStore.hpp"
 
 #include <glm/gtc/epsilon.hpp>
 
@@ -47,10 +48,11 @@ int main()
     lr::Scene         scene;
     lr::MeshStore     meshStore;
     lr::AnimationLibrary animations;
+    lr::SkinStore     importedSkins;
     lr::MaterialStore importedMaterials(32, [] { return lr::Material{}; });
     auto imported = lr::SceneLoader::load(
         std::filesystem::path(LR_SAMPLE_ASSET_DIR) / "bird_orange.glb", scene, meshStore, importedMaterials,
-        animations);
+        importedSkins, animations);
 
     assert(imported.nodeObjects[0].has_value());
     assert(scene.getSceneObject(imported.nodeObjects[0].value()).parent().value() == imported.rootObject);

@@ -34,7 +34,7 @@ MeshLoadResult loadFile(const std::filesystem::path &path, MaterialStore &materi
 } // namespace
 
 SceneLoadResult SceneLoader::load(const std::filesystem::path &path, Scene &scene, MeshStore &meshStore,
-                                  MaterialStore &materialStore, AnimationLibrary &animations,
+                                  MaterialStore &materialStore, SkinStore &skinStore, AnimationLibrary &animations,
                                   const SceneLoaderConfig &config)
 {
     MeshLoadResult loaded = loadFile(path, materialStore, config);
@@ -56,6 +56,9 @@ SceneLoadResult SceneLoader::load(const std::filesystem::path &path, Scene &scen
     {
         meshHandles.push_back(meshStore.add(std::move(mesh)));
     }
+    // glTF nodes reference skins by index. Resolve each definition at most once, then give every
+    // mesh node its own Skin instance over that shared immutable binding.
+    std::vector<std::optional<SkinHandle>> skinHandles(loaded.skins.size());
 
     std::vector<bool> selected(loaded.nodes.size(), false);
     std::vector<uint32_t> pending = loaded.sceneRoots;
@@ -234,19 +237,24 @@ SceneLoadResult SceneLoader::load(const std::filesystem::path &path, Scene &scen
         object.addComponent<MeshComponent>(meshHandles[meshIndex], meshStore, materialStore);
         if (loaded.nodes[nodeIndex].skinIndex)
         {
-            const SkinLoadData &loadedSkin = loaded.skins[loaded.nodes[nodeIndex].skinIndex.value()];
-            std::vector<Joint>  joints;
-            joints.reserve(loadedSkin.joints.size());
-            for (const SkinJointLoadData &joint : loadedSkin.joints)
+            const uint32_t skinIndex = loaded.nodes[nodeIndex].skinIndex.value();
+            if (!skinHandles[skinIndex])
             {
-                if (!result.nodeObjects[joint.nodeIndex])
+                const SkinLoadData &loadedSkin = loaded.skins[skinIndex];
+                std::vector<Joint> joints;
+                joints.reserve(loadedSkin.joints.size());
+                for (const SkinJointLoadData &joint : loadedSkin.joints)
                 {
-                    throw std::runtime_error("SceneLoader: skin joint was not imported into the scene");
+                    if (!result.nodeObjects[joint.nodeIndex])
+                    {
+                        throw std::runtime_error("SceneLoader: skin joint was not imported into the scene");
+                    }
+                    joints.push_back({.sceneObject = result.nodeObjects[joint.nodeIndex].value(),
+                                      .inverseBindMatrix = joint.inverseBindMatrix});
                 }
-                joints.push_back({.sceneObject = result.nodeObjects[joint.nodeIndex].value(),
-                                  .inverseBindMatrix = joint.inverseBindMatrix});
+                skinHandles[skinIndex] = skinStore.add(scene, std::move(joints));
             }
-            auto &skinComponent = object.addComponent<SkinComponent>(Skin(scene, std::move(joints)));
+            auto &skinComponent = object.addComponent<SkinComponent>(Skin(skinStore, *skinHandles[skinIndex]));
             skinComponent.evaluate();
         }
         if (!result.firstMeshObject)

@@ -1,6 +1,7 @@
 #include "core/scene/Scene.hpp"
 #include "features/linear_blend_skinning/Skin.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
+#include "features/linear_blend_skinning/SkinStore.hpp"
 #include "features/linear_blend_skinning/editor/SkeletonTopology.hpp"
 
 #include <cassert>
@@ -32,7 +33,8 @@ int main()
     scene.setParent(leafB.id(), middle.id());
 
     // Deliberately not hierarchy order: palette indices, not traversal order, identify bones.
-    lr::Skin skin(scene, {joint(leafA), joint(root), joint(leafB), joint(middle)});
+    lr::SkinStore skins;
+    lr::Skin skin(skins, skins.add(scene, {joint(leafA), joint(root), joint(leafB), joint(middle)}));
     lr::SkeletonTopology topology(skinObject.id(), scene, skin);
 
     assert(topology.bonesByChildJoint().size() == 3);
@@ -59,7 +61,7 @@ int main()
     bool duplicateRejected = false;
     try
     {
-        lr::Skin duplicateSkin(scene, {joint(root), joint(root)});
+        lr::Skin duplicateSkin(skins, skins.add(scene, {joint(root), joint(root)}));
         lr::SkeletonTopology duplicateTopology(skinObject.id(), scene, duplicateSkin);
     }
     catch (const std::invalid_argument &)
@@ -69,7 +71,7 @@ int main()
     assert(duplicateRejected);
 
     // A skin outside the joint subtree prevents deletion from leaving a dangling palette entry.
-    skinObject.addComponent<lr::SkinComponent>(lr::Skin(scene, {joint(root), joint(middle)}));
+    skinObject.addComponent<lr::SkinComponent>(lr::Skin(skins, skins.add(scene, {joint(root), joint(middle)})));
     const lr::Scene::DestructionCheck destruction = scene.checkSceneObjectDestruction(root.id());
     assert(!destruction.allowed);
     assert(destruction.reason.find("SkinComponent") != std::string::npos);
@@ -88,10 +90,12 @@ int main()
 
     // A component being deleted with its referenced joints cannot leave a dangling reference.
     lr::Scene ownedRigScene;
+    lr::SkinStore ownedRigSkins;
     auto &ownedSkin = ownedRigScene.createSceneObject();
     auto &ownedJoint = ownedRigScene.createSceneObject();
     ownedRigScene.setParent(ownedJoint.id(), ownedSkin.id());
-    ownedSkin.addComponent<lr::SkinComponent>(lr::Skin(ownedRigScene, {joint(ownedJoint)}));
+    ownedSkin.addComponent<lr::SkinComponent>(
+        lr::Skin(ownedRigSkins, ownedRigSkins.add(ownedRigScene, {joint(ownedJoint)})));
     assert(ownedRigScene.canDestroySceneObject(ownedSkin.id()));
     ownedRigScene.destroySceneObject(ownedSkin.id());
     assert(!ownedRigScene.contains(ownedSkin.id()));

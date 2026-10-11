@@ -166,8 +166,11 @@ int main()
     source.animations.add(lr::AnimationClip("Unreferenced", {}));
 
     auto &skinnedObject = source.scene.getSceneObject(meshObjectIds[0]);
-    skinnedObject.addComponent<lr::SkinComponent>(lr::Skin(source.scene, {
-        {root.id(), glm::mat4(1.0f)}, {lightObjectIds[0], glm::mat4(2.0f)}}));
+    const lr::SkinHandle sharedSkin = source.skins.add(source.scene, {
+        {root.id(), glm::mat4(1.0f)}, {lightObjectIds[0], glm::mat4(2.0f)}});
+    skinnedObject.addComponent<lr::SkinComponent>(lr::Skin(source.skins, sharedSkin));
+    source.scene.getSceneObject(meshObjectIds[1]).addComponent<lr::SkinComponent>(
+        lr::Skin(source.skins, sharedSkin));
     auto &body = skinnedObject.addComponent<lr::RigidBodyComponent>(7.0f, lr::RigidBodyType::Dynamic);
     body.setInertiaDiagonal({2, 3, 4});
     body.setLinearDrag(0.2f);
@@ -204,7 +207,7 @@ int main()
     editorTarget.animations.add(lr::AnimationClip("Stale clip", {}));
     const auto editorLoaded = lr::SceneSerializer::load(
         temporary.path, editorTarget.scene, editorTarget.meshes, editorTarget.materials,
-        editorTarget.animations, true);
+        editorTarget.skins, editorTarget.animations, true);
     assert(editorTarget.animations.size() == 2);
     assert(editorTarget.animations.get(0).name() == "Edited");
     assert(editorTarget.animations.get(1).name() == "Unreferenced");
@@ -214,6 +217,7 @@ int main()
     assert(temporaryCamera.getComponent<lr::Camera>().orthoHeight == 22);
 
     auto loaded = lr::SceneSerializer::load(temporary.path);
+    assert(loaded->skins.size() == 1);
     assert(loaded->scene.hdriPath() == temporary.hdriPath.filename());
     assert(loaded->scene.hdriData() == std::vector<std::byte>(hdriBytes.begin(), hdriBytes.end()));
     assert(loaded->scene.sceneObjects().size() == 8);
@@ -262,6 +266,9 @@ int main()
     assert(roundTripTranslation.target() == meshObjectIds[0] && roundTripTranslation.interpolation() == lr::AnimationInterpolation::CubicSpline);
     assert(roundTripTranslation.keyframes()[1].outgoingTangent == glm::vec3(16, 17, 18));
     const auto &roundTripSkin = loaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::SkinComponent>().skin();
+    const auto &secondRoundTripSkin = loaded->scene.getSceneObject(meshObjectIds[1]).getComponent<lr::SkinComponent>().skin();
+    assert(roundTripSkin.handle() == secondRoundTripSkin.handle());
+    assert(roundTripSkin.id() == secondRoundTripSkin.id());
     assert(roundTripSkin.joints().size() == 2 && roundTripSkin.joints()[0].sceneObject == loadedRoot.id());
     assert(roundTripSkin.joints()[1].inverseBindMatrix == glm::mat4(2.0f));
     const auto &roundTripBody = loaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::RigidBodyComponent>();
@@ -278,7 +285,7 @@ int main()
     // already holds those objects is a collision rather than a silent duplicate.
     bool collisionRejected = false;
     try { (void)lr::SceneSerializer::load(temporary.path, loaded->scene, loaded->meshes, loaded->materials,
-                                         loaded->animations); }
+                                         loaded->skins, loaded->animations); }
     catch (const std::exception &) { collisionRejected = true; }
     assert(collisionRejected);
 

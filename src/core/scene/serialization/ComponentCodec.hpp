@@ -15,11 +15,13 @@ class MaterialStore;
 class MeshStore;
 class Scene;
 class SceneObject;
+class SkinStore;
 
 struct ComponentSaveContext
 {
     const MeshStore &meshes;
     const MaterialStore &materials;
+    const SkinStore &skins;
 };
 
 struct ComponentLoadContext
@@ -27,6 +29,7 @@ struct ComponentLoadContext
     Scene &scene;
     MeshStore &meshes;
     MaterialStore &materials;
+    SkinStore &skins;
 };
 
 class ComponentCodec

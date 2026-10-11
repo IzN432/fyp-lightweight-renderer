@@ -6,6 +6,7 @@
 #include "core/scene/MeshStore.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "features/animation/AnimationLibrary.hpp"
+#include "features/linear_blend_skinning/SkinStore.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -36,7 +37,7 @@ class SceneLoader
 {
 public:
     static SceneLoadResult load(const std::filesystem::path &path, Scene &scene, MeshStore &meshStore,
-                                MaterialStore &materialStore, AnimationLibrary &animations,
+                                MaterialStore &materialStore, SkinStore &skinStore, AnimationLibrary &animations,
                                 const SceneLoaderConfig &config = {});
 };
 

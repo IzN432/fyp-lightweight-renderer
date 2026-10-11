@@ -347,11 +347,12 @@ Material deserializeMaterial(const json &value, const std::string &where, const 
 
 void SceneSerializer::save(const SceneAssets &assets, const std::filesystem::path &path)
 {
-    save(assets.scene, assets.meshes, assets.materials, assets.animations, path);
+    save(assets.scene, assets.meshes, assets.materials, assets.skins, assets.animations, path);
 }
 
 void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
-                           const MaterialStore &materialStore, const AnimationLibrary &animationLibrary,
+                           const MaterialStore &materialStore, const SkinStore &skinStore,
+                           const AnimationLibrary &animationLibrary,
                            const std::filesystem::path &path)
 {
     if constexpr (std::endian::native != std::endian::little)
@@ -417,7 +418,7 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
         animations.push_back(serializeAnimationClip(clip));
 
     const ComponentCodecRegistry codecs = makeSceneComponentCodecs();
-    const ComponentSaveContext componentContext{meshStore, materialStore};
+    const ComponentSaveContext componentContext{meshStore, materialStore, skinStore};
     json objects = json::array();
     for (const auto &objectPointer : scene.sceneObjects())
     {
@@ -473,12 +474,13 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
 std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &path)
 {
     auto result = std::make_unique<SceneAssets>();
-    load(path, result->scene, result->meshes, result->materials, result->animations);
+    load(path, result->scene, result->meshes, result->materials, result->skins, result->animations);
     return result;
 }
 
 std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &path, Scene &scene,
                                                  MeshStore &meshStore, MaterialStore &materialStore,
+                                                 SkinStore &skinStore,
                                                  AnimationLibrary &animationLibrary,
                                                  bool remapCameraObject)
 {
@@ -644,7 +646,7 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
     std::optional<SceneObjectId> serializedCameraId;
     std::optional<SceneObjectId> loadedCameraId;
     const ComponentCodecRegistry codecs = makeSceneComponentCodecs();
-    ComponentLoadContext componentContext{scene, meshStore, materialStore};
+    ComponentLoadContext componentContext{scene, meshStore, materialStore, skinStore};
     for (size_t index = 0; index < objects.size(); ++index)
     {
         const json &value = objects[index];

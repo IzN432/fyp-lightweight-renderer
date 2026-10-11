@@ -309,6 +309,7 @@ target_link_libraries(lr_laplace_beltrami_feature PUBLIC lr_core igl::igl_core)
 
 add_library(lr_linear_blend_skinning_feature STATIC
     src/features/linear_blend_skinning/Skin.cpp
+    src/features/linear_blend_skinning/SkinStore.cpp
     src/features/linear_blend_skinning/editor/SkeletonOverlay.cpp
     src/features/linear_blend_skinning/editor/SkeletonTopology.cpp
 )

@@ -75,7 +75,7 @@ const SceneGpu &SceneManager::gpu() const { return const_cast<SceneManager *>(th
 SceneObject &SceneManager::load(const std::filesystem::path &path, const SceneLoaderConfig &config)
 {
     Scene          &target   = scene();
-    SceneLoadResult imported = SceneLoader::load(path, target, meshStore(), materialStore(), animations(), config);
+    SceneLoadResult imported = SceneLoader::load(path, target, meshStore(), materialStore(), skinStore(), animations(), config);
     if (!imported.firstMeshObject)
     {
         throw std::runtime_error("SceneManager::load: imported scene does not instantiate a mesh");
@@ -115,10 +115,11 @@ std::vector<SceneObjectId> SceneManager::loadScene(const std::filesystem::path &
     clearEditedMeshObject();
     meshStore().clear();
     materialStore().clear();
+    skinStore().clear();
 
     m_animationSystem.stopAll();
     const std::vector<SceneObjectId> loadedObjects =
-        SceneSerializer::load(path, target, meshStore(), materialStore(), animations(), true);
+        SceneSerializer::load(path, target, meshStore(), materialStore(), skinStore(), animations(), true);
 
     std::vector<SceneObjectId> added;
     std::vector<MaterialHandle> loadedMaterials;

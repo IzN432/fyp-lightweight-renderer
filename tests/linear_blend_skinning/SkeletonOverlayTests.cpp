@@ -2,6 +2,7 @@
 #include "core/scene/TransformComponent.hpp"
 #include "features/linear_blend_skinning/Skin.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
+#include "features/linear_blend_skinning/SkinStore.hpp"
 #include "features/linear_blend_skinning/editor/SkeletonOverlay.hpp"
 
 #include <glm/gtc/quaternion.hpp>
@@ -37,6 +38,7 @@ int main()
     auto &root = scene.createSceneObject();
     auto &middle = scene.createSceneObject();
     auto &leaf = scene.createSceneObject();
+    lr::SkinStore skins;
 
     root.addComponent<lr::TransformComponent>(glm::vec3(1.0f, 0.0f, 0.0f));
     middle.addComponent<lr::TransformComponent>(glm::vec3(0.0f, 2.0f, 0.0f));
@@ -46,7 +48,8 @@ int main()
 
     // Palette order intentionally differs from hierarchy order. The two arrows must still follow
     // the scene parent links, then the three joint balls follow palette order.
-    skinObject.addComponent<lr::SkinComponent>(lr::Skin(scene, {joint(leaf), joint(root), joint(middle)}));
+    skinObject.addComponent<lr::SkinComponent>(
+        lr::Skin(skins, skins.add(scene, {joint(leaf), joint(root), joint(middle)})));
     const std::vector<lr::OverlayInstance> instances = lr::buildSkeletonOverlay(scene, skinObject.id());
 
     assert(instances.size() == 5);

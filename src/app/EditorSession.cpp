@@ -50,6 +50,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -258,7 +259,23 @@ public:
             return;
         }
 
-        bool foundSkin = false;
+        std::unordered_map<SkinId, size_t> userCounts;
+        for (const auto &entry : m_scene.sceneObjects())
+        {
+            if (entry && m_scene.contains(entry->id()) && entry->hasComponent<SkinComponent>())
+            {
+                ++userCounts[entry->getComponent<SkinComponent>().skin().id()];
+            }
+        }
+
+        std::optional<SkinId> selectedSkin;
+        if (const std::optional<SceneObjectId> selected = m_scene.selectedObject();
+            selected && m_scene.contains(*selected) && m_scene.getSceneObject(*selected).hasComponent<SkinComponent>())
+        {
+            selectedSkin = m_scene.getSceneObject(*selected).getComponent<SkinComponent>().skin().id();
+        }
+
+        std::unordered_set<SkinId> displayed;
         for (const auto &entry : m_scene.sceneObjects())
         {
             SceneObject *object = entry.get();
@@ -266,8 +283,12 @@ public:
             {
                 continue;
             }
-            foundSkin = true;
-            const bool selected = m_scene.selectedObject() == object->id();
+            const Skin &skin = object->getComponent<SkinComponent>().skin();
+            if (!displayed.insert(skin.id()).second)
+            {
+                continue;
+            }
+            const bool selected = selectedSkin == skin.id();
             const std::string label = object->name.empty() ? "Unnamed Skin" : object->name;
             const std::string objectId = toString(object->id());
             ImGui::PushID(objectId.c_str());
@@ -277,11 +298,12 @@ public:
                 m_scene.revealInHierarchy(object->id());
             }
             ImGui::SameLine();
-            ImGui::TextDisabled("%zu joints", object->getComponent<SkinComponent>().skin().joints().size());
+            ImGui::TextDisabled("%zu joints, %zu mesh%s", skin.joints().size(), userCounts.at(skin.id()),
+                                userCounts.at(skin.id()) == 1 ? "" : "es");
             ImGui::PopID();
         }
 
-        if (!foundSkin)
+        if (displayed.empty())
         {
             ImGui::TextDisabled("No skins in the scene.");
         }

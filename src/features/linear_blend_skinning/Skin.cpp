@@ -1,4 +1,5 @@
 #include "features/linear_blend_skinning/Skin.hpp"
+#include "features/linear_blend_skinning/SkinStore.hpp"
 
 #include "core/scene/Scene.hpp"
 
@@ -8,13 +9,17 @@
 namespace lr
 {
 
-Skin::Skin(Scene &scene, std::vector<Joint> joints) : m_scene(&scene), m_joints(std::move(joints))
+SkinBinding::SkinBinding(Scene &scene, std::vector<Joint> joints, SkinId id)
+    : m_scene(&scene), m_id(id), m_joints(std::move(joints))
 {
+    if (m_id.is_nil())
+    {
+        throw std::invalid_argument("Skin definition ID cannot be nil");
+    }
     validate();
-    m_jointMatrices.resize(m_joints.size(), glm::mat4(1.0f));
 }
 
-const SceneObject &Skin::jointObject(JointIndex index) const
+const SceneObject &SkinBinding::jointObject(JointIndex index) const
 {
     if (index >= m_joints.size())
     {
@@ -23,18 +28,28 @@ const SceneObject &Skin::jointObject(JointIndex index) const
     return m_scene->getSceneObject(m_joints[index].sceneObject);
 }
 
+Skin::Skin(SkinStore &store, SkinHandle handle) : m_store(&store), m_handle(handle)
+{
+    m_jointMatrices.resize(binding().joints().size(), glm::mat4(1.0f));
+}
+
+SkinId Skin::id() const { return m_store->idOf(m_handle); }
+const SkinBinding &Skin::binding() const { return m_store->get(m_handle); }
+const std::vector<Joint> &Skin::joints() const { return binding().joints(); }
+const SceneObject &Skin::jointObject(JointIndex index) const { return binding().jointObject(index); }
+
 void Skin::evaluate(const glm::mat4 &meshWorldMatrix)
 {
     const glm::mat4 inverseMeshWorld = glm::inverse(meshWorldMatrix);
-    for (JointIndex jointIndex = 0; jointIndex < m_joints.size(); ++jointIndex)
+    for (JointIndex jointIndex = 0; jointIndex < joints().size(); ++jointIndex)
     {
-        const Joint &joint = m_joints[jointIndex];
+        const Joint &joint = joints()[jointIndex];
         m_jointMatrices[jointIndex] =
             inverseMeshWorld * jointObject(jointIndex).worldMatrix() * joint.inverseBindMatrix;
     }
 }
 
-void Skin::validate() const
+void SkinBinding::validate() const
 {
     for (const Joint &joint : m_joints)
     {
