@@ -159,6 +159,7 @@ add_library(lr_core STATIC
     src/core/editor/ErrorReporter.cpp
     src/core/editor/VertexCentroid.cpp
     src/core/editor/VertexManager.cpp
+    src/core/editor/ViewportPicker.cpp
     src/core/editor/DefaultVertexDragHandler.cpp
     src/core/editor/SceneObjectDragHandler.cpp
     src/core/editor/SceneObjectRotationHandler.cpp

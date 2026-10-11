@@ -1,7 +1,6 @@
 #pragma once
 
-#include "core/scene/SceneObjectId.hpp"
-#include "features/linear_blend_skinning/Joint.hpp"
+#include "features/linear_blend_skinning/Skin.hpp"
 
 #include <variant>
 
@@ -13,8 +12,8 @@ namespace lr
 // incoming bone and therefore cannot be named by BoneRef.
 struct BoneRef
 {
-    SceneObjectId skinObject{};
-    JointIndex    childJoint = 0;
+    SkinId     skin{};
+    JointIndex childJoint = 0;
 
     friend bool operator==(const BoneRef &, const BoneRef &) = default;
 };
@@ -23,8 +22,8 @@ struct BoneRef
 // including roots and joints at branching points.
 struct JointRef
 {
-    SceneObjectId skinObject{};
-    JointIndex    joint = 0;
+    SkinId     skin{};
+    JointIndex joint = 0;
 
     friend bool operator==(const JointRef &, const JointRef &) = default;
 };

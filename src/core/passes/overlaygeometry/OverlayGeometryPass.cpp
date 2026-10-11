@@ -5,6 +5,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <algorithm>
 
 namespace lr
 {
@@ -16,6 +17,16 @@ struct OverlayGeometryPC
     float     occludedOpacity = 0.0f;
     uint32_t  instanceIndex   = 0; // 1-based; 0 written when not used (shouldn't happen)
 };
+
+namespace
+{
+
+glm::vec3 brightenForHover(const glm::vec3 &color)
+{
+    return glm::vec3(1.0f, 0.8f, 0.8f);
+}
+
+} // namespace
 
 OverlayGeometryPass::OverlayGeometryPass(Config cfg) : m_cfg(std::move(cfg)) {}
 
@@ -44,7 +55,7 @@ void OverlayGeometryPass::uploadResources(ResourceRegistry &registry)
 
     // Pre-register the picking image with TRANSFER_SRC so ImageReadback can copy it.
     // Must happen before FrameGraph::compile() to override the default usage flags.
-    registry.registerImage(m_cfg.pickingImageName, VK_FORMAT_R32_UINT,
+    registry.registerImage(imageName, VK_FORMAT_R32_UINT,
                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 }
 
@@ -64,7 +75,7 @@ void OverlayGeometryPass::build(FrameGraph &fg)
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledDepth(1, fg.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .colorAttachment(fg.image("overlay"), VK_FORMAT_R16G16B16A16_SFLOAT)
-        .colorAttachment(fg.image(m_cfg.pickingImageName), VK_FORMAT_R32_UINT)
+        .colorAttachment(fg.image(imageName), VK_FORMAT_R32_UINT)
         .depthAttachment(fg.image("overlayDepth"), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,
                          {.depthStencil = {1.0f, 0}})
         .execute([&](PassContext &ctx) {
@@ -80,7 +91,7 @@ void OverlayGeometryPass::build(FrameGraph &fg)
                 const glm::mat4 model = T * glm::mat4_cast(q) * glm::scale(glm::mat4(1.0f), inst.scale);
 
                 const glm::vec3 drawColor =
-                    (inst.pickingId == m_hoveredInstance) ? glm::mix(inst.color, glm::vec3(1.0f), 0.4f) : inst.color;
+                    (inst.pickingId == m_hoveredInstance) ? brightenForHover(inst.color) : inst.color;
 
                 OverlayGeometryPC pc{
                     .model           = model,

@@ -9,8 +9,8 @@
 namespace lr
 {
 
-SkeletonTopology::SkeletonTopology(SceneObjectId skinObject, const Scene &scene, const Skin &skin)
-    : m_skinObject(skinObject)
+SkeletonTopology::SkeletonTopology(const Scene &scene, const Skin &skin)
+    : m_skinId(skin.id())
 {
     std::unordered_map<SceneObjectId, JointIndex> jointByObject;
     jointByObject.reserve(skin.joints().size());
@@ -51,7 +51,7 @@ SkeletonTopology::SkeletonTopology(SceneObjectId skinObject, const Scene &scene,
 
 const SkeletonBone *SkeletonTopology::find(BoneRef bone) const
 {
-    if (bone.skinObject != m_skinObject)
+    if (bone.skin != m_skinId)
     {
         return nullptr;
     }

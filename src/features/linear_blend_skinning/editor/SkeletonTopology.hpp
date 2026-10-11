@@ -23,9 +23,9 @@ struct SkeletonBone
 class SkeletonTopology
 {
 public:
-    SkeletonTopology(SceneObjectId skinObject, const Scene &scene, const Skin &skin);
+    SkeletonTopology(const Scene &scene, const Skin &skin);
 
-    SceneObjectId skinObject() const { return m_skinObject; }
+    SkinId skinId() const { return m_skinId; }
     const std::map<JointIndex, SkeletonBone> &bonesByChildJoint() const { return m_bonesByChildJoint; }
 
     // A bone exists only for a joint whose scene parent is also in this skin. Joint balls resolve
@@ -33,7 +33,7 @@ public:
     const SkeletonBone *find(BoneRef bone) const;
 
 private:
-    SceneObjectId                      m_skinObject{};
+    SkinId                             m_skinId{};
     std::map<JointIndex, SkeletonBone> m_bonesByChildJoint;
 };
 

@@ -119,6 +119,11 @@ void EditorRenderBridge::setOverlayGeometry(std::vector<OverlayInstance> instanc
     m_passes.overlayGeometry->setInstances(std::move(instances));
 }
 
+void EditorRenderBridge::setHoveredOverlay(uint32_t pickingId)
+{
+    m_passes.overlayGeometry->setHoveredInstance(pickingId);
+}
+
 void EditorRenderBridge::updateSceneOverlays(const Scene &scene, const EditorFrameContext &frame)
 {
     std::vector<OverlayLine> overlayLines = buildColliderOverlayLines(scene);

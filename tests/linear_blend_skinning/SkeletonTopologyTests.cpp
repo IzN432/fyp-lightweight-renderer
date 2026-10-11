@@ -35,7 +35,7 @@ int main()
     // Deliberately not hierarchy order: palette indices, not traversal order, identify bones.
     lr::SkinStore skins;
     lr::Skin skin(skins, skins.add(scene, {joint(leafA), joint(root), joint(leafB), joint(middle)}));
-    lr::SkeletonTopology topology(skinObject.id(), scene, skin);
+    lr::SkeletonTopology topology(scene, skin);
 
     assert(topology.bonesByChildJoint().size() == 3);
     assert(!topology.bonesByChildJoint().contains(1)); // outsideParent is not part of this skin.
@@ -43,26 +43,26 @@ int main()
     assert(topology.bonesByChildJoint().at(2).parentJoint == 3);
     assert(topology.bonesByChildJoint().at(3).parentJoint == 1);
 
-    const lr::BoneRef leafBone{skinObject.id(), 0};
+    const lr::BoneRef leafBone{skin.id(), 0};
     assert(topology.find(leafBone));
     assert(topology.find(leafBone)->childObject == leafA.id());
 
     // Joint balls use the Skin palette directly; topology stores only actual connections.
-    const lr::JointRef middleJoint{skinObject.id(), 3};
-    const lr::JointRef rootJoint{skinObject.id(), 1};
+    const lr::JointRef middleJoint{skin.id(), 3};
+    const lr::JointRef rootJoint{skin.id(), 1};
     assert(skin.joints()[middleJoint.joint].sceneObject == middle.id());
     assert(skin.joints()[rootJoint.joint].sceneObject == root.id());
 
     // A root has a selectable joint ball but no incoming bone shaft.
-    assert(!topology.find(lr::BoneRef{skinObject.id(), 1}));
+    assert(!topology.find(lr::BoneRef{skin.id(), 1}));
     assert(!topology.find(lr::BoneRef{lr::generateUuid(), 0}));
-    assert(!topology.find(lr::BoneRef{skinObject.id(), 99}));
+    assert(!topology.find(lr::BoneRef{skin.id(), 99}));
 
     bool duplicateRejected = false;
     try
     {
         lr::Skin duplicateSkin(skins, skins.add(scene, {joint(root), joint(root)}));
-        lr::SkeletonTopology duplicateTopology(skinObject.id(), scene, duplicateSkin);
+        lr::SkeletonTopology duplicateTopology(scene, duplicateSkin);
     }
     catch (const std::invalid_argument &)
     {

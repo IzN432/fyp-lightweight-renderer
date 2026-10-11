@@ -16,12 +16,13 @@ namespace lr
 class OverlayGeometryPass
 {
 public:
+    static constexpr const char *imageName = "gizmoPicking";
+
     struct Config
     {
         std::string cameraBufferResourceName;
         std::string vertexBufferName = "overlayMeshVertexBuffer";
         std::string indexBufferName  = "overlayMeshIndexBuffer";
-        std::string pickingImageName = "gizmoPicking";
     };
 
     explicit OverlayGeometryPass(Config cfg);
@@ -32,10 +33,8 @@ public:
     void setInstances(std::vector<OverlayInstance> instances);
 
     // Set the pickingId (OverlayInstance::pickingId) of the instance currently under the
-    // cursor. Use ~0u for "none". The hovered instance is drawn with a lightened color.
+    // cursor. Use ~0u for "none". The hovered instance is drawn brighter (same hue and saturation).
     void setHoveredInstance(uint32_t pickingId) { m_hoveredInstance = pickingId; }
-
-    const std::string &pickingImageName() const { return m_cfg.pickingImageName; }
 
 private:
     Config                       m_cfg;

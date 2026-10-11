@@ -55,6 +55,7 @@ public:
     void apply(const EditorPresentation &presentation);
     void setEditableTarget(const EditableMeshContext &target);
     void setOverlayGeometry(std::vector<OverlayInstance> instances);
+    void setHoveredOverlay(uint32_t pickingId);
     void updateSceneOverlays(const Scene &scene, const EditorFrameContext &frame);
 
 private:

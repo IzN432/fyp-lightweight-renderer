@@ -34,8 +34,18 @@ glm::quat rotatePositiveYTo(const glm::vec3 &direction)
 }
 } // namespace
 
-std::vector<OverlayInstance> buildSkeletonOverlay(const Scene &scene, SceneObjectId skinObject,
-                                                  const SkeletonOverlayStyle &style)
+const SkeletonSelection *SkeletonOverlay::selectionForPickingId(uint32_t pickingId) const
+{
+    if (pickingId == 0 || pickingId == ~0u || pickingId > selectionsByPickingId.size())
+    {
+        return nullptr;
+    }
+    return &selectionsByPickingId[pickingId - 1];
+}
+
+SkeletonOverlay buildSkeletonOverlay(const Scene &scene, SceneObjectId skinObject,
+                                     const std::optional<SkeletonSelection> &selected,
+                                     const SkeletonOverlayStyle &style)
 {
     if (!scene.contains(skinObject))
     {
@@ -53,7 +63,7 @@ std::vector<OverlayInstance> buildSkeletonOverlay(const Scene &scene, SceneObjec
     }
 
     const Skin             &skin = object.getComponent<SkinComponent>().skin();
-    const SkeletonTopology  topology(skinObject, scene, skin);
+    const SkeletonTopology  topology(scene, skin);
 
     float  totalLength = 0.0f;
     size_t lengthCount = 0;
@@ -71,8 +81,9 @@ std::vector<OverlayInstance> buildSkeletonOverlay(const Scene &scene, SceneObjec
     const float boneRadius      = referenceLength * style.boneRadiusRatio;
     const float jointRadius     = referenceLength * style.jointRadiusRatio;
 
-    std::vector<OverlayInstance> instances;
-    instances.reserve(topology.bonesByChildJoint().size() + skin.joints().size());
+    SkeletonOverlay overlay;
+    overlay.instances.reserve(topology.bonesByChildJoint().size() + skin.joints().size());
+    overlay.selectionsByPickingId.reserve(topology.bonesByChildJoint().size() + skin.joints().size());
 
     for (const auto &[childJoint, bone] : topology.bonesByChildJoint())
     {
@@ -86,27 +97,34 @@ std::vector<OverlayInstance> buildSkeletonOverlay(const Scene &scene, SceneObjec
 
         // The canonical arrow runs from y=0 to y=1 and has a 0.05-unit shaft radius.
         const glm::quat orientation = rotatePositiveYTo(delta / length);
-        instances.push_back({
+        const SkeletonSelection selection = BoneRef{skin.id(), childJoint};
+        overlay.selectionsByPickingId.push_back(selection);
+        overlay.instances.push_back({
             .primitive       = OverlayPrimitive::Arrow,
             .position        = start,
             .eulerDegrees    = glm::degrees(glm::eulerAngles(orientation)),
             .scale           = {boneRadius / 0.05f, length, boneRadius / 0.05f},
-            .color           = style.boneColor,
+            .color           = selected && *selected == selection ? style.selectedColor : style.boneColor,
             .occludedOpacity = style.occludedOpacity,
+            .pickingId       = static_cast<uint32_t>(overlay.selectionsByPickingId.size()),
         });
     }
 
-    for (const Joint &joint : skin.joints())
+    for (JointIndex jointIndex = 0; jointIndex < skin.joints().size(); ++jointIndex)
     {
-        instances.push_back({
+        const Joint             &joint = skin.joints()[jointIndex];
+        const SkeletonSelection  selection = JointRef{skin.id(), jointIndex};
+        overlay.selectionsByPickingId.push_back(selection);
+        overlay.instances.push_back({
             .primitive       = OverlayPrimitive::Sphere,
             .position        = worldPosition(scene, joint.sceneObject),
             .scale           = glm::vec3(jointRadius),
-            .color           = style.jointColor,
+            .color           = selected && *selected == selection ? style.selectedColor : style.jointColor,
             .occludedOpacity = style.occludedOpacity,
+            .pickingId       = static_cast<uint32_t>(overlay.selectionsByPickingId.size()),
         });
     }
-    return instances;
+    return overlay;
 }
 
 } // namespace lr

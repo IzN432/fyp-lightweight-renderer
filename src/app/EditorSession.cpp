@@ -21,12 +21,13 @@
 #include "core/editor/SceneObjectScaleHandler.hpp"
 #include "core/editor/SceneObjectTransformController.hpp"
 #include "core/editor/VertexManager.hpp"
+#include "core/editor/ViewportPicker.hpp"
 #include "core/editor/command/CommandManager.hpp"
 #include "core/editor/camera/CameraController.hpp"
 #include "core/editor/gizmo/GizmoController.hpp"
 #include "core/editor/selection/SelectionGestureTool.hpp"
-#include "core/framegraph/ImageReadback.hpp"
 #include "core/passes/objectpicking/ObjectPickingPass.hpp"
+#include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
 #include "core/scene/Camera.hpp"
 #include "core/scene/ComponentCatalog.hpp"
 #include "core/scene/Light.hpp"
@@ -50,6 +51,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -124,7 +126,8 @@ public:
                             return m_gizmoController.capturesMouse();
                         }),
           m_transformController(m_objectTranslationHandler, m_objectRotationHandler, m_objectScaleHandler),
-          m_objectPickingReadback(viewer.context(), viewer.allocator()),
+          m_objectPicker(viewer.context(), viewer.allocator()),
+          m_skeletonPicker(viewer.context(), viewer.allocator()),
           m_componentCatalog(makeComponentCatalog()),
           m_context{*this, m_commandManager, *this, m_componentCatalog},
           m_arapTool(m_selectionManager, m_vertexManager, m_commandManager), m_laplaceBeltramiTool(sceneManager),
@@ -320,7 +323,20 @@ public:
         ImGui::EndDisabled();
         if (editing)
         {
-            ImGui::TextDisabled("Bone and joint manipulation will be added in the next slice.");
+            if (!m_skeletonSelection)
+            {
+                ImGui::TextDisabled("Click a bone or joint ball in the viewport.");
+            }
+            else
+            {
+                std::visit([](const auto &selection) {
+                    using Selection = std::decay_t<decltype(selection)>;
+                    if constexpr (std::is_same_v<Selection, BoneRef>)
+                        ImGui::Text("Selected bone ending at joint %u", selection.childJoint);
+                    else
+                        ImGui::Text("Selected joint %u", selection.joint);
+                }, *m_skeletonSelection);
+            }
         }
         ImGui::End();
     }
@@ -772,6 +788,42 @@ private:
         ImGui::EndPopup();
     }
 
+    uint32_t readSkeletonPickingId()
+    {
+        return m_skeletonPicker.readIdAtCursor(m_viewer, OverlayGeometryPass::imageName);
+    }
+
+    bool handleSkeletonPointer(const PointerButtonEvent &event)
+    {
+        if (event.button != GLFW_MOUSE_BUTTON_LEFT)
+        {
+            return false;
+        }
+        const bool consumed = m_skeletonPicker.consumes(event.action);
+        if (!m_skeletonPicker.clickCompleted(m_viewer, event.action))
+        {
+            // A press is consumed so the release that ends it reaches this layer too; anything
+            // else (a release with no press of ours) belongs to whoever did handle the press.
+            return consumed;
+        }
+
+        const uint32_t pickingId = readSkeletonPickingId();
+        if (pickingId == ViewportPicker::kNoData)
+        {
+            return true;
+        }
+        if (pickingId == 0)
+        {
+            m_skeletonSelection.reset();
+            return true;
+        }
+        if (const SkeletonSelection *selection = m_skeletonOverlay.selectionForPickingId(pickingId))
+        {
+            m_skeletonSelection = *selection;
+        }
+        return true;
+    }
+
     // Each state registers its own presentation *and* its own behavior, so neither update() nor the
     // gizmo arbitration below needs to know that ARAP, vertex editing, or analysis exist. Once
     // feature tools register themselves (EditorTool), these closures move out with them.
@@ -804,7 +856,14 @@ private:
         m_stateController.registerState({
             .id           = std::string(kSkeletonEditState),
             .presentation = {.skinningEnabled = true},
-            .onExit       = [this] { m_renderBridge.setOverlayGeometry({}); },
+            .onExit       = [this] {
+                m_skeletonSelection.reset();
+                m_skeletonPicker.reset();
+                m_skeletonHoverCursor.reset();
+                m_skeletonOverlay = {};
+                m_renderBridge.setHoveredOverlay(~0u);
+                m_renderBridge.setOverlayGeometry({});
+            },
             .update       = [this](const EditorFrameContext &) {
                 const std::optional<SceneObjectId> selected = m_scene.selectedObject();
                 if (!selected || !m_scene.contains(*selected) ||
@@ -813,8 +872,29 @@ private:
                     m_stateController.activateDefault();
                     return;
                 }
-                m_renderBridge.setOverlayGeometry(buildSkeletonOverlay(m_scene, *selected));
+                const Skin &skin = m_scene.getSceneObject(*selected).getComponent<SkinComponent>().skin();
+                if (m_skeletonSelection && !std::visit([&](const auto &selection) {
+                        return selection.skin == skin.id();
+                    }, *m_skeletonSelection))
+                {
+                    m_skeletonSelection.reset();
+                }
+                m_skeletonOverlay = buildSkeletonOverlay(m_scene, *selected, m_skeletonSelection);
+                m_renderBridge.setOverlayGeometry(m_skeletonOverlay.instances);
+
+                double mouseX = 0.0, mouseY = 0.0;
+                m_viewer.input().getMousePos(mouseX, mouseY);
+                const glm::dvec2 cursor(mouseX, mouseY);
+                if (!m_skeletonHoverCursor || m_skeletonHoverCursor->x != cursor.x ||
+                    m_skeletonHoverCursor->y != cursor.y)
+                {
+                    m_skeletonHoverCursor = cursor;
+                    const uint32_t hovered = readSkeletonPickingId();
+                    m_renderBridge.setHoveredOverlay(
+                        m_skeletonOverlay.selectionForPickingId(hovered) ? hovered : ~0u);
+                }
             },
+            .handleInput = [this](const PointerButtonEvent &event) { return handleSkeletonPointer(event); },
         });
     }
 
@@ -925,7 +1005,9 @@ private:
                 {
                     if (object.hasComponent<SkinComponent>())
                     {
-                        m_renderBridge.setOverlayGeometry(buildSkeletonOverlay(m_scene, object.id()));
+                        m_skeletonSelection.reset();
+                        m_skeletonOverlay = buildSkeletonOverlay(m_scene, object.id());
+                        m_renderBridge.setOverlayGeometry(m_skeletonOverlay.instances);
                     }
                     else
                     {
@@ -1003,7 +1085,7 @@ private:
                                                                        const EditorInputContext &context) {
             if (!context.presentation.objectSelectionActive)
             {
-                m_objectPickPress.reset();
+                m_objectPicker.reset();
                 return false;
             }
             if (event.button != GLFW_MOUSE_BUTTON_LEFT)
@@ -1011,37 +1093,14 @@ private:
                 return false;
             }
 
-            double x = 0.0, y = 0.0;
-            m_viewer.input().getMousePos(x, y);
-            if (event.action == GLFW_PRESS)
+            const bool consumed = m_objectPicker.consumes(event.action);
+            if (!m_objectPicker.clickCompleted(m_viewer, event.action))
             {
-                m_objectPickPress = glm::dvec2(x, y);
-                return true;
-            }
-            if (event.action != GLFW_RELEASE || !m_objectPickPress)
-            {
-                return false;
+                return consumed;
             }
 
-            const glm::dvec2 release(x, y);
-            const double distanceSquared = glm::dot(release - *m_objectPickPress, release - *m_objectPickPress);
-            m_objectPickPress.reset();
-            if (distanceSquared > 16.0 || !m_viewer.hasRenderedAtLeastOneFrame())
-            {
-                return true;
-            }
-
-            const VkExtent2D extent = m_viewer.resources().getExtent();
-            const ImVec2 display = ImGui::GetIO().DisplaySize;
-            if (display.x <= 0.0f || display.y <= 0.0f || x < 0.0 || y < 0.0 || x >= display.x || y >= display.y)
-            {
-                return true;
-            }
-            const uint32_t pixelX = std::min(static_cast<uint32_t>(x * extent.width / display.x), extent.width - 1);
-            const uint32_t pixelY = std::min(static_cast<uint32_t>(y * extent.height / display.y), extent.height - 1);
-            const uint32_t pickingId = m_objectPickingReadback.readPixel(
-                m_viewer.resources(), ObjectPickingPass::imageName, pixelX, pixelY);
-            if (pickingId == ImageReadback::kNoData)
+            const uint32_t pickingId = m_objectPicker.readIdAtCursor(m_viewer, ObjectPickingPass::imageName);
+            if (pickingId == ViewportPicker::kNoData)
             {
                 // Nothing was read at all. Not the same answer as "nothing is there", so the
                 // selection stands.
@@ -1215,8 +1274,11 @@ private:
     GizmoController                m_gizmoController;
     EditorInputRouter              m_inputRouter;
     SceneObjectTransformController m_transformController;
-    ImageReadback                  m_objectPickingReadback;
-    std::optional<glm::dvec2>      m_objectPickPress;
+    ViewportPicker                 m_objectPicker;
+    ViewportPicker                 m_skeletonPicker;
+    SkeletonOverlay                m_skeletonOverlay;
+    std::optional<SkeletonSelection> m_skeletonSelection;
+    std::optional<glm::dvec2>      m_skeletonHoverCursor;
     // Declared before m_context, which holds a reference to it.
     ComponentCatalog               m_componentCatalog;
     EditorContext                  m_context;
