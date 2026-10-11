@@ -2,8 +2,10 @@
 #include "EditorSession.hpp"
 
 #include "core/Paths.hpp"
+#include "core/loaders/ObjExporter.hpp"
 #include "core/app/Viewer.hpp"
 #include "core/editor/ErrorReporter.hpp"
+#include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneManager.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "features/rigid_body/PhysicsWorld.hpp"
@@ -13,8 +15,10 @@
 #include <spdlog/spdlog.h>
 
 #include <exception>
+#include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace lr
 {
@@ -28,8 +32,10 @@ namespace
 constexpr const char *kLoadDialog   = "LoadNativeScene";
 constexpr const char *kSaveDialog   = "SaveNativeScene";
 constexpr const char *kImportDialog = "ImportScene";
+constexpr const char *kExportDialog = "ExportGeometry";
 
 constexpr const char *kSceneExtension = ".lrscene";
+constexpr const char *kObjExtension   = ".obj";
 
 constexpr ImVec2 kDialogSize(640.0f, 360.0f);
 
@@ -70,6 +76,49 @@ void SceneDocument::openImportDialog()
     dialogConfig.flags = commonDialogFlags() | ImGuiFileDialogFlags_ReadOnlyFileNameField;
     ImGuiFileDialog::Instance()->OpenDialog(kImportDialog, "Import Mesh or Animated Mesh", ".obj,.gltf,.glb",
                                             dialogConfig);
+}
+
+bool SceneDocument::canExportGeometry()
+{
+    // The registered mesh objects are exactly what the renderer draws, so asking them is what makes
+    // the menu item agree with what is on screen. Empty before anything is imported.
+    return !collectExportObjects().empty();
+}
+
+void SceneDocument::openExportGeometryDialog()
+{
+    if (!canExportGeometry())
+    {
+        return;
+    }
+
+    IGFD::FileDialogConfig dialogConfig;
+    dialogConfig.path = m_path ? m_path->parent_path().string() : ".";
+    // Named after the scene rather than after any one object, since the whole scene is written.
+    dialogConfig.fileName = (m_path ? m_path->stem().string() : std::string("scene")) + kObjExtension;
+    dialogConfig.flags    = commonDialogFlags() | ImGuiFileDialogFlags_ConfirmOverwrite;
+    ImGuiFileDialog::Instance()->OpenDialog(kExportDialog, "Export Scene Geometry", kObjExtension, dialogConfig);
+}
+
+std::vector<ObjExportObject> SceneDocument::collectExportObjects() const
+{
+    std::vector<ObjExportObject> objects;
+    for (SceneObject *object : m_sceneManager.gpu().meshObjects())
+    {
+        // Registration already required both components (SceneGpu::addMeshObject), but a null entry
+        // or a component removed since would otherwise reach the exporter as a null mesh.
+        if (!object)
+        {
+            continue;
+        }
+        const MeshComponent *mesh = object->findComponent<MeshComponent>();
+        if (!mesh)
+        {
+            continue;
+        }
+        objects.push_back({&mesh->mesh(), object->worldMatrix(), object->name});
+    }
+    return objects;
 }
 
 void SceneDocument::importPrimitive(const std::string &fileName, const std::string &objectName)
@@ -168,6 +217,38 @@ void SceneDocument::drawDialogs()
                 m_persistenceError = e.what();
                 m_errors.report("Could not save scene", e.what());
                 spdlog::error("Failed to save scene: {}", e.what());
+            }
+        }
+        ImGuiFileDialog::Instance()->Close();
+    }
+
+    if (ImGuiFileDialog::Instance()->Display(kExportDialog, ImGuiWindowFlags_NoCollapse, kDialogSize))
+    {
+        if (ImGuiFileDialog::Instance()->IsOk())
+        {
+            try
+            {
+                // Re-collected rather than captured at open time: the dialog is modeless as far as
+                // the scene is concerned, so objects can be added, moved or deleted between opening
+                // it and confirming it, and the export should reflect the scene as it is now.
+                const std::vector<ObjExportObject> objects = collectExportObjects();
+                if (objects.empty())
+                {
+                    throw std::runtime_error("The scene has no renderable geometry to export.");
+                }
+
+                fs::path selectedPath(ImGuiFileDialog::Instance()->GetFilePathName());
+                if (selectedPath.extension() != kObjExtension)
+                {
+                    selectedPath += kObjExtension;
+                }
+                ObjExporter::write(objects, selectedPath);
+                m_persistenceError.clear();
+            } catch (const std::exception &e)
+            {
+                m_persistenceError = e.what();
+                m_errors.report("Could not export geometry", e.what());
+                spdlog::error("Failed to export geometry: {}", e.what());
             }
         }
         ImGuiFileDialog::Instance()->Close();

@@ -1,11 +1,13 @@
 #pragma once
 
+#include "core/loaders/ObjExporter.hpp"
 #include "core/loaders/SceneLoader.hpp"
 
 #include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace lr
 {
@@ -50,6 +52,17 @@ public:
     void openSaveAsDialog();
     void openImportDialog();
 
+    // Exports every renderable object in the scene as a single Wavefront OBJ: the registered mesh
+    // objects the renderer is drawing, each as its own `o` group with its positions baked through
+    // its world transform, so the file reproduces the scene as composed rather than stacking every
+    // mesh on the origin. Geometry only -- positions and faces, no normals, uvs or materials (see
+    // ObjExporter). Disabled when the scene has no renderable geometry, which canExportGeometry()
+    // reports for the menu item.
+    void openExportGeometryDialog();
+
+    // Whether the scene has any renderable mesh geometry to export.
+    bool canExportGeometry();
+
     // Imports one of the built-in primitives shipped in assets/runtime/primitives/, naming its root
     // after the shape rather than after the file. Takes the same path as a user import — including
     // the device idle and the resettle afterwards — so a primitive is an ordinary imported object
@@ -70,6 +83,11 @@ private:
     // the device first (done by the caller, before mutating the scene) and rebuild everything bound
     // against the old contents afterward.
     void resettleAfterSceneChange();
+
+    // The scene's renderable mesh objects as exporter entries, each paired with its world transform.
+    // Taken from the registered mesh objects, which are what the renderer draws, so the export
+    // matches what is on screen.
+    std::vector<ObjExportObject> collectExportObjects() const;
 
     Viewer           &m_viewer;
     SceneManager     &m_sceneManager;

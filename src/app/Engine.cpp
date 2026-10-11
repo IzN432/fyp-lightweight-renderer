@@ -447,6 +447,19 @@ void Engine::run()
                 {
                     sceneDocument.openSaveAsDialog();
                 }
+                ImGui::Separator();
+                // Geometry only, hence the wording: the .obj carries every rendered object's
+                // positions and faces, not their normals, uvs or materials.
+                if (ImGui::MenuItem("Export Scene Geometry (.obj)...", nullptr, false,
+                                    sceneDocument.canExportGeometry()))
+                {
+                    sceneDocument.openExportGeometryDialog();
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                {
+                    ImGui::SetTooltip("Writes every rendered object's vertices and faces, placed in world "
+                                      "space - no normals, UVs or materials.");
+                }
                 ImGui::EndMenu();
             }
             ImGui::EndMainMenuBar();

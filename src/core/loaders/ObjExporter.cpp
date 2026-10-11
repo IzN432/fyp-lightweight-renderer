@@ -3,159 +3,79 @@
 #include <fstream>
 #include <ostream>
 #include <stdexcept>
-#include <unordered_map>
-#include <vector>
 
 namespace lr
 {
 namespace
 {
 
-// Reads a per-vertex attribute only if it is registered with the expected type. A Mesh's
-// getPerVertexArray throws on both a missing name and a type mismatch; here either just means
-// "the OBJ omits this attribute", so the layout is consulted first and the span left empty.
-template <typename T> std::span<const T> optionalPerVertexArray(const Mesh &mesh, const std::string &name)
-{
-    if (name.empty())
-    {
-        return {};
-    }
-    const MeshLayout::AttributeDesc *desc = mesh.layout().findPerVertexAttr(name);
-    if (!desc || desc->type != std::type_index(typeid(T)))
-    {
-        return {};
-    }
-    return mesh.getPerVertexArray<T>(name);
-}
-
-// OBJ indices are 1-based.
-uint32_t objIndex(uint32_t zeroBased) { return zeroBased + 1; }
-
-void writeFaceCorner(std::ostream &out, uint32_t positionIndex, uint32_t cornerIndex, bool hasUvs, bool hasNormals)
-{
-    out << ' ' << objIndex(positionIndex);
-    if (hasUvs)
-    {
-        out << '/' << objIndex(cornerIndex);
-    } else if (hasNormals)
-    {
-        // "v//vn" — the empty texcoord field is what lets a normal follow without a uv.
-        out << '/';
-    }
-    if (hasNormals)
-    {
-        out << '/' << objIndex(cornerIndex);
-    }
-}
-
-} // namespace
-
-void ObjExporter::write(const Mesh &mesh, std::ostream &out, const ObjExporterConfig &config)
+// Writes one object's `v` and `f` lines, shifting face indices by `vertexOffset` -- the number of
+// vertices already written by earlier objects -- so several objects share one index space in the
+// file. Returns the vertex count this object contributed, which the caller adds to the offset.
+// A mesh with no faces writes nothing and contributes nothing.
+uint32_t writeObject(const Mesh &mesh, const glm::mat4 &transform, const std::string &name, std::ostream &out,
+                     uint32_t vertexOffset)
 {
     const auto &positions       = mesh.positions();
     const auto &positionIndices = mesh.positionIndices();
     const auto &faces           = mesh.faces();
-    const auto &faceGroups      = mesh.faceGroups();
 
     if (faces.empty())
     {
-        throw std::invalid_argument("ObjExporter: mesh has no faces");
-    }
-    if (!faceGroups.empty() && faceGroups.size() != faces.size())
-    {
-        throw std::invalid_argument("ObjExporter: faceGroups size does not match face count");
+        return 0;
     }
 
-    const std::span<const glm::vec3> normals = optionalPerVertexArray<glm::vec3>(mesh, config.normalAttributeName);
-    const std::span<const glm::vec2> uvs     = optionalPerVertexArray<glm::vec2>(mesh, config.uvAttributeName);
-
-    // Both attribute domains are sized by vertexCount(), so one vt/vn line per render vertex
-    // keeps a face corner's position index and its attribute index independent of each other.
-    const bool hasNormals = normals.size() == positionIndices.size();
-    const bool hasUvs     = uvs.size() == positionIndices.size();
-
-    const std::streamsize previousPrecision = out.precision(config.precision);
-
-    if (!config.objectName.empty())
+    if (!name.empty())
     {
-        out << "o " << config.objectName << '\n';
+        out << "o " << name << '\n';
     }
 
     for (const glm::vec3 &position : positions)
     {
-        out << "v " << position.x << ' ' << position.y << ' ' << position.z << '\n';
-    }
-    if (hasUvs)
-    {
-        for (const glm::vec2 &uv : uvs)
-        {
-            out << "vt " << uv.x << ' ' << uv.y << '\n';
-        }
-    }
-    if (hasNormals)
-    {
-        for (const glm::vec3 &normal : normals)
-        {
-            out << "vn " << normal.x << ' ' << normal.y << ' ' << normal.z << '\n';
-        }
+        // Baked rather than written as-is: OBJ carries no per-object transform, so an object's
+        // placement in the scene can only survive in the coordinates themselves.
+        const glm::vec3 world = glm::vec3(transform * glm::vec4(position, 1.0f));
+        out << "v " << world.x << ' ' << world.y << ' ' << world.z << '\n';
     }
 
-    // Faces are emitted in their existing order and a usemtl is written whenever the group
-    // changes, rather than sorting faces by group. Reordering would renumber faces and so
-    // invalidate any per-face data a caller holds alongside the exported file.
-    std::unordered_map<uint32_t, std::string> groupNames;
-    auto                                      groupName = [&](uint32_t group) -> const std::string                                      &{
-        auto [it, inserted] = groupNames.try_emplace(group);
-        if (inserted)
-        {
-            if (config.materialStore && group < config.materialStore->capacity())
-            {
-                it->second = config.materialStore->get(group).name;
-            }
-            // Positional fallback, also used for a real material whose name is empty: a usemtl
-            // with no argument is not valid OBJ, and a stable name keeps groups distinguishable.
-            if (it->second.empty())
-            {
-                it->second = "group_" + std::to_string(group);
-            }
-        }
-        return it->second;
-    };
-
-    bool     haveGroup   = false;
-    uint32_t activeGroup = 0;
-
-    for (size_t faceIdx = 0; faceIdx < faces.size(); ++faceIdx)
+    for (const glm::uvec3 &face : faces)
     {
-        if (!faceGroups.empty())
-        {
-            const uint32_t group = faceGroups[faceIdx];
-            if (!haveGroup || group != activeGroup)
-            {
-                out << "usemtl " << groupName(group) << '\n';
-                activeGroup = group;
-                haveGroup   = true;
-            }
-        }
-
-        const glm::uvec3 &face = faces[faceIdx];
         out << 'f';
         for (int corner = 0; corner < 3; ++corner)
         {
+            // A face corner is a render vertex, so it resolves to a position through
+            // positionIndices even here, where no per-corner attributes are written.
             const uint32_t cornerIndex = face[corner];
             if (cornerIndex >= positionIndices.size())
             {
                 throw std::invalid_argument("ObjExporter: face references a vertex outside the mesh");
             }
-            writeFaceCorner(out, positionIndices[cornerIndex], cornerIndex, hasUvs, hasNormals);
+            // OBJ indices are 1-based, and counted from the start of the file across all objects.
+            out << ' ' << vertexOffset + positionIndices[cornerIndex] + 1;
         }
         out << '\n';
     }
 
-    out.precision(previousPrecision);
+    return static_cast<uint32_t>(positions.size());
 }
 
-void ObjExporter::write(const Mesh &mesh, const std::filesystem::path &path, const ObjExporterConfig &config)
+// Guards the stream's precision so a throw mid-write cannot leave the caller's stream reconfigured.
+class PrecisionGuard
+{
+public:
+    PrecisionGuard(std::ostream &out, int precision) : m_out(out), m_previous(out.precision(precision)) {}
+    ~PrecisionGuard() { m_out.precision(m_previous); }
+
+    PrecisionGuard(const PrecisionGuard &)            = delete;
+    PrecisionGuard &operator=(const PrecisionGuard &) = delete;
+
+private:
+    std::ostream   &m_out;
+    std::streamsize m_previous;
+};
+
+// Shared by both path overloads: opening, delegating, and turning stream failure into an exception.
+template <typename WriteBody> void writeToPath(const std::filesystem::path &path, WriteBody writeBody)
 {
     if (path.empty())
     {
@@ -168,13 +88,68 @@ void ObjExporter::write(const Mesh &mesh, const std::filesystem::path &path, con
         throw std::runtime_error("ObjExporter: failed to open '" + path.string() + "' for writing");
     }
 
-    write(mesh, file, config);
+    writeBody(file);
 
     file.flush();
     if (!file)
     {
         throw std::runtime_error("ObjExporter: failed to write '" + path.string() + "'");
     }
+}
+
+} // namespace
+
+void ObjExporter::write(const Mesh &mesh, std::ostream &out, const ObjExporterConfig &config)
+{
+    if (mesh.faces().empty())
+    {
+        throw std::invalid_argument("ObjExporter: mesh has no faces");
+    }
+
+    const PrecisionGuard precision(out, config.precision);
+    writeObject(mesh, glm::mat4(1.0f), config.objectName, out, 0);
+}
+
+void ObjExporter::write(const Mesh &mesh, const std::filesystem::path &path, const ObjExporterConfig &config)
+{
+    writeToPath(path, [&](std::ostream &out) {
+        write(mesh, out, config);
+    });
+}
+
+void ObjExporter::write(std::span<const ObjExportObject> objects, std::ostream &out, const ObjExporterConfig &config)
+{
+    if (objects.empty())
+    {
+        throw std::invalid_argument("ObjExporter: no objects to export");
+    }
+
+    const PrecisionGuard precision(out, config.precision);
+
+    uint32_t vertexOffset = 0;
+    for (const ObjExportObject &object : objects)
+    {
+        if (!object.mesh)
+        {
+            throw std::invalid_argument("ObjExporter: null mesh in export object list");
+        }
+        vertexOffset += writeObject(*object.mesh, object.transform, object.name, out, vertexOffset);
+    }
+
+    // Every object was empty, so the file would have no geometry at all. Reported like the
+    // single-mesh no-faces case rather than written out, since an empty OBJ is not a useful export.
+    if (vertexOffset == 0)
+    {
+        throw std::invalid_argument("ObjExporter: none of the objects have any faces");
+    }
+}
+
+void ObjExporter::write(std::span<const ObjExportObject> objects, const std::filesystem::path &path,
+                        const ObjExporterConfig &config)
+{
+    writeToPath(path, [&](std::ostream &out) {
+        write(objects, out, config);
+    });
 }
 
 } // namespace lr
