@@ -63,6 +63,8 @@ public:
     Component(std::string name = "") : m_name(std::move(name)) {}
     virtual ~Component() = default;
 
+    const std::string &name() const { return m_name; }
+
     // `removalRequest` is how this component's menu asks to be deleted: it is set rather than acted
     // on, because the caller is iterating its object's components and a component cannot erase
     // itself from inside its own method. SceneObject::onGUI performs it after the loop.

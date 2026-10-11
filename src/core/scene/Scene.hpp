@@ -19,6 +19,12 @@ namespace lr
 class Scene
 {
 public:
+    struct DestructionCheck
+    {
+        bool        allowed = true;
+        std::string reason;
+    };
+
     Scene() = default;
 
     void onHierarchyGUI(EditorContext &context);
@@ -37,6 +43,7 @@ public:
     // may subsequently release the tombstones with purgeDestroyedSceneObjects().
     void destroySceneObject(SceneObjectId id);
     bool contains(SceneObjectId id) const;
+    DestructionCheck checkSceneObjectDestruction(SceneObjectId id) const;
     bool canDestroySceneObject(SceneObjectId id) const;
 
     // Permanently removes retired object storage and releases its IDs. Only use at a full-scene

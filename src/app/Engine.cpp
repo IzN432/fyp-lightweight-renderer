@@ -505,6 +505,7 @@ void Engine::run()
         ImGui::End();
         editor.drawTransformWindow();
         editor.drawAnimationWindow();
+        editor.drawErrorPopup();
     }));
 
     // Application-level rendering policy: the C++ demo owns the IBL shaders, resource names,

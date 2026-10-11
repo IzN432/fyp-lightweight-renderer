@@ -10,6 +10,7 @@
 #include "core/editor/EditableMeshContext.hpp"
 #include "core/editor/EditorContext.hpp"
 #include "core/editor/EditorFrameContext.hpp"
+#include "core/editor/ErrorReporter.hpp"
 #include "core/editor/EditorInputRouter.hpp"
 #include "core/editor/EditorShortcuts.hpp"
 #include "core/editor/PointerCapture.hpp"
@@ -475,6 +476,8 @@ public:
         ImGui::End();
     }
 
+    void drawErrorPopup() { m_errorReporter.drawPopup(); }
+
 private:
     // Import and the built-in primitives, plus the two objects worth creating from nothing. Light is
     // capped by what the light SSBO can hold, so the button reports the limit rather than silently
@@ -793,10 +796,13 @@ private:
                     return;
                 }
                 const SceneObjectId id = *selected;
-                m_deleter.select(sceneObjectDeletionKey(id), [this, id] {
-                    if (m_scene.contains(id) && m_scene.canDestroySceneObject(id))
-                        m_scene.destroySceneObject(id);
-                });
+                m_deleter.select(
+                    sceneObjectDeletionKey(id),
+                    [this, id]() -> std::optional<std::string> {
+                        const Scene::DestructionCheck check = m_scene.checkSceneObjectDestruction(id);
+                        return check.allowed ? std::nullopt : std::optional<std::string>(check.reason);
+                    },
+                    [this, id] { m_scene.destroySceneObject(id); });
             }));
         m_connections.push_back(
             m_scene.registerSelectionChangedCallback([this](std::optional<SceneObjectId> selected) {
@@ -1029,7 +1035,11 @@ private:
         });
 
         m_shortcuts.add({.key = GLFW_KEY_DELETE}, [this] {
-            m_deleter.erase();
+            const Deleter::EraseResult result = m_deleter.erase();
+            if (result.status == Deleter::EraseResult::Status::Blocked)
+            {
+                m_errorReporter.report("Cannot delete selection", result.message);
+            }
         });
     }
 
@@ -1117,6 +1127,7 @@ private:
     }
 
     Deleter                            m_deleter;
+    ErrorReporter                      m_errorReporter;
     std::optional<AnimationClipHandle> m_selectedAnimation;
     float                              m_animationSeconds = 0.0f;
     size_t                             m_selectedAnimationTrack = 0;
@@ -1148,6 +1159,7 @@ void           EditorSession::drawFeaturePanel() { m_impl->drawFeaturePanel(); }
 void           EditorSession::drawScenePanel(SceneDocument &document) { m_impl->drawScenePanel(document); }
 void           EditorSession::drawTransformWindow() { m_impl->drawTransformWindow(); }
 void           EditorSession::drawAnimationWindow() { m_impl->drawAnimationWindow(); }
+void           EditorSession::drawErrorPopup() { m_impl->drawErrorPopup(); }
 bool           EditorSession::allowsViewportNavigation() const { return m_impl->allowsViewportNavigation(); }
 
 } // namespace lr

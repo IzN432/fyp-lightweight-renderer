@@ -156,6 +156,7 @@ add_library(lr_core STATIC
     src/core/editor/EditorShortcuts.cpp
     src/core/editor/PointerCapture.cpp
     src/core/editor/EditorStateController.cpp
+    src/core/editor/ErrorReporter.cpp
     src/core/editor/VertexCentroid.cpp
     src/core/editor/VertexManager.cpp
     src/core/editor/DefaultVertexDragHandler.cpp

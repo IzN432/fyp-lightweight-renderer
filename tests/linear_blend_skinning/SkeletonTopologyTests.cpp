@@ -70,6 +70,9 @@ int main()
 
     // A skin outside the joint subtree prevents deletion from leaving a dangling palette entry.
     skinObject.addComponent<lr::SkinComponent>(lr::Skin(scene, {joint(root), joint(middle)}));
+    const lr::Scene::DestructionCheck destruction = scene.checkSceneObjectDestruction(root.id());
+    assert(!destruction.allowed);
+    assert(destruction.reason.find("SkinComponent") != std::string::npos);
     assert(!scene.canDestroySceneObject(root.id()));
     bool referencedDeleteRejected = false;
     try

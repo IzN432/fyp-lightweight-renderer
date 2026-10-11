@@ -659,6 +659,25 @@ void deleterOwnsOnlyTheLatestTarget()
     deleter.clear();
     deleter.erase();
     assert(deleted == 2);
+
+    bool blocked = true;
+    deleter.select(
+        "scene:blocked",
+        [&]() -> std::optional<std::string> {
+            return blocked ? std::optional<std::string>("Referenced by a skin") : std::nullopt;
+        },
+        [&] { deleted = 4; });
+    const auto blockedResult = deleter.erase();
+    assert(blockedResult.status == lr::Deleter::EraseResult::Status::Blocked);
+    assert(blockedResult.message == "Referenced by a skin");
+    assert(deleter.selected("scene:blocked"));
+    assert(deleted == 2);
+
+    blocked = false;
+    const auto erasedResult = deleter.erase();
+    assert(erasedResult.status == lr::Deleter::EraseResult::Status::Erased);
+    assert(!deleter.hasSelection());
+    assert(deleted == 4);
 }
 
 } // namespace

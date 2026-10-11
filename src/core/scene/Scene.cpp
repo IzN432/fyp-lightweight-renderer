@@ -91,11 +91,11 @@ bool Scene::contains(SceneObjectId id) const
     return object && object->m_alive;
 }
 
-bool Scene::canDestroySceneObject(SceneObjectId id) const
+Scene::DestructionCheck Scene::checkSceneObjectDestruction(SceneObjectId id) const
 {
     if (!contains(id))
     {
-        return false;
+        return {.allowed = false, .reason = "The scene object no longer exists."};
     }
 
     std::unordered_set<SceneObjectId> subtree;
@@ -107,7 +107,9 @@ bool Scene::canDestroySceneObject(SceneObjectId id) const
         subtree.insert(current);
         if (m_protectedObjects.contains(current))
         {
-            return false;
+            const SceneObject *object = find(current);
+            const std::string label = object->name.empty() ? "Scene Object " + toString(current) : object->name;
+            return {.allowed = false, .reason = "Cannot delete '" + label + "' because it is protected."};
         }
         const auto &children = find(current)->m_children;
         pending.insert(pending.end(), children.begin(), children.end());
@@ -127,12 +129,26 @@ bool Scene::canDestroySceneObject(SceneObjectId id) const
             {
                 if (component->referencesSceneObject(removed))
                 {
-                    return false;
+                    const SceneObject *referenced = find(removed);
+                    const std::string referencedLabel = referenced->name.empty()
+                        ? "Scene Object " + toString(removed) : referenced->name;
+                    const std::string ownerLabel = object->name.empty()
+                        ? "Scene Object " + toString(object->id()) : object->name;
+                    return {
+                        .allowed = false,
+                        .reason = "Cannot delete '" + referencedLabel + "' because " + component->name() +
+                                  " on '" + ownerLabel + "' references it.",
+                    };
                 }
             }
         }
     }
-    return true;
+    return {};
+}
+
+bool Scene::canDestroySceneObject(SceneObjectId id) const
+{
+    return checkSceneObjectDestruction(id).allowed;
 }
 
 void Scene::destroySceneObject(SceneObjectId id)
@@ -142,9 +158,10 @@ void Scene::destroySceneObject(SceneObjectId id)
         throw std::out_of_range("Scene object ID is not alive");
     }
 
-    if (!canDestroySceneObject(id))
+    const DestructionCheck check = checkSceneObjectDestruction(id);
+    if (!check.allowed)
     {
-        throw std::invalid_argument("A protected or referenced scene object cannot be deleted");
+        throw std::invalid_argument(check.reason);
     }
 
     std::vector<SceneObjectId> destroyed;
@@ -323,12 +340,17 @@ void Scene::drawHierarchyNode(SceneObject &object, std::optional<SceneObjectId> 
         {
             renameRequested = object.id();
         }
-        ImGui::BeginDisabled(!canDestroySceneObject(object.id()));
+        const DestructionCheck destruction = checkSceneObjectDestruction(object.id());
+        ImGui::BeginDisabled(!destruction.allowed);
         if (ImGui::MenuItem("Delete"))
         {
             deleteRequested = object.id();
         }
         ImGui::EndDisabled();
+        if (!destruction.allowed && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip("%s", destruction.reason.c_str());
+        }
         ImGui::EndPopup();
     }
 
