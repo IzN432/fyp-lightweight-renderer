@@ -103,9 +103,9 @@ class EditorSession::Impl final : public ComponentAddService, public TransformCo
 {
 public:
     Impl(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,
-         EditorRenderBridge &renderBridge)
+         EditorRenderBridge &renderBridge, ErrorReporter &errors)
         : m_viewer(viewer), m_sceneManager(sceneManager), m_scene(sceneManager.scene()), m_camera(camera),
-          m_renderBridge(renderBridge),
+          m_renderBridge(renderBridge), m_errors(errors),
           m_stateController([this](const EditorStateDefinition &state) {
               m_sceneManager.setEditorPresentation(state.presentation);
           }),
@@ -475,8 +475,6 @@ public:
         drawAddTrackPopup();
         ImGui::End();
     }
-
-    void drawErrorPopup() { m_errorReporter.drawPopup(); }
 
 private:
     // Import and the built-in primitives, plus the two objects worth creating from nothing. Light is
@@ -1038,7 +1036,7 @@ private:
             const Deleter::EraseResult result = m_deleter.erase();
             if (result.status == Deleter::EraseResult::Status::Blocked)
             {
-                m_errorReporter.report("Cannot delete selection", result.message);
+                m_errors.report("Cannot delete selection", result.message);
             }
         });
     }
@@ -1090,6 +1088,7 @@ private:
     Scene                         &m_scene;
     SceneObject                   &m_camera;
     EditorRenderBridge            &m_renderBridge;
+    ErrorReporter                 &m_errors;
     EditorStateController          m_stateController;
     EditorShortcuts                m_shortcuts;
     SceneObject                   *m_meshObject;
@@ -1127,7 +1126,6 @@ private:
     }
 
     Deleter                            m_deleter;
-    ErrorReporter                      m_errorReporter;
     std::optional<AnimationClipHandle> m_selectedAnimation;
     float                              m_animationSeconds = 0.0f;
     size_t                             m_selectedAnimationTrack = 0;
@@ -1147,8 +1145,8 @@ private:
 };
 
 EditorSession::EditorSession(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,
-                             EditorRenderBridge &renderBridge)
-    : m_impl(std::make_unique<Impl>(viewer, sceneManager, camera, renderBridge))
+                             EditorRenderBridge &renderBridge, ErrorReporter &errors)
+    : m_impl(std::make_unique<Impl>(viewer, sceneManager, camera, renderBridge, errors))
 {}
 
 EditorSession::~EditorSession() = default;
@@ -1159,7 +1157,6 @@ void           EditorSession::drawFeaturePanel() { m_impl->drawFeaturePanel(); }
 void           EditorSession::drawScenePanel(SceneDocument &document) { m_impl->drawScenePanel(document); }
 void           EditorSession::drawTransformWindow() { m_impl->drawTransformWindow(); }
 void           EditorSession::drawAnimationWindow() { m_impl->drawAnimationWindow(); }
-void           EditorSession::drawErrorPopup() { m_impl->drawErrorPopup(); }
 bool           EditorSession::allowsViewportNavigation() const { return m_impl->allowsViewportNavigation(); }
 
 } // namespace lr

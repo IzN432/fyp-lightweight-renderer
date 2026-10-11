@@ -11,6 +11,7 @@ namespace lr
 {
 
 class EditorSession;
+class ErrorReporter;
 class PhysicsWorld;
 class SceneManager;
 class Viewer;
@@ -30,7 +31,7 @@ class SceneDocument
 {
 public:
     SceneDocument(Viewer &viewer, SceneManager &sceneManager, EditorSession &editor, PhysicsWorld &physicsWorld,
-                  SceneLoaderConfig importConfig);
+                  SceneLoaderConfig importConfig, ErrorReporter &errors);
 
     // Fires after loadScene() succeeds, for host-owned state derived from the document.
     void setSceneLoadedCallback(std::function<void()> callback) { m_onSceneLoaded = std::move(callback); }
@@ -74,6 +75,7 @@ private:
     SceneManager     &m_sceneManager;
     EditorSession    &m_editor;
     PhysicsWorld     &m_physicsWorld;
+    ErrorReporter    &m_errors;
     SceneLoaderConfig m_importConfig;
 
     std::function<void()> m_onSceneLoaded;

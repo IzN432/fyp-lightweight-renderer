@@ -3,6 +3,7 @@
 
 #include "core/Paths.hpp"
 #include "core/app/Viewer.hpp"
+#include "core/editor/ErrorReporter.hpp"
 #include "core/scene/SceneManager.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "features/rigid_body/PhysicsWorld.hpp"
@@ -40,9 +41,9 @@ ImGuiFileDialogFlags commonDialogFlags()
 } // namespace
 
 SceneDocument::SceneDocument(Viewer &viewer, SceneManager &sceneManager, EditorSession &editor,
-                             PhysicsWorld &physicsWorld, SceneLoaderConfig importConfig)
+                             PhysicsWorld &physicsWorld, SceneLoaderConfig importConfig, ErrorReporter &errors)
     : m_viewer(viewer), m_sceneManager(sceneManager), m_editor(editor), m_physicsWorld(physicsWorld),
-      m_importConfig(std::move(importConfig))
+      m_errors(errors), m_importConfig(std::move(importConfig))
 {}
 
 void SceneDocument::openLoadDialog()
@@ -86,6 +87,7 @@ void SceneDocument::importPrimitive(const std::string &fileName, const std::stri
     } catch (const std::exception &e)
     {
         m_importError = e.what();
+        m_errors.report("Could not add primitive", e.what());
         spdlog::error("Failed to add primitive '{}': {}", objectName, e.what());
     }
 }
@@ -104,6 +106,7 @@ void SceneDocument::save()
     } catch (const std::exception &e)
     {
         m_persistenceError = e.what();
+        m_errors.report("Could not save scene", e.what());
         spdlog::error("Failed to save scene: {}", e.what());
     }
 }
@@ -139,6 +142,7 @@ void SceneDocument::drawDialogs()
             } catch (const std::exception &e)
             {
                 m_persistenceError = e.what();
+                m_errors.report("Could not load scene", e.what());
                 spdlog::error("Failed to load scene: {}", e.what());
             }
         }
@@ -162,6 +166,7 @@ void SceneDocument::drawDialogs()
             } catch (const std::exception &e)
             {
                 m_persistenceError = e.what();
+                m_errors.report("Could not save scene", e.what());
                 spdlog::error("Failed to save scene: {}", e.what());
             }
         }
@@ -182,6 +187,7 @@ void SceneDocument::drawDialogs()
             } catch (const std::exception &e)
             {
                 m_importError = e.what();
+                m_errors.report("Could not import asset", e.what());
                 spdlog::error("Failed to import scene: {}", e.what());
             }
         }

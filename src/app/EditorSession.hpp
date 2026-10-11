@@ -7,6 +7,7 @@ namespace lr
 
 struct EditorContext;
 class EditorRenderBridge;
+class ErrorReporter;
 class SceneDocument;
 class SceneManager;
 class SceneObject;
@@ -20,7 +21,7 @@ class EditorSession
 {
 public:
     EditorSession(Viewer &viewer, SceneManager &sceneManager, SceneObject &camera,
-                  EditorRenderBridge &renderBridge);
+                  EditorRenderBridge &renderBridge, ErrorReporter &errors);
     ~EditorSession();
 
     EditorSession(const EditorSession &)            = delete;
@@ -42,7 +43,6 @@ public:
     void drawScenePanel(SceneDocument &document);
     void drawTransformWindow();
     void drawAnimationWindow();
-    void drawErrorPopup();
 
     // Whether camera orbit/pan/zoom may act on the pointer this frame — the editor arbitrates
     // pointer priority, so a host camera controller asks rather than guessing.

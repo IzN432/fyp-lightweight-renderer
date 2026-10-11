@@ -28,6 +28,7 @@
 #include "core/scene/Mesh.hpp"
 #include "core/scene/SceneObject.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
+#include "core/editor/ErrorReporter.hpp"
 #include "core/scene/EngineConventions.hpp"
 #include "core/scene/SceneManager.hpp"
 #include "core/scene/Scene.hpp"
@@ -301,7 +302,8 @@ void Engine::run()
         .outline        = &outlinePass,
     };
     lr::EditorRenderBridge editorRendering(sceneManager, editorPasses);
-    lr::EditorSession editor(viewer, sceneManager, *camera, editorRendering);
+    lr::ErrorReporter      errorReporter;
+    lr::EditorSession editor(viewer, sceneManager, *camera, editorRendering, errorReporter);
 
     // -------------------------------------------------------------------------
     // Per-frame callbacks
@@ -314,7 +316,7 @@ void Engine::run()
     lr::Settings            settings;
 
     // Owns the scene document's path, its load/save/import sequencing, and the errors from it.
-    lr::SceneDocument sceneDocument(viewer, sceneManager, editor, physicsWorld, sceneLoadConfig);
+    lr::SceneDocument sceneDocument(viewer, sceneManager, editor, physicsWorld, sceneLoadConfig, errorReporter);
     // A loaded scene brings its own authored HDRI path, so the environment has to be rebuilt from
     // it. Which passes that touches stays here — see the onLateUpdate below.
     sceneDocument.setSceneLoadedCallback([&environmentDirty] { environmentDirty = true; });
@@ -505,7 +507,7 @@ void Engine::run()
         ImGui::End();
         editor.drawTransformWindow();
         editor.drawAnimationWindow();
-        editor.drawErrorPopup();
+        errorReporter.drawPopup();
     }));
 
     // Application-level rendering policy: the C++ demo owns the IBL shaders, resource names,
@@ -542,6 +544,7 @@ void Engine::run()
         } catch (const std::exception &e)
         {
             environmentLoadError = e.what();
+            errorReporter.report("Could not update environment", e.what());
             spdlog::error("Failed to update environment: {}", e.what());
         }
 
