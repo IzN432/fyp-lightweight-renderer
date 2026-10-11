@@ -21,6 +21,7 @@ public:
 
     void setTarget(SceneObject *target) { m_target = target; }
     SceneObject *target() const { return m_target; }
+    void setBeginCallback(std::function<void(SceneObject &)> callback) { m_beginCallback = std::move(callback); }
     void setCommitCallback(std::function<void(SceneObject &)> callback) { m_commitCallback = std::move(callback); }
 
     void beginDrag() override;
@@ -31,6 +32,7 @@ private:
     CommandManager &m_commandManager;
     SceneObject    *m_target = nullptr;
     glm::quat       m_beforeRotation{1.0f, 0.0f, 0.0f, 0.0f};
+    std::function<void(SceneObject &)> m_beginCallback;
     std::function<void(SceneObject &)> m_commitCallback;
 };
 

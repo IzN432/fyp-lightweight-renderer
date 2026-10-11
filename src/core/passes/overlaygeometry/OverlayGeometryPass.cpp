@@ -23,7 +23,9 @@ namespace
 
 glm::vec3 brightenForHover(const glm::vec3 &color)
 {
-    return glm::vec3(1.0f, 0.8f, 0.8f);
+    // Preserve the element's hue so a hovered bone, joint, or selected element remains legible as
+    // that same state rather than all hover states collapsing to one pink color.
+    return glm::mix(color, glm::vec3(1.0f), 0.45f);
 }
 
 } // namespace

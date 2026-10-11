@@ -184,7 +184,7 @@ json serializeAnimationClip(const AnimationClip &clip)
                         {"keyframes", std::move(keyframes)}};
         }, channel));
     }
-    return {{"name", clip.name()}, {"tracks", std::move(tracks)}};
+    return {{"name", clip.name()}, {"duration", clip.durationSeconds()}, {"tracks", std::move(tracks)}};
 }
 
 AnimationClip deserializeAnimationClip(const json &value, const std::string &where, const Scene &scene)
@@ -235,7 +235,12 @@ AnimationClip deserializeAnimationClip(const json &value, const std::string &whe
         }
         else throw std::runtime_error("SceneSerializer: invalid animation property '" + property + "' at " + trackWhere);
     }
-    return AnimationClip(required(value, "name", where).get<std::string>(), std::move(tracks));
+    std::optional<float> duration;
+    if (value.contains("duration"))
+    {
+        duration = value.at("duration").get<float>();
+    }
+    return AnimationClip(required(value, "name", where).get<std::string>(), std::move(tracks), duration);
 }
 
 std::string attributeType(const MeshLayout::AttributeDesc &attribute)

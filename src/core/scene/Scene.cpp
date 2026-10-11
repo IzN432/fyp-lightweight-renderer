@@ -1,5 +1,6 @@
 #include "Scene.hpp"
 
+#include "core/app/ImGuiWidgets.hpp"
 #include "core/editor/EditorContext.hpp"
 #include "core/editor/command/AddComponentCommand.hpp"
 #include "core/editor/command/CommandManager.hpp"
@@ -14,26 +15,6 @@
 #include <stdexcept>
 #include <typeindex>
 #include <utility>
-
-namespace
-{
-
-int resizeStringInput(ImGuiInputTextCallbackData *data)
-{
-    auto &value = *static_cast<std::string *>(data->UserData);
-    value.resize(static_cast<size_t>(data->BufTextLen));
-    data->Buf = value.data();
-    return 0;
-}
-
-bool inputText(const char *label, std::string &value, ImGuiInputTextFlags flags)
-{
-    flags |= ImGuiInputTextFlags_CallbackResize;
-    return ImGui::InputText(label, value.data(), value.capacity() + 1, flags, resizeStringInput,
-                            &value);
-}
-
-} // namespace
 
 namespace lr
 {
@@ -385,8 +366,8 @@ void Scene::drawRenamePopup(EditorContext &context)
                 ImGui::SetKeyboardFocusHere();
             }
 
-            const bool submitted = inputText("Name", m_renameBuffer,
-                                             ImGuiInputTextFlags_EnterReturnsTrue);
+            const bool submitted = gui::inputText("Name", m_renameBuffer,
+                                                  ImGuiInputTextFlags_EnterReturnsTrue);
             if (submitted || ImGui::Button("Rename"))
             {
                 SceneObject &renamed = getSceneObject(*m_renamingObject);

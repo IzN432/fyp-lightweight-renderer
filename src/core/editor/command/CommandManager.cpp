@@ -11,10 +11,10 @@ void CommandManager::record(std::unique_ptr<Command> command)
 {
     if (!m_transactions.empty())
     {
-        m_transactions.back().push_back(std::move(command));
+        m_transactions.back().commands.push_back(std::move(command));
         return;
     }
-    activeHistory().commands.push_back(std::move(command));
+    activeHistory().commands.push_back({HistoryEntryId{m_nextHistoryEntryId++}, std::move(command)});
     activeHistory().redo.clear();
 }
 
@@ -28,7 +28,39 @@ void CommandManager::appendCommandWithoutExecuting(std::unique_ptr<Command> comm
     record(std::move(command));
 }
 
-void CommandManager::beginTransaction() { m_transactions.emplace_back(); }
+bool CommandManager::executeCommandAndAppendTo(HistoryEntryId entry,
+                                               std::unique_ptr<Command> command)
+{
+    command->execute();
+    History &history = activeHistory();
+    if (inTransaction() || history.commands.empty() || history.commands.back().id != entry)
+    {
+        record(std::move(command));
+        return false;
+    }
+
+    std::vector<std::unique_ptr<Command>> combined;
+    combined.push_back(std::move(history.commands.back().command));
+    combined.push_back(std::move(command));
+    history.commands.back().command = std::make_unique<CompositeCommand>(std::move(combined));
+    history.redo.clear();
+    return true;
+}
+
+CommandManager::HistoryEntryId CommandManager::beginTransaction()
+{
+    const HistoryEntryId id = m_transactions.empty()
+                                  ? HistoryEntryId{m_nextHistoryEntryId++}
+                                  : m_transactions.front().id;
+    m_transactions.push_back({id, {}});
+    return id;
+}
+
+std::optional<CommandManager::HistoryEntryId> CommandManager::currentTransactionId() const
+{
+    if (m_transactions.empty()) return std::nullopt;
+    return m_transactions.front().id;
+}
 
 void CommandManager::endTransaction()
 {
@@ -37,19 +69,26 @@ void CommandManager::endTransaction()
         return;
     }
 
-    std::vector<std::unique_ptr<Command>> collected = std::move(m_transactions.back());
+    Transaction transaction = std::move(m_transactions.back());
     m_transactions.pop_back();
-    if (collected.empty())
+    if (transaction.commands.empty())
     {
         return;
     }
 
     // A gesture that recorded one command is that command: wrapping it would only add a layer for
     // undo to walk through.
-    std::unique_ptr<Command> entry = collected.size() == 1
-                                         ? std::move(collected.front())
-                                         : std::make_unique<CompositeCommand>(std::move(collected));
-    record(std::move(entry));
+    std::unique_ptr<Command> command = transaction.commands.size() == 1
+                                           ? std::move(transaction.commands.front())
+                                           : std::make_unique<CompositeCommand>(
+                                                 std::move(transaction.commands));
+    if (!m_transactions.empty())
+    {
+        m_transactions.back().commands.push_back(std::move(command));
+        return;
+    }
+    activeHistory().commands.push_back({transaction.id, std::move(command)});
+    activeHistory().redo.clear();
 }
 
 void CommandManager::undo()
@@ -57,10 +96,10 @@ void CommandManager::undo()
     History &history = activeHistory();
     if (!history.commands.empty())
     {
-        std::unique_ptr<Command> command = std::move(history.commands.back());
-        command->undo();
+        HistoryEntry entry = std::move(history.commands.back());
+        entry.command->undo();
         history.commands.pop_back();
-        history.redo.push_back(std::move(command));
+        history.redo.push_back(std::move(entry));
     }
 }
 
@@ -69,10 +108,10 @@ void CommandManager::redo()
     History &history = activeHistory();
     if (!history.redo.empty())
     {
-        std::unique_ptr<Command> command = std::move(history.redo.back());
+        HistoryEntry entry = std::move(history.redo.back());
         history.redo.pop_back();
-        command->execute();
-        history.commands.push_back(std::move(command));
+        entry.command->execute();
+        history.commands.push_back(std::move(entry));
     }
 }
 
@@ -86,7 +125,7 @@ void CommandManager::rollbackActiveHistory()
     History &history = activeHistory();
     while (!history.commands.empty())
     {
-        history.commands.back()->undo();
+        history.commands.back().command->undo();
         history.commands.pop_back();
     }
 }

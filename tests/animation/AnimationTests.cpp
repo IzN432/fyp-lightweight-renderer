@@ -59,6 +59,10 @@ int main()
 
     lr::AnimationClip clip("Walk", {track});
     assert(near(clip.durationSeconds(), 2.0f));
+    lr::AnimationClip heldClip("Held pose", {track}, 5.0f);
+    assert(near(heldClip.durationSeconds(), 5.0f));
+    heldClip.setDurationSeconds(3.0f);
+    assert(near(heldClip.durationSeconds(), 3.0f));
 
     const lr::AnimationClipHandle clipHandle = animations.add(clip);
     lr::TranslationTrack conflictingTrack(target.id());
@@ -102,6 +106,15 @@ int main()
     assert(animations.get(1).tracks().size() == 1);
     assert(!animationSystem.isPlaying(1));
 
+    // Explicit clip duration, rather than its last key, controls when playback ends. Empty clips
+    // can therefore also represent a useful span on the timeline.
+    const auto timedEmptyHandle = animations.add(lr::AnimationClip("Timed empty", {}, 3.0f));
+    assert(animationSystem.play(timedEmptyHandle, false).started);
+    animationSystem.update(2.5f);
+    assert(animationSystem.isPlaying(timedEmptyHandle));
+    animationSystem.update(0.6f);
+    assert(!animationSystem.isPlaying(timedEmptyHandle));
+
     bool rejectedInvalidTime = false;
     try
     {
@@ -112,4 +125,15 @@ int main()
         rejectedInvalidTime = true;
     }
     assert(rejectedInvalidTime);
+
+    bool rejectedInvalidDuration = false;
+    try
+    {
+        heldClip.setDurationSeconds(-1.0f);
+    }
+    catch (const std::invalid_argument &)
+    {
+        rejectedInvalidDuration = true;
+    }
+    assert(rejectedInvalidDuration);
 }

@@ -143,5 +143,53 @@ int main()
         assert(log == "-gesture");
     }
 
+    // A modal confirmation can arrive after the gesture transaction closes. Its command is still
+    // executed now, but is folded into that gesture so pose + newly confirmed Auto Key track remain
+    // one undo operation.
+    {
+        std::string        log;
+        lr::CommandManager commands;
+        lr::CommandManager::HistoryEntryId poseEntry{0};
+        {
+            lr::CommandTransaction transaction(commands);
+            poseEntry = transaction.id();
+            commands.executeCommand(logging(log, "pose"));
+        }
+        assert(commands.executeCommandAndAppendTo(poseEntry, logging(log, "confirmed-track")));
+        assert(log == "+pose+confirmed-track");
+
+        log.clear();
+        commands.undo();
+        assert(log == "-confirmed-track-pose");
+        log.clear();
+        commands.undo();
+        assert(log.empty());
+        commands.redo();
+        assert(log == "+pose+confirmed-track");
+    }
+
+    // A delayed confirmation must not attach itself to an unrelated entry if its originating
+    // gesture was undone before the user answered the modal.
+    {
+        std::string        log;
+        lr::CommandManager commands;
+        lr::CommandManager::HistoryEntryId poseEntry{0};
+        {
+            lr::CommandTransaction transaction(commands);
+            poseEntry = transaction.id();
+            commands.executeCommand(logging(log, "pose"));
+        }
+        commands.undo();
+        commands.executeCommand(logging(log, "unrelated"));
+        assert(!commands.executeCommandAndAppendTo(poseEntry, logging(log, "confirmed-track")));
+
+        log.clear();
+        commands.undo();
+        assert(log == "-confirmed-track");
+        log.clear();
+        commands.undo();
+        assert(log == "-unrelated");
+    }
+
     return 0;
 }

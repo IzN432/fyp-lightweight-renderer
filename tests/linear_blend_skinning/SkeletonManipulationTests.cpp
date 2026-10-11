@@ -5,103 +5,135 @@
 #include "core/scene/TransformComponent.hpp"
 #include "features/linear_blend_skinning/Skin.hpp"
 #include "features/linear_blend_skinning/SkinStore.hpp"
-#include "features/linear_blend_skinning/editor/SkeletonSelectionResolver.hpp"
+#include "features/linear_blend_skinning/editor/SkeletonManipulationAdapter.hpp"
 
 #include <cassert>
+#include <glm/gtc/constants.hpp>
 
 namespace
 {
+lr::Joint joint(const lr::SceneObject &object) { return {.sceneObject = object.id()}; }
+bool near(const glm::vec3 &a, const glm::vec3 &b) { return glm::length(a - b) < 1e-5f; }
 
-lr::Joint joint(const lr::SceneObject &object)
-{
-    return {.sceneObject = object.id()};
-}
-
-bool near(const glm::vec3 &a, const glm::vec3 &b)
-{
-    return glm::length(a - b) < 1e-5f;
-}
-
-} // namespace
-
-int main()
+void adapterSemanticsAndSharedSkins()
 {
     lr::Scene scene;
     auto &root = scene.createSceneObject();
     auto &child = scene.createSceneObject();
-    root.addComponent<lr::TransformComponent>(glm::vec3(2.0f, 0.0f, 0.0f));
-    child.addComponent<lr::TransformComponent>(glm::vec3(0.0f, 1.0f, 0.0f));
+    root.addComponent<lr::TransformComponent>();
+    child.addComponent<lr::TransformComponent>();
     scene.setParent(child.id(), root.id());
-
     lr::SkinStore skins;
-    lr::Skin skin(skins, skins.add(scene, {joint(root), joint(child)}));
-    const lr::JointRef selectedJoint{skin.id(), 1};
-    const std::optional<lr::SceneObjectId> targetId =
-        lr::resolveSkeletonSelection(scene, skin, selectedJoint);
-    assert(targetId == child.id());
+    const lr::SkinHandle handle = skins.add(scene, {joint(root), joint(child)});
+    lr::Skin firstMeshSkin(skins, handle), secondMeshSkin(skins, handle);
+
+    const auto jointTarget = lr::SkeletonManipulationAdapter::resolve(
+        scene, firstMeshSkin, lr::JointRef{firstMeshSkin.id(), 0});
+    assert(jointTarget && jointTarget->object == root.id() && jointTarget->joint == 0);
+    assert(!jointTarget->selectedThroughBone);
+
+    static_assert(lr::SkeletonManipulationAdapter::boneSemantics ==
+                  lr::BoneShaftPoseSemantics::ChildJointLocalTransform);
+    const lr::BoneRef shaft{firstMeshSkin.id(), 1};
+    const auto firstTarget = lr::SkeletonManipulationAdapter::resolve(scene, firstMeshSkin, shaft);
+    const auto secondTarget = lr::SkeletonManipulationAdapter::resolve(scene, secondMeshSkin, shaft);
+    assert(firstTarget && secondTarget);
+    assert(firstTarget->object == child.id() && secondTarget->object == child.id());
+    assert(firstTarget->selectedThroughBone && secondTarget->selectedThroughBone);
+
+    lr::Skin otherSkin(skins, skins.add(scene, {joint(root)}));
+    assert(!lr::SkeletonManipulationAdapter::resolve(scene, otherSkin, shaft));
+    assert(!lr::SkeletonManipulationAdapter::resolve(
+        scene, firstMeshSkin, lr::JointRef{firstMeshSkin.id(), 99}));
+}
+
+void translationWithRotatedAndScaledParent()
+{
+    lr::Scene scene;
+    auto &parent = scene.createSceneObject();
+    auto &child = scene.createSceneObject();
+    const glm::quat quarterTurn = glm::angleAxis(glm::half_pi<float>(), glm::vec3(0, 0, 1));
+    parent.addComponent<lr::TransformComponent>(glm::vec3(2, 0, 0), quarterTurn, glm::vec3(2, 4, 1));
+    child.addComponent<lr::TransformComponent>(glm::vec3(1, 1, 0));
+    scene.setParent(child.id(), parent.id());
 
     lr::CommandManager commands;
     lr::SceneObjectDragHandler handler(commands);
-    handler.setTarget(&scene.getSceneObject(*targetId));
-
+    handler.setTarget(&child);
     bool committed = false;
-    handler.setCommitCallback([&](lr::SceneObject &object) {
-        assert(object.id() == child.id());
-        // Auto Key is invoked from this callback. It must join the transform command's transaction
-        // so one undo removes both the joint movement and its keyframe edit.
-        assert(commands.inTransaction());
-        committed = true;
-    });
-
+    handler.setCommitCallback([&](lr::SceneObject &) { assert(commands.inTransaction()); committed = true; });
+    const glm::vec3 worldBefore(child.worldMatrix()[3]);
     handler.beginDrag();
-    handler.translate(glm::vec3(1.0f, 0.0f, 0.0f));
-    handler.endDrag(glm::vec3(1.0f, 0.0f, 0.0f));
+    handler.translate(glm::vec3(4, 0, 0));
+    handler.endDrag(glm::vec3(4, 0, 0));
     assert(committed);
-    assert(near(child.getComponent<lr::TransformComponent>().transform().position(),
-                glm::vec3(1.0f, 1.0f, 0.0f)));
-
+    assert(near(glm::vec3(child.worldMatrix()[3]), worldBefore + glm::vec3(4, 0, 0)));
+    assert(near(child.getComponent<lr::TransformComponent>().transform().position(), glm::vec3(1, 0, 0)));
     commands.undo();
-    assert(near(child.getComponent<lr::TransformComponent>().transform().position(),
-                glm::vec3(0.0f, 1.0f, 0.0f)));
+    assert(near(child.getComponent<lr::TransformComponent>().transform().position(), glm::vec3(1, 1, 0)));
     commands.redo();
-    assert(near(child.getComponent<lr::TransformComponent>().transform().position(),
-                glm::vec3(1.0f, 1.0f, 0.0f)));
+    assert(near(glm::vec3(child.worldMatrix()[3]), worldBefore + glm::vec3(4, 0, 0)));
+}
 
-    // Bone arrows are only hierarchy edges, not transforms. The endpoint popup resolves one to a
-    // JointRef before the ordinary joint rotation handler is bound.
-    const lr::BoneRef bone{skin.id(), 1};
-    assert(!lr::resolveSkeletonSelection(scene, skin, bone));
-    const lr::JointRef rootJoint{skin.id(), 0};
-    const std::optional<lr::SceneObjectId> rotationTargetId =
-        lr::resolveSkeletonSelection(scene, skin, rootJoint);
-    assert(rotationTargetId == root.id());
-
-    lr::SceneObjectRotationHandler rotationHandler(commands);
-    rotationHandler.setTarget(&scene.getSceneObject(*rotationTargetId));
-    bool rotationCommitted = false;
-    rotationHandler.setCommitCallback([&](lr::SceneObject &object) {
-        assert(object.id() == root.id());
-        assert(commands.inTransaction());
-        rotationCommitted = true;
-    });
-
-    const glm::vec3 childLocalBefore = child.getComponent<lr::TransformComponent>().transform().position();
-    const float boneLengthBefore = glm::length(childLocalBefore);
-    rotationHandler.beginDrag();
-    const glm::quat quarterTurn = glm::angleAxis(glm::half_pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f));
-    const glm::mat4 rotatedRoot = glm::translate(glm::mat4(1.0f), glm::vec3(root.worldMatrix()[3])) *
-                                  glm::mat4_cast(quarterTurn);
-    rotationHandler.rotateToWorld(rotatedRoot);
-    rotationHandler.endDrag();
-
-    assert(rotationCommitted);
-    assert(near(child.getComponent<lr::TransformComponent>().transform().position(), childLocalBefore));
-    assert(glm::abs(glm::length(child.getComponent<lr::TransformComponent>().transform().position()) -
-                    boneLengthBefore) < 1e-5f);
-    assert(near(glm::vec3(child.worldMatrix()[3]), glm::vec3(1.0f, 1.0f, 0.0f)));
-
+void rootTranslationAndChildRotation()
+{
+    lr::Scene scene;
+    auto &root = scene.createSceneObject();
+    auto &child = scene.createSceneObject();
+    root.addComponent<lr::TransformComponent>(glm::vec3(2, 0, 0));
+    child.addComponent<lr::TransformComponent>(glm::vec3(0, 1, 0));
+    scene.setParent(child.id(), root.id());
+    lr::CommandManager commands;
+    lr::SceneObjectDragHandler translation(commands);
+    translation.setTarget(&root);
+    translation.beginDrag();
+    translation.translate(glm::vec3(1, 2, 0));
+    translation.endDrag(glm::vec3(1, 2, 0));
+    assert(near(root.getComponent<lr::TransformComponent>().transform().position(), glm::vec3(3, 2, 0)));
     commands.undo();
-    assert(near(glm::vec3(child.worldMatrix()[3]), glm::vec3(3.0f, 1.0f, 0.0f)));
+
+    lr::SceneObjectRotationHandler rotation(commands);
+    rotation.setTarget(&child);
+    const glm::vec3 childPosition = child.getComponent<lr::TransformComponent>().transform().position();
+    const glm::quat quarterTurn = glm::angleAxis(glm::half_pi<float>(), glm::vec3(0, 0, 1));
+    rotation.beginDrag();
+    rotation.rotateToWorld(glm::translate(glm::mat4(1), glm::vec3(child.worldMatrix()[3])) *
+                           glm::mat4_cast(quarterTurn));
+    rotation.endDrag();
+    assert(near(child.getComponent<lr::TransformComponent>().transform().position(), childPosition));
+    assert(near(child.worldRotation() * glm::vec3(1, 0, 0), glm::vec3(0, 1, 0)));
+    commands.undo();
+    assert(near(child.worldRotation() * glm::vec3(1, 0, 0), glm::vec3(1, 0, 0)));
     commands.redo();
-    assert(near(glm::vec3(child.worldMatrix()[3]), glm::vec3(1.0f, 1.0f, 0.0f)));
+    assert(near(child.worldRotation() * glm::vec3(1, 0, 0), glm::vec3(0, 1, 0)));
+}
+
+void rotationUnderRotatedScaledParent()
+{
+    lr::Scene scene;
+    auto &parent = scene.createSceneObject();
+    auto &child = scene.createSceneObject();
+    const glm::quat parentRotation = glm::angleAxis(glm::half_pi<float>(), glm::vec3(0, 1, 0));
+    parent.addComponent<lr::TransformComponent>(glm::vec3(0), parentRotation, glm::vec3(2, 3, 4));
+    child.addComponent<lr::TransformComponent>();
+    scene.setParent(child.id(), parent.id());
+    lr::CommandManager commands;
+    lr::SceneObjectRotationHandler rotation(commands);
+    rotation.setTarget(&child);
+    const glm::quat desiredWorld = glm::angleAxis(glm::half_pi<float>(), glm::vec3(1, 0, 0));
+    rotation.beginDrag();
+    rotation.rotateToWorld(glm::mat4_cast(desiredWorld));
+    rotation.endDrag();
+    assert(glm::abs(glm::dot(child.worldRotation(), desiredWorld)) > 1.0f - 1e-5f);
+    assert(glm::abs(glm::dot(child.getComponent<lr::TransformComponent>().transform().rotation(),
+                             glm::normalize(glm::inverse(parentRotation) * desiredWorld))) > 1.0f - 1e-5f);
+}
+} // namespace
+
+int main()
+{
+    adapterSemanticsAndSharedSkins();
+    translationWithRotatedAndScaledParent();
+    rootTranslationAndChildRotation();
+    rotationUnderRotatedScaledParent();
 }

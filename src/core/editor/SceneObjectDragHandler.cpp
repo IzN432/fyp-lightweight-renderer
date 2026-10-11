@@ -24,6 +24,7 @@ glm::vec3 SceneObjectDragHandler::worldDeltaToLocal(const glm::vec3 &worldDelta)
 void SceneObjectDragHandler::beginDrag()
 {
     m_accumulatedLocalDelta = glm::vec3(0.0f);
+    if (m_target && m_beginCallback) m_beginCallback(*m_target);
 }
 
 void SceneObjectDragHandler::translate(const glm::vec3 &frameDelta)

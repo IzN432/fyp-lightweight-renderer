@@ -162,7 +162,7 @@ int main()
     translation.setKeyframe({2.0f, {10, 11, 12}, {13, 14, 15}, {16, 17, 18}});
     lr::RotationTrack rotation(meshObjectIds[1], lr::AnimationInterpolation::Step);
     rotation.setKeyframe(0.0f, glm::quat(1, 0, 0, 0));
-    const auto editedClip = source.animations.add(lr::AnimationClip("Edited", {translation, rotation}));
+    const auto editedClip = source.animations.add(lr::AnimationClip("Edited", {translation, rotation}, 4.5f));
     source.animations.add(lr::AnimationClip("Unreferenced", {}));
 
     auto &skinnedObject = source.scene.getSceneObject(meshObjectIds[0]);
@@ -262,6 +262,7 @@ int main()
     assert(loaded->animations.size() == 2);
     assert(loaded->animations.get(1).name() == "Unreferenced");
     assert(loaded->animations.get(editedClip).tracks().size() == 2);
+    assert(loaded->animations.get(editedClip).durationSeconds() == 4.5f);
     const auto &roundTripTranslation = std::get<lr::TranslationTrack>(loaded->animations.get(editedClip).tracks()[0]);
     assert(roundTripTranslation.target() == meshObjectIds[0] && roundTripTranslation.interpolation() == lr::AnimationInterpolation::CubicSpline);
     assert(roundTripTranslation.keyframes()[1].outgoingTangent == glm::vec3(16, 17, 18));

@@ -13,6 +13,7 @@ void SceneObjectRotationHandler::beginDrag()
 {
     if (m_target && m_target->hasComponent<TransformComponent>())
     {
+        if (m_beginCallback) m_beginCallback(*m_target);
         m_beforeRotation = m_target->getComponent<TransformComponent>().transform().rotation();
     }
 }

@@ -23,6 +23,8 @@
 #include "core/editor/VertexManager.hpp"
 #include "core/editor/ViewportPicker.hpp"
 #include "core/editor/command/CommandManager.hpp"
+#include "core/editor/command/RotateSceneObjectCommand.hpp"
+#include "core/editor/command/TranslateSceneObjectCommand.hpp"
 #include "core/editor/camera/CameraController.hpp"
 #include "core/editor/gizmo/GizmoController.hpp"
 #include "core/editor/selection/SelectionGestureTool.hpp"
@@ -40,8 +42,8 @@
 #include "features/animation/AnimationTrack.hpp"
 #include "features/animation/AnimationTrackCommands.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
+#include "features/linear_blend_skinning/editor/SkeletonManipulationAdapter.hpp"
 #include "features/linear_blend_skinning/editor/SkeletonOverlay.hpp"
-#include "features/linear_blend_skinning/editor/SkeletonSelectionResolver.hpp"
 #include "features/linear_blend_skinning/editor/SkeletonTopology.hpp"
 
 #include <GLFW/glfw3.h>
@@ -152,6 +154,12 @@ public:
         m_skeletonRotationHandler.setCommitCallback([this](SceneObject &object) {
             onTransformCommitted(object, AnimationTargetProperty::Rotation);
         });
+        const auto beginSkeletonPoseEdit = [this](SceneObject &) {
+            m_sceneManager.animationSystem().stopAll();
+            m_animationPlaybackWarning = "Playback stopped to edit the pose.";
+        };
+        m_skeletonTranslationHandler.setBeginCallback(beginSkeletonPoseEdit);
+        m_skeletonRotationHandler.setBeginCallback(beginSkeletonPoseEdit);
 
         const auto applyPresentation = [this](const EditorPresentation &presentation) {
             m_renderBridge.apply(presentation);
@@ -228,6 +236,11 @@ public:
         // Imports and full scene replacements can invalidate either kind of captured delete action.
         m_scene.clearHierarchySelection();
         m_deleter.clear();
+        m_renamingAnimation.reset();
+        m_animationRenameBuffer.clear();
+        m_pendingTrack.reset();
+        m_openAddTrackPopup = false;
+        m_animationPlaybackWarning.clear();
         SceneObject *editedMesh = m_sceneManager.editedMeshObject();
         if (!editedMesh)
         {
@@ -340,11 +353,21 @@ public:
             }
             else
             {
-                if (const JointRef *joint = std::get_if<JointRef>(&*m_skeletonSelection))
+                const Skin &skin = m_scene.getSceneObject(*selected).getComponent<SkinComponent>().skin();
+                if (const std::optional<SkeletonManipulationTarget> target =
+                        SkeletonManipulationAdapter::resolve(m_scene, skin, *m_skeletonSelection))
                 {
-                    ImGui::Text("Selected joint %u", joint->joint);
+                    ImGui::Text(target->selectedThroughBone ? "Selected bone (child joint %u)"
+                                                            : "Selected joint %u",
+                                target->joint);
+                    drawSkeletonTransformControls(m_scene.getSceneObject(target->object));
                 }
             }
+            ImGui::SeparatorText("Display");
+            ImGui::SliderFloat("Bone size", &m_skeletonOverlayStyle.boneRadiusRatio, 0.005f, 0.1f,
+                               "%.3f", ImGuiSliderFlags_Logarithmic);
+            ImGui::SliderFloat("Joint size", &m_skeletonOverlayStyle.jointRadiusRatio, 0.015f, 0.2f,
+                               "%.3f", ImGuiSliderFlags_Logarithmic);
         }
         ImGui::End();
     }
@@ -356,13 +379,9 @@ public:
             ImGui::OpenPopup("Select Bone Endpoint");
             m_openSkeletonEndpointPopup = false;
         }
-
         if (!ImGui::BeginPopup("Select Bone Endpoint"))
         {
-            if (!ImGui::IsPopupOpen("Select Bone Endpoint"))
-            {
-                m_pendingSkeletonBone.reset();
-            }
+            if (!ImGui::IsPopupOpen("Select Bone Endpoint")) m_pendingSkeletonBone.reset();
             return;
         }
 
@@ -378,15 +397,10 @@ public:
             topology.emplace(m_scene, *skin);
             bone = topology->find(*m_pendingSkeletonBone);
         }
-
         if (!bone)
         {
             ImGui::TextDisabled("The selected bone is no longer available.");
-            if (ImGui::Button("Close"))
-            {
-                m_pendingSkeletonBone.reset();
-                ImGui::CloseCurrentPopup();
-            }
+            if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
             return;
         }
@@ -394,18 +408,72 @@ public:
         ImGui::TextUnformatted("Select the joint to pose:");
         if (ImGui::Button(("Parent joint " + std::to_string(bone->parentJoint)).c_str()))
         {
-            selectSkeletonJoint({skin->id(), bone->parentJoint});
+            selectSkeletonElement(JointRef{skin->id(), bone->parentJoint});
             m_pendingSkeletonBone.reset();
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button(("Child joint " + std::to_string(bone->childJoint)).c_str()))
         {
-            selectSkeletonJoint({skin->id(), bone->childJoint});
+            selectSkeletonElement(JointRef{skin->id(), bone->childJoint});
             m_pendingSkeletonBone.reset();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
+    }
+
+    void drawSkeletonTransformControls(SceneObject &joint)
+    {
+        TransformComponent &component = joint.getComponent<TransformComponent>();
+        glm::vec3 position = component.transform().position();
+        glm::vec3 rotation = component.transform().eulerDegrees();
+
+        ImGui::SeparatorText("Local Transform");
+        const glm::vec3 positionBeforeFrame = position;
+        if (ImGui::DragFloat3("Position##SkeletonJoint", &position.x, 0.01f))
+        {
+            component.setPosition(position);
+        }
+        if (ImGui::IsItemActivated())
+        {
+            beginSkeletonPoseEdit();
+            m_skeletonPositionBeforeEdit = positionBeforeFrame;
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit() && m_skeletonPositionBeforeEdit)
+        {
+            const glm::vec3 delta = component.transform().position() - *m_skeletonPositionBeforeEdit;
+            if (glm::dot(delta, delta) > 0.0f)
+            {
+                CommandTransaction transaction(m_commandManager);
+                m_commandManager.appendCommandWithoutExecuting(
+                    std::make_unique<TranslateSceneObjectCommand>(joint, delta));
+                onTransformCommitted(joint, AnimationTargetProperty::Translation);
+            }
+            m_skeletonPositionBeforeEdit.reset();
+        }
+
+        const glm::quat rotationBeforeFrame = component.transform().rotation();
+        if (ImGui::DragFloat3("Rotation (Degrees)##SkeletonJoint", &rotation.x, 0.1f))
+        {
+            component.setEulerDegrees(rotation);
+        }
+        if (ImGui::IsItemActivated())
+        {
+            beginSkeletonPoseEdit();
+            m_skeletonRotationBeforeEdit = rotationBeforeFrame;
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit() && m_skeletonRotationBeforeEdit)
+        {
+            const glm::quat after = component.transform().rotation();
+            if (glm::abs(glm::dot(*m_skeletonRotationBeforeEdit, after)) < 1.0f - 1e-6f)
+            {
+                CommandTransaction transaction(m_commandManager);
+                m_commandManager.appendCommandWithoutExecuting(
+                    std::make_unique<RotateSceneObjectCommand>(joint, *m_skeletonRotationBeforeEdit, after));
+                onTransformCommitted(joint, AnimationTargetProperty::Rotation);
+            }
+            m_skeletonRotationBeforeEdit.reset();
+        }
     }
 
     void drawScenePanel(SceneDocument &document)
@@ -490,6 +558,22 @@ public:
         }
 
         ImGui::BeginChild("AnimationClips", ImVec2(180.0f, 0.0f), ImGuiChildFlags_Borders);
+        if (ImGui::Button("Add Animation", ImVec2(-FLT_MIN, 0.0f)))
+        {
+            size_t suffix = library.size() + 1;
+            std::string name;
+            do
+            {
+                name = "Animation " + std::to_string(suffix++);
+            } while (std::ranges::any_of(library.clips(), [&](const AnimationClip &clip) {
+                return clip.name() == name;
+            }));
+            const AnimationClipHandle handle =
+                library.add(AnimationClip(std::move(name), {}, 1.0f));
+            selectAnimation(handle);
+        }
+        ImGui::Separator();
+        std::optional<AnimationClipHandle> renameRequested;
         for (AnimationClipHandle handle = 0; handle < library.size(); ++handle)
         {
             const bool selected = m_deleter.selected(animationDeletionKey(handle));
@@ -497,6 +581,14 @@ public:
             if (ImGui::Selectable(library.get(handle).name().c_str(), selected))
             {
                 selectAnimation(handle);
+            }
+            if (ImGui::BeginPopupContextItem())
+            {
+                if (ImGui::MenuItem("Rename"))
+                {
+                    renameRequested = handle;
+                }
+                ImGui::EndPopup();
             }
             ImGui::PopID();
         }
@@ -508,6 +600,13 @@ public:
         {
             m_scene.clearHierarchySelection();
         }
+        if (renameRequested)
+        {
+            m_renamingAnimation = renameRequested;
+            m_animationRenameBuffer = library.get(*renameRequested).name();
+            ImGui::OpenPopup("Rename Animation");
+        }
+        drawAnimationRenamePopup(library);
         ImGui::EndChild();
         ImGui::SameLine();
 
@@ -520,6 +619,17 @@ public:
         {
             AnimationClip &clip = library.get(*m_selectedAnimation);
             ImGui::TextUnformatted(clip.name().c_str());
+            float editedDuration = clip.durationSeconds();
+            ImGui::SetNextItemWidth(160.0f);
+            if (ImGui::DragFloat("Duration (seconds)", &editedDuration, 0.05f, 0.0f, FLT_MAX, "%.3f"))
+            {
+                clip.setDurationSeconds(std::max(0.0f, editedDuration));
+                m_animationSeconds = std::min(m_animationSeconds, clip.durationSeconds());
+            }
+            if (ImGui::IsItemActivated())
+            {
+                m_sceneManager.animationSystem().stop(*m_selectedAnimation);
+            }
             if (ImGui::Checkbox("Auto Key", &m_autoKey) && m_autoKey)
             {
                 m_sceneManager.animationSystem().stopAll();
@@ -603,6 +713,7 @@ public:
                         m_animationSeconds = progress * duration;
                         if (!m_sceneManager.animationSystem().seek(*m_selectedAnimation, m_animationSeconds))
                             applyAnimation(clip, m_animationSeconds);
+                        refreshSkeletonOverlay();
                     }
                     for (size_t index = 0; index < track.keyframes().size(); ++index)
                     {
@@ -647,6 +758,54 @@ public:
     }
 
 private:
+    void drawAnimationRenamePopup(AnimationLibrary &library)
+    {
+        if (!m_renamingAnimation)
+        {
+            return;
+        }
+
+        bool closePopup = false;
+        if (ImGui::BeginPopupModal("Rename Animation", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            if (!library.contains(*m_renamingAnimation))
+            {
+                closePopup = true;
+            }
+            else
+            {
+                if (ImGui::IsWindowAppearing())
+                {
+                    ImGui::SetKeyboardFocusHere();
+                }
+                const bool submitted = gui::inputText("Name", m_animationRenameBuffer,
+                                                      ImGuiInputTextFlags_EnterReturnsTrue);
+                if (submitted || ImGui::Button("Rename"))
+                {
+                    library.get(*m_renamingAnimation).setName(m_animationRenameBuffer);
+                    closePopup = true;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+                {
+                    closePopup = true;
+                }
+            }
+
+            if (closePopup)
+            {
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+
+        if (closePopup)
+        {
+            m_renamingAnimation.reset();
+            m_animationRenameBuffer.clear();
+        }
+    }
+
     // Import and the built-in primitives, plus the two objects worth creating from nothing. Light is
     // capped by what the light SSBO can hold, so the button reports the limit rather than silently
     // refusing.
@@ -707,6 +866,7 @@ private:
 
     void selectAnimation(AnimationClipHandle handle)
     {
+        clearSkeletonSelection();
         m_selectedAnimation = handle;
         m_scene.clearHierarchySelection();
         m_deleter.select(animationDeletionKey(handle), [this, handle] {
@@ -761,6 +921,7 @@ private:
                 const size_t trackCount = library.get(handle).tracks().size();
                 m_selectedAnimationTrack = trackCount == 0 ? 0 : std::min(index, trackCount - 1);
             }
+            clearSkeletonSelection();
         });
         const AnimationChannel &channel = m_sceneManager.animations().get(handle).tracks()[index];
         std::visit([&](const auto &track) {
@@ -797,7 +958,7 @@ private:
             m_selectedAnimationTrack = index;
             return;
         }
-        m_pendingTrack = PendingTrack{object.id(), property};
+        m_pendingTrack = PendingTrack{object.id(), property, m_commandManager.currentTransactionId()};
         m_openAddTrackPopup = true;
     }
 
@@ -848,9 +1009,14 @@ private:
                           ? AnimationChannel(RotationTrack(object.id()))
                           : AnimationChannel(ScaleTrack(object.id()));
             setCurrentTransformKey(channel, object, m_animationSeconds);
-            m_commandManager.executeCommand(std::make_unique<AddAnimationTrackCommand>(
+            auto command = std::make_unique<AddAnimationTrackCommand>(
                 m_sceneManager.animationSystem(), m_sceneManager.animations(), *m_selectedAnimation,
-                std::move(channel)));
+                std::move(channel));
+            if (m_pendingTrack->originatingHistoryEntry)
+                m_commandManager.executeCommandAndAppendTo(*m_pendingTrack->originatingHistoryEntry,
+                                                           std::move(command));
+            else
+                m_commandManager.executeCommand(std::move(command));
             const size_t trackCount = m_sceneManager.animations().get(*m_selectedAnimation).tracks().size();
             m_selectedAnimationTrack = trackCount == 0 ? 0 : trackCount - 1;
             m_pendingTrack.reset(); ImGui::CloseCurrentPopup();
@@ -888,6 +1054,7 @@ private:
         {
             m_skeletonSelection.reset();
             m_pendingSkeletonBone.reset();
+            clearSkeletonControlEdits();
             return true;
         }
         if (const SkeletonSelection *selection = m_skeletonOverlay.selectionForPickingId(pickingId))
@@ -899,7 +1066,7 @@ private:
             }
             else
             {
-                selectSkeletonJoint(std::get<JointRef>(*selection));
+                selectSkeletonElement(*selection);
                 m_pendingSkeletonBone.reset();
             }
         }
@@ -944,8 +1111,10 @@ private:
                 m_skeletonSelection.reset();
                 m_pendingSkeletonBone.reset();
                 m_openSkeletonEndpointPopup = false;
+                clearSkeletonControlEdits();
                 m_skeletonPicker.reset();
                 m_skeletonHoverCursor.reset();
+                m_lastSkeletonHoverReadbackSeconds = 0.0;
                 m_skeletonOverlay = {};
                 m_renderBridge.setHoveredOverlay(~0u);
                 m_renderBridge.setOverlayGeometry({});
@@ -972,16 +1141,22 @@ private:
                 }
                 m_skeletonTranslationHandler.setTarget(jointTarget);
                 m_skeletonRotationHandler.setTarget(jointTarget);
-                m_skeletonOverlay = buildSkeletonOverlay(m_scene, *selected, m_skeletonSelection);
+                m_skeletonOverlay =
+                    buildSkeletonOverlay(m_scene, *selected, m_skeletonSelection, m_skeletonOverlayStyle);
                 m_renderBridge.setOverlayGeometry(m_skeletonOverlay.instances);
 
                 double mouseX = 0.0, mouseY = 0.0;
                 m_viewer.input().getMousePos(mouseX, mouseY);
                 const glm::dvec2 cursor(mouseX, mouseY);
-                if (!m_skeletonHoverCursor || m_skeletonHoverCursor->x != cursor.x ||
-                    m_skeletonHoverCursor->y != cursor.y)
+                const double now = glfwGetTime();
+                const bool cursorMoved = !m_skeletonHoverCursor || m_skeletonHoverCursor->x != cursor.x ||
+                                         m_skeletonHoverCursor->y != cursor.y;
+                // Hover is visual feedback, not a precision action. Cap its synchronous GPU
+                // readback rate while preserving the unthrottled click read used for selection.
+                if (cursorMoved && now - m_lastSkeletonHoverReadbackSeconds >= 1.0 / 30.0)
                 {
                     m_skeletonHoverCursor = cursor;
+                    m_lastSkeletonHoverReadbackSeconds = now;
                     const uint32_t hovered = readSkeletonPickingId();
                     m_renderBridge.setHoveredOverlay(
                         m_skeletonOverlay.selectionForPickingId(hovered) ? hovered : ~0u);
@@ -1125,7 +1300,8 @@ private:
                     if (object.hasComponent<SkinComponent>())
                     {
                         m_skeletonSelection.reset();
-                        m_skeletonOverlay = buildSkeletonOverlay(m_scene, object.id());
+                        m_skeletonOverlay =
+                            buildSkeletonOverlay(m_scene, object.id(), std::nullopt, m_skeletonOverlayStyle);
                         m_renderBridge.setOverlayGeometry(m_skeletonOverlay.instances);
                     }
                     else
@@ -1366,24 +1542,65 @@ private:
         {
             return nullptr;
         }
-        const std::optional<SceneObjectId> target =
-            resolveSkeletonSelection(m_scene, skin, *m_skeletonSelection);
+        const std::optional<SkeletonManipulationTarget> target =
+            SkeletonManipulationAdapter::resolve(m_scene, skin, *m_skeletonSelection);
         if (!target)
         {
             return nullptr;
         }
-        SceneObject &object = m_scene.getSceneObject(*target);
+        SceneObject &object = m_scene.getSceneObject(target->object);
         return object.hasComponent<TransformComponent>() ? &object : nullptr;
     }
 
-    void selectSkeletonJoint(JointRef joint)
+    void beginSkeletonPoseEdit()
     {
-        m_skeletonSelection = joint;
+        m_sceneManager.animationSystem().stopAll();
+        m_animationPlaybackWarning = "Playback stopped to edit the pose.";
+    }
+
+    void clearSkeletonSelection()
+    {
+        m_skeletonSelection.reset();
+        m_pendingSkeletonBone.reset();
+        m_openSkeletonEndpointPopup = false;
+        m_skeletonTranslationHandler.setTarget(nullptr);
+        m_skeletonRotationHandler.setTarget(nullptr);
+        clearSkeletonControlEdits();
+        refreshSkeletonOverlay();
+    }
+
+    void refreshSkeletonOverlay()
+    {
+        if (!m_stateController.isActive(kSkeletonEditState))
+        {
+            return;
+        }
+        const std::optional<SceneObjectId> selected = m_scene.selectedObject();
+        if (!selected || !m_scene.contains(*selected) ||
+            !m_scene.getSceneObject(*selected).hasComponent<SkinComponent>())
+        {
+            return;
+        }
+        m_skeletonOverlay =
+            buildSkeletonOverlay(m_scene, *selected, m_skeletonSelection, m_skeletonOverlayStyle);
+        m_renderBridge.setOverlayGeometry(m_skeletonOverlay.instances);
+    }
+
+    void selectSkeletonElement(SkeletonSelection selection)
+    {
+        m_skeletonSelection = std::move(selection);
+        clearSkeletonControlEdits();
         if (m_transformController.tool() != TransformTool::Translate &&
             m_transformController.tool() != TransformTool::Rotate)
         {
             m_transformController.setTool(TransformTool::Translate);
         }
+    }
+
+    void clearSkeletonControlEdits()
+    {
+        m_skeletonPositionBeforeEdit.reset();
+        m_skeletonRotationBeforeEdit.reset();
     }
 
     void update(VkExtent2D extent)
@@ -1434,9 +1651,13 @@ private:
     ViewportPicker                 m_objectPicker;
     ViewportPicker                 m_skeletonPicker;
     SkeletonOverlay                m_skeletonOverlay;
+    SkeletonOverlayStyle           m_skeletonOverlayStyle;
     std::optional<SkeletonSelection> m_skeletonSelection;
     std::optional<BoneRef>         m_pendingSkeletonBone;
+    std::optional<glm::vec3>       m_skeletonPositionBeforeEdit;
+    std::optional<glm::quat>       m_skeletonRotationBeforeEdit;
     std::optional<glm::dvec2>      m_skeletonHoverCursor;
+    double                         m_lastSkeletonHoverReadbackSeconds = 0.0;
     bool                           m_openSkeletonEndpointPopup = false;
     // Declared before m_context, which holds a reference to it.
     ComponentCatalog               m_componentCatalog;
@@ -1461,6 +1682,8 @@ private:
 
     Deleter                            m_deleter;
     std::optional<AnimationClipHandle> m_selectedAnimation;
+    std::optional<AnimationClipHandle> m_renamingAnimation;
+    std::string                        m_animationRenameBuffer;
     float                              m_animationSeconds = 0.0f;
     size_t                             m_selectedAnimationTrack = 0;
     float                              m_animationTrackViewCenter = 0.5f;
@@ -1471,6 +1694,7 @@ private:
     {
         SceneObjectId target;
         AnimationTargetProperty property;
+        std::optional<CommandManager::HistoryEntryId> originatingHistoryEntry;
     };
     std::optional<PendingTrack>        m_pendingTrack;
     bool                               m_openAddTrackPopup = false;

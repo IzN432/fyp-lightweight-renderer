@@ -8,6 +8,14 @@ namespace lr::gui
 namespace
 {
 
+int resizeStringInput(ImGuiInputTextCallbackData *data)
+{
+    auto &value = *static_cast<std::string *>(data->UserData);
+    value.resize(static_cast<size_t>(data->BufTextLen));
+    data->Buf = value.data();
+    return 0;
+}
+
 float snapToNearestKeyframe(float progress, std::span<const float> keyframes, float threshold)
 {
     float snapped      = progress;
@@ -33,6 +41,13 @@ float snapToNearestKeyframe(float progress, std::span<const float> keyframes, fl
 }
 
 } // namespace
+
+bool inputText(const char *label, std::string &value, ImGuiInputTextFlags flags)
+{
+    flags |= ImGuiInputTextFlags_CallbackResize;
+    return ImGui::InputText(label, value.data(), value.capacity() + 1, flags, resizeStringInput,
+                            &value);
+}
 
 AnimationTrackResult animationTrack(const char *label, float *progress, std::span<const float> keyframes,
                                     float *viewCenter, float *viewHalfWidth, float snapThreshold, ImVec2 size)

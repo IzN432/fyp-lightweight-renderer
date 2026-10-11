@@ -3,9 +3,13 @@
 #include <imgui.h>
 
 #include <span>
+#include <string>
 
 namespace lr::gui
 {
+
+// ImGui text input backed by a dynamically sized std::string.
+bool inputText(const char *label, std::string &value, ImGuiInputTextFlags flags = 0);
 
 struct AnimationTrackResult
 {
