@@ -135,6 +135,7 @@ add_library(lr_core STATIC
     src/core/scene/EngineConventions.cpp
 
     src/core/loaders/ObjLoader.cpp
+    src/core/loaders/ObjExporter.cpp
     src/core/loaders/GltfLoader.cpp
     src/core/loaders/SceneLoader.cpp
     src/core/loaders/LoaderUtils.cpp
@@ -598,6 +599,12 @@ if(BUILD_TESTING)
         LR_SAMPLE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/samples/models/"
     )
     add_test(NAME linear_blend_skinning.gltf_loader COMMAND gltf_skin_loader_tests)
+
+    add_executable(obj_exporter_tests
+        tests/loaders/ObjExporterTests.cpp
+    )
+    target_link_libraries(obj_exporter_tests PRIVATE lr_core)
+    add_test(NAME loaders.obj_exporter COMMAND obj_exporter_tests)
 
     add_executable(animation_tests
         tests/animation/AnimationTests.cpp
