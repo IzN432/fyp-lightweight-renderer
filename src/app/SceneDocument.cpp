@@ -8,6 +8,7 @@
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneManager.hpp"
 #include "core/scene/SceneObject.hpp"
+#include "features/linear_blend_skinning/SkinComponent.hpp"
 #include "features/rigid_body/PhysicsWorld.hpp"
 
 #include <ImGuiFileDialog.h>
@@ -16,6 +17,7 @@
 
 #include <exception>
 #include <stdexcept>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -116,7 +118,21 @@ std::vector<ObjExportObject> SceneDocument::collectExportObjects() const
         {
             continue;
         }
-        objects.push_back({&mesh->mesh(), object->worldMatrix(), object->name});
+
+        // A posed character should export posed, so a skinned object hands the exporter its
+        // evaluated joint palette. Skinning switched off is deliberately treated the same as no
+        // skin at all -- bind-pose positions through the object's transform -- because that is what
+        // the viewport is drawing in that state (see SkinComponent's own note).
+        std::span<const glm::mat4> jointMatrices;
+        if (const SkinComponent *skin = object->findComponent<SkinComponent>(); skin && skin->skin().skinningEnabled())
+        {
+            // Already evaluated for this frame by the animation/skin update, the same matrices the
+            // geometry pass is drawing with; re-evaluating here would both duplicate that work and
+            // risk disagreeing with what is on screen.
+            jointMatrices = skin->skin().jointMatrices();
+        }
+
+        objects.push_back({&mesh->mesh(), object->worldMatrix(), object->name, jointMatrices});
     }
     return objects;
 }

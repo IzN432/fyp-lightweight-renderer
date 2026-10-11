@@ -85,6 +85,29 @@ Mesh makeMesh()
     return mesh;
 }
 
+// A triangle whose three positions are each influenced by one joint, so a palette can move them
+// independently and the test can see which joint reached which vertex.
+Mesh makeSkinnedMesh()
+{
+    Mesh mesh;
+    mesh.enableVertexGroups();
+    mesh.setTopology({{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}}, {0, 1, 2}, {{0, 1, 2}});
+
+    const VertexGroupEntry joint0{0, 1.0f};
+    const VertexGroupEntry joint1{1, 1.0f};
+    mesh.setVertexGroups(0, std::span<const VertexGroupEntry>(&joint0, 1));
+    mesh.setVertexGroups(1, std::span<const VertexGroupEntry>(&joint1, 1));
+    mesh.setVertexGroups(2, std::span<const VertexGroupEntry>(&joint0, 1));
+    return mesh;
+}
+
+glm::mat4 translation(float x, float y, float z)
+{
+    glm::mat4 m(1.0f);
+    m[3] = glm::vec4(x, y, z, 1.0f);
+    return m;
+}
+
 std::filesystem::path makeScratchDir()
 {
     const std::filesystem::path dir = std::filesystem::temp_directory_path() / "lr_obj_exporter_tests";
@@ -374,6 +397,165 @@ void testMultiObjectRoundTripThroughObjLoader()
     std::filesystem::remove_all(dir);
 }
 
+// The palette has to reach the written coordinates, per vertex, through each vertex's own joint.
+void testJointPaletteDeformsPositions()
+{
+    const Mesh mesh = makeSkinnedMesh();
+
+    // Joint 0 moves along +x, joint 1 along +y, so each vertex lands somewhere only its own joint
+    // could have put it.
+    const std::vector<glm::mat4> palette = {translation(10.0f, 0.0f, 0.0f), translation(0.0f, 100.0f, 0.0f)};
+
+    const std::vector<ObjExportObject> objects = {{&mesh, glm::mat4(1.0f), "posed", palette}};
+    ObjExporterConfig                  config;
+    config.precision       = 6;
+    const std::string text = exportToString(objects, config);
+
+    // Positions 0 and 2 follow joint 0; position 1 follows joint 1.
+    assert(contains(text, "v 10 0 0\n"));  // position 0 (0,0,0) through joint 0
+    assert(contains(text, "v 1 100 0\n")); // position 1 (1,0,0) through joint 1
+    assert(contains(text, "v 10 1 0\n"));  // position 2 (0,1,0) through joint 0
+
+    // Exactly the three vertices, none left at the bind pose.
+    assert(countLinesStartingWith(text, "v ") == 3);
+    assert(!contains(text, "v 0 0 0\n"));
+}
+
+// An empty palette is the "no pose" signal, and must leave the mesh at its bind pose rather than
+// collapsing it -- this is the path an unskinned object and a skinning-disabled one both take.
+void testEmptyPaletteWritesBindPose()
+{
+    const Mesh mesh = makeSkinnedMesh();
+
+    const std::vector<ObjExportObject> objects = {{&mesh, glm::mat4(1.0f), "bind", {}}};
+    ObjExporterConfig                  config;
+    config.precision       = 6;
+    const std::string text = exportToString(objects, config);
+
+    assert(contains(text, "v 0 0 0\n"));
+    assert(contains(text, "v 1 0 0\n"));
+    assert(contains(text, "v 0 1 0\n"));
+}
+
+// The order the vertex shader uses: skin matrix first (into mesh-local posed space), model matrix
+// second. Composed the other way round the translation would be scaled, so this pins the order.
+void testTransformAppliesOnTopOfSkinning()
+{
+    Mesh mesh;
+    mesh.enableVertexGroups();
+    mesh.setTopology({{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}}, {0, 1, 2}, {{0, 1, 2}});
+    const VertexGroupEntry joint0{0, 1.0f};
+    for (uint32_t i = 0; i < 3; ++i)
+    {
+        mesh.setVertexGroups(i, std::span<const VertexGroupEntry>(&joint0, 1));
+    }
+
+    // Skin translates by +1 on x; the object transform scales x by 2.
+    const std::vector<glm::mat4> palette = {translation(1.0f, 0.0f, 0.0f)};
+    glm::mat4                    scaled(1.0f);
+    scaled[0][0] = 2.0f;
+
+    const std::vector<ObjExportObject> objects = {{&mesh, scaled, "scaled", palette}};
+    ObjExporterConfig                  config;
+    config.precision       = 6;
+    const std::string text = exportToString(objects, config);
+
+    // (1,0,0) -> skin -> (2,0,0) -> scale -> (4,0,0). Skinning after scaling would give (3,0,0).
+    assert(contains(text, "v 4 0 0\n"));
+    assert(!contains(text, "v 3 0 0\n"));
+}
+
+// Weights are normalized by their sum, matching skinning.glslh, so weights that do not add to 1
+// still land the vertex between its joints rather than somewhere scaled by the total.
+void testWeightsAreNormalized()
+{
+    Mesh mesh;
+    mesh.enableVertexGroups();
+    mesh.setTopology({{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}}, {0, 1, 2}, {{0, 1, 2}});
+
+    // Deliberately summing to 0.5, not 1: equal halves of that sum must still mean "midway".
+    const std::vector<VertexGroupEntry> influences = {{0, 0.25f}, {1, 0.25f}};
+    mesh.setVertexGroups(0, influences);
+
+    const std::vector<glm::mat4> palette = {translation(0.0f, 0.0f, 0.0f), translation(10.0f, 0.0f, 0.0f)};
+
+    const std::vector<ObjExportObject> objects = {{&mesh, glm::mat4(1.0f), "blended", palette}};
+    ObjExporterConfig                  config;
+    config.precision       = 6;
+    const std::string text = exportToString(objects, config);
+
+    // Midway between staying put and moving 10 along x. Un-normalized it would be (2.5,0,0).
+    assert(contains(text, "v 5 0 0\n"));
+    assert(!contains(text, "v 2.5 0 0\n"));
+}
+
+// A position with no influences at all keeps its bind-pose place: the shader's identity fallback,
+// not the zero matrix the weighted sum starts from.
+void testUninfluencedVerticesKeepBindPose()
+{
+    Mesh mesh;
+    mesh.enableVertexGroups();
+    mesh.setTopology({{7.0f, 8.0f, 9.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}}, {0, 1, 2}, {{0, 1, 2}});
+
+    // Only position 1 is influenced; 0 and 2 are left with no entries.
+    const VertexGroupEntry joint0{0, 1.0f};
+    mesh.setVertexGroups(1, std::span<const VertexGroupEntry>(&joint0, 1));
+
+    const std::vector<glm::mat4>       palette = {translation(0.0f, 0.0f, 50.0f)};
+    const std::vector<ObjExportObject> objects = {{&mesh, glm::mat4(1.0f), "partial", palette}};
+    ObjExporterConfig                  config;
+    config.precision       = 6;
+    const std::string text = exportToString(objects, config);
+
+    // Untouched, rather than at the origin.
+    assert(contains(text, "v 7 8 9\n"));
+    assert(contains(text, "v 0 1 0\n"));
+    // The one influenced vertex did move.
+    assert(contains(text, "v 1 0 50\n"));
+}
+
+// A palette too short for the mesh's influences is a rig/mesh mismatch, not something to write out
+// with a silently wrong pose.
+void testOutOfRangeJointThrows()
+{
+    const Mesh mesh = makeSkinnedMesh();
+
+    // makeSkinnedMesh references joints 0 and 1, so a one-entry palette is one short.
+    const std::vector<glm::mat4> shortPalette = {glm::mat4(1.0f)};
+    expectThrow<std::invalid_argument>([&] {
+        exportToString(std::vector<ObjExportObject>{{&mesh, glm::mat4(1.0f), "short", shortPalette}});
+    });
+}
+
+// A skinned and an unskinned object in one file: the pose must not leak across entries, and the
+// index offsetting still has to hold.
+void testSkinnedAndUnskinnedObjectsCoexist()
+{
+    const Mesh skinnedMesh = makeSkinnedMesh();
+    const Mesh plainMesh   = makeMesh();
+
+    const std::vector<glm::mat4> palette = {translation(0.0f, 0.0f, 20.0f), translation(0.0f, 0.0f, 20.0f)};
+
+    const std::vector<ObjExportObject> objects = {
+        {&skinnedMesh, glm::mat4(1.0f), "posed", palette},
+        {&plainMesh, glm::mat4(1.0f), "plain", {}},
+    };
+    ObjExporterConfig config;
+    config.precision       = 6;
+    const std::string text = exportToString(objects, config);
+
+    // The skinned object moved along z; the unskinned one stayed at its bind pose.
+    assert(contains(text, "v 0 0 20\n"));
+    assert(contains(text, "v 0 0 0\n"));
+
+    assert(countLinesStartingWith(text, "v ") == 6);
+    const std::vector<std::string> faces = linesStartingWith(text, "f ");
+    assert(faces.size() == 3);
+    assert(faces[0] == "f 1 2 3");
+    assert(faces[1] == "f 4 5 6");
+    assert(faces[2] == "f 4 5 6");
+}
+
 } // namespace
 
 int main()
@@ -388,5 +570,12 @@ int main()
     testEmptyObjectsAreSkipped();
     testInvalidObjectListsThrow();
     testMultiObjectRoundTripThroughObjLoader();
+    testJointPaletteDeformsPositions();
+    testEmptyPaletteWritesBindPose();
+    testTransformAppliesOnTopOfSkinning();
+    testWeightsAreNormalized();
+    testUninfluencedVerticesKeepBindPose();
+    testOutOfRangeJointThrows();
+    testSkinnedAndUnskinnedObjectsCoexist();
     return 0;
 }

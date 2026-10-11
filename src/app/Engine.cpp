@@ -458,7 +458,7 @@ void Engine::run()
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 {
                     ImGui::SetTooltip("Writes every rendered object's vertices and faces, placed in world "
-                                      "space - no normals, UVs or materials.");
+                                      "space and in their current pose - no normals, UVs or materials.");
                 }
                 ImGui::EndMenu();
             }
