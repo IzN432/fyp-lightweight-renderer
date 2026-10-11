@@ -297,6 +297,7 @@ void Engine::run()
         .cascadedShadow = &cascadedShadowPass,
         .areaShadow     = &areaShadowPass,
         .heatmap        = &heatmapPass,
+        .overlayGeometry = &overlayGeometryPass,
         .overlayPoints  = &overlayPointsPass,
         .overlayLines   = &overlayLinesPass,
         .outline        = &outlinePass,
@@ -507,6 +508,7 @@ void Engine::run()
         ImGui::End();
         editor.drawTransformWindow();
         editor.drawAnimationWindow();
+        editor.drawSkinningWindow();
         errorReporter.drawPopup();
     }));
 

@@ -6,6 +6,7 @@
 #include "core/passes/heatmap/HeatmapPass.hpp"
 #include "core/passes/objectpicking/ObjectPickingPass.hpp"
 #include "core/passes/outline/OutlinePass.hpp"
+#include "core/passes/overlaygeometry/OverlayGeometryPass.hpp"
 #include "core/passes/overlaylines/OverlayLinesPass.hpp"
 #include "core/passes/overlaypoints/OverlayPointsPass.hpp"
 #include "core/passes/shadow/AreaShadowPass.hpp"
@@ -75,7 +76,8 @@ EditorRenderBridge::EditorRenderBridge(SceneManager &sceneManager, Passes passes
     : m_sceneManager(sceneManager), m_passes(passes)
 {
     if (!m_passes.geometry || !m_passes.transparent || !m_passes.objectPicking || !m_passes.spotShadow || !m_passes.pointShadow ||
-        !m_passes.cascadedShadow || !m_passes.areaShadow || !m_passes.heatmap || !m_passes.overlayPoints ||
+        !m_passes.cascadedShadow || !m_passes.areaShadow || !m_passes.heatmap || !m_passes.overlayGeometry ||
+        !m_passes.overlayPoints ||
         !m_passes.overlayLines || !m_passes.outline)
     {
         throw std::invalid_argument("EditorRenderBridge: every pass is required");
@@ -110,6 +112,11 @@ void EditorRenderBridge::setEditableTarget(const EditableMeshContext &target)
                                     transform);
     m_passes.overlayPoints->setPointsSource(m_sceneManager.selectedMeshPoints(), target.mesh.uniquePositionCount(),
                                             transform);
+}
+
+void EditorRenderBridge::setOverlayGeometry(std::vector<OverlayInstance> instances)
+{
+    m_passes.overlayGeometry->setInstances(std::move(instances));
 }
 
 void EditorRenderBridge::updateSceneOverlays(const Scene &scene, const EditorFrameContext &frame)

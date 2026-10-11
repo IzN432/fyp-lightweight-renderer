@@ -43,6 +43,7 @@ public:
     void drawScenePanel(SceneDocument &document);
     void drawTransformWindow();
     void drawAnimationWindow();
+    void drawSkinningWindow();
 
     // Whether camera orbit/pan/zoom may act on the pointer this frame — the editor arbitrates
     // pointer priority, so a host camera controller asks rather than guessing.

@@ -1,6 +1,9 @@
 #pragma once
 
 #include "core/editor/EditorPresentation.hpp"
+#include "core/passes/overlaygeometry/OverlayInstance.hpp"
+
+#include <vector>
 
 namespace lr
 {
@@ -10,6 +13,7 @@ class CascadedShadowPass;
 class GeometryPass;
 class HeatmapPass;
 class ObjectPickingPass;
+class OverlayGeometryPass;
 class OverlayLinesPass;
 class OutlinePass;
 class OverlayPointsPass;
@@ -39,6 +43,7 @@ public:
         CascadedShadowPass *cascadedShadow = nullptr;
         AreaShadowPass     *areaShadow     = nullptr;
         HeatmapPass        *heatmap        = nullptr;
+        OverlayGeometryPass *overlayGeometry = nullptr;
         OverlayPointsPass  *overlayPoints  = nullptr;
         OverlayLinesPass   *overlayLines   = nullptr;
         OutlinePass        *outline        = nullptr;
@@ -49,6 +54,7 @@ public:
 
     void apply(const EditorPresentation &presentation);
     void setEditableTarget(const EditableMeshContext &target);
+    void setOverlayGeometry(std::vector<OverlayInstance> instances);
     void updateSceneOverlays(const Scene &scene, const EditorFrameContext &frame);
 
 private:

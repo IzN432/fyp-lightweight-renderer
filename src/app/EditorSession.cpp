@@ -38,6 +38,8 @@
 #include "features/laplace_beltrami/LaplaceBeltramiTool.hpp"
 #include "features/animation/AnimationTrack.hpp"
 #include "features/animation/AnimationTrackCommands.hpp"
+#include "features/linear_blend_skinning/SkinComponent.hpp"
+#include "features/linear_blend_skinning/editor/SkeletonOverlay.hpp"
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -59,6 +61,7 @@ namespace
 {
 constexpr std::string_view kViewState = "view";
 constexpr std::string_view kEditState = "edit";
+constexpr std::string_view kSkeletonEditState = "skeleton-edit";
 
 // The shapes "Add Primitive" offers, paired with the file each one imports from
 // assets/runtime/primitives/. The menu shows the shape, not the filename, so the list reads as
@@ -205,6 +208,10 @@ public:
 
     void onSceneContentChanged()
     {
+        if (m_stateController.isActive(kSkeletonEditState))
+        {
+            m_stateController.activateDefault();
+        }
         // Imports and full scene replacements can invalidate either kind of captured delete action.
         m_scene.clearHierarchySelection();
         m_deleter.clear();
@@ -241,6 +248,59 @@ public:
             ImGui::Unindent();
             ImGui::PopID();
         }
+    }
+
+    void drawSkinningWindow()
+    {
+        if (!ImGui::Begin("Skinning"))
+        {
+            ImGui::End();
+            return;
+        }
+
+        bool foundSkin = false;
+        for (const auto &entry : m_scene.sceneObjects())
+        {
+            SceneObject *object = entry.get();
+            if (!object || !m_scene.contains(object->id()) || !object->hasComponent<SkinComponent>())
+            {
+                continue;
+            }
+            foundSkin = true;
+            const bool selected = m_scene.selectedObject() == object->id();
+            const std::string label = object->name.empty() ? "Unnamed Skin" : object->name;
+            const std::string objectId = toString(object->id());
+            ImGui::PushID(objectId.c_str());
+            if (ImGui::Selectable(label.c_str(), selected))
+            {
+                m_scene.selectHierarchyObject(object->id());
+                m_scene.revealInHierarchy(object->id());
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("%zu joints", object->getComponent<SkinComponent>().skin().joints().size());
+            ImGui::PopID();
+        }
+
+        if (!foundSkin)
+        {
+            ImGui::TextDisabled("No skins in the scene.");
+        }
+
+        const std::optional<SceneObjectId> selected = m_scene.selectedObject();
+        const bool canEdit = selected && m_scene.contains(*selected) &&
+                             m_scene.getSceneObject(*selected).hasComponent<SkinComponent>();
+        const bool editing = m_stateController.isActive(kSkeletonEditState);
+        ImGui::BeginDisabled(!canEdit && !editing);
+        if (ImGui::Button(editing ? "Exit Skeleton Edit Mode" : "Edit Skeleton"))
+        {
+            m_stateController.toggle(kSkeletonEditState);
+        }
+        ImGui::EndDisabled();
+        if (editing)
+        {
+            ImGui::TextDisabled("Bone and joint manipulation will be added in the next slice.");
+        }
+        ImGui::End();
     }
 
     void drawScenePanel(SceneDocument &document)
@@ -718,6 +778,22 @@ private:
                 };
             },
         });
+
+        m_stateController.registerState({
+            .id           = std::string(kSkeletonEditState),
+            .presentation = {.skinningEnabled = true},
+            .onExit       = [this] { m_renderBridge.setOverlayGeometry({}); },
+            .update       = [this](const EditorFrameContext &) {
+                const std::optional<SceneObjectId> selected = m_scene.selectedObject();
+                if (!selected || !m_scene.contains(*selected) ||
+                    !m_scene.getSceneObject(*selected).hasComponent<SkinComponent>())
+                {
+                    m_stateController.activateDefault();
+                    return;
+                }
+                m_renderBridge.setOverlayGeometry(buildSkeletonOverlay(m_scene, *selected));
+            },
+        });
     }
 
     // Target binding is one operation applied to every registered tool, so adding a feature does not
@@ -814,11 +890,26 @@ private:
                     {
                         m_stateController.activateDefault();
                     }
+                    if (m_stateController.isActive(kSkeletonEditState))
+                    {
+                        m_stateController.activateDefault();
+                    }
                     return;
                 }
                 SceneObject &object   = m_scene.getSceneObject(*selected);
                 m_transformWindowOpen = true;
                 m_transformController.setSelectedTarget(object.hasComponent<TransformComponent>() ? &object : nullptr);
+                if (m_stateController.isActive(kSkeletonEditState))
+                {
+                    if (object.hasComponent<SkinComponent>())
+                    {
+                        m_renderBridge.setOverlayGeometry(buildSkeletonOverlay(m_scene, object.id()));
+                    }
+                    else
+                    {
+                        m_stateController.activateDefault();
+                    }
+                }
                 if (!SceneManager::isEditable(object))
                 {
                     if (m_stateController.active().presentation.vertexSelectionActive)
@@ -1157,6 +1248,7 @@ void           EditorSession::drawFeaturePanel() { m_impl->drawFeaturePanel(); }
 void           EditorSession::drawScenePanel(SceneDocument &document) { m_impl->drawScenePanel(document); }
 void           EditorSession::drawTransformWindow() { m_impl->drawTransformWindow(); }
 void           EditorSession::drawAnimationWindow() { m_impl->drawAnimationWindow(); }
+void           EditorSession::drawSkinningWindow() { m_impl->drawSkinningWindow(); }
 bool           EditorSession::allowsViewportNavigation() const { return m_impl->allowsViewportNavigation(); }
 
 } // namespace lr
