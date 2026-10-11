@@ -98,17 +98,39 @@ bool Scene::canDestroySceneObject(SceneObjectId id) const
         return false;
     }
 
+    std::unordered_set<SceneObjectId> subtree;
     std::vector<SceneObjectId> pending{id};
     while (!pending.empty())
     {
         const SceneObjectId current = pending.back();
         pending.pop_back();
+        subtree.insert(current);
         if (m_protectedObjects.contains(current))
         {
             return false;
         }
         const auto &children = find(current)->m_children;
         pending.insert(pending.end(), children.begin(), children.end());
+    }
+
+    // References owned by an object that is itself being deleted disappear atomically with the
+    // subtree. Only a live component outside it can be left dangling.
+    for (const auto &object : m_sceneObjects)
+    {
+        if (!object->m_alive || subtree.contains(object->id()))
+        {
+            continue;
+        }
+        for (const auto &[type, component] : object->components)
+        {
+            for (const SceneObjectId removed : subtree)
+            {
+                if (component->referencesSceneObject(removed))
+                {
+                    return false;
+                }
+            }
+        }
     }
     return true;
 }
@@ -120,16 +142,17 @@ void Scene::destroySceneObject(SceneObjectId id)
         throw std::out_of_range("Scene object ID is not alive");
     }
 
+    if (!canDestroySceneObject(id))
+    {
+        throw std::invalid_argument("A protected or referenced scene object cannot be deleted");
+    }
+
     std::vector<SceneObjectId> destroyed;
     std::vector<SceneObjectId> pending{id};
     while (!pending.empty())
     {
         const SceneObjectId current = pending.back();
         pending.pop_back();
-        if (m_protectedObjects.contains(current))
-        {
-            throw std::invalid_argument("A protected scene object cannot be deleted");
-        }
         destroyed.push_back(current);
         const auto &children = find(current)->m_children;
         pending.insert(pending.end(), children.begin(), children.end());

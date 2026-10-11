@@ -308,6 +308,7 @@ target_link_libraries(lr_laplace_beltrami_feature PUBLIC lr_core igl::igl_core)
 
 add_library(lr_linear_blend_skinning_feature STATIC
     src/features/linear_blend_skinning/Skin.cpp
+    src/features/linear_blend_skinning/editor/SkeletonTopology.cpp
 )
 target_include_directories(lr_linear_blend_skinning_feature PUBLIC src)
 target_link_libraries(lr_linear_blend_skinning_feature PUBLIC lr_core glm::glm)
@@ -561,6 +562,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(linear_blend_skinning_joint_tests PRIVATE lr_core lr_linear_blend_skinning_feature)
     add_test(NAME linear_blend_skinning.joint COMMAND linear_blend_skinning_joint_tests)
+
+    add_executable(linear_blend_skinning_skeleton_topology_tests
+        tests/linear_blend_skinning/SkeletonTopologyTests.cpp
+    )
+    target_link_libraries(linear_blend_skinning_skeleton_topology_tests PRIVATE lr_core lr_linear_blend_skinning_feature)
+    add_test(NAME linear_blend_skinning.skeleton_topology COMMAND linear_blend_skinning_skeleton_topology_tests)
 
     add_executable(gltf_skin_loader_tests
         tests/linear_blend_skinning/GltfSkinLoaderTests.cpp

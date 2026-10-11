@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/scene/ComponentClipboard.hpp"
+#include "core/scene/SceneObjectId.hpp"
 
 #include <glm/glm.hpp>
 
@@ -112,6 +113,12 @@ public:
     // matched to the mesh it would replace. A false answer disables the paste entry without
     // disabling the copy one.
     virtual bool acceptsPastedValues() const { return true; }
+
+    // Authored references to other scene objects. Scene destruction consults this before retiring
+    // a subtree, so a component outside that subtree cannot be left pointing at one of the objects
+    // being removed. Components inside the subtree do not block its destruction: their references
+    // disappear with them.
+    virtual bool referencesSceneObject(SceneObjectId) const { return false; }
 
     // Appends editor-only geometry when this component's owning object is selected.
     // Components without a selection visualization keep the default no-op.

@@ -5,6 +5,7 @@
 #include "features/linear_blend_skinning/Skin.hpp"
 
 #include <memory>
+#include <algorithm>
 #include <utility>
 
 namespace lr
@@ -36,6 +37,13 @@ public:
     {
         m_skin.setSkinningEnabled(componentValuesAs<bool>(values));
         markDirty();
+    }
+
+    bool referencesSceneObject(SceneObjectId id) const override
+    {
+        return std::ranges::any_of(m_skin.joints(), [id](const Joint &joint) {
+            return joint.sceneObject == id;
+        });
     }
 
     void onGUIImpl() override
