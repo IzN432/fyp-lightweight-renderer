@@ -2,6 +2,7 @@
 #include "features/linear_blend_skinning/Skin.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 #include "features/linear_blend_skinning/SkinStore.hpp"
+#include "features/linear_blend_skinning/editor/SkeletonSelectionResolver.hpp"
 #include "features/linear_blend_skinning/editor/SkeletonTopology.hpp"
 
 #include <cassert>
@@ -52,11 +53,16 @@ int main()
     const lr::JointRef rootJoint{skin.id(), 1};
     assert(skin.joints()[middleJoint.joint].sceneObject == middle.id());
     assert(skin.joints()[rootJoint.joint].sceneObject == root.id());
+    assert(!lr::resolveSkeletonSelection(scene, skin, leafBone));
+    assert(lr::resolveSkeletonSelection(scene, skin, middleJoint) == middle.id());
 
     // A root has a selectable joint ball but no incoming bone shaft.
     assert(!topology.find(lr::BoneRef{skin.id(), 1}));
     assert(!topology.find(lr::BoneRef{lr::generateUuid(), 0}));
     assert(!topology.find(lr::BoneRef{skin.id(), 99}));
+    assert(!lr::resolveSkeletonSelection(scene, skin, lr::BoneRef{skin.id(), 1}));
+    assert(!lr::resolveSkeletonSelection(scene, skin, lr::JointRef{skin.id(), 99}));
+    assert(!lr::resolveSkeletonSelection(scene, skin, lr::JointRef{lr::generateUuid(), 0}));
 
     bool duplicateRejected = false;
     try

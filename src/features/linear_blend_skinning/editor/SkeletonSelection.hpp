@@ -28,8 +28,8 @@ struct JointRef
     friend bool operator==(const JointRef &, const JointRef &) = default;
 };
 
-// The two things pose mode can select. Both ultimately manipulate an existing joint SceneObject:
-// a bone shaft targets its child joint, while a joint ball targets that joint directly.
+// The two things the overlay can pick. BoneRef is transient: picking a shaft asks which endpoint
+// joint to select. Only a JointRef becomes the pose target manipulated by the gizmos.
 using SkeletonSelection = std::variant<BoneRef, JointRef>;
 
 } // namespace lr

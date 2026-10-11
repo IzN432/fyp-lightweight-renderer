@@ -312,6 +312,7 @@ add_library(lr_linear_blend_skinning_feature STATIC
     src/features/linear_blend_skinning/Skin.cpp
     src/features/linear_blend_skinning/SkinStore.cpp
     src/features/linear_blend_skinning/editor/SkeletonOverlay.cpp
+    src/features/linear_blend_skinning/editor/SkeletonSelectionResolver.cpp
     src/features/linear_blend_skinning/editor/SkeletonTopology.cpp
 )
 target_include_directories(lr_linear_blend_skinning_feature PUBLIC src)
@@ -578,6 +579,14 @@ if(BUILD_TESTING)
     )
     target_link_libraries(linear_blend_skinning_skeleton_overlay_tests PRIVATE lr_core lr_linear_blend_skinning_feature)
     add_test(NAME linear_blend_skinning.skeleton_overlay COMMAND linear_blend_skinning_skeleton_overlay_tests)
+
+    add_executable(linear_blend_skinning_skeleton_manipulation_tests
+        tests/linear_blend_skinning/SkeletonManipulationTests.cpp
+    )
+    target_link_libraries(linear_blend_skinning_skeleton_manipulation_tests
+        PRIVATE lr_core lr_linear_blend_skinning_feature)
+    add_test(NAME linear_blend_skinning.skeleton_manipulation
+        COMMAND linear_blend_skinning_skeleton_manipulation_tests)
 
     add_executable(gltf_skin_loader_tests
         tests/linear_blend_skinning/GltfSkinLoaderTests.cpp

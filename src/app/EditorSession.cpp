@@ -41,6 +41,8 @@
 #include "features/animation/AnimationTrackCommands.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 #include "features/linear_blend_skinning/editor/SkeletonOverlay.hpp"
+#include "features/linear_blend_skinning/editor/SkeletonSelectionResolver.hpp"
+#include "features/linear_blend_skinning/editor/SkeletonTopology.hpp"
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -119,7 +121,8 @@ public:
           m_selectionManager(sceneManager.selectionManager()),
           m_defaultVertexHandler(m_vertexManager, m_selectionManager, m_commandManager),
           m_objectTranslationHandler(m_commandManager), m_objectRotationHandler(m_commandManager),
-          m_objectScaleHandler(m_commandManager),
+          m_objectScaleHandler(m_commandManager), m_skeletonTranslationHandler(m_commandManager),
+          m_skeletonRotationHandler(m_commandManager),
           m_gizmoController(m_defaultVertexHandler, m_objectRotationHandler, m_objectScaleHandler),
           m_inputRouter(imguiCapturesPointer,
                         [this] {
@@ -142,6 +145,12 @@ public:
         });
         m_objectScaleHandler.setCommitCallback([this](SceneObject &object) {
             onTransformCommitted(object, AnimationTargetProperty::Scale);
+        });
+        m_skeletonTranslationHandler.setCommitCallback([this](SceneObject &object) {
+            onTransformCommitted(object, AnimationTargetProperty::Translation);
+        });
+        m_skeletonRotationHandler.setCommitCallback([this](SceneObject &object) {
+            onTransformCommitted(object, AnimationTargetProperty::Rotation);
         });
 
         const auto applyPresentation = [this](const EditorPresentation &presentation) {
@@ -256,7 +265,9 @@ public:
 
     void drawSkinningWindow()
     {
-        if (!ImGui::Begin("Skinning"))
+        const bool visible = ImGui::Begin("Skinning");
+        drawSkeletonEndpointPopup();
+        if (!visible)
         {
             ImGui::End();
             return;
@@ -316,7 +327,7 @@ public:
                              m_scene.getSceneObject(*selected).hasComponent<SkinComponent>();
         const bool editing = m_stateController.isActive(kSkeletonEditState);
         ImGui::BeginDisabled(!canEdit && !editing);
-        if (ImGui::Button(editing ? "Exit Skeleton Edit Mode" : "Edit Skeleton"))
+        if (ImGui::Button(editing ? "Exit Pose Mode" : "Pose Skeleton"))
         {
             m_stateController.toggle(kSkeletonEditState);
         }
@@ -325,20 +336,76 @@ public:
         {
             if (!m_skeletonSelection)
             {
-                ImGui::TextDisabled("Click a bone or joint ball in the viewport.");
+                ImGui::TextDisabled("Click a joint, or click a bone to choose an endpoint.");
             }
             else
             {
-                std::visit([](const auto &selection) {
-                    using Selection = std::decay_t<decltype(selection)>;
-                    if constexpr (std::is_same_v<Selection, BoneRef>)
-                        ImGui::Text("Selected bone ending at joint %u", selection.childJoint);
-                    else
-                        ImGui::Text("Selected joint %u", selection.joint);
-                }, *m_skeletonSelection);
+                if (const JointRef *joint = std::get_if<JointRef>(&*m_skeletonSelection))
+                {
+                    ImGui::Text("Selected joint %u", joint->joint);
+                }
             }
         }
         ImGui::End();
+    }
+
+    void drawSkeletonEndpointPopup()
+    {
+        if (m_openSkeletonEndpointPopup)
+        {
+            ImGui::OpenPopup("Select Bone Endpoint");
+            m_openSkeletonEndpointPopup = false;
+        }
+
+        if (!ImGui::BeginPopup("Select Bone Endpoint"))
+        {
+            if (!ImGui::IsPopupOpen("Select Bone Endpoint"))
+            {
+                m_pendingSkeletonBone.reset();
+            }
+            return;
+        }
+
+        const std::optional<SceneObjectId> selected = m_scene.selectedObject();
+        const Skin *skin = selected && m_scene.contains(*selected) &&
+                                   m_scene.getSceneObject(*selected).hasComponent<SkinComponent>()
+                               ? &m_scene.getSceneObject(*selected).getComponent<SkinComponent>().skin()
+                               : nullptr;
+        const SkeletonBone *bone = nullptr;
+        std::optional<SkeletonTopology> topology;
+        if (skin && m_pendingSkeletonBone && m_pendingSkeletonBone->skin == skin->id())
+        {
+            topology.emplace(m_scene, *skin);
+            bone = topology->find(*m_pendingSkeletonBone);
+        }
+
+        if (!bone)
+        {
+            ImGui::TextDisabled("The selected bone is no longer available.");
+            if (ImGui::Button("Close"))
+            {
+                m_pendingSkeletonBone.reset();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+            return;
+        }
+
+        ImGui::TextUnformatted("Select the joint to pose:");
+        if (ImGui::Button(("Parent joint " + std::to_string(bone->parentJoint)).c_str()))
+        {
+            selectSkeletonJoint({skin->id(), bone->parentJoint});
+            m_pendingSkeletonBone.reset();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(("Child joint " + std::to_string(bone->childJoint)).c_str()))
+        {
+            selectSkeletonJoint({skin->id(), bone->childJoint});
+            m_pendingSkeletonBone.reset();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 
     void drawScenePanel(SceneDocument &document)
@@ -381,7 +448,9 @@ public:
         ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f), ImGuiCond_Appearing);
         if (ImGui::Begin("Transform Gizmo", &m_transformWindowOpen, ImGuiWindowFlags_AlwaysAutoResize))
         {
-            const bool canTransform = m_transformController.target() != nullptr;
+            const bool posing = m_stateController.isActive(kSkeletonEditState);
+            const bool canTransform = posing ? m_skeletonTranslationHandler.target() != nullptr
+                                             : m_transformController.target() != nullptr;
             ImGui::BeginDisabled(!canTransform);
             if (ImGui::RadioButton("Translate", m_transformController.tool() == TransformTool::Translate))
             {
@@ -392,10 +461,13 @@ public:
             {
                 m_transformController.setTool(TransformTool::Rotate);
             }
-            ImGui::SameLine();
-            if (ImGui::RadioButton("Scale", m_transformController.tool() == TransformTool::Scale))
+            if (!posing)
             {
-                m_transformController.setTool(TransformTool::Scale);
+                ImGui::SameLine();
+                if (ImGui::RadioButton("Scale", m_transformController.tool() == TransformTool::Scale))
+                {
+                    m_transformController.setTool(TransformTool::Scale);
+                }
             }
             ImGui::EndDisabled();
         }
@@ -815,11 +887,21 @@ private:
         if (pickingId == 0)
         {
             m_skeletonSelection.reset();
+            m_pendingSkeletonBone.reset();
             return true;
         }
         if (const SkeletonSelection *selection = m_skeletonOverlay.selectionForPickingId(pickingId))
         {
-            m_skeletonSelection = *selection;
+            if (const BoneRef *bone = std::get_if<BoneRef>(selection))
+            {
+                m_pendingSkeletonBone = *bone;
+                m_openSkeletonEndpointPopup = true;
+            }
+            else
+            {
+                selectSkeletonJoint(std::get<JointRef>(*selection));
+                m_pendingSkeletonBone.reset();
+            }
         }
         return true;
     }
@@ -857,7 +939,11 @@ private:
             .id           = std::string(kSkeletonEditState),
             .presentation = {.skinningEnabled = true},
             .onExit       = [this] {
+                m_skeletonTranslationHandler.setTarget(nullptr);
+                m_skeletonRotationHandler.setTarget(nullptr);
                 m_skeletonSelection.reset();
+                m_pendingSkeletonBone.reset();
+                m_openSkeletonEndpointPopup = false;
                 m_skeletonPicker.reset();
                 m_skeletonHoverCursor.reset();
                 m_skeletonOverlay = {};
@@ -879,6 +965,13 @@ private:
                 {
                     m_skeletonSelection.reset();
                 }
+                SceneObject *jointTarget = selectedSkeletonTarget(skin);
+                if (m_skeletonSelection && !jointTarget)
+                {
+                    m_skeletonSelection.reset();
+                }
+                m_skeletonTranslationHandler.setTarget(jointTarget);
+                m_skeletonRotationHandler.setTarget(jointTarget);
                 m_skeletonOverlay = buildSkeletonOverlay(m_scene, *selected, m_skeletonSelection);
                 m_renderBridge.setOverlayGeometry(m_skeletonOverlay.instances);
 
@@ -893,6 +986,32 @@ private:
                     m_renderBridge.setHoveredOverlay(
                         m_skeletonOverlay.selectionForPickingId(hovered) ? hovered : ~0u);
                 }
+            },
+            .gizmoRequest = [this](const EditorFrameContext &) -> GizmoRequest {
+                switch (m_transformController.tool())
+                {
+                    case TransformTool::Translate:
+                        if (const SceneObject *target = m_skeletonTranslationHandler.target())
+                        {
+                            return TranslateGizmoRequest{
+                                .origin  = glm::vec3(target->worldMatrix()[3]),
+                                .handler = &m_skeletonTranslationHandler,
+                            };
+                        }
+                        break;
+                    case TransformTool::Rotate:
+                        if (const SceneObject *target = m_skeletonRotationHandler.target())
+                        {
+                            return RotateGizmoRequest{
+                                .worldMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(target->worldMatrix()[3])) *
+                                               glm::mat4_cast(target->worldRotation()),
+                                .handler     = &m_skeletonRotationHandler,
+                            };
+                        }
+                        break;
+                    default: break;
+                }
+                return {};
             },
             .handleInput = [this](const PointerButtonEvent &event) { return handleSkeletonPointer(event); },
         });
@@ -1180,7 +1299,10 @@ private:
                                         std::pair{GLFW_KEY_S, TransformTool::Scale}})
         {
             m_shortcuts.add({.key = key}, [this, tool = tool] {
-                if (m_transformController.target())
+                const bool posing = m_stateController.isActive(kSkeletonEditState);
+                const bool targetSelected = posing ? m_skeletonTranslationHandler.target() != nullptr
+                                                    : m_transformController.target() != nullptr;
+                if (targetSelected && (!posing || tool != TransformTool::Scale))
                 {
                     m_transformController.toggleTool(tool);
                 }
@@ -1205,6 +1327,13 @@ private:
         });
 
         m_shortcuts.add({.key = GLFW_KEY_DELETE}, [this] {
+            // Skeleton elements are the active selection in this mode. Bone/joint deletion is not
+            // implemented, so Delete must not fall through to the stale hierarchy deletion target
+            // and remove the mesh that merely represents the edited skin.
+            if (m_stateController.isActive(kSkeletonEditState))
+            {
+                return;
+            }
             const Deleter::EraseResult result = m_deleter.erase();
             if (result.status == Deleter::EraseResult::Status::Blocked)
             {
@@ -1229,6 +1358,32 @@ private:
     glm::vec3 worldCentroidOf(const std::unordered_set<uint32_t> &indices) const
     {
         return worldVertexCentroid(m_vertexManager, m_meshObject->getComponent<TransformComponent>(), indices);
+    }
+
+    SceneObject *selectedSkeletonTarget(const Skin &skin)
+    {
+        if (!m_skeletonSelection)
+        {
+            return nullptr;
+        }
+        const std::optional<SceneObjectId> target =
+            resolveSkeletonSelection(m_scene, skin, *m_skeletonSelection);
+        if (!target)
+        {
+            return nullptr;
+        }
+        SceneObject &object = m_scene.getSceneObject(*target);
+        return object.hasComponent<TransformComponent>() ? &object : nullptr;
+    }
+
+    void selectSkeletonJoint(JointRef joint)
+    {
+        m_skeletonSelection = joint;
+        if (m_transformController.tool() != TransformTool::Translate &&
+            m_transformController.tool() != TransformTool::Rotate)
+        {
+            m_transformController.setTool(TransformTool::Translate);
+        }
     }
 
     void update(VkExtent2D extent)
@@ -1271,6 +1426,8 @@ private:
     SceneObjectDragHandler         m_objectTranslationHandler;
     SceneObjectRotationHandler     m_objectRotationHandler;
     SceneObjectScaleHandler        m_objectScaleHandler;
+    SceneObjectDragHandler         m_skeletonTranslationHandler;
+    SceneObjectRotationHandler     m_skeletonRotationHandler;
     GizmoController                m_gizmoController;
     EditorInputRouter              m_inputRouter;
     SceneObjectTransformController m_transformController;
@@ -1278,7 +1435,9 @@ private:
     ViewportPicker                 m_skeletonPicker;
     SkeletonOverlay                m_skeletonOverlay;
     std::optional<SkeletonSelection> m_skeletonSelection;
+    std::optional<BoneRef>         m_pendingSkeletonBone;
     std::optional<glm::dvec2>      m_skeletonHoverCursor;
+    bool                           m_openSkeletonEndpointPopup = false;
     // Declared before m_context, which holds a reference to it.
     ComponentCatalog               m_componentCatalog;
     EditorContext                  m_context;
