@@ -97,9 +97,34 @@ public:
     void          setImageLayout(const std::string &name, VkImageLayout layout);
 
     // Quiesces prior graphics work, transitions an exported image to GENERAL, and waits for the
-    // barrier to complete. This is the conservative synchronization path used before CUDA writes;
-    // external semaphores can replace the waits once frame-loop integration is in place.
+    // barrier to complete. The blocking path, kept for one-off setup and for tests; per-frame
+    // callers should use the semaphore pair below instead.
     void prepareImageForExternalWrite(const std::string &name);
+
+    // Semaphore handoff for exported images, so neither API stalls the host.
+    //
+    // releaseImagesToExternalWrite() submits the GENERAL transitions for every named image in one
+    // command buffer and signals `signalSemaphore` when they complete; the external API waits on
+    // its imported copy of that semaphore before writing. acquireImagesFromExternalWrite() does
+    // the reverse: it waits on `waitSemaphore`, which the external API signals after its writes,
+    // and records the dependency that makes those writes visible to later Vulkan work.
+    //
+    // Both submit without waiting on a fence. The semaphores are binary, so each call consumes or
+    // produces exactly one signal and the two must alternate: release, external write, acquire.
+    // Skipping an acquire leaves a signalled semaphore that the next release cannot re-signal.
+    void releaseImagesToExternalWrite(const std::vector<std::string> &names, VkSemaphore signalSemaphore);
+    void acquireImagesFromExternalWrite(const std::vector<std::string> &names, VkSemaphore waitSemaphore);
+
+    // The image state one external-ownership barrier needs. Public because the barrier recording
+    // helpers in the .cpp take it by reference.
+    struct ExternalBarrierTarget
+    {
+        VkImage            image       = VK_NULL_HANDLE;
+        VkImageLayout      oldLayout   = VK_IMAGE_LAYOUT_UNDEFINED;
+        VkImageAspectFlags aspect      = VK_IMAGE_ASPECT_COLOR_BIT;
+        uint32_t           mipLevels   = 1;
+        uint32_t           arrayLayers = 1;
+    };
 
     std::vector<const AllocatedImage *> getImageArray(const std::string &arrayName) const;
     std::vector<VkImageLayout>          getImageArrayLayouts(const std::string &arrayName) const;
@@ -275,6 +300,22 @@ private:
     // Records with `record`, submits on the graphics queue and waits for completion.
     void runOneShotCommands(const std::function<void(VkCommandBuffer)> &record);
 
+    // Records with `record` and submits on the graphics queue, optionally waiting on and signalling
+    // a semaphore. With no semaphore to signal it waits for the fence and frees everything, exactly
+    // like runOneShotCommands(). With one, it returns as soon as the work is submitted and parks
+    // the command buffer and fence in m_oneShots for reclaimCompletedOneShots() to collect.
+    void submitOneShotCommands(const std::function<void(VkCommandBuffer)> &record, VkSemaphore waitSemaphore,
+                               VkPipelineStageFlags2 waitStage, VkSemaphore signalSemaphore);
+
+    // Frees the parked command buffers and fences of non-blocking one-shots that have completed.
+    void reclaimCompletedOneShots();
+
+    ExternalBarrierTarget externalBarrierTarget(const std::string &name);
+    // Resolves every name before any submission, so a bad name cannot leave a semaphore pair in a
+    // half-consumed state. `operation` names the caller in the thrown message.
+    std::vector<ExternalBarrierTarget> externalBarrierTargets(const std::vector<std::string> &names,
+                                                              const char                     *operation);
+
     void allocateImageEntry(const std::string &name, ImageEntry &entry);
     void queueImageUpload(const std::string &name, const void *data, uint32_t width, uint32_t height, VkFormat format,
                           bool generateMipmaps, ImageUploadMode mode);
@@ -296,6 +337,14 @@ private:
     std::unordered_map<std::string, uint64_t> m_generations;
     uint64_t                                  m_currentFrame   = 0;
     uint32_t                                  m_framesInFlight = 1;
+
+    // A one-shot submission that handed off through a semaphore, so the host did not wait for it.
+    struct OneShot
+    {
+        VkCommandBuffer cmd   = VK_NULL_HANDLE;
+        VkFence         fence = VK_NULL_HANDLE;
+    };
+    std::vector<OneShot> m_oneShots;
 
     VkCommandPool m_uploadPool = VK_NULL_HANDLE;
 };

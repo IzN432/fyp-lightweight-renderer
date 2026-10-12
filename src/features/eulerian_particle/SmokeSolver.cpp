@@ -53,9 +53,22 @@ struct SmokeSolver::Impl
 {
     // Index order matches kVolumes.
     std::vector<std::unique_ptr<CudaVolume>> volumes;
-    cudaStream_t                             stream = nullptr;
+    // Same order, cached so the handshake can name every volume in one registry call per step.
+    std::vector<std::string>                 volumeNames;
+    ResourceRegistry                        *resources = nullptr;
+    cudaStream_t                             stream    = nullptr;
     cudaExtent                               extent{};
     int                                      device = 0;
+
+    // Vulkan signals `toCuda` once the volumes are in GENERAL and prior graphics work is done;
+    // CUDA signals `toVulkan` once the step's kernels are done. Both are binary, so exactly one
+    // signal may be outstanding on each and the two sides must alternate.
+    std::unique_ptr<CudaInteropSemaphore> toCuda;
+    std::unique_ptr<CudaInteropSemaphore> toVulkan;
+
+    // True between step() and endStep(): CUDA holds the volumes and `toVulkan` has a signal
+    // pending (or will have once the stream drains).
+    bool pending = false;
 
     CudaVolume &at(std::size_t index) { return *volumes.at(index); }
 
@@ -72,12 +85,54 @@ struct SmokeSolver::Impl
         return f;
     }
 
+    // Hands the volumes to CUDA: Vulkan transitions them and signals, and the stream waits on that
+    // signal on the device. Neither call blocks the host.
+    void beginExternalWrite()
+    {
+        resources->releaseImagesToExternalWrite(volumeNames, toCuda->handle());
+        toCuda->waitInCuda(stream);
+    }
+
+    // Hands them back: CUDA signals after the work already on the stream, and a Vulkan submission
+    // waits on that signal so later Vulkan work sees the writes.
+    void endExternalWrite()
+    {
+        toVulkan->signalInCuda(stream);
+        resources->acquireImagesFromExternalWrite(volumeNames, toVulkan->handle());
+    }
+
     ~Impl()
     {
-        if (stream != nullptr)
+        if (stream == nullptr)
+            return;
+
+        (void)cudaSetDevice(device);
+
+        // A step left open has a CUDA-side signal of `toVulkan` that nothing waits on, and the
+        // semaphores are about to be destroyed. Close the handshake the way endStep() would, then
+        // drain the stream so no queued wait or signal outlives its semaphore. Errors are ignored:
+        // a destructor cannot report them, and the device wait below is the real safety net.
+        if (pending)
         {
-            (void)cudaSetDevice(device);
-            (void)cudaStreamDestroy(stream);
+            (void)closeHandshakeNoThrow();
+            pending = false;
+        }
+        (void)cudaStreamSynchronize(stream);
+        (void)cudaStreamDestroy(stream);
+    }
+
+    // endExternalWrite() without the throwing wrapper, for the destructor. Consuming the signal on
+    // the Vulkan side matters: leaving a binary semaphore signalled while a queued wait on the
+    // other one is still outstanding is what would wedge the queue.
+    bool closeHandshakeNoThrow()
+    {
+        try
+        {
+            endExternalWrite();
+            return true;
+        } catch (const std::exception &)
+        {
+            return false;
         }
     }
 };
@@ -107,15 +162,23 @@ SmokeSolver::SmokeSolver(ResourceRegistry &resources, const VulkanContext &conte
             resources.registerPersistentVolume(name, spec.format, kVolumeUsage, m_config.extent, true);
     }
 
+    m_impl->resources = &resources;
     m_impl->volumes.reserve(std::size(kVolumes));
+    m_impl->volumeNames.reserve(std::size(kVolumes));
     for (const VolumeSpec &spec : kVolumes)
-        m_impl->volumes.push_back(
-            std::make_unique<CudaVolume>(resources, context, m_config.namePrefix + spec.suffix));
+    {
+        const std::string name = m_config.namePrefix + spec.suffix;
+        m_impl->volumes.push_back(std::make_unique<CudaVolume>(resources, context, name));
+        m_impl->volumeNames.push_back(name);
+    }
 
     m_impl->extent = m_impl->volumes.front()->extent();
     m_impl->device = m_impl->volumes.front()->device();
     checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
     checkCuda(cudaStreamCreate(&m_impl->stream), "cudaStreamCreate");
+
+    m_impl->toCuda   = std::make_unique<CudaInteropSemaphore>(context, m_impl->device);
+    m_impl->toVulkan = std::make_unique<CudaInteropSemaphore>(context, m_impl->device);
 
     reset();
 }
@@ -129,19 +192,28 @@ void SmokeSolver::reset()
     if (!m_impl)
         throw std::logic_error("SmokeSolver: cannot use a moved-from solver");
 
-    // Imported Vulkan memory starts undefined, so zero every field before accumulating into it.
+    // Close any step still in flight before overwriting the fields it is writing.
+    waitForStep();
+
     checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
+    m_impl->beginExternalWrite();
+    m_impl->pending = true;
+
+    // Imported Vulkan memory starts undefined, so zero every field before accumulating into it.
     for (std::unique_ptr<CudaVolume> &volume : m_impl->volumes)
-    {
-        volume->prepareForExternalWrite();
         checkCuda(launchClearVolume(volume->surface(), volume->extent(), volume->channels(), m_impl->stream),
                   "launchClearVolume");
-    }
-    checkCuda(cudaStreamSynchronize(m_impl->stream), "cudaStreamSynchronize");
+
+    // reset() is a setup call rather than a per-frame one, so it is allowed to block: callers
+    // expect the fields to read as zero the moment it returns.
+    waitForStep();
 }
 
 void SmokeSolver::step(float dt)
 {
+    if (!m_impl)
+        throw std::logic_error("SmokeSolver: cannot use a moved-from solver");
+
     const float previous = m_config.step.dt;
     m_config.step.dt     = dt;
     try
@@ -159,10 +231,19 @@ void SmokeSolver::step()
 {
     if (!m_impl)
         throw std::logic_error("SmokeSolver: cannot use a moved-from solver");
+    // The handshake semaphores are binary: a second step before endStep() would try to re-signal
+    // an already-signalled semaphore, which the driver is free to treat as undefined behaviour.
+    // Failing loudly beats a deadlock or a corrupted field.
+    if (m_impl->pending)
+        throw std::logic_error("SmokeSolver: a step is already in flight; call endStep() or waitForStep() first");
 
     checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
-    for (std::unique_ptr<CudaVolume> &volume : m_impl->volumes)
-        volume->prepareForExternalWrite();
+
+    // Transition the volumes and have the stream wait for that transition on the device. From here
+    // on the step is in flight: pending is set before any launch so a throw mid-step still leaves
+    // endStep() responsible for consuming the signals.
+    m_impl->beginExternalWrite();
+    m_impl->pending = true;
 
     SmokeFields       fields = m_impl->fields();
     const cudaExtent  extent = m_impl->extent;
@@ -214,9 +295,42 @@ void SmokeSolver::step()
         checkCuda(launchCopyVolume(m_impl->volumes[4]->surface(), fields.pressure, extent, 1, stream),
                   "launchCopyVolume(pressure)");
 
-    // Blocking until the step is done is what lets Vulkan sample the volumes safely. Replacing
-    // this with an external semaphore signal is the next step for overlapping sim and render.
-    checkCuda(cudaStreamSynchronize(stream), "cudaStreamSynchronize");
+    // No host wait: the stream signals `toVulkan` when the kernels above retire, and endStep()
+    // submits the Vulkan wait that orders them before anything that samples the volumes.
+}
+
+void SmokeSolver::endStep()
+{
+    if (!m_impl)
+        throw std::logic_error("SmokeSolver: cannot use a moved-from solver");
+    if (!m_impl->pending)
+        return;
+
+    // Clear `pending` first: if the signal or the Vulkan submission throws, the semaphore state is
+    // already indeterminate and retrying the same handoff cannot fix it, so do not leave the
+    // solver wedged in a state where every later step() refuses to run.
+    m_impl->pending = false;
+    checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
+    m_impl->endExternalWrite();
+}
+
+void SmokeSolver::waitForStep()
+{
+    if (!m_impl)
+        throw std::logic_error("SmokeSolver: cannot use a moved-from solver");
+
+    const bool wasPending = m_impl->pending;
+    endStep();
+    if (!wasPending)
+        return;
+
+    checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
+    checkCuda(cudaStreamSynchronize(m_impl->stream), "cudaStreamSynchronize");
+}
+
+bool SmokeSolver::stepPending() const
+{
+    return m_impl && m_impl->pending;
 }
 
 const CudaVolume &SmokeSolver::densityVolume() const { return *m_impl->volumes[2]; }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CudaInteropSemaphore.hpp"
 #include "CudaVolume.hpp"
 #include "CudaVolumeKernels.cuh"
 
@@ -27,6 +28,11 @@ namespace lr::eulerian
 // Density and velocity live in ResourceRegistry volumes so the renderer can sample them; pressure
 // and divergence are registered too, which keeps them inspectable for debug views. Register the
 // volumes with registerVolumes() before constructing the solver, or let the constructor do it.
+//
+// Simulation and rendering are ordered by imported external semaphores, not by host waits, so
+// step() returns while the kernels are still running. The VulkanContext must therefore enable
+// VK_KHR_external_memory and VK_KHR_external_semaphore plus the platform handle extensions
+// (..._win32 on Windows, ..._fd on Linux); construction throws if the semaphore ones are missing.
 class SmokeSolver
 {
 public:
@@ -54,13 +60,37 @@ public:
     // when the frame graph needs the resources declared before the CUDA device is chosen.
     static void registerVolumes(ResourceRegistry &resources, const Config &config);
 
-    // Runs one simulation step and blocks until CUDA is done, so Vulkan may sample the result.
+    // Enqueues one simulation step and returns without blocking the host.
+    //
+    // The step is ordered against Vulkan by a pair of imported external semaphores rather than by
+    // host waits: a Vulkan submission transitions the volumes and signals, CUDA's stream waits on
+    // that signal before the first kernel, and CUDA signals back after the last one. A Vulkan
+    // submission consumes that second signal, which is what makes the new contents safe to sample.
+    //
+    // That consuming submission is issued by endStep(), so a caller that wants the result in
+    // Vulkan calls step() then endStep(). The two are separate so a frame loop can put its own
+    // work between them and overlap simulation with rendering. Calling step() twice without an
+    // intervening endStep() throws rather than deadlocking on the binary semaphores.
     void step();
 
     // Runs one step with an explicit timestep, overriding Config::step.dt for that step only.
     void step(float dt);
 
-    // Zeroes every field. Called by the constructor; call again to restart the simulation.
+    // Closes the handshake the last step() opened: submits the Vulkan-side wait that orders CUDA's
+    // writes before any later Vulkan work, and leaves the volumes safe to sample. Does not block
+    // the host. A no-op if no step is outstanding, so it is safe to call defensively.
+    void endStep();
+
+    // Blocks until the outstanding step's CUDA work has finished, closing the handshake first.
+    // Only for host readback and tests; a frame loop uses endStep() and lets the GPU stay ahead.
+    void waitForStep();
+
+    // Whether a step() is outstanding, i.e. CUDA has been handed the volumes and endStep() has not
+    // yet taken them back.
+    bool stepPending() const;
+
+    // Zeroes every field. Called by the constructor; call again to restart the simulation. Closes
+    // any outstanding step and blocks until the clears are done, so it is safe to sample after.
     void reset();
 
     SmokeStepParams   &stepParams() { return m_config.step; }

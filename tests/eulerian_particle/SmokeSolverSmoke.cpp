@@ -82,10 +82,13 @@ int main()
     try
     {
         std::vector<const char *> externalMemoryExtensions = {VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME};
+        externalMemoryExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME);
 #if defined(_WIN32)
         externalMemoryExtensions.push_back("VK_KHR_external_memory_win32");
+        externalMemoryExtensions.push_back("VK_KHR_external_semaphore_win32");
 #elif defined(__linux__)
         externalMemoryExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+        externalMemoryExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
 #endif
         lr::VulkanContext context(lr::VulkanContext::Config{
             .appName               = "Smoke solver smoke",
@@ -116,6 +119,9 @@ int main()
 
         std::cout << "one step injects smoke and keeps every field finite\n";
         solver.step();
+        check(solver.stepPending(), "step() leaves the handshake open rather than blocking");
+        solver.waitForStep();
+        check(!solver.stepPending(), "waitForStep() closes the handshake");
         const std::vector<float> density1  = solver.densityVolume().download();
         const std::vector<float> velocity1 = solver.velocityVolume().download();
         check(allFinite(density1) && allFinite(velocity1), "density and velocity stay finite");
@@ -146,8 +152,15 @@ int main()
         };
 
         const double startHeight = centroidY(density1);
+        // The per-frame pattern: step() hands the volumes to CUDA and endStep() takes them back,
+        // with no host wait in between. Sixty of these in a row also check that the binary
+        // semaphores stay balanced over a long run rather than drifting into a deadlock.
         for (int frame = 0; frame < 60; ++frame)
+        {
             solver.step();
+            solver.endStep();
+        }
+        check(!solver.stepPending(), "60 step()/endStep() pairs leave no step outstanding");
         const std::vector<float> density60 = solver.densityVolume().download();
         check(allFinite(density60), "density stays finite over 60 steps");
         check(allFinite(solver.velocityVolume().download()), "velocity stays finite over 60 steps");
@@ -158,9 +171,36 @@ int main()
         solver.step(1.0f / 120.0f);
         check(solver.config().step.dt == config.step.dt, "step(dt) restores Config::step.dt");
 
+        std::cout << "stepping twice without closing the handshake is refused\n";
+        bool refused = false;
+        try
+        {
+            solver.step();
+        } catch (const std::logic_error &)
+        {
+            refused = true;
+        }
+        check(refused, "step() throws while a step is still in flight");
+        solver.endStep();
+
         std::cout << "reset clears the simulation again\n";
         solver.reset();
         check(maxAbs(solver.densityVolume().download()) == 0.0, "reset() empties a running simulation");
+
+        std::cout << "a solver destroyed mid-step tears down cleanly\n";
+        {
+            // Destroying a solver with an open handshake has to close it: the CUDA-side signal of
+            // the return semaphore is otherwise left unconsumed while the semaphores are freed.
+            // A hang or a validation error here is the failure; reaching the next line is the pass.
+            lr::eulerian::SmokeSolver doomed(resources, context, [&] {
+                lr::eulerian::SmokeSolver::Config other = config;
+                other.namePrefix                        = "doomed";
+                return other;
+            }());
+            doomed.step();
+            check(doomed.stepPending(), "the solver under test really is mid-step");
+        }
+        check(true, "destroying a mid-step solver completes without hanging");
 
         if (failures != 0)
         {

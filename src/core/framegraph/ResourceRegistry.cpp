@@ -72,6 +72,12 @@ ResourceRegistry::~ResourceRegistry()
         destroyRetired(retired);
     }
 
+    // Destroying the pool frees any parked command buffers, but their fences are separate objects.
+    for (OneShot &oneShot : m_oneShots)
+    {
+        vkDestroyFence(m_ctx.getDevice(), oneShot.fence, nullptr);
+    }
+
     vkDestroyCommandPool(m_ctx.getDevice(), m_uploadPool, nullptr);
 }
 
@@ -1039,7 +1045,18 @@ void ResourceRegistry::flushUploads()
 
 void ResourceRegistry::runOneShotCommands(const std::function<void(VkCommandBuffer)> &record)
 {
+    submitOneShotCommands(record, {}, 0, {});
+}
+
+void ResourceRegistry::submitOneShotCommands(const std::function<void(VkCommandBuffer)> &record,
+                                             VkSemaphore waitSemaphore, VkPipelineStageFlags2 waitStage,
+                                             VkSemaphore signalSemaphore)
+{
     VkDevice device = m_ctx.getDevice();
+    // Only a submission that nothing else is told to wait on can be reclaimed by waiting on a
+    // fence here. Once a semaphore hands the work to another API, the host must not block, so the
+    // command buffer and fence are retired by a later call instead.
+    const bool blocking = signalSemaphore == VK_NULL_HANDLE;
 
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1071,14 +1088,31 @@ void ResourceRegistry::runOneShotCommands(const std::function<void(VkCommandBuff
         cmdSubmit.sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
         cmdSubmit.commandBuffer = cmd;
 
+        VkSemaphoreSubmitInfo wait{};
+        wait.sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        wait.semaphore = waitSemaphore;
+        wait.stageMask = waitStage != 0 ? waitStage : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+        VkSemaphoreSubmitInfo signal{};
+        signal.sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        signal.semaphore = signalSemaphore;
+        signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
         VkSubmitInfo2 submitInfo{};
         submitInfo.sType                  = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+        submitInfo.waitSemaphoreInfoCount = waitSemaphore != VK_NULL_HANDLE ? 1u : 0u;
+        submitInfo.pWaitSemaphoreInfos    = &wait;
         submitInfo.commandBufferInfoCount = 1;
         submitInfo.pCommandBufferInfos    = &cmdSubmit;
+        submitInfo.signalSemaphoreInfoCount = signalSemaphore != VK_NULL_HANDLE ? 1u : 0u;
+        submitInfo.pSignalSemaphoreInfos    = &signal;
 
         checkVk(vkQueueSubmit2(m_ctx.getGraphicsQueue(), 1, &submitInfo, fence), "ResourceRegistry: vkQueueSubmit2");
         submitted = true;
-        checkVk(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX), "ResourceRegistry: vkWaitForFences");
+        if (blocking)
+        {
+            checkVk(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX), "ResourceRegistry: vkWaitForFences");
+        }
     } catch (...)
     {
         // A failed wait does not prove that submitted GPU work has stopped. Quiesce
@@ -1095,8 +1129,35 @@ void ResourceRegistry::runOneShotCommands(const std::function<void(VkCommandBuff
         throw;
     }
 
-    vkDestroyFence(device, fence, nullptr);
-    vkFreeCommandBuffers(device, m_uploadPool, 1, &cmd);
+    if (blocking)
+    {
+        vkDestroyFence(device, fence, nullptr);
+        vkFreeCommandBuffers(device, m_uploadPool, 1, &cmd);
+    }
+    else
+    {
+        // The submission is still in flight and hands off via a semaphore. Park its command
+        // buffer and fence; reclaimCompletedOneShots() frees them once the fence reports done.
+        m_oneShots.push_back({cmd, fence});
+        reclaimCompletedOneShots();
+    }
+}
+
+void ResourceRegistry::reclaimCompletedOneShots()
+{
+    VkDevice device = m_ctx.getDevice();
+    auto     live    = m_oneShots.begin();
+    for (auto it = m_oneShots.begin(); it != m_oneShots.end(); ++it)
+    {
+        if (vkGetFenceStatus(device, it->fence) != VK_SUCCESS)
+        {
+            *live++ = *it;
+            continue;
+        }
+        vkDestroyFence(device, it->fence, nullptr);
+        vkFreeCommandBuffers(device, m_uploadPool, 1, &it->cmd);
+    }
+    m_oneShots.erase(live, m_oneShots.end());
 }
 
 // ---------------------------------------------------------------------------
@@ -1278,7 +1339,59 @@ void ResourceRegistry::setImageLayout(const std::string &name, VkImageLayout lay
     }
 }
 
-void ResourceRegistry::prepareImageForExternalWrite(const std::string &name)
+namespace
+{
+// Barrier taking an exported image to GENERAL so an external API may write it. The source scope is
+// deliberately broad: whatever the renderer last did with the image has to be visible to a
+// different API, and these volumes are touched once per frame, so a tighter mask buys nothing.
+void recordExternalWriteBarrier(VkCommandBuffer cmd, const ResourceRegistry::ExternalBarrierTarget &target)
+{
+    VkImageMemoryBarrier2 barrier{};
+    barrier.sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.srcStageMask  = target.oldLayout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_2_NONE
+                                                                         : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    barrier.srcAccessMask = target.oldLayout == VK_IMAGE_LAYOUT_UNDEFINED
+                                ? VK_ACCESS_2_NONE
+                                : VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    barrier.dstStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    barrier.oldLayout     = target.oldLayout;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.image         = target.image;
+    barrier.subresourceRange = {target.aspect, 0, target.mipLevels, 0, target.arrayLayers};
+
+    VkDependencyInfo dependency{};
+    dependency.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency.imageMemoryBarrierCount = 1;
+    dependency.pImageMemoryBarriers    = &barrier;
+    vkCmdPipelineBarrier2(cmd, &dependency);
+}
+
+// Execution/memory dependency that makes an external API's writes visible to later Vulkan work.
+// The layout does not change: GENERAL is what the external writer needs next frame and what the
+// renderer samples from, so re-transitioning would only add a redundant barrier.
+void recordExternalWriteAcquireBarrier(VkCommandBuffer cmd, const ResourceRegistry::ExternalBarrierTarget &target)
+{
+    VkImageMemoryBarrier2 barrier{};
+    barrier.sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.srcStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    barrier.srcAccessMask    = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    barrier.dstStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    barrier.dstAccessMask    = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    barrier.oldLayout        = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.newLayout        = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.image            = target.image;
+    barrier.subresourceRange = {target.aspect, 0, target.mipLevels, 0, target.arrayLayers};
+
+    VkDependencyInfo dependency{};
+    dependency.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency.imageMemoryBarrierCount = 1;
+    dependency.pImageMemoryBarriers    = &barrier;
+    vkCmdPipelineBarrier2(cmd, &dependency);
+}
+} // namespace
+
+ResourceRegistry::ExternalBarrierTarget ResourceRegistry::externalBarrierTarget(const std::string &name)
 {
     auto it = m_images.find(name);
     if (it == m_images.end())
@@ -1288,32 +1401,77 @@ void ResourceRegistry::prepareImageForExternalWrite(const std::string &name)
     if (!entry.image.isExternal())
         throw std::invalid_argument("ResourceRegistry: image '" + name + "' is not exportable");
 
-    // Queue order covers previous graphics submissions. Waiting for this one-shot barrier before
-    // returning transfers access to the external API without requiring a semaphore for the initial
-    // bring-up path.
-    const VkImageLayout oldLayout = entry.currentLayout;
-    runOneShotCommands([&entry, oldLayout](VkCommandBuffer cmd) {
-        VkImageMemoryBarrier2 barrier{};
-        barrier.sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        barrier.srcStageMask  = oldLayout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_2_NONE
-                                                                       : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        barrier.srcAccessMask = oldLayout == VK_IMAGE_LAYOUT_UNDEFINED
-                                    ? VK_ACCESS_2_NONE
-                                    : VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
-        barrier.dstStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
-        barrier.oldLayout     = oldLayout;
-        barrier.newLayout     = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.image         = entry.image.image;
-        barrier.subresourceRange = {entry.aspect, 0, entry.mipLevels, 0, entry.arrayLayers};
+    return {entry.image.image, entry.currentLayout, entry.aspect, entry.mipLevels, entry.arrayLayers};
+}
 
-        VkDependencyInfo dependency{};
-        dependency.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dependency.imageMemoryBarrierCount = 1;
-        dependency.pImageMemoryBarriers    = &barrier;
-        vkCmdPipelineBarrier2(cmd, &dependency);
-    });
-    entry.currentLayout = VK_IMAGE_LAYOUT_GENERAL;
+std::vector<ResourceRegistry::ExternalBarrierTarget>
+ResourceRegistry::externalBarrierTargets(const std::vector<std::string> &names, const char *operation)
+{
+    if (names.empty())
+        throw std::invalid_argument(std::string("ResourceRegistry: ") + operation + " needs at least one image");
+
+    // Resolve every target up front so an unknown or non-exportable name throws before anything is
+    // submitted, leaving the semaphore pair untouched rather than half-consumed.
+    std::vector<ExternalBarrierTarget> targets;
+    targets.reserve(names.size());
+    for (const std::string &name : names)
+        targets.push_back(externalBarrierTarget(name));
+    return targets;
+}
+
+void ResourceRegistry::prepareImageForExternalWrite(const std::string &name)
+{
+    const ExternalBarrierTarget target = externalBarrierTarget(name);
+
+    // Queue order covers previous graphics submissions. Waiting for this one-shot barrier before
+    // returning transfers access to the external API without a semaphore. Kept for one-off setup
+    // paths and tests; a per-frame solver uses releaseImagesToExternalWrite() instead, which hands
+    // off through a semaphore rather than stalling the host.
+    runOneShotCommands([&target](VkCommandBuffer cmd) { recordExternalWriteBarrier(cmd, target); });
+    m_images.at(name).currentLayout = VK_IMAGE_LAYOUT_GENERAL;
+}
+
+void ResourceRegistry::releaseImagesToExternalWrite(const std::vector<std::string> &names, VkSemaphore signalSemaphore)
+{
+    if (signalSemaphore == VK_NULL_HANDLE)
+        throw std::invalid_argument("ResourceRegistry: releaseImagesToExternalWrite needs a semaphore to signal");
+
+    const std::vector<ExternalBarrierTarget> targets =
+        externalBarrierTargets(names, "releaseImagesToExternalWrite");
+
+    // One submission for the whole set: the external API waits on a single semaphore and receives
+    // every image at once. The host never waits on this submission's fence.
+    submitOneShotCommands(
+        [&targets](VkCommandBuffer cmd) {
+            for (const ExternalBarrierTarget &target : targets)
+                recordExternalWriteBarrier(cmd, target);
+        },
+        VK_NULL_HANDLE, 0, signalSemaphore);
+
+    for (const std::string &name : names)
+        m_images.at(name).currentLayout = VK_IMAGE_LAYOUT_GENERAL;
+}
+
+void ResourceRegistry::acquireImagesFromExternalWrite(const std::vector<std::string> &names, VkSemaphore waitSemaphore)
+{
+    if (waitSemaphore == VK_NULL_HANDLE)
+        throw std::invalid_argument("ResourceRegistry: acquireImagesFromExternalWrite needs a semaphore to wait on");
+
+    const std::vector<ExternalBarrierTarget> targets =
+        externalBarrierTargets(names, "acquireImagesFromExternalWrite");
+
+    // Consuming the external API's signal here is what orders its writes before any later Vulkan
+    // submission on this queue. A binary semaphore carries one signal, so this must run exactly
+    // once per external signal.
+    submitOneShotCommands(
+        [&targets](VkCommandBuffer cmd) {
+            for (const ExternalBarrierTarget &target : targets)
+                recordExternalWriteAcquireBarrier(cmd, target);
+        },
+        waitSemaphore, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE);
+
+    for (const std::string &name : names)
+        m_images.at(name).currentLayout = VK_IMAGE_LAYOUT_GENERAL;
 }
 
 void ResourceRegistry::setDebugName(VkObjectType objectType, uint64_t objectHandle, const std::string &name)

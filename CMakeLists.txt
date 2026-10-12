@@ -348,6 +348,7 @@ if(LR_ENABLE_CUDA)
     find_package(CUDAToolkit REQUIRED)
 
     add_library(lr_eulerian_particle_feature STATIC
+        src/features/eulerian_particle/CudaInteropSemaphore.cpp
         src/features/eulerian_particle/CudaVolume.cpp
         src/features/eulerian_particle/CudaVolumeKernels.cu
         src/features/eulerian_particle/SmokeSolver.cpp
