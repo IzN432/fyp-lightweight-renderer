@@ -497,6 +497,31 @@ void runsLastOrdersAfterLaterDeclaredPasses()
             "a runsLast pass should execute after every other pass, including later-declared ones");
 }
 
+void fluidBillboardsRunBetweenOpaqueGeometryAndFinalComposite()
+{
+    lr::FrameGraphDefinition definition;
+    const auto               opaqueColor  = definition.image("pbr");
+    const auto               opaqueDepth  = definition.image("gbufferDepth");
+    const auto               overlay      = definition.image("overlay");
+    const auto               overlayDepth = definition.image("overlayDepth");
+
+    builder(definition, definition.addPass("opaque_geometry"))
+        .colorAttachment(opaqueColor, VK_FORMAT_R16G16B16A16_SFLOAT)
+        .depthAttachment(opaqueDepth, VK_FORMAT_D32_SFLOAT);
+    builder(definition, definition.addPass("fluid_particle_billboards"))
+        .sampledDepth(2, opaqueDepth, VK_SHADER_STAGE_FRAGMENT_BIT)
+        .colorAttachment(overlay, VK_FORMAT_R16G16B16A16_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD)
+        .depthAttachment(overlayDepth, VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD);
+    builder(definition, definition.addPass("final"))
+        .sampledImage(4, opaqueColor, VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledDepth(3, overlayDepth, VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledImage(5, overlay, VK_SHADER_STAGE_FRAGMENT_BIT)
+        .colorAttachment(definition.image("swapchain"), VK_FORMAT_B8G8R8A8_UNORM);
+
+    require(sort(definition) == std::vector<size_t>({0, 1, 2}),
+            "fluid pipeline should order opaque geometry, billboards, then final composite");
+}
+
 void definitionRevisionTracksChanges()
 {
     lr::FrameGraphDefinition definition;
@@ -709,6 +734,7 @@ int main()
         {"MSAA LOAD of shared color", msaaLoadOfSharedColorSynchronizes},
         {"MSAA reads require a producer", msaaReadsRequireAnEarlierProducer},
         {"runsLast orders after later-declared passes", runsLastOrdersAfterLaterDeclaredPasses},
+        {"fluid billboard pipeline ordering", fluidBillboardsRunBetweenOpaqueGeometryAndFinalComposite},
         {"definition revision tracks changes", definitionRevisionTracksChanges},
         {"backbuffer presentation contract", backbufferContractPlansPresentationTransitions},
         {"external binding ownership", externalBindingsEnforceHandleOwnership},

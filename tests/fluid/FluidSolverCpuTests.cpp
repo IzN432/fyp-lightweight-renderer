@@ -15,6 +15,19 @@ bool isFinite(const glm::vec3 &value)
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
 
+void testEmptyPositionList()
+{
+    lr::FluidSolverCpu solver;
+    solver.setParticles({glm::vec3(1.0f)});
+    solver.setParticles({});
+    solver.step(1.0f / 60.0f);
+
+    assert(solver.particleCount() == 0);
+    assert(solver.positions().empty());
+    assert(solver.velocities().empty());
+    assert(solver.densities().empty());
+}
+
 // Kernels: density falls off to exactly zero at the support radius, and the gradient points from
 // neighbour to particle so the correction separates them.
 void testKernels()
@@ -271,6 +284,7 @@ void testFluidSettlesWithoutClimbingWalls()
 
 int main()
 {
+    testEmptyPositionList();
     testKernels();
     testFreeFallAndFloor();
     testBlockSettlesNearRestDensity();

@@ -657,6 +657,12 @@ if(BUILD_TESTING)
     target_link_libraries(fluid_solver_cpu_tests PRIVATE lr_fluid_feature)
     add_test(NAME fluid.solver_cpu COMMAND fluid_solver_cpu_tests)
 
+    add_executable(particle_billboard_tests
+        tests/fluid/ParticleBillboardTests.cpp
+    )
+    target_link_libraries(particle_billboard_tests PRIVATE lr_fluid_feature)
+    add_test(NAME fluid.particle_billboard COMMAND particle_billboard_tests)
+
     add_executable(rigid_body_collider_tests
         tests/rigid_body/ColliderTests.cpp
     )
@@ -691,6 +697,9 @@ if(BUILD_TESTING)
         tests/framegraph/ShaderInterfaceTests.cpp
     )
     target_link_libraries(shader_interface_tests PRIVATE lr_core)
+    target_compile_definitions(shader_interface_tests PRIVATE
+        LR_FLUID_SHADER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src/features/fluid"
+    )
     add_test(NAME framegraph.shader_interface COMMAND shader_interface_tests)
 
     add_executable(framegraph_model_tests

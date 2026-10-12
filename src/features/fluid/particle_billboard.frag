@@ -26,11 +26,11 @@ void main()
         discard;
     }
 
-    // The camera looks down -Z, so the surface nearest the camera is offset toward -Z from the
-    // centre, while the normal used for shading points back at the camera along +Z.
+    // The camera looks down -Z, so the surface nearest the camera is offset toward +Z from the
+    // centre. The shading normal points in that same direction.
     float nearZ = sqrt(max(0.0, 1.0 - radiusSquared));
     vec3 normal = vec3(inSphereCoord, nearZ);
-    vec3 viewPosition = inViewCenter + vec3(inSphereCoord, -nearZ) * inRadius;
+    vec3 viewPosition = inViewCenter + normal * inRadius;
     vec4 clipPosition = cameraUbo.proj * vec4(viewPosition, 1.0);
     float particleDepth = clipPosition.z / clipPosition.w;
 

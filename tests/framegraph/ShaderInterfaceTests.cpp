@@ -6,6 +6,7 @@
 #include "core/vulkan/ShaderCompiler.hpp"
 
 #include <functional>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -209,6 +210,23 @@ void everyProblemIsReportedAtOnce()
     requireError(f.pass(), {"binding 0", "binding 1", "push constants"});
 }
 
+void particleBillboardShadersMatchTheirPassInterface()
+{
+    Fixture                     f;
+    const std::filesystem::path shaderRoot = LR_FLUID_SHADER_SOURCE_DIR;
+    f.builder.type(lr::PassType::Geometry)
+        .vertShader(lr::compileGlslFile(shaderRoot / "particle_billboard.vert"), "particle_billboard.vert")
+        .fragShader(lr::compileGlslFile(shaderRoot / "particle_billboard.frag"), "particle_billboard.frag")
+        .uniformBuffer(0, f.definition.buffer("camera"), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+        .storageBufferRead(1, f.definition.buffer("particles"), VK_SHADER_STAGE_VERTEX_BIT)
+        .sampledDepth(2, f.definition.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .colorAttachment(f.definition.image("overlay"), VK_FORMAT_R16G16B16A16_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD)
+        .depthAttachment(f.definition.image("overlayDepth"), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD);
+
+    require(errorOf(f.pass()).empty(),
+            "the billboard pass declarations should match the production shaders:\n" + errorOf(f.pass()));
+}
+
 } // namespace
 
 int main()
@@ -224,6 +242,7 @@ int main()
         {"fullscreen passes take no vertex input", fullscreenPassesTakeNoVertexInput},
         {"only set 0 exists", onlySetZeroExists},
         {"every problem is reported at once", everyProblemIsReportedAtOnce},
+        {"particle billboard interface", particleBillboardShadersMatchTheirPassInterface},
     };
 
     size_t failures = 0;

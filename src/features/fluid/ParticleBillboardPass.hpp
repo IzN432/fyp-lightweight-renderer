@@ -5,10 +5,15 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
-#include <type_traits>
+#include <stdexcept>
 #include <string>
+#include <type_traits>
 
 namespace lr
 {
@@ -43,6 +48,51 @@ inline ParticleGpuData makeParticleGpuData(const glm::vec3 &position, float radi
     };
 }
 
+namespace particle_billboard
+{
+
+// CPU reference for the vertex shader's projected half-size. Keeping this beside the upload
+// contract gives tests a GPU-free way to lock down the projection convention used by the GLSL.
+inline glm::vec2 projectedRadiusNdc(const glm::mat4 &projection, const glm::vec3 &viewCenter, float radius)
+{
+    const glm::vec4 centerClip = projection * glm::vec4(viewCenter, 1.0f);
+    const glm::vec4 xClip      = projection * glm::vec4(viewCenter + glm::vec3(radius, 0.0f, 0.0f), 1.0f);
+    const glm::vec4 yClip      = projection * glm::vec4(viewCenter + glm::vec3(0.0f, radius, 0.0f), 1.0f);
+    const glm::vec2 centerNdc  = glm::vec2(centerClip) / centerClip.w;
+    return glm::abs(glm::vec2(xClip.x / xClip.w - centerNdc.x, yClip.y / yClip.w - centerNdc.y));
+}
+
+// Reconstructs the visible hemisphere from the quad-local coordinate used by the fragment shader.
+// View space looks down -Z, so the visible surface is displaced toward +Z from the centre.
+inline std::optional<glm::vec3> reconstructSurface(const glm::vec3 &viewCenter, float radius,
+                                                   const glm::vec2 &sphereCoord)
+{
+    const float radiusSquared = glm::dot(sphereCoord, sphereCoord);
+    if (radius <= 0.0f || radiusSquared > 1.0f)
+    {
+        return std::nullopt;
+    }
+    const float nearZ = std::sqrt(std::max(0.0f, 1.0f - radiusSquared));
+    return viewCenter + glm::vec3(sphereCoord, nearZ) * radius;
+}
+
+inline float projectDepth(const glm::mat4 &projection, const glm::vec3 &viewPosition)
+{
+    const glm::vec4 clip = projection * glm::vec4(viewPosition, 1.0f);
+    return clip.z / clip.w;
+}
+
+inline uint32_t checkedParticleCount(std::size_t count, uint32_t capacity)
+{
+    if (count > capacity)
+    {
+        throw std::length_error("ParticleBillboardPass particle count exceeds configured capacity");
+    }
+    return static_cast<uint32_t>(count);
+}
+
+} // namespace particle_billboard
+
 // Debug/reference particle renderer. Each particle is expanded to a camera-facing quad in the
 // vertex shader; the fragment shader turns it into a sphere impostor and writes corrected depth.
 class ParticleBillboardPass
@@ -52,7 +102,7 @@ public:
     {
         std::string cameraBufferResourceName;
         std::string particleBufferResourceName = "fluid_particles";
-        uint32_t    maxParticles                = 65536;
+        uint32_t    maxParticles               = 65536;
     };
 
     ParticleBillboardPass(Config config, ResourceRegistry &resources);
@@ -64,7 +114,7 @@ public:
 
 private:
     Config            m_config;
-    ResourceRegistry *m_resources = nullptr;
+    ResourceRegistry *m_resources     = nullptr;
     uint32_t          m_particleCount = 0;
 };
 

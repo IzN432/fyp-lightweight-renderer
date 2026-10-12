@@ -23,12 +23,7 @@ ParticleBillboardPass::ParticleBillboardPass(Config config, ResourceRegistry &re
 
 void ParticleBillboardPass::setParticles(std::span<const ParticleGpuData> particles)
 {
-    if (particles.size() > m_config.maxParticles)
-    {
-        throw std::length_error("ParticleBillboardPass particle count exceeds configured capacity");
-    }
-
-    m_particleCount = static_cast<uint32_t>(particles.size());
+    m_particleCount = particle_billboard::checkedParticleCount(particles.size(), m_config.maxParticles);
     if (!particles.empty())
     {
         m_resources->updateBuffer(m_config.particleBufferResourceName, particles.data(),
