@@ -34,6 +34,8 @@
 #include "core/scene/Scene.hpp"
 
 #include "features/rigid_body/PhysicsWorld.hpp"
+#include "features/fluid/FluidSolverCpu.hpp"
+#include "features/fluid/ParticleBillboardPass.hpp"
 
 #include <ImGuiFileDialog.h>
 #include <imgui.h>
@@ -264,6 +266,30 @@ void Engine::run()
     }, viewer.resources());
     overlayLinesPass.build(viewer.frameGraph());
     overlayLinesPass.setLines({});
+
+    // A small live CPU PBF scene feeds the reference billboard renderer directly. The pass accepts
+    // any position span, so this producer can later be replaced by baked playback or a GPU solver.
+    // Keep this reference scene deliberately small: the CPU solver currently uses an O(n^2)
+    // neighbour search and is meant as a correctness producer, not the eventual interactive path.
+    constexpr float fluidSpacing = 0.1f;
+    lr::FluidSolverCpu::Config fluidConfig;
+    fluidConfig.smoothingRadius = fluidSpacing * 2.0f;
+    fluidConfig.restDensity = lr::FluidSolverCpu::restDensityForSpacing(
+        fluidSpacing, fluidConfig.smoothingRadius, fluidConfig.particleMass);
+    fluidConfig.boundsMin = {-0.5f, 0.0f, -0.5f};
+    fluidConfig.boundsMax = {0.5f, 1.0f, 0.5f};
+
+    lr::FluidSolverCpu fluidSolver(fluidConfig);
+    fluidSolver.setParticles(lr::FluidSolverCpu::makeParticleBlock(
+        {-0.25f, 0.08f, -0.15f}, {0.25f, 0.68f, 0.15f}, fluidSpacing));
+
+    lr::ParticleBillboardPass particleBillboards({
+        .cameraBufferResourceName = sceneManager.cameraBufferName(),
+        .maxParticles = 65536,
+        .radius = fluidSpacing * 0.48f,
+    }, viewer.resources());
+    particleBillboards.setPositions(fluidSolver.positions());
+    particleBillboards.build(viewer.frameGraph());
 
     // As with the heatmap pass: one empty draw entry until EditorRenderBridge points it at a mesh.
     lr::OverlayPointsPass overlayPointsPass({
@@ -569,6 +595,20 @@ void Engine::run()
     appConnections.push_back(viewer.onUpdate([&](float dt, VkExtent2D) {
         sceneManager.animationSystem().update(dt);
         physicsWorld.update(dt);
+
+        // Fixed simulation steps make the CPU reference deterministic and keep a slow frame from
+        // destabilising the solve. Limit catch-up work so dragging/resizing cannot cause a spiral.
+        static float fluidAccumulator = 0.0f;
+        constexpr float fluidStep = 1.0f / 120.0f;
+        fluidAccumulator += std::min(dt, 0.1f);
+        int fluidSteps = 0;
+        while (fluidAccumulator >= fluidStep && fluidSteps < 12)
+        {
+            fluidSolver.step(fluidStep);
+            fluidAccumulator -= fluidStep;
+            ++fluidSteps;
+        }
+        particleBillboards.setPositions(fluidSolver.positions());
     }));
 
     appConnections.push_back(viewer.onUpdate([&](float dt, VkExtent2D extent) {

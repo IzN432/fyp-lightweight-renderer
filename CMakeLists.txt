@@ -320,6 +320,20 @@ add_library(lr_linear_blend_skinning_feature STATIC
 target_include_directories(lr_linear_blend_skinning_feature PUBLIC src)
 target_link_libraries(lr_linear_blend_skinning_feature PUBLIC lr_core glm::glm)
 
+# Position Based Fluids reference solver. Pure CPU and dependency-free on purpose: it is the
+# ground truth the GPU compute solver gets diffed against.
+add_library(lr_fluid_feature STATIC
+    src/features/fluid/FluidSolverCpu.cpp
+    src/features/fluid/ParticleBillboardPass.cpp
+)
+target_include_directories(lr_fluid_feature PUBLIC src)
+target_link_libraries(lr_fluid_feature PUBLIC lr_core glm::glm)
+
+add_shaders(lr_fluid_feature
+    src/features/fluid/particle_billboard.vert
+    src/features/fluid/particle_billboard.frag
+)
+
 add_library(lr_rigid_body_feature STATIC
     src/features/rigid_body/ColliderComponent.cpp
     src/features/rigid_body/ColliderVisual.cpp
@@ -354,7 +368,7 @@ add_library(lr_editor_app STATIC
 )
 target_include_directories(lr_editor_app PUBLIC src)
 target_link_libraries(lr_editor_app PUBLIC lr_core lr_arap_feature lr_laplace_beltrami_feature
-    lr_rigid_body_feature lr_linear_blend_skinning_feature
+    lr_rigid_body_feature lr_linear_blend_skinning_feature lr_fluid_feature
     lr_scene_serialization imguiFileDialog)
 
 # Application executable
@@ -611,6 +625,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(animation_tests PRIVATE lr_core)
     add_test(NAME animation.model COMMAND animation_tests)
+
+    add_executable(fluid_solver_cpu_tests
+        tests/fluid/FluidSolverCpuTests.cpp
+    )
+    target_link_libraries(fluid_solver_cpu_tests PRIVATE lr_fluid_feature)
+    add_test(NAME fluid.solver_cpu COMMAND fluid_solver_cpu_tests)
 
     add_executable(rigid_body_collider_tests
         tests/rigid_body/ColliderTests.cpp

@@ -1,0 +1,372 @@
+#include "features/fluid/FluidSolverCpu.hpp"
+
+#include <algorithm>
+#include <cmath>
+
+namespace lr
+{
+namespace
+{
+constexpr float kPi = 3.14159265358979323846f;
+} // namespace
+
+FluidSolverCpu::FluidSolverCpu() = default;
+
+FluidSolverCpu::FluidSolverCpu(Config config) : m_config(config) {}
+
+void FluidSolverCpu::setParticles(std::vector<glm::vec3> positions)
+{
+    m_positions = std::move(positions);
+    m_velocities.assign(m_positions.size(), glm::vec3(0.0f));
+    m_predicted.resize(m_positions.size());
+    m_corrections.resize(m_positions.size());
+    m_densities.assign(m_positions.size(), 0.0f);
+    m_lambdas.assign(m_positions.size(), 0.0f);
+    m_neighbourOffsets.assign(m_positions.size() + 1, 0u);
+    m_neighbours.clear();
+}
+
+void FluidSolverCpu::clear()
+{
+    setParticles({});
+}
+
+float FluidSolverCpu::poly6(float squaredDistance, float smoothingRadius)
+{
+    const float h2 = smoothingRadius * smoothingRadius;
+    if (squaredDistance >= h2)
+    {
+        return 0.0f;
+    }
+    const float h9        = std::pow(smoothingRadius, 9.0f);
+    const float deficit   = h2 - squaredDistance;
+    const float normaliser = 315.0f / (64.0f * kPi * h9);
+    return normaliser * deficit * deficit * deficit;
+}
+
+glm::vec3 FluidSolverCpu::spikyGradient(const glm::vec3 &offset, float smoothingRadius)
+{
+    const float distance = glm::length(offset);
+    // Coincident particles have no defined direction to separate along. Returning zero leaves them
+    // to be pushed apart by their other neighbours.
+    if (distance <= 1e-6f || distance >= smoothingRadius)
+    {
+        return glm::vec3(0.0f);
+    }
+    const float h6        = std::pow(smoothingRadius, 6.0f);
+    const float deficit   = smoothingRadius - distance;
+    const float magnitude = -45.0f / (kPi * h6) * deficit * deficit;
+    return magnitude * (offset / distance);
+}
+
+void FluidSolverCpu::findNeighbours()
+{
+    const std::size_t count = m_predicted.size();
+    const float       h2    = m_config.smoothingRadius * m_config.smoothingRadius;
+
+    m_neighbours.clear();
+    m_neighbourOffsets.assign(count + 1, 0u);
+
+    // Brute force: the grid-accelerated search has to reproduce exactly these sets.
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        m_neighbourOffsets[i] = static_cast<unsigned int>(m_neighbours.size());
+        for (std::size_t j = 0; j < count; ++j)
+        {
+            if (i == j)
+            {
+                continue;
+            }
+            const glm::vec3 offset = m_predicted[i] - m_predicted[j];
+            if (glm::dot(offset, offset) < h2)
+            {
+                m_neighbours.push_back(static_cast<unsigned int>(j));
+            }
+        }
+    }
+    m_neighbourOffsets[count] = static_cast<unsigned int>(m_neighbours.size());
+}
+
+void FluidSolverCpu::computeDensitiesAndLambdas()
+{
+    const std::size_t count = m_predicted.size();
+    const float       h     = m_config.smoothingRadius;
+    const float       rho0  = m_config.restDensity;
+
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        // A particle contributes to its own density, so start from the r = 0 kernel value.
+        float density = m_config.particleMass * poly6(0.0f, h);
+
+        // Gradient of particle i's constraint with respect to i itself, accumulated as the negated
+        // sum of its neighbour gradients.
+        glm::vec3 gradientSelf(0.0f);
+        float     squaredGradientSum = 0.0f;
+
+        for (unsigned int n = m_neighbourOffsets[i]; n < m_neighbourOffsets[i + 1]; ++n)
+        {
+            const std::size_t j      = m_neighbours[n];
+            const glm::vec3   offset = m_predicted[i] - m_predicted[j];
+            density += m_config.particleMass * poly6(glm::dot(offset, offset), h);
+
+            const glm::vec3 gradient = spikyGradient(offset, h) / rho0;
+            gradientSelf += gradient;
+            squaredGradientSum += glm::dot(gradient, gradient);
+        }
+        squaredGradientSum += glm::dot(gradientSelf, gradientSelf);
+
+        // The walls stand in for the fluid that would otherwise be on the far side of them. This
+        // has no gradient term: the wall does not move, so it contributes to how compressed the
+        // particle is but not to how the constraint can be relieved.
+        density += boundaryDensity(m_predicted[i]);
+
+        m_densities[i] = density;
+
+        const float constraint = density / rho0 - 1.0f;
+        // Only compression is resolved. Letting the solve pull particles together as well makes
+        // the free surface clump into blobs.
+        if (constraint <= 0.0f)
+        {
+            m_lambdas[i] = 0.0f;
+            continue;
+        }
+        m_lambdas[i] = -constraint / (squaredGradientSum + m_config.relaxation);
+    }
+}
+
+void FluidSolverCpu::computePositionCorrections()
+{
+    const std::size_t count = m_predicted.size();
+    const float       h     = m_config.smoothingRadius;
+    const float       rho0  = m_config.restDensity;
+
+    // Separate pass from the lambda computation on purpose: every correction has to be built from
+    // the same iteration's lambdas, or the result depends on particle ordering and stops matching
+    // what a parallel implementation produces.
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        glm::vec3 correction(0.0f);
+        for (unsigned int n = m_neighbourOffsets[i]; n < m_neighbourOffsets[i + 1]; ++n)
+        {
+            const std::size_t j      = m_neighbours[n];
+            const glm::vec3   offset = m_predicted[i] - m_predicted[j];
+            // The symmetric (lambda_i + lambda_j) weight is what makes each pair push itself apart
+            // equally and oppositely, conserving momentum.
+            correction += (m_lambdas[i] + m_lambdas[j]) * spikyGradient(offset, h);
+        }
+        m_corrections[i] = correction / rho0;
+    }
+
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        m_predicted[i] += m_corrections[i];
+    }
+}
+
+float FluidSolverCpu::boundaryDensity(const glm::vec3 &position) const
+{
+    const float h = m_config.smoothingRadius;
+    if (h <= 0.0f || m_config.boundsDensity <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    // How much of the kernel each wall cuts off. Integrating poly6 over the half space beyond a
+    // plane at distance d gives 0.5 at d = 0, falling to 0 at d = h; 0.5 * (1 - d/h)^3 tracks that
+    // integral to within a couple of percent across the range and costs three multiplies. The 0.5
+    // is not a tuning constant: a flat wall occludes exactly half a neighbourhood at contact.
+    //
+    // Summed per axis, so a corner reads as more enclosed than a flat face -- which is the point,
+    // since a particle in a corner is missing two halves of its neighbourhood, and that is exactly
+    // where the extrusion was worst.
+    float occluded = 0.0f;
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        const float toMin   = position[axis] - m_config.boundsMin[axis];
+        const float toMax   = m_config.boundsMax[axis] - position[axis];
+        const float nearest = std::min(toMin, toMax);
+        if (nearest < h)
+        {
+            const float deficit = 1.0f - std::max(nearest, 0.0f) / h;
+            occluded += 0.5f * deficit * deficit * deficit;
+        }
+    }
+
+    return m_config.boundsDensity * m_config.restDensity * occluded;
+}
+
+void FluidSolverCpu::applyViscosity(float deltaTime)
+{
+    if (m_config.viscosity <= 0.0f)
+    {
+        return;
+    }
+
+    const std::size_t count = m_velocities.size();
+    const float       h     = m_config.smoothingRadius;
+
+    // XSPH. Written into a scratch buffer first so every particle blends against the same
+    // pre-viscosity velocity field, for the same ordering-independence reason as the corrections.
+    std::vector<glm::vec3> blended(count);
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        glm::vec3 delta(0.0f);
+        float     weightSum = 0.0f;
+        for (unsigned int n = m_neighbourOffsets[i]; n < m_neighbourOffsets[i + 1]; ++n)
+        {
+            const std::size_t j      = m_neighbours[n];
+            const glm::vec3   offset = m_positions[i] - m_positions[j];
+            const float       weight = poly6(glm::dot(offset, offset), h);
+            delta += weight * (m_velocities[j] - m_velocities[i]);
+            weightSum += weight;
+        }
+        blended[i] = m_velocities[i];
+        if (weightSum > 0.0f)
+        {
+            blended[i] += m_config.viscosity * delta / weightSum;
+        }
+    }
+    m_velocities = std::move(blended);
+
+    (void)deltaTime;
+}
+
+void FluidSolverCpu::resolveBoundaryCollisions()
+{
+    // Positions only. The velocity update at the end of step() derives velocity from total
+    // displacement, so anything written to m_velocities here would be discarded; contact response
+    // belongs with the velocity update in step(), after it.
+    for (std::size_t i = 0; i < m_predicted.size(); ++i)
+    {
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            m_predicted[i][axis] = std::clamp(m_predicted[i][axis], m_config.boundsMin[axis],
+                                              m_config.boundsMax[axis]);
+        }
+    }
+}
+
+void FluidSolverCpu::step(float deltaTime)
+{
+    const std::size_t count = m_positions.size();
+    if (count == 0 || deltaTime <= 0.0f)
+    {
+        return;
+    }
+
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        m_velocities[i] += m_config.gravity * deltaTime;
+        m_predicted[i] = m_positions[i] + m_velocities[i] * deltaTime;
+    }
+
+    // Found once from the predicted positions rather than per iteration: the corrections below are
+    // small relative to the smoothing radius, so the neighbour sets barely change within a step.
+    findNeighbours();
+
+    for (int iteration = 0; iteration < m_config.solverIterations; ++iteration)
+    {
+        computeDensitiesAndLambdas();
+        computePositionCorrections();
+        resolveBoundaryCollisions();
+    }
+
+    // Also enforced outside the loop so the container still holds with the solve disabled, which
+    // is how the integration path is tested in isolation.
+    resolveBoundaryCollisions();
+
+    const float maxSpeed    = m_config.maxSpeedInRadiiPerSecond * m_config.smoothingRadius;
+    const float maxSpeedSqr = maxSpeed * maxSpeed;
+
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        // Velocity follows from the total displacement the solve settled on, which is what makes
+        // this position based.
+        glm::vec3 velocity = (m_predicted[i] - m_positions[i]) / deltaTime;
+
+        // Contact response, applied here rather than during the solve because the line above
+        // overwrites whatever velocity the solve left behind. A particle resting on the floor has
+        // been clamped upwards; letting that clamp distance read as upward velocity is what makes a
+        // settled pile jitter forever instead of coming to rest.
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            const bool atMin = m_predicted[i][axis] <= m_config.boundsMin[axis] + 1e-6f;
+            const bool atMax = m_predicted[i][axis] >= m_config.boundsMax[axis] - 1e-6f;
+            if (!atMin && !atMax)
+            {
+                continue;
+            }
+            // Only cancel velocity pushing further into the wall; a particle leaving the surface
+            // keeps its motion.
+            if ((atMin && velocity[axis] < 0.0f) || (atMax && velocity[axis] > 0.0f))
+            {
+                velocity[axis] *= -m_config.boundsRestitution;
+            }
+            for (int tangent = 0; tangent < 3; ++tangent)
+            {
+                if (tangent != axis)
+                {
+                    velocity[tangent] *= m_config.boundsFriction;
+                }
+            }
+        }
+
+        if (maxSpeedSqr > 0.0f)
+        {
+            const float speedSqr = glm::dot(velocity, velocity);
+            if (speedSqr > maxSpeedSqr)
+            {
+                velocity *= maxSpeed / std::sqrt(speedSqr);
+            }
+        }
+
+        m_velocities[i] = velocity;
+        m_positions[i]  = m_predicted[i];
+    }
+
+    // After positions are committed, so neighbours blend against the velocities they just got.
+    applyViscosity(deltaTime);
+}
+
+std::vector<glm::vec3> FluidSolverCpu::makeParticleBlock(const glm::vec3 &min, const glm::vec3 &max,
+                                                        float spacing)
+{
+    std::vector<glm::vec3> positions;
+    if (spacing <= 0.0f)
+    {
+        return positions;
+    }
+    for (float x = min.x; x <= max.x; x += spacing)
+    {
+        for (float y = min.y; y <= max.y; y += spacing)
+        {
+            for (float z = min.z; z <= max.z; z += spacing)
+            {
+                positions.emplace_back(x, y, z);
+            }
+        }
+    }
+    return positions;
+}
+
+float FluidSolverCpu::restDensityForSpacing(float spacing, float smoothingRadius, float particleMass)
+{
+    // Sum the kernel over a lattice of this spacing, which is the density a settled block of fluid
+    // will actually report. Deriving it rather than guessing keeps the first step from inflating.
+    const int reach   = static_cast<int>(std::ceil(smoothingRadius / spacing));
+    float     density = 0.0f;
+    for (int x = -reach; x <= reach; ++x)
+    {
+        for (int y = -reach; y <= reach; ++y)
+        {
+            for (int z = -reach; z <= reach; ++z)
+            {
+                const glm::vec3 offset = glm::vec3(x, y, z) * spacing;
+                density += particleMass * poly6(glm::dot(offset, offset), smoothingRadius);
+            }
+        }
+    }
+    return density;
+}
+
+} // namespace lr
