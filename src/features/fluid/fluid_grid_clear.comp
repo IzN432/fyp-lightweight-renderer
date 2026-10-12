@@ -1,0 +1,22 @@
+#version 450
+
+// Spatial hash, pass 0: zero the per-bucket tallies before the counting pass accumulates into them.
+// Dispatched over buckets, not particles.
+
+#include "fluid_sim.glslh"
+
+layout(local_size_x = FLUID_WORKGROUP_SIZE) in;
+
+void main()
+{
+    uint bucket = gl_GlobalInvocationID.x;
+    if (bucket >= bucketCount())
+        return;
+
+    cellCounts[bucket] = 0u;
+    // cellStarts holds one extra entry so a bucket's span can be read as [start[b], start[b + 1])
+    // without bounds-checking the last one; the scan writes the rest.
+    cellStarts[bucket] = 0u;
+    if (bucket == 0u)
+        cellStarts[bucketCount()] = 0u;
+}

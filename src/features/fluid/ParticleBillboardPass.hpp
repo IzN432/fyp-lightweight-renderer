@@ -103,12 +103,23 @@ public:
         std::string cameraBufferResourceName;
         std::string particleBufferResourceName = "fluid_particles";
         uint32_t    maxParticles               = 65536;
+        // Whether this pass allocates the particle buffer. False means another component already
+        // registered it and this pass only reads it -- which is how the GPU solver feeds the
+        // renderer: it writes the records in a compute pass and nothing is uploaded from the host,
+        // so the buffer has to be the solver's device-local one rather than a dynamic buffer this
+        // pass would own. setParticles() is then unavailable, because there is nothing to upload.
+        bool ownsParticleBuffer = true;
     };
 
     ParticleBillboardPass(Config config, ResourceRegistry &resources);
 
     void build(FrameGraph &frameGraph);
+    // Uploads records from the host. Only valid when the pass owns its particle buffer; with an
+    // externally written one (see Config::ownsParticleBuffer) the producer sets the count through
+    // setParticleCount() instead.
     void setParticles(std::span<const ParticleGpuData> particles);
+    // How many records of an externally written buffer to draw.
+    void setParticleCount(uint32_t count);
 
     uint32_t particleCount() const { return m_particleCount; }
 

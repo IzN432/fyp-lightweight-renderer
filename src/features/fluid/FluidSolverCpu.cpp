@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace lr
 {
@@ -24,6 +25,9 @@ void FluidSolverCpu::setParticles(std::vector<glm::vec3> positions)
     m_lambdas.assign(m_positions.size(), 0.0f);
     m_neighbourOffsets.assign(m_positions.size() + 1, 0u);
     m_neighbours.clear();
+    m_particleBuckets.assign(m_positions.size(), 0u);
+    m_cellParticles.assign(m_positions.size(), 0u);
+    m_cellStarts.clear();
 }
 
 void FluidSolverCpu::clear()
@@ -59,28 +63,123 @@ glm::vec3 FluidSolverCpu::spikyGradient(const glm::vec3 &offset, float smoothing
     return magnitude * (offset / distance);
 }
 
+glm::ivec3 FluidSolverCpu::cellForPosition(const glm::vec3 &position) const
+{
+    const glm::vec3 scaled = position / m_config.smoothingRadius;
+    return glm::ivec3(static_cast<int>(std::floor(scaled.x)), static_cast<int>(std::floor(scaled.y)),
+                      static_cast<int>(std::floor(scaled.z)));
+}
+
+std::size_t FluidSolverCpu::bucketForCell(const glm::ivec3 &cell) const
+{
+    // Large primes, one per axis. Three rather than two: with a shared multiplier on any pair of
+    // axes, cells that are permutations of each other collapse onto the same hash, and a fluid
+    // sitting on a diagonal would pile every such pair into one bucket.
+    constexpr std::uint32_t kPrimeX = 73856093u;
+    constexpr std::uint32_t kPrimeY = 19349663u;
+    constexpr std::uint32_t kPrimeZ = 83492791u;
+
+    // Cast through unsigned so negative cells wrap defined rather than overflowing a signed int.
+    const std::uint32_t hash = (static_cast<std::uint32_t>(cell.x) * kPrimeX) ^
+                               (static_cast<std::uint32_t>(cell.y) * kPrimeY) ^
+                               (static_cast<std::uint32_t>(cell.z) * kPrimeZ);
+    return static_cast<std::size_t>(hash) & m_bucketMask;
+}
+
+void FluidSolverCpu::buildSpatialHash()
+{
+    const std::size_t count = m_predicted.size();
+
+    // Two buckets per particle keeps the load factor low enough that a bucket holds about one
+    // cell's worth of particles, which is the point of the grid.
+    const std::size_t requested = m_config.hashBuckets != 0 ? m_config.hashBuckets : count * 2;
+
+    // Round up to a power of two so wrapping is a mask, and keep at least one bucket so an empty
+    // solver still has a valid table.
+    std::size_t buckets = 1;
+    while (buckets < requested)
+    {
+        buckets <<= 1;
+    }
+    m_bucketMask = buckets - 1;
+
+    // Counting sort over buckets. Pass one tallies how many particles each bucket holds.
+    m_cellStarts.assign(buckets + 1, 0u);
+    m_particleBuckets.resize(count);
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const std::size_t bucket = bucketForCell(cellForPosition(m_predicted[i]));
+        m_particleBuckets[i]     = static_cast<unsigned int>(bucket);
+        ++m_cellStarts[bucket + 1];
+    }
+
+    // Prefix sum turns the tallies into the start offset of each bucket.
+    for (std::size_t b = 0; b < buckets; ++b)
+    {
+        m_cellStarts[b + 1] += m_cellStarts[b];
+    }
+
+    // Pass two scatters each particle into its bucket's span. Walking a cursor copy leaves
+    // m_cellStarts itself intact as the offsets the lookup needs.
+    std::vector<unsigned int> cursor(m_cellStarts.begin(), m_cellStarts.end() - 1);
+    m_cellParticles.resize(count);
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        m_cellParticles[cursor[m_particleBuckets[i]]++] = static_cast<unsigned int>(i);
+    }
+}
+
 void FluidSolverCpu::findNeighbours()
 {
     const std::size_t count = m_predicted.size();
     const float       h2    = m_config.smoothingRadius * m_config.smoothingRadius;
 
+    buildSpatialHash();
+
     m_neighbours.clear();
     m_neighbourOffsets.assign(count + 1, 0u);
 
-    // Brute force: the grid-accelerated search has to reproduce exactly these sets.
+    // Cells are a full smoothing radius across, so every particle within range lies in this
+    // particle's own cell or one of the 26 around it. The result is identical to the brute force
+    // search this replaced -- same sets, same order within each cell span -- which is what lets the
+    // density assertions in the tests stay as they were.
     for (std::size_t i = 0; i < count; ++i)
     {
-        m_neighbourOffsets[i] = static_cast<unsigned int>(m_neighbours.size());
-        for (std::size_t j = 0; j < count; ++j)
+        m_neighbourOffsets[i]  = static_cast<unsigned int>(m_neighbours.size());
+        const glm::ivec3 centre = cellForPosition(m_predicted[i]);
+
+        for (int dz = -1; dz <= 1; ++dz)
         {
-            if (i == j)
+            for (int dy = -1; dy <= 1; ++dy)
             {
-                continue;
-            }
-            const glm::vec3 offset = m_predicted[i] - m_predicted[j];
-            if (glm::dot(offset, offset) < h2)
-            {
-                m_neighbours.push_back(static_cast<unsigned int>(j));
+                for (int dx = -1; dx <= 1; ++dx)
+                {
+                    const glm::ivec3  cell   = centre + glm::ivec3(dx, dy, dz);
+                    const std::size_t bucket = bucketForCell(cell);
+
+                    for (unsigned int s = m_cellStarts[bucket]; s < m_cellStarts[bucket + 1]; ++s)
+                    {
+                        const unsigned int j = m_cellParticles[s];
+                        if (j == i)
+                        {
+                            continue;
+                        }
+                        // A bucket can hold particles from unrelated cells, either through a hash
+                        // collision or because a neighbouring cell wrapped onto the same bucket, so
+                        // the distance test below is what actually decides membership. The same
+                        // bucket can also be visited twice by two of the 27 offsets; checking the
+                        // cell the particle really sits in keeps it from being listed twice.
+                        if (cellForPosition(m_predicted[j]) != cell)
+                        {
+                            continue;
+                        }
+                        const glm::vec3 offset = m_predicted[i] - m_predicted[j];
+                        if (glm::dot(offset, offset) < h2)
+                        {
+                            m_neighbours.push_back(j);
+                        }
+                    }
+                }
             }
         }
     }

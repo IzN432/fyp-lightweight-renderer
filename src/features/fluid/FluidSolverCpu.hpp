@@ -10,10 +10,11 @@ namespace lr
 
 // Reference CPU implementation of Position Based Fluids (Macklin & Muller 2013).
 //
-// This is deliberately the simplest correct formulation: neighbours are found by brute force, and
-// boundaries are limited to an axis-aligned box. It exists to be the ground truth the GPU compute
-// solver is diffed against, so clarity outranks speed here. Neighbour search is kept behind
-// findNeighbours() so a spatial grid can replace it without touching the solve.
+// This is deliberately the simplest correct formulation: boundaries are limited to an axis-aligned
+// box. It exists to be the ground truth the GPU compute solver is diffed against, so clarity
+// outranks speed here. Neighbour search goes through a spatial hash grid, which is the one place
+// speed was allowed to win, because brute force is quadratic and made even a few thousand
+// particles unusable; the grid is structured the way the compute solver will want it.
 class FluidSolverCpu
 {
 public:
@@ -54,6 +55,14 @@ public:
         // goes slack, and the over-dense fluid behind it extrudes it up the wall -- the corners
         // worst of all, where two walls are missing at once.
         float boundsDensity = 1.0f;
+
+        // Buckets in the neighbour-search hash table. The grid itself is unbounded -- cells are
+        // only ever reached through the hash -- so this trades memory against how often two
+        // distant cells share a bucket and get scanned together. Zero sizes the table from the
+        // particle count each step, which is what keeps a large sim from degrading back towards
+        // brute force; set it explicitly only to pin the table for a GPU buffer of fixed size.
+        // Either way it is rounded up to a power of two internally so the modulo becomes a mask.
+        std::size_t hashBuckets = 0;
     };
 
     FluidSolverCpu();
@@ -91,6 +100,15 @@ private:
     // Spiky gradient, used for every gradient term for the reason above.
     static glm::vec3 spikyGradient(const glm::vec3 &offset, float smoothingRadius);
 
+    // Cell a position falls in. Negative coordinates floor towards -inf, so the lattice stays
+    // uniform across the origin rather than doubling up the cells either side of it.
+    glm::ivec3 cellForPosition(const glm::vec3 &position) const;
+    // Bucket a cell hashes to. Multiplying each axis by its own large prime and XORing decorrelates
+    // the low bits, which is what makes neighbouring cells land in unrelated buckets instead of
+    // clustering.
+    std::size_t bucketForCell(const glm::ivec3 &cell) const;
+
+    void buildSpatialHash();
     void findNeighbours();
     void computeDensitiesAndLambdas();
     void computePositionCorrections();
@@ -115,6 +133,18 @@ private:
     // m_neighbourOffsets[i + 1]).
     std::vector<unsigned int> m_neighbours;
     std::vector<unsigned int> m_neighbourOffsets;
+
+    // Spatial hash, in the same counting-sort layout as the neighbour lists above: the particles
+    // in bucket b are m_cellParticles[m_cellStarts[b]) up to m_cellStarts[b + 1]). Held as two
+    // flat arrays rather than a vector-per-bucket so rebuilding it each step does not reallocate,
+    // and so the structure ports to the compute solver unchanged.
+    std::vector<unsigned int> m_cellStarts;
+    std::vector<unsigned int> m_cellParticles;
+    // Bucket of each particle, kept from the counting pass so the fill pass does not rehash.
+    std::vector<unsigned int> m_particleBuckets;
+    // m_config.hashBuckets rounded up to a power of two, minus one: the mask that replaces the
+    // modulo when wrapping a hash into a bucket.
+    std::size_t m_bucketMask = 0;
 };
 
 } // namespace lr

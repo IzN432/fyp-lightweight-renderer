@@ -1,0 +1,41 @@
+#version 450
+
+// Packs the solved positions into the renderer's ParticleGpuData layout.
+//
+// This is the whole reason the solve can stay on the device: the billboard and screen-space liquid
+// passes bind the buffer this writes, so solved positions reach the rasteriser without a round trip
+// through the host. ResourceRegistry::readBuffer() waits for the device to go idle, so doing this on
+// the CPU would stall the pipeline every frame.
+//
+// Appearance comes from a push constant rather than the simulation uniform: it is a rendering
+// property, and keeping it out of FluidParams means changing the colour does not touch the solve.
+
+#include "fluid_sim.glslh"
+
+layout(local_size_x = FLUID_WORKGROUP_SIZE) in;
+
+layout(push_constant) uniform Appearance
+{
+    vec4 colorAndRadius; // xyz colour, w radius
+} appearance;
+
+// Must match lr::ParticleGpuData: two vec4s, position+radius then colour+type.
+struct ParticleGpuData
+{
+    vec4 positionAndRadius;
+    vec4 colorAndType;
+};
+
+layout(std430, set = 0, binding = 10) buffer ParticleOut { ParticleGpuData particlesOut[]; };
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= particleCount())
+        return;
+
+    particlesOut[i].positionAndRadius = vec4(positions[i].xyz, appearance.colorAndRadius.w);
+    // Type 0 is ParticleType::Liquid. The solver does not classify particles, so every record is
+    // liquid; foam and spray would be set here once it does.
+    particlesOut[i].colorAndType = vec4(appearance.colorAndRadius.xyz, 0.0);
+}

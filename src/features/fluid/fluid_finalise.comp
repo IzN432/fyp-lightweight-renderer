@@ -1,0 +1,63 @@
+#version 450
+
+// Solver stage: derive velocity from the displacement the solve settled on, apply contact response
+// and the speed cap, then commit the positions. The final loop of FluidSolverCpu::step.
+
+#include "fluid_sim.glslh"
+
+layout(local_size_x = FLUID_WORKGROUP_SIZE) in;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= particleCount())
+        return;
+
+    vec3 previous = positions[i].xyz;
+    // Confined again here, not just in fluid_apply: that pass belongs to a constraint iteration, so
+    // with solverIterations at zero the container would not hold at all. FluidSolverCpu::step
+    // enforces it outside its iteration loop for the same reason -- it is how the integration path
+    // is tested in isolation.
+    vec3 settled = clamp(predicted[i].xyz, domainMin(), domainMax());
+
+    // Velocity follows from the total displacement, which is what makes this position based.
+    vec3 velocity = (settled - previous) / deltaTime();
+
+    // Contact response, applied here rather than during the solve because the line above overwrites
+    // whatever velocity the solve left behind. A particle resting on the floor has been clamped
+    // upwards; letting that clamp distance read as upward velocity is what makes a settled pile
+    // jitter forever instead of coming to rest.
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        bool atMin = settled[axis] <= domainMin()[axis] + 1e-6;
+        bool atMax = settled[axis] >= domainMax()[axis] - 1e-6;
+        if (!atMin && !atMax)
+            continue;
+
+        // Only cancel velocity pushing further into the wall; a particle leaving the surface keeps
+        // its motion.
+        if ((atMin && velocity[axis] < 0.0) || (atMax && velocity[axis] > 0.0))
+            velocity[axis] *= -restitution();
+
+        for (int tangent = 0; tangent < 3; ++tangent)
+        {
+            if (tangent != axis)
+                velocity[tangent] *= friction();
+        }
+    }
+
+    // Stops a single bad step from throwing a particle clean out of its neighbourhood.
+    float maxSpeed = maxSpeedRadii() * smoothingRadius();
+    if (maxSpeed > 0.0)
+    {
+        float speedSquared = dot(velocity, velocity);
+        if (speedSquared > maxSpeed * maxSpeed)
+            velocity *= maxSpeed / sqrt(speedSquared);
+    }
+
+    velocities[i] = vec4(velocity, 0.0);
+    positions[i]  = vec4(settled, 0.0);
+    // Written back as well because the viscosity pass that follows walks the grid, whose cell guard
+    // reads predicted[]. Committing the clamped position to both keeps the two in agreement.
+    predicted[i] = vec4(settled, 0.0);
+}

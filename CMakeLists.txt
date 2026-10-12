@@ -14,8 +14,10 @@ find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin REQUIRED)
 function(add_shaders TARGET)
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/shaders")
     
-    # Collect all shader headers (.glslh files) as implicit dependencies
-    file(GLOB_RECURSE SHADER_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/passes/*.glslh")
+    # Collect all shader headers (.glslh files) as implicit dependencies. Features carry their own
+    # alongside their shaders (e.g. the fluid solver's), so this covers src rather than core/passes
+    # only -- a header missing from here means editing it does not rebuild the shaders including it.
+    file(GLOB_RECURSE SHADER_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.glslh")
     
     set(SPV_FILES)
     foreach(GLSL ${ARGN})
@@ -324,6 +326,7 @@ target_link_libraries(lr_linear_blend_skinning_feature PUBLIC lr_core glm::glm)
 # ground truth the GPU compute solver gets diffed against.
 add_library(lr_fluid_feature STATIC
     src/features/fluid/FluidSolverCpu.cpp
+    src/features/fluid/FluidSolverGpu.cpp
     src/features/fluid/ParticleBillboardPass.cpp
     src/features/fluid/ScreenSpaceLiquidPass.cpp
 )
@@ -337,6 +340,18 @@ add_shaders(lr_fluid_feature
     src/features/fluid/fluid_depth.frag
     src/features/fluid/fluid_bilateral.comp
     src/features/fluid/fluid_normal.comp
+    src/features/fluid/fluid_predict.comp
+    src/features/fluid/fluid_grid_clear.comp
+    src/features/fluid/fluid_grid_count.comp
+    src/features/fluid/fluid_grid_scan.comp
+    src/features/fluid/fluid_grid_scatter.comp
+    src/features/fluid/fluid_density.comp
+    src/features/fluid/fluid_correct.comp
+    src/features/fluid/fluid_apply.comp
+    src/features/fluid/fluid_finalise.comp
+    src/features/fluid/fluid_viscosity.comp
+    src/features/fluid/fluid_viscosity_apply.comp
+    src/features/fluid/fluid_publish.comp
     src/features/fluid/fluid_thickness.frag
     src/features/fluid/fluid_composite.frag
 )
@@ -558,6 +573,11 @@ if(BUILD_TESTING)
     add_executable(brdf_lut_gpu_smoke EXCLUDE_FROM_ALL tests/vulkan/BrdfLutGpuSmoke.cpp)
     target_link_libraries(brdf_lut_gpu_smoke PRIVATE lr_core)
     add_dependencies(brdf_lut_gpu_smoke lr_core_shaders)
+
+    # Diffs the GPU compute fluid solver against the CPU reference on real hardware.
+    add_executable(fluid_solver_gpu_smoke EXCLUDE_FROM_ALL tests/fluid/FluidSolverGpuSmoke.cpp)
+    target_link_libraries(fluid_solver_gpu_smoke PRIVATE lr_fluid_feature)
+    add_dependencies(fluid_solver_gpu_smoke lr_fluid_feature_shaders)
 
     add_executable(editor_state_controller_tests
         tests/editor/EditorStateControllerTests.cpp

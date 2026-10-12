@@ -1,0 +1,19 @@
+#version 450
+
+// Spatial hash, pass 1: tally how many particles fall in each bucket. This is the counting pass of
+// the counting sort FluidSolverCpu::buildSpatialHash performs serially; here the tally is an atomic
+// because many particles hash to the same bucket.
+
+#include "fluid_sim.glslh"
+
+layout(local_size_x = FLUID_WORKGROUP_SIZE) in;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= particleCount())
+        return;
+
+    uint bucket = bucketForCell(cellForPosition(predicted[i].xyz));
+    atomicAdd(cellCounts[bucket], 1u);
+}

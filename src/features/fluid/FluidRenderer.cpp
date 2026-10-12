@@ -15,11 +15,6 @@ namespace lr
 
 namespace
 {
-constexpr const char *kDepthImageName      = "fluidDepth";
-constexpr const char *kSphereVertexBuffer  = "fluidSphereVertices";
-constexpr const char *kSphereIndexBuffer   = "fluidSphereIndices";
-constexpr const char *kInstanceBuffer      = "fluidParticleInstances";
-constexpr const char *kLineVertexBuffer    = "fluidLineVertices";
 } // namespace
 
 FluidRenderer::FluidRenderer(Config config, ResourceRegistry &registry)
@@ -30,15 +25,34 @@ FluidRenderer::FluidRenderer(Config config, ResourceRegistry &registry)
         throw std::invalid_argument("FluidRenderer maxParticleCount must be greater than zero");
     }
 
+    m_fluidDepth             = m_config.resourceNamePrefix + "fluidDepth";
+    m_fluidSphereVertices    = m_config.resourceNamePrefix + "fluidSphereVertices";
+    m_fluidSphereIndices     = m_config.resourceNamePrefix + "fluidSphereIndices";
+    m_fluidParticleInstances = m_config.resourceNamePrefix + "fluidParticleInstances";
+    m_fluidLineVertices      = m_config.resourceNamePrefix + "fluidLineVertices";
+
     // The sphere mesh never changes, so it is uploaded once here; only the instance buffer is
     // rewritten per frame.
     uploadSphereMesh();
 
-    m_registry->registerDynamicBuffer(kInstanceBuffer,
-                                      static_cast<VkDeviceSize>(m_config.maxParticleCount) * sizeof(InstanceData),
-                                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    if (m_config.instanceBufferResourceName.empty())
+    {
+        m_config.instanceBufferResourceName = m_fluidParticleInstances;
+        m_ownsInstanceBuffer                = true;
+        // Our own records are the bare centre and radius, with no colour after them.
+        m_config.instanceStride = sizeof(InstanceData);
+        m_registry->registerDynamicBuffer(m_fluidParticleInstances,
+                                          static_cast<VkDeviceSize>(m_config.maxParticleCount) * sizeof(InstanceData),
+                                          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    } else if (!m_registry->hasBuffer(m_config.instanceBufferResourceName))
+    {
+        // Reported here rather than at compile time, where the error would name a missing frame
+        // graph resource instead of the component that was meant to register it.
+        throw std::invalid_argument("FluidRenderer: instance buffer '" + m_config.instanceBufferResourceName +
+                                    "' must be registered before the renderer that reads it");
+    }
 
-    m_registry->registerDynamicBuffer(kLineVertexBuffer,
+    m_registry->registerDynamicBuffer(m_fluidLineVertices,
                                       static_cast<VkDeviceSize>(m_config.maxLineCount) * 2 * sizeof(LineVertex),
                                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 }
@@ -78,16 +92,27 @@ void FluidRenderer::uploadSphereMesh()
     m_sphereIndexCount = static_cast<uint32_t>(indices.size());
 
     const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(vertices.size() * sizeof(SphereVertex));
-    m_registry->registerDynamicBuffer(kSphereVertexBuffer, vertexBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    m_registry->updateBuffer(kSphereVertexBuffer, vertices.data(), vertexBytes);
+    m_registry->registerDynamicBuffer(m_fluidSphereVertices, vertexBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    m_registry->updateBuffer(m_fluidSphereVertices, vertices.data(), vertexBytes);
 
     const VkDeviceSize indexBytes = static_cast<VkDeviceSize>(indices.size() * sizeof(uint32_t));
-    m_registry->registerDynamicBuffer(kSphereIndexBuffer, indexBytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-    m_registry->updateBuffer(kSphereIndexBuffer, indices.data(), indexBytes);
+    m_registry->registerDynamicBuffer(m_fluidSphereIndices, indexBytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    m_registry->updateBuffer(m_fluidSphereIndices, indices.data(), indexBytes);
+}
+
+void FluidRenderer::setParticleCount(uint32_t count, const glm::vec3 &color)
+{
+    m_particleColor = color;
+    m_instanceCount = std::min(count, m_config.maxParticleCount);
 }
 
 void FluidRenderer::setParticles(const std::vector<glm::vec3> &centers, float radius, const glm::vec3 &color)
 {
+    if (!m_ownsInstanceBuffer)
+    {
+        throw std::logic_error("FluidRenderer: the instance buffer is written by another component; "
+                               "use setParticleCount()");
+    }
     m_particleColor = color;
 
     const std::size_t count = std::min<std::size_t>(centers.size(), m_config.maxParticleCount);
@@ -102,7 +127,7 @@ void FluidRenderer::setParticles(const std::vector<glm::vec3> &centers, float ra
     m_instanceCount = static_cast<uint32_t>(instances.size());
     if (!instances.empty())
     {
-        m_registry->updateBuffer(kInstanceBuffer, instances.data(),
+        m_registry->updateBuffer(m_config.instanceBufferResourceName, instances.data(),
                                  static_cast<VkDeviceSize>(instances.size() * sizeof(InstanceData)));
     }
 }
@@ -122,7 +147,7 @@ void FluidRenderer::setLines(const std::vector<Line> &lines)
     m_lineVertexCount = static_cast<uint32_t>(vertices.size());
     if (!vertices.empty())
     {
-        m_registry->updateBuffer(kLineVertexBuffer, vertices.data(),
+        m_registry->updateBuffer(m_fluidLineVertices, vertices.data(),
                                  static_cast<VkDeviceSize>(vertices.size() * sizeof(LineVertex)));
     }
 }
@@ -153,7 +178,9 @@ void FluidRenderer::build(FrameGraph &frameGraph)
     // ---------------------------------------------------------------------
     const std::vector<VkVertexInputBindingDescription> particleBindings{
         {.binding = 0, .stride = sizeof(SphereVertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX},
-        {.binding = 1, .stride = sizeof(InstanceData), .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE},
+        // The stride comes from the config so an external buffer of wider records -- the GPU
+        // solver's, which carry a colour after the centre and radius -- can be read in place.
+        {.binding = 1, .stride = m_config.instanceStride, .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE},
     };
     const std::vector<VkVertexInputAttributeDescription> particleAttributes{
         {.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(SphereVertex, position)},
@@ -172,21 +199,20 @@ void FluidRenderer::build(FrameGraph &frameGraph)
     VkClearValue depthClear{};
     depthClear.depthStencil = {1.0f, 0};
 
-    frameGraph.addPass("fluid_particles")
+    frameGraph.addPass(m_config.resourceNamePrefix + "fluid_particles")
         .type(PassType::Geometry)
         .vertexLayout(particleBindings, particleAttributes)
         .vertShader((paths::shaderDir / "fluid_particles.vert.spv").string())
         .fragShader((paths::shaderDir / "fluid_particles.frag.spv").string())
         .pushConstantSize(sizeof(glm::vec4), VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
-        .vertexBuffer(0, frameGraph.buffer(kSphereVertexBuffer))
-        .vertexBuffer(1, frameGraph.buffer(kInstanceBuffer))
-        .indexBuffer(frameGraph.buffer(kSphereIndexBuffer))
+        .vertexBuffer(0, frameGraph.buffer(m_fluidSphereVertices))
+        .vertexBuffer(1, frameGraph.buffer(m_config.instanceBufferResourceName))
+        .indexBuffer(frameGraph.buffer(m_fluidSphereIndices))
         .depth(true, true)
         .colorAttachment(frameGraph.image(Viewer::kBackbufferName), m_config.swapchainFormat,
                          VK_ATTACHMENT_LOAD_OP_CLEAR, colorClear)
-        .depthAttachment(frameGraph.image(kDepthImageName), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR,
-                         depthClear)
+        .depthAttachment(frameGraph.image(m_fluidDepth), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR, depthClear)
         .execute([this](PassContext &context) {
             if (m_instanceCount == 0)
             {
@@ -209,18 +235,18 @@ void FluidRenderer::build(FrameGraph &frameGraph)
         {.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(LineVertex, color)},
     };
 
-    frameGraph.addPass("fluid_lines")
+    frameGraph.addPass(m_config.resourceNamePrefix + "fluid_lines")
         .type(PassType::Geometry)
         .topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
         .vertexLayout(lineBindings, lineAttributes)
         .vertShader((paths::shaderDir / "fluid_lines.vert.spv").string())
         .fragShader((paths::shaderDir / "fluid_lines.frag.spv").string())
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
-        .vertexBuffer(0, frameGraph.buffer(kLineVertexBuffer))
+        .vertexBuffer(0, frameGraph.buffer(m_fluidLineVertices))
         .depth(true, true)
         .colorAttachment(frameGraph.image(Viewer::kBackbufferName), m_config.swapchainFormat,
                          VK_ATTACHMENT_LOAD_OP_LOAD)
-        .depthAttachment(frameGraph.image(kDepthImageName), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD)
+        .depthAttachment(frameGraph.image(m_fluidDepth), VK_FORMAT_D32_SFLOAT, VK_ATTACHMENT_LOAD_OP_LOAD)
         .execute([this](PassContext &context) {
             if (m_lineVertexCount > 0)
             {

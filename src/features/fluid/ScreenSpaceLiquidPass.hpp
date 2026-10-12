@@ -26,24 +26,30 @@ public:
         std::string cameraBufferResourceName;
         std::string particleBufferResourceName = "fluid_liquid_particles";
         uint32_t    maxParticles               = 65536;
+        // Whether this pass allocates the particle buffer. False means another component already
+        // registered it and this pass only reads it -- which is how the GPU solver feeds the
+        // renderer: it writes the records in a compute pass, so the buffer must be its device-local
+        // one rather than a dynamic buffer this pass would own and upload to. setParticles() is
+        // then unavailable; the producer sets the count with setParticleCount() instead.
+        bool ownsParticleBuffer = true;
 
         // Bilateral kernel half-width in WORLD units. The shader projects this to a per-pixel
         // radius at the sampled depth, so the kernel covers the same amount of liquid at any
         // camera distance. Fusing neighbouring impostors into one surface takes a radius on the
         // order of a particle diameter, so this tracks the particle size rather than a fixed
         // pixel count; smoothingRadiusFromParticle() derives a sensible value.
-        float smoothingRadius   = 0.14f;
+        float smoothingRadius = 0.14f;
         // Hard ceiling on the projected radius, in pixels. This bounds the per-pixel cost when
         // the liquid comes close to the camera; it is a performance guard, not a tuning knob, so
         // it sits far above the radius any reasonable shot needs.
-        int   maxFilterRadius   = 96;
+        int maxFilterRadius = 96;
         // Fraction of the centre sample's view distance, not an absolute length, so the filter
         // preserves a silhouette the same way at two metres and at fifty.
-        float depthSigma        = 0.02f;
-        float thicknessScale    = 1.0f;
-        float refractionStrength = 0.018f;
-        float indexOfRefraction = 1.333f;
-        float absorptionScale   = 1.35f;
+        float     depthSigma         = 0.02f;
+        float     thicknessScale     = 1.0f;
+        float     refractionStrength = 0.018f;
+        float     indexOfRefraction  = 1.333f;
+        float     absorptionScale    = 1.35f;
         glm::vec3 liquidColor{0.25f, 0.5f, 0.95f};
     };
 
@@ -51,13 +57,15 @@ public:
 
     void build(FrameGraph &frameGraph);
     void setParticles(std::span<const ParticleGpuData> particles);
+    // How many records of an externally written buffer to draw.
+    void setParticleCount(uint32_t count);
     void setLiquidColor(const glm::vec3 &color);
     // Kernel width in world units; the shader projects it per pixel. Kept in sync with the
     // simulation's particle size, so it changes whenever spacing or render scale do.
     void setSmoothingRadius(float radius);
     void updateParams();
 
-    uint32_t particleCount() const { return m_particleCount; }
+    uint32_t      particleCount() const { return m_particleCount; }
     Config       &config() { return m_config; }
     const Config &config() const { return m_config; }
 
@@ -86,15 +94,9 @@ inline glm::vec3 absorptionCoefficient(const glm::vec3 &color, float scale)
 
 // Neighbouring impostors only merge into a continuous surface once the kernel spans roughly a
 // particle diameter; below that each sphere keeps its own depth profile and shades separately.
-inline float smoothingRadiusFromParticle(float particleRadius)
-{
-    return std::max(particleRadius, 0.0f) * 2.0f;
-}
+inline float smoothingRadiusFromParticle(float particleRadius) { return std::max(particleRadius, 0.0f) * 2.0f; }
 
-inline uint32_t dispatchSize(uint32_t pixels, uint32_t groupSize = 16)
-{
-    return (pixels + groupSize - 1) / groupSize;
-}
+inline uint32_t dispatchSize(uint32_t pixels, uint32_t groupSize = 16) { return (pixels + groupSize - 1) / groupSize; }
 
 } // namespace screen_space_liquid
 
