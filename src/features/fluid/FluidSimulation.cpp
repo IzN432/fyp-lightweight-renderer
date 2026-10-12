@@ -33,7 +33,6 @@ FluidSolverGpu::Config FluidSimulation::solverConfig(const Config &config)
     result.boundsMin           = config.boundsMin;
     result.boundsMax           = config.boundsMax;
     result.boundsFriction      = config.boundsFriction;
-    result.boundsDensity       = config.boundsDensity;
     result.viscosity           = config.viscosity;
     result.maxParticles        = config.maxParticles;
     result.fixedDeltaTime      = config.fixedDeltaTime;
@@ -99,7 +98,6 @@ void FluidSimulation::applyRuntimeConfig()
     solver.boundsMin        = m_config.boundsMin;
     solver.boundsMax        = m_config.boundsMax;
     solver.boundsFriction   = m_config.boundsFriction;
-    solver.boundsDensity    = m_config.boundsDensity;
     solver.viscosity        = m_config.viscosity;
     solver.particleRadius   = m_config.particleRadius();
     solver.particleColor    = m_config.particleColor;
@@ -171,11 +169,6 @@ void FluidSimulation::onGUI()
     if (ImGui::DragFloat("Viscosity", &m_config.viscosity, 0.005f, 0.0f, 0.5f, "%.3f"))
     {
         solver.viscosity = m_config.viscosity;
-        m_solver.updateParams();
-    }
-    if (ImGui::DragFloat("Wall Density", &m_config.boundsDensity, 0.02f, 0.0f, 2.0f, "%.2f"))
-    {
-        solver.boundsDensity = m_config.boundsDensity;
         m_solver.updateParams();
     }
     if (ImGui::DragFloat("Wall Friction", &m_config.boundsFriction, 0.005f, 0.0f, 1.0f, "%.3f"))

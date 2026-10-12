@@ -39,10 +39,7 @@ void testKernels()
 
     lr::FluidSolverCpu::Config config;
     config.smoothingRadius = h;
-    // The walls and gravity are both kept out of this test. Within smoothingRadius of a wall
-    // boundaryDensity() adds 0.5 * restDensity per occluded axis, which is two orders of magnitude
-    // larger than one neighbour's contribution -- with the default bounds the particles sit on the
-    // floor and both readings below saturate to the same value, measuring nothing.
+    // Keep gravity and boundary collision handling out of this density-kernel test.
     config.boundsMin       = glm::vec3(-10.0f);
     config.boundsMax       = glm::vec3(10.0f);
     config.gravity         = glm::vec3(0.0f);
@@ -212,13 +209,9 @@ void testCompressionIsResolved()
     assert(finalExtent > initialExtent); // The clump expanded rather than staying compressed.
 }
 
-// Regression: the fluid must not climb the walls, and must come to rest.
-//
-// Both were real bugs. Without a boundary density contribution a particle beside a wall is missing
-// half its neighbourhood, so its density reads low, its constraint goes slack, and the denser fluid
-// behind extrudes it up the wall -- worst in the corners, where two walls are missing at once.
-// Without viscosity the positional solve converts its own corrections straight back into velocity
-// and a dropped block oscillates forever.
+// Regression: a dropped column in contact with all four walls must not climb them and must come to
+// rest. Boundary clamping must not inject upward energy at face or corner contacts, while viscosity
+// must dissipate the energy that positional corrections convert back into velocity.
 void testFluidSettlesWithoutClimbingWalls()
 {
     constexpr float spacing = 0.025f;

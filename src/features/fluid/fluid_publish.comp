@@ -34,8 +34,9 @@ void main()
     if (i >= particleCount())
         return;
 
-    particlesOut[i].positionAndRadius = vec4(positions[i].xyz, appearance.colorAndRadius.w);
+    uint outputIndex = particleIds[i];
+    particlesOut[outputIndex].positionAndRadius = vec4(positions[i].xyz, appearance.colorAndRadius.w);
     // Type 0 is ParticleType::Liquid. The solver does not classify particles, so every record is
     // liquid; foam and spray would be set here once it does.
-    particlesOut[i].colorAndType = vec4(appearance.colorAndRadius.xyz, 0.0);
+    particlesOut[outputIndex].colorAndType = vec4(appearance.colorAndRadius.xyz, 0.0);
 }

@@ -20,7 +20,7 @@ layout(set = 0, binding = 0) uniform FluidParams
     vec4 gravityAndDeltaTime;     // xyz gravity, w timestep
     vec4 boundsMin;               // xyz min, w smoothing radius
     vec4 boundsMax;               // xyz max, w rest density
-    vec4 massRelaxViscosity;      // x mass, y relaxation, z viscosity, w bounds density
+    vec4 massRelaxViscosity;      // x mass, y relaxation, z viscosity, w unused
     vec4 restitutionFrictionSpeed; // x restitution, y friction, z max speed, w unused
     uvec4 counts;                 // x particle count, y bucket count, z bucket mask, w iterations
 } params;
@@ -32,7 +32,6 @@ float restDensity()     { return params.boundsMax.w; }
 float particleMass()    { return params.massRelaxViscosity.x; }
 float relaxation()      { return params.massRelaxViscosity.y; }
 float viscosity()       { return params.massRelaxViscosity.z; }
-float boundsDensity()   { return params.massRelaxViscosity.w; }
 float restitution()     { return params.restitutionFrictionSpeed.x; }
 float friction()        { return params.restitutionFrictionSpeed.y; }
 float maxSpeedRadii()   { return params.restitutionFrictionSpeed.z; }
@@ -66,6 +65,15 @@ layout(std430, set = 0, binding = 9) buffer CellParticles { uint cellParticles[]
 // keeps them. ivec4 rather than ivec3: std430 gives a three-component vector a 16-byte stride
 // anyway, so the padding is explicit. Binding 10 is the renderer's output in fluid_publish.comp.
 layout(std430, set = 0, binding = 11) buffer ParticleCells { ivec4 particleCells[]; };
+// Scratch arrays used to put the live particle state into the bucket order produced by the grid.
+// This is deliberately a physical reorder rather than just a sorted index list: the 16 hot
+// density/correction traversals then fetch adjacent predicted positions and lambdas from L2.
+layout(std430, set = 0, binding = 12) buffer SortedPositions     { vec4 sortedPositions[]; };
+layout(std430, set = 0, binding = 13) buffer SortedVelocities    { vec4 sortedVelocities[]; };
+layout(std430, set = 0, binding = 14) buffer SortedPredicted     { vec4 sortedPredicted[]; };
+layout(std430, set = 0, binding = 15) buffer SortedParticleCells { ivec4 sortedParticleCells[]; };
+layout(std430, set = 0, binding = 16) buffer ParticleIds         { uint particleIds[]; };
+layout(std430, set = 0, binding = 17) buffer SortedParticleIds   { uint sortedParticleIds[]; };
 
 // Poly6, density only: its gradient vanishes as r approaches zero, so particles sitting on top of
 // each other would feel no separating force.
@@ -107,28 +115,6 @@ uint bucketForCell(ivec3 cell)
     return hash & bucketMask();
 }
 
-// Density the walls stand in for, so a particle beside one is not treated as a free surface.
-// Transcribed from FluidSolverCpu::boundaryDensity, including the per-axis sum that makes a corner
-// read as more enclosed than a flat face.
-float boundaryDensity(vec3 position)
-{
-    float h = smoothingRadius();
-    if (h <= 0.0 || boundsDensity() <= 0.0)
-        return 0.0;
-
-    float occluded = 0.0;
-    for (int axis = 0; axis < 3; ++axis)
-    {
-        float nearest = min(position[axis] - domainMin()[axis], domainMax()[axis] - position[axis]);
-        if (nearest < h)
-        {
-            float deficit = 1.0 - max(nearest, 0.0) / h;
-            occluded += 0.5 * deficit * deficit * deficit;
-        }
-    }
-    return boundsDensity() * restDensity() * occluded;
-}
-
 // Walks the 27 cells around a position. Callers supply the body through the FLUID_FOR_EACH_NEIGHBOUR
 // macro below, which keeps the triple loop and the collision guards in one place -- every stage
 // that needs neighbours uses exactly the same traversal as the CPU reference.
@@ -156,7 +142,7 @@ float boundaryDensity(vec3 position)
             uint spanEnd = cellStarts[bucket + 1u];                                                \
             for (uint s = cellStarts[bucket]; s < spanEnd; ++s)                                    \
             {                                                                                      \
-                uint neighbourIndex = cellParticles[s];                                            \
+                uint neighbourIndex = s;                                                           \
                 if (neighbourIndex == selfIndex)                                                   \
                     continue;                                                                      \
                 if (particleCells[neighbourIndex].xyz != cell)                                      \

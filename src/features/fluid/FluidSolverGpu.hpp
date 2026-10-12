@@ -20,8 +20,8 @@ namespace lr
 // passes over buffers that never leave device memory.
 //
 // The CPU solver stays the reference. Every stage here is a transcription of the correspondingly
-// named method there, down to the kernel constants and the boundary-density approximation, so the
-// two can be diffed particle for particle -- which is what FluidSolverGpuTests does. Where the two
+// named method there, down to the kernel constants and boundary collision response, so the two can
+// be diffed particle for particle -- which is what FluidSolverGpuTests does. Where the two
 // necessarily differ it is because the GPU solve is order-independent and the CPU one is not; see
 // the note on the Jacobi split in computePositionCorrections().
 //
@@ -56,7 +56,6 @@ public:
         float     boundsFriction           = 0.98f;
         float     viscosity                = 0.05f;
         float     maxSpeedInRadiiPerSecond = 20.0f;
-        float     boundsDensity            = 1.0f;
 
         // Buffer capacity. Unlike the CPU solver this is fixed at construction: every buffer below
         // is allocated for it, and setParticles() rejects more than this many.
@@ -157,6 +156,12 @@ private:
     std::string m_cellCounts;
     std::string m_cellParticles;
     std::string m_particleCells;
+    std::string m_sortedPositions;
+    std::string m_sortedVelocities;
+    std::string m_sortedPredicted;
+    std::string m_sortedParticleCells;
+    std::string m_particleIds;
+    std::string m_sortedParticleIds;
     std::string m_params;
 
     Config            m_config;

@@ -37,7 +37,6 @@ public:
         // Forwarded to the solver; see FluidSolverCpu::Config for what each one is for.
         float viscosity     = 0.05f;
         float boundsFriction = 0.98f;
-        float boundsDensity  = 1.0f;
 
         // Simulation domain. The fluid is dropped into one corner of it.
         glm::vec3 boundsMin{-0.5f, 0.0f, -0.5f};

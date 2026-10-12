@@ -28,7 +28,6 @@ public:
         int   solverIterations     = 8;
         float viscosity            = 0.05f;
         float boundsFriction       = 0.98f;
-        float boundsDensity        = 1.0f;
 
         glm::vec3 boundsMin{-0.5f, 0.0f, -0.5f};
         glm::vec3 boundsMax{0.5f, 1.0f, 0.5f};

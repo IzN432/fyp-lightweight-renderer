@@ -73,7 +73,6 @@ FluidSolverCpu::Config FluidSolverGpu::toCpuConfig(const Config &config)
     cpu.boundsFriction           = config.boundsFriction;
     cpu.viscosity                = config.viscosity;
     cpu.maxSpeedInRadiiPerSecond = config.maxSpeedInRadiiPerSecond;
-    cpu.boundsDensity            = config.boundsDensity;
     // The GPU table is fixed, so pin the CPU one to the same size. Bucket counts change which
     // cells collide, and a collision changes nothing about the neighbour sets -- the distance test
     // decides membership -- but matching them keeps the two solvers comparable step for step.
@@ -109,6 +108,12 @@ FluidSolverGpu::FluidSolverGpu(Config config, ResourceRegistry &resources)
     m_cellCounts             = prefix + "_cell_counts";
     m_cellParticles          = prefix + "_cell_particles";
     m_particleCells          = prefix + "_particle_cells";
+    m_sortedPositions        = prefix + "_sorted_positions";
+    m_sortedVelocities       = prefix + "_sorted_velocities";
+    m_sortedPredicted        = prefix + "_sorted_predicted";
+    m_sortedParticleCells    = prefix + "_sorted_particle_cells";
+    m_particleIds            = prefix + "_particle_ids";
+    m_sortedParticleIds      = prefix + "_sorted_particle_ids";
     m_params                 = prefix + "_params";
 
     const uint32_t capacity = m_config.maxParticles;
@@ -140,6 +145,18 @@ FluidSolverGpu::FluidSolverGpu(Config config, ResourceRegistry &resources)
     // ivec4 rather than ivec3 for the same reason the positions are vec4: a std430 array of
     // three-component vectors is laid out with a 16-byte stride anyway.
     resources.registerStaticBuffer(m_particleCells, VkDeviceSize(capacity) * sizeof(glm::ivec4), storage);
+    // Sebastian Lague's key locality trick: after the counting sort, reorder the hot particle
+    // arrays into bucket order. The iterative neighbour passes then read contiguous particle data
+    // rather than following a different indirect index for every lane. These are the temporary
+    // targets; a second pass copies them back before the solve begins.
+    resources.registerStaticBuffer(m_sortedPositions, vectorBytes, storage);
+    resources.registerStaticBuffer(m_sortedVelocities, vectorBytes, storage);
+    resources.registerStaticBuffer(m_sortedPredicted, vectorBytes, storage);
+    resources.registerStaticBuffer(m_sortedParticleCells, VkDeviceSize(capacity) * sizeof(glm::ivec4), storage);
+    // Reordering makes array indices unstable. Preserve a small logical ID so diagnostic readbacks
+    // can still return the particle order supplied to setParticles(); rendering does not need it.
+    resources.registerStaticBuffer(m_particleIds, VkDeviceSize(capacity) * sizeof(uint32_t), uploaded);
+    resources.registerStaticBuffer(m_sortedParticleIds, VkDeviceSize(capacity) * sizeof(uint32_t), storage);
 
     // The renderer's view of the solve. Registered here rather than by the render pass so the
     // solver owns the buffer it writes; ParticleBillboardPass and ScreenSpaceLiquidPass take the
@@ -163,8 +180,7 @@ void FluidSolverGpu::updateParams()
         .gravityAndDeltaTime = glm::vec4(m_config.gravity, std::max(m_fixedDeltaTime, 1e-5f)),
         .boundsMin           = glm::vec4(m_config.boundsMin, h),
         .boundsMax           = glm::vec4(m_config.boundsMax, std::max(m_config.restDensity, 1e-6f)),
-        .massRelaxViscosity =
-            glm::vec4(m_config.particleMass, m_config.relaxation, m_config.viscosity, m_config.boundsDensity),
+        .massRelaxViscosity = glm::vec4(m_config.particleMass, m_config.relaxation, m_config.viscosity, 0.0f),
         .restitutionFrictionSpeed =
             glm::vec4(m_config.boundsRestitution, m_config.boundsFriction, m_config.maxSpeedInRadiiPerSecond, 0.0f),
         .counts = glm::uvec4(m_particleCount, resolvedHashBuckets(m_config), resolvedHashBuckets(m_config) - 1u,
@@ -191,6 +207,14 @@ void FluidSolverGpu::setParticles(std::span<const glm::vec3> positions)
     // zero throughout, so it doubles as the velocity payload.
     std::fill(padded.begin(), padded.end(), glm::vec4(0.0f));
     m_resources->reuploadBuffer(m_velocities, padded.data(), bytes);
+
+    std::vector<uint32_t> particleIds(m_config.maxParticles);
+    for (uint32_t i = 0; i < m_config.maxParticles; ++i)
+    {
+        particleIds[i] = i;
+    }
+    m_resources->reuploadBuffer(m_particleIds, particleIds.data(),
+                                VkDeviceSize(m_config.maxParticles) * sizeof(uint32_t));
 
     m_stepAccumulator = 0.0f;
     m_pendingSteps    = 0;
@@ -361,6 +385,32 @@ void FluidSolverGpu::build(FrameGraph &frameGraph)
         // corrections are small relative to the smoothing radius, so the neighbour sets barely
         // change within a step. This matches FluidSolverCpu::step.
         addGridPasses(frameGraph, step);
+        addComputePass(frameGraph, "fluid_reorder" + suffix, "fluid_reorder.comp")
+            .storageBufferWrite(12, frameGraph.buffer(m_sortedPositions), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageBufferWrite(13, frameGraph.buffer(m_sortedVelocities), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageBufferWrite(14, frameGraph.buffer(m_sortedPredicted), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageBufferWrite(15, frameGraph.buffer(m_sortedParticleCells), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageBufferRead(16, frameGraph.buffer(m_particleIds), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageBufferWrite(17, frameGraph.buffer(m_sortedParticleIds), VK_SHADER_STAGE_COMPUTE_BIT)
+            .execute([this, step](PassContext &context) {
+                if (shouldDispatchStep(step))
+                {
+                    context.cmd().dispatch(dispatchGroups(m_particleCount), 1, 1);
+                }
+            });
+        addComputePass(frameGraph, "fluid_reorder_copyback" + suffix, "fluid_reorder_copyback.comp")
+            .storageBufferRead(12, frameGraph.buffer(m_sortedPositions), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageBufferRead(13, frameGraph.buffer(m_sortedVelocities), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageBufferRead(14, frameGraph.buffer(m_sortedPredicted), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageBufferRead(15, frameGraph.buffer(m_sortedParticleCells), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageBufferWrite(16, frameGraph.buffer(m_particleIds), VK_SHADER_STAGE_COMPUTE_BIT)
+            .storageBufferRead(17, frameGraph.buffer(m_sortedParticleIds), VK_SHADER_STAGE_COMPUTE_BIT)
+            .execute([this, step](PassContext &context) {
+                if (shouldDispatchStep(step))
+                {
+                    context.cmd().dispatch(dispatchGroups(m_particleCount), 1, 1);
+                }
+            });
 
         for (uint32_t iteration = 0; iteration < iterations; ++iteration)
         {
@@ -379,6 +429,7 @@ void FluidSolverGpu::build(FrameGraph &frameGraph)
     // step, and unconditionally: with the sim paused the renderer still needs a populated buffer.
     addComputePass(frameGraph, "fluid_publish", "fluid_publish.comp")
         .pushConstantSize(sizeof(GpuAppearance), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageBufferRead(16, frameGraph.buffer(m_particleIds), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageBufferWrite(10, frameGraph.buffer(m_config.particleBufferResourceName), VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([this](PassContext &context) {
             if (m_particleCount == 0)
@@ -396,12 +447,14 @@ void FluidSolverGpu::build(FrameGraph &frameGraph)
 std::vector<glm::vec3> FluidSolverGpu::readPositions()
 {
     const std::vector<std::byte> bytes = m_resources->readBuffer(m_positions);
+    const std::vector<std::byte> idBytes = m_resources->readBuffer(m_particleIds);
     const auto                  *data  = reinterpret_cast<const glm::vec4 *>(bytes.data());
+    const auto                  *ids   = reinterpret_cast<const uint32_t *>(idBytes.data());
 
     std::vector<glm::vec3> positions(m_particleCount);
     for (uint32_t i = 0; i < m_particleCount; ++i)
     {
-        positions[i] = glm::vec3(data[i]);
+        positions[ids[i]] = glm::vec3(data[i]);
     }
     return positions;
 }
@@ -409,12 +462,14 @@ std::vector<glm::vec3> FluidSolverGpu::readPositions()
 std::vector<glm::vec3> FluidSolverGpu::readVelocities()
 {
     const std::vector<std::byte> bytes = m_resources->readBuffer(m_velocities);
+    const std::vector<std::byte> idBytes = m_resources->readBuffer(m_particleIds);
     const auto                  *data  = reinterpret_cast<const glm::vec4 *>(bytes.data());
+    const auto                  *ids   = reinterpret_cast<const uint32_t *>(idBytes.data());
 
     std::vector<glm::vec3> velocities(m_particleCount);
     for (uint32_t i = 0; i < m_particleCount; ++i)
     {
-        velocities[i] = glm::vec3(data[i]);
+        velocities[ids[i]] = glm::vec3(data[i]);
     }
     return velocities;
 }
@@ -422,8 +477,16 @@ std::vector<glm::vec3> FluidSolverGpu::readVelocities()
 std::vector<float> FluidSolverGpu::readDensities()
 {
     const std::vector<std::byte> bytes = m_resources->readBuffer(m_densities);
+    const std::vector<std::byte> idBytes = m_resources->readBuffer(m_particleIds);
     const auto                  *data  = reinterpret_cast<const float *>(bytes.data());
-    return std::vector<float>(data, data + m_particleCount);
+    const auto                  *ids   = reinterpret_cast<const uint32_t *>(idBytes.data());
+
+    std::vector<float> densities(m_particleCount);
+    for (uint32_t i = 0; i < m_particleCount; ++i)
+    {
+        densities[ids[i]] = data[i];
+    }
+    return densities;
 }
 
 } // namespace lr

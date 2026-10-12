@@ -38,10 +38,6 @@ void main()
 
     squaredGradientSum += dot(gradientSelf, gradientSelf);
 
-    // The walls stand in for the fluid that would otherwise be on the far side of them. No gradient
-    // term: the wall does not move, so it contributes to how compressed the particle is but not to
-    // how the constraint can be relieved.
-    density += boundaryDensity(self);
     densities[i] = density;
 
     float constraint = density / rho0 - 1.0;

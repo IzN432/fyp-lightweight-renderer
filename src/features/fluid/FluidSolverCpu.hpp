@@ -49,13 +49,6 @@ public:
         // Stops a single bad step from throwing a particle clean out of its neighbourhood.
         float maxSpeedInRadiiPerSecond = 20.0f;
 
-        // Density the walls contribute to a particle within smoothingRadius of them, as a fraction
-        // of restDensity at contact, falling to zero at a radius out. A particle beside a wall is
-        // missing half its neighbourhood, so without this its density reads low, its constraint
-        // goes slack, and the over-dense fluid behind it extrudes it up the wall -- the corners
-        // worst of all, where two walls are missing at once.
-        float boundsDensity = 1.0f;
-
         // Buckets in the neighbour-search hash table. The grid itself is unbounded -- cells are
         // only ever reached through the hash -- so this trades memory against how often two
         // distant cells share a bucket and get scanned together. Zero sizes the table from the
@@ -114,10 +107,6 @@ private:
     void computePositionCorrections();
     void resolveBoundaryCollisions();
     void applyViscosity(float deltaTime);
-
-    // Density the walls stand in for at this position, so a particle beside one is not treated as
-    // though it were at a free surface.
-    float boundaryDensity(const glm::vec3 &position) const;
 
     Config m_config;
 

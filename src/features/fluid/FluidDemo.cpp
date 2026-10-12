@@ -117,7 +117,6 @@ void FluidDemo::rebuildSolverConfig()
     solverConfig.solverIterations = std::max(m_config.solverIterations, 0);
     solverConfig.viscosity        = m_config.viscosity;
     solverConfig.boundsFriction   = m_config.boundsFriction;
-    solverConfig.boundsDensity    = m_config.boundsDensity;
     solverConfig.boundsMin        = m_config.boundsMin;
     solverConfig.boundsMax        = m_config.boundsMax;
     m_solver.setConfig(solverConfig);
@@ -234,12 +233,6 @@ void FluidDemo::onGUI()
     // Energy has to leave the system somewhere: with viscosity at zero the positional solve feeds
     // its own corrections back into velocity and a dropped block never settles.
     if (ImGui::DragFloat("Viscosity", &m_config.viscosity, 0.005f, 0.0f, 0.5f, "%.3f"))
-    {
-        rebuildSolverConfig();
-    }
-    // At zero the walls contribute no density, so particles beside one read as free surface and get
-    // extruded up the corners by the denser fluid behind them.
-    if (ImGui::DragFloat("Wall Density", &m_config.boundsDensity, 0.02f, 0.0f, 2.0f, "%.2f"))
     {
         rebuildSolverConfig();
     }

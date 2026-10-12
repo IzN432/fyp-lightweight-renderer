@@ -1,0 +1,23 @@
+#version 450
+
+// Turn the counting sort's index permutation into physical particle locality. Each destination
+// index is one slot in bucket order, so neighbouring slots belong to the same (or nearby) cells.
+// Separate targets are required because the permutation cannot safely be applied in place.
+
+#include "fluid_sim.glslh"
+
+layout(local_size_x = FLUID_WORKGROUP_SIZE) in;
+
+void main()
+{
+    uint destination = gl_GlobalInvocationID.x;
+    if (destination >= particleCount())
+        return;
+
+    uint source = cellParticles[destination];
+    sortedPositions[destination]     = positions[source];
+    sortedVelocities[destination]    = velocities[source];
+    sortedPredicted[destination]     = predicted[source];
+    sortedParticleCells[destination] = particleCells[source];
+    sortedParticleIds[destination]   = particleIds[source];
+}

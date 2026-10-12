@@ -214,11 +214,6 @@ void FluidSolverCpu::computeDensitiesAndLambdas()
         }
         squaredGradientSum += glm::dot(gradientSelf, gradientSelf);
 
-        // The walls stand in for the fluid that would otherwise be on the far side of them. This
-        // has no gradient term: the wall does not move, so it contributes to how compressed the
-        // particle is but not to how the constraint can be relieved.
-        density += boundaryDensity(m_predicted[i]);
-
         m_densities[i] = density;
 
         const float constraint = density / rho0 - 1.0f;
@@ -260,38 +255,6 @@ void FluidSolverCpu::computePositionCorrections()
     {
         m_predicted[i] += m_corrections[i];
     }
-}
-
-float FluidSolverCpu::boundaryDensity(const glm::vec3 &position) const
-{
-    const float h = m_config.smoothingRadius;
-    if (h <= 0.0f || m_config.boundsDensity <= 0.0f)
-    {
-        return 0.0f;
-    }
-
-    // How much of the kernel each wall cuts off. Integrating poly6 over the half space beyond a
-    // plane at distance d gives 0.5 at d = 0, falling to 0 at d = h; 0.5 * (1 - d/h)^3 tracks that
-    // integral to within a couple of percent across the range and costs three multiplies. The 0.5
-    // is not a tuning constant: a flat wall occludes exactly half a neighbourhood at contact.
-    //
-    // Summed per axis, so a corner reads as more enclosed than a flat face -- which is the point,
-    // since a particle in a corner is missing two halves of its neighbourhood, and that is exactly
-    // where the extrusion was worst.
-    float occluded = 0.0f;
-    for (int axis = 0; axis < 3; ++axis)
-    {
-        const float toMin   = position[axis] - m_config.boundsMin[axis];
-        const float toMax   = m_config.boundsMax[axis] - position[axis];
-        const float nearest = std::min(toMin, toMax);
-        if (nearest < h)
-        {
-            const float deficit = 1.0f - std::max(nearest, 0.0f) / h;
-            occluded += 0.5f * deficit * deficit * deficit;
-        }
-    }
-
-    return m_config.boundsDensity * m_config.restDensity * occluded;
 }
 
 void FluidSolverCpu::applyViscosity(float deltaTime)

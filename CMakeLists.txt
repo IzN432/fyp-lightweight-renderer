@@ -345,6 +345,8 @@ add_shaders(lr_fluid_feature
     src/features/fluid/fluid_grid_count.comp
     src/features/fluid/fluid_grid_scan.comp
     src/features/fluid/fluid_grid_scatter.comp
+    src/features/fluid/fluid_reorder.comp
+    src/features/fluid/fluid_reorder_copyback.comp
     src/features/fluid/fluid_density.comp
     src/features/fluid/fluid_correct.comp
     src/features/fluid/fluid_apply.comp
