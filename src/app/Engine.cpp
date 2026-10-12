@@ -34,7 +34,7 @@
 #include "core/scene/Scene.hpp"
 
 #include "features/rigid_body/PhysicsWorld.hpp"
-#include "features/fluid/FluidDemo.hpp"
+#include "features/fluid/FluidSimulation.hpp"
 #include "features/fluid/ScreenSpaceLiquidPass.hpp"
 
 #include <ImGuiFileDialog.h>
@@ -267,48 +267,20 @@ void Engine::run()
     overlayLinesPass.build(viewer.frameGraph());
     overlayLinesPass.setLines({});
 
-    // FluidDemo owns the fixed-step CPU simulation and its controls. The reference billboard path
-    // remains available in ParticleBillboardPass; the editor uses its depth-correct impostors as
-    // input to the smooth screen-space liquid reconstruction.
-    lr::FluidDemo fluidDemo({
-        .particleSpacing = 0.1f,
-        // Screen-space reconstruction needs neighbouring impostors to overlap; otherwise a
-        // bilateral filter quite correctly preserves the empty pixels between particles.
-        .particleRenderScale = 1.4f,
-        .fixedDeltaTime  = 1.0f / 120.0f,
-        .maxStepsPerFrame = 12,
-        .startPaused     = false,
-    });
-
-    // The smoothing kernel has to span roughly a particle diameter to fuse neighbouring
-    // impostors, so derive it from the simulation's particle size instead of fixing a pixel count.
-    const float fluidParticleRadius =
-        fluidDemo.config().particleSpacing * fluidDemo.config().particleRenderScale * 0.5f;
+    // The solver publishes renderer-ready records into a device-local buffer. The liquid pass
+    // reads that same buffer, so solved positions never make a per-frame round trip through the CPU.
+    lr::FluidSimulation fluidSimulation({}, viewer.resources());
 
     lr::ScreenSpaceLiquidPass liquidPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
-        .maxParticles = 65536,
-        .smoothingRadius = lr::screen_space_liquid::smoothingRadiusFromParticle(fluidParticleRadius),
-        .liquidColor = fluidDemo.config().particleColor,
+        .particleBufferResourceName = fluidSimulation.particleBufferName(),
+        .maxParticles               = fluidSimulation.capacity(),
+        .ownsParticleBuffer         = false,
+        .smoothingRadius = lr::screen_space_liquid::smoothingRadiusFromParticle(fluidSimulation.particleRadius()),
+        .liquidColor     = fluidSimulation.particleColor(),
     }, viewer.resources());
-    std::vector<lr::ParticleGpuData> fluidParticleUpload;
-    const auto updateFluidParticleUpload = [&] {
-        const auto &fluidConfig = fluidDemo.config();
-        const float radius = fluidConfig.particleSpacing * fluidConfig.particleRenderScale * 0.5f;
-        liquidPass.setSmoothingRadius(lr::screen_space_liquid::smoothingRadiusFromParticle(radius));
-        const auto &positions = fluidDemo.solver().positions();
-
-        fluidParticleUpload.clear();
-        fluidParticleUpload.reserve(positions.size());
-        for (const glm::vec3 &position : positions)
-        {
-            fluidParticleUpload.push_back(lr::makeParticleGpuData(
-                position, radius, fluidConfig.particleColor, lr::ParticleType::Liquid));
-        }
-        liquidPass.setParticles(fluidParticleUpload);
-        liquidPass.setLiquidColor(fluidConfig.particleColor);
-    };
-    updateFluidParticleUpload();
+    liquidPass.setParticleCount(fluidSimulation.particleCount());
+    fluidSimulation.build(viewer.frameGraph());
     liquidPass.build(viewer.frameGraph());
 
     // As with the heatmap pass: one empty draw entry until EditorRenderBridge points it at a mesh.
@@ -527,10 +499,11 @@ void Engine::run()
         physicsWorld.onGUI();
         ImGui::End();
 
-        ImGui::SetNextWindowPos(ImVec2(topLeft.x, topLeft.y + panelSize.y), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(panelSize, ImGuiCond_FirstUseEver);
+        // Place the panel once per run even if an older imgui.ini predates the fluid UI.
+        ImGui::SetNextWindowPos(ImVec2(topLeft.x, topLeft.y + panelSize.y), ImGuiCond_Once);
+        ImGui::SetNextWindowSize(panelSize, ImGuiCond_Once);
         ImGui::Begin("Fluid");
-        fluidDemo.onGUI();
+        fluidSimulation.onGUI();
         ImGui::End();
 
         ImGui::SetNextWindowPos(bottomLeft, ImGuiCond_FirstUseEver);
@@ -621,8 +594,11 @@ void Engine::run()
     appConnections.push_back(viewer.onUpdate([&](float dt, VkExtent2D) {
         sceneManager.animationSystem().update(dt);
         physicsWorld.update(dt);
-        fluidDemo.update(dt);
-        updateFluidParticleUpload();
+        fluidSimulation.update(dt);
+        liquidPass.setParticleCount(fluidSimulation.particleCount());
+        liquidPass.setSmoothingRadius(
+            lr::screen_space_liquid::smoothingRadiusFromParticle(fluidSimulation.particleRadius()));
+        liquidPass.setLiquidColor(fluidSimulation.particleColor());
     }));
 
     appConnections.push_back(viewer.onUpdate([&](float dt, VkExtent2D extent) {
