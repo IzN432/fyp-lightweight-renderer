@@ -1,0 +1,67 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) uniform sampler2D sourceDepth;
+layout(set = 0, binding = 1) uniform LiquidParams
+{
+    vec4 absorptionAndRefraction;
+    vec4 filterAndMaterial;
+    vec4 tintAndFresnel;
+    ivec4 filterRadius;
+} params;
+layout(set = 0, binding = 2, r32f) uniform writeonly image2D outputDepth;
+
+layout(push_constant) uniform BlurDirection
+{
+    ivec2 direction;
+} pc;
+
+// Run twice, once per axis, from ScreenSpaceLiquidPass. A bilateral filter is not actually
+// separable: the range weight makes the kernel depend on the centre sample, so the two-pass form
+// is an approximation rather than an exact factorisation of the 2D kernel. The second pass
+// weights against already-filtered depths, which lets a strong silhouette bleed along the second
+// axis. It is kept because the exact 2D kernel costs (2r+1)^2 taps per pixel instead of 2(2r+1),
+// and the error only shows as slight softening at edges that the surface shading largely hides.
+void main()
+{
+    ivec2 size = textureSize(sourceDepth, 0);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, size)))
+        return;
+
+    float center = texelFetch(sourceDepth, pixel, 0).r;
+    if (center <= 0.0)
+    {
+        imageStore(outputDepth, pixel, vec4(0.0));
+        return;
+    }
+
+    float weightedDepth = 0.0;
+    float totalWeight = 0.0;
+    float spatialSigma = params.filterAndMaterial.x;
+    float depthSigma = params.filterAndMaterial.y;
+    int radius = params.filterRadius.x;
+
+    for (int i = -radius; i <= radius; ++i)
+    {
+        ivec2 samplePixel = clamp(pixel + pc.direction * i, ivec2(0), size - 1);
+        float sampleDepth = texelFetch(sourceDepth, samplePixel, 0).r;
+        if (sampleDepth <= 0.0)
+            continue;
+
+        float spatialWeight = exp(-0.5 * float(i * i) / (spatialSigma * spatialSigma));
+        float delta = sampleDepth - center;
+        // depthSigma is a fraction of the centre distance rather than an absolute length. With a
+        // fixed metre threshold the same body of liquid keeps its silhouette up close but, far
+        // away, every neighbour falls well inside the threshold and the bilateral degenerates
+        // into a plain Gaussian that smears the edge into the background.
+        float depthScale = depthSigma * center;
+        float rangeWeight = exp(-0.5 * delta * delta / max(depthScale * depthScale, 1e-12));
+        float weight = spatialWeight * rangeWeight;
+        weightedDepth += sampleDepth * weight;
+        totalWeight += weight;
+    }
+
+    imageStore(outputDepth, pixel, vec4(totalWeight > 0.0 ? weightedDepth / totalWeight : center));
+}

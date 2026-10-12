@@ -325,6 +325,7 @@ target_link_libraries(lr_linear_blend_skinning_feature PUBLIC lr_core glm::glm)
 add_library(lr_fluid_feature STATIC
     src/features/fluid/FluidSolverCpu.cpp
     src/features/fluid/ParticleBillboardPass.cpp
+    src/features/fluid/ScreenSpaceLiquidPass.cpp
 )
 target_include_directories(lr_fluid_feature PUBLIC src)
 target_link_libraries(lr_fluid_feature PUBLIC lr_core glm::glm)
@@ -332,6 +333,12 @@ target_link_libraries(lr_fluid_feature PUBLIC lr_core glm::glm)
 add_shaders(lr_fluid_feature
     src/features/fluid/particle_billboard.vert
     src/features/fluid/particle_billboard.frag
+    src/features/fluid/fluid_surface.vert
+    src/features/fluid/fluid_depth.frag
+    src/features/fluid/fluid_bilateral.comp
+    src/features/fluid/fluid_normal.comp
+    src/features/fluid/fluid_thickness.frag
+    src/features/fluid/fluid_composite.frag
 )
 
 # Simulation controller and ImGui controls, shared by the editor and standalone fluid viewer.
@@ -662,6 +669,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(particle_billboard_tests PRIVATE lr_fluid_feature)
     add_test(NAME fluid.particle_billboard COMMAND particle_billboard_tests)
+
+    add_executable(screen_space_liquid_tests
+        tests/fluid/ScreenSpaceLiquidTests.cpp
+    )
+    target_link_libraries(screen_space_liquid_tests PRIVATE lr_fluid_feature)
+    add_test(NAME fluid.screen_space_liquid COMMAND screen_space_liquid_tests)
 
     add_executable(rigid_body_collider_tests
         tests/rigid_body/ColliderTests.cpp

@@ -1,0 +1,69 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) uniform CameraUbo
+{
+    mat4 view;
+    mat4 proj;
+    mat4 viewProj;
+    mat4 invView;
+    mat4 invProj;
+    vec4 cameraPosition;
+} cameraUbo;
+layout(set = 0, binding = 1) uniform sampler2D smoothDepth;
+layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D normalOut;
+
+vec3 viewPosition(ivec2 pixel, float linearDepth, ivec2 size)
+{
+    vec2 uv = (vec2(pixel) + vec2(0.5)) / vec2(size);
+    vec2 ndc = uv * 2.0 - 1.0;
+    vec4 farPoint = cameraUbo.invProj * vec4(ndc, 1.0, 1.0);
+    vec3 ray = farPoint.xyz / farPoint.w;
+    return ray * (linearDepth / max(-ray.z, 1e-6));
+}
+
+void main()
+{
+    ivec2 size = textureSize(smoothDepth, 0);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, size)))
+        return;
+
+    float depth = texelFetch(smoothDepth, pixel, 0).r;
+    if (depth <= 0.0)
+    {
+        imageStore(normalOut, pixel, vec4(0.0));
+        return;
+    }
+
+    ivec2 leftPixel  = max(pixel - ivec2(1, 0), ivec2(0));
+    ivec2 rightPixel = min(pixel + ivec2(1, 0), size - 1);
+    ivec2 downPixel  = max(pixel - ivec2(0, 1), ivec2(0));
+    ivec2 upPixel    = min(pixel + ivec2(0, 1), size - 1);
+    float leftDepth  = texelFetch(smoothDepth, leftPixel, 0).r;
+    float rightDepth = texelFetch(smoothDepth, rightPixel, 0).r;
+    float downDepth  = texelFetch(smoothDepth, downPixel, 0).r;
+    float upDepth    = texelFetch(smoothDepth, upPixel, 0).r;
+
+    vec3 center = viewPosition(pixel, depth, size);
+    vec3 dxForward = rightDepth > 0.0 ? viewPosition(rightPixel, rightDepth, size) - center : vec3(1.0, 0.0, 0.0);
+    vec3 dxBackward = leftDepth > 0.0 ? center - viewPosition(leftPixel, leftDepth, size) : dxForward;
+    vec3 dyForward = upDepth > 0.0 ? viewPosition(upPixel, upDepth, size) - center : vec3(0.0, 1.0, 0.0);
+    vec3 dyBackward = downDepth > 0.0 ? center - viewPosition(downPixel, downDepth, size) : dyForward;
+
+    vec3 dx = abs(rightDepth - depth) < abs(depth - leftDepth) ? dxForward : dxBackward;
+    vec3 dy = abs(upDepth - depth) < abs(depth - downDepth) ? dyForward : dyBackward;
+
+    // cross() collapses to zero when the two tangents end up parallel, which happens on a
+    // perfectly flat depth region that falls back to the axis defaults and at clamped border
+    // pixels where both taps resolve to the same texel. normalize() would return NaN there, and
+    // the alpha-based validity test downstream cannot reject it, so fall back to facing the
+    // camera instead.
+    vec3 tangentCross = cross(dx, dy);
+    float crossLength = length(tangentCross);
+    vec3 normal = crossLength > 1e-12 ? tangentCross / crossLength : vec3(0.0, 0.0, 1.0);
+    if (normal.z < 0.0)
+        normal = -normal;
+    imageStore(normalOut, pixel, vec4(normal, 1.0));
+}

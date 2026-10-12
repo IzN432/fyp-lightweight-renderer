@@ -35,7 +35,7 @@
 
 #include "features/rigid_body/PhysicsWorld.hpp"
 #include "features/fluid/FluidDemo.hpp"
-#include "features/fluid/ParticleBillboardPass.hpp"
+#include "features/fluid/ScreenSpaceLiquidPass.hpp"
 
 #include <ImGuiFileDialog.h>
 #include <imgui.h>
@@ -267,18 +267,23 @@ void Engine::run()
     overlayLinesPass.build(viewer.frameGraph());
     overlayLinesPass.setLines({});
 
-    // FluidDemo owns the fixed-step CPU simulation and its controls. Rendering stays on the newer
-    // instanced billboard path rather than FluidDemo's original one-draw-per-sphere overlay path.
+    // FluidDemo owns the fixed-step CPU simulation and its controls. The reference billboard path
+    // remains available in ParticleBillboardPass; the editor uses its depth-correct impostors as
+    // input to the smooth screen-space liquid reconstruction.
     lr::FluidDemo fluidDemo({
         .particleSpacing = 0.1f,
+        // Screen-space reconstruction needs neighbouring impostors to overlap; otherwise a
+        // bilateral filter quite correctly preserves the empty pixels between particles.
+        .particleRenderScale = 1.4f,
         .fixedDeltaTime  = 1.0f / 120.0f,
         .maxStepsPerFrame = 12,
         .startPaused     = false,
     });
 
-    lr::ParticleBillboardPass particleBillboards({
+    lr::ScreenSpaceLiquidPass liquidPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
         .maxParticles = 65536,
+        .liquidColor = fluidDemo.config().particleColor,
     }, viewer.resources());
     std::vector<lr::ParticleGpuData> fluidParticleUpload;
     const auto updateFluidParticleUpload = [&] {
@@ -293,10 +298,11 @@ void Engine::run()
             fluidParticleUpload.push_back(lr::makeParticleGpuData(
                 position, radius, fluidConfig.particleColor, lr::ParticleType::Liquid));
         }
-        particleBillboards.setParticles(fluidParticleUpload);
+        liquidPass.setParticles(fluidParticleUpload);
+        liquidPass.setLiquidColor(fluidConfig.particleColor);
     };
     updateFluidParticleUpload();
-    particleBillboards.build(viewer.frameGraph());
+    liquidPass.build(viewer.frameGraph());
 
     // As with the heatmap pass: one empty draw entry until EditorRenderBridge points it at a mesh.
     lr::OverlayPointsPass overlayPointsPass({
