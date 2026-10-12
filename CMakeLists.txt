@@ -352,6 +352,7 @@ if(LR_ENABLE_CUDA)
         src/features/eulerian_particle/CudaVolume.cpp
         src/features/eulerian_particle/CudaVolumeKernels.cu
         src/features/eulerian_particle/SmokeRenderPass.cpp
+        src/features/eulerian_particle/SmokeSimulation.cpp
         src/features/eulerian_particle/SmokeSolver.cpp
     )
     target_include_directories(lr_eulerian_particle_feature PUBLIC src)
