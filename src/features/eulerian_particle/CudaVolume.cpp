@@ -4,10 +4,13 @@
 #include "core/framegraph/ResourceRegistry.hpp"
 #include "core/vulkan/VulkanContext.hpp"
 
+#include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
 
+#include <cstddef>
 #include <cstring>
 #include <stdexcept>
+#include <vector>
 #include <utility>
 
 #if defined(_WIN32)
@@ -52,7 +55,15 @@ cudaChannelFormatDesc channelDescription(VkFormat format)
 {
     if (format == VK_FORMAT_R32_SFLOAT)
         return cudaCreateChannelDesc(32, 0, 0, 0, cudaChannelFormatKindFloat);
-    throw std::invalid_argument("CudaVolume: only VK_FORMAT_R32_SFLOAT is supported by the initial density surface");
+    if (format == VK_FORMAT_R32G32B32A32_SFLOAT)
+        return cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
+    throw std::invalid_argument(
+        "CudaVolume: only VK_FORMAT_R32_SFLOAT and VK_FORMAT_R32G32B32A32_SFLOAT volumes can be imported");
+}
+
+int channelCount(VkFormat format)
+{
+    return format == VK_FORMAT_R32G32B32A32_SFLOAT ? 4 : 1;
 }
 
 } // namespace
@@ -65,6 +76,7 @@ struct CudaVolume::Impl
     cudaArray_t               array = nullptr;
     cudaSurfaceObject_t       surface = 0;
     cudaExtent                extent{};
+    int                       channels = 1;
 
     ~Impl()
     {
@@ -150,22 +162,97 @@ CudaVolume::CudaVolume(ResourceRegistry &resources, const VulkanContext &context
     surfaceDesc.resType         = cudaResourceTypeArray;
     surfaceDesc.res.array.array = m_impl->array;
     checkCuda(cudaCreateSurfaceObject(&m_impl->surface, &surfaceDesc), "cudaCreateSurfaceObject");
-    m_impl->extent = arrayDesc.extent;
+    m_impl->extent   = arrayDesc.extent;
+    m_impl->channels = channelCount(image->format);
 }
 
 CudaVolume::~CudaVolume() = default;
 CudaVolume::CudaVolume(CudaVolume &&) noexcept = default;
 CudaVolume &CudaVolume::operator=(CudaVolume &&) noexcept = default;
 
+namespace
+{
+void requireLive(const void *impl)
+{
+    if (impl == nullptr)
+        throw std::logic_error("CudaVolume: cannot use a moved-from volume");
+}
+} // namespace
+
 void CudaVolume::writeTestPattern(float timeSeconds)
 {
-    if (!m_impl)
-        throw std::logic_error("CudaVolume: cannot use a moved-from volume");
-    m_resources->prepareImageForExternalWrite(m_resourceName);
+    requireLive(m_impl.get());
+    prepareForExternalWrite();
     checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
     checkCuda(launchDensityTestPattern(m_impl->surface, m_impl->extent, timeSeconds, nullptr),
               "launchDensityTestPattern");
     checkCuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+}
+
+void CudaVolume::clear()
+{
+    requireLive(m_impl.get());
+    prepareForExternalWrite();
+    checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
+    checkCuda(launchClearVolume(m_impl->surface, m_impl->extent, m_impl->channels, nullptr), "launchClearVolume");
+    checkCuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+}
+
+void CudaVolume::synchronize() const
+{
+    requireLive(m_impl.get());
+    checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
+    checkCuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+}
+
+void CudaVolume::prepareForExternalWrite()
+{
+    requireLive(m_impl.get());
+    m_resources->prepareImageForExternalWrite(m_resourceName);
+}
+
+cudaSurfaceObject_t CudaVolume::surface() const
+{
+    requireLive(m_impl.get());
+    return m_impl->surface;
+}
+
+cudaExtent CudaVolume::extent() const
+{
+    requireLive(m_impl.get());
+    return m_impl->extent;
+}
+
+int CudaVolume::channels() const
+{
+    requireLive(m_impl.get());
+    return m_impl->channels;
+}
+
+std::vector<float> CudaVolume::download() const
+{
+    requireLive(m_impl.get());
+    checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
+    checkCuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+
+    const std::size_t cells = m_impl->extent.width * m_impl->extent.height * m_impl->extent.depth;
+    std::vector<float> host(cells * static_cast<std::size_t>(m_impl->channels));
+
+    cudaMemcpy3DParms copy{};
+    copy.srcArray = m_impl->array;
+    copy.dstPtr   = make_cudaPitchedPtr(host.data(),
+                                        m_impl->extent.width * sizeof(float) * static_cast<std::size_t>(m_impl->channels),
+                                        m_impl->extent.width, m_impl->extent.height);
+    copy.extent   = m_impl->extent;
+    copy.kind     = cudaMemcpyDeviceToHost;
+    checkCuda(cudaMemcpy3D(&copy), "cudaMemcpy3D");
+    return host;
+}
+
+int CudaVolume::device() const
+{
+    requireLive(m_impl.get());
+    return m_impl->device;
 }
 
 } // namespace lr::eulerian

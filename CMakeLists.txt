@@ -350,6 +350,7 @@ if(LR_ENABLE_CUDA)
     add_library(lr_eulerian_particle_feature STATIC
         src/features/eulerian_particle/CudaVolume.cpp
         src/features/eulerian_particle/CudaVolumeKernels.cu
+        src/features/eulerian_particle/SmokeSolver.cpp
     )
     target_include_directories(lr_eulerian_particle_feature PUBLIC src)
     target_link_libraries(lr_eulerian_particle_feature PUBLIC lr_core CUDA::cudart)
@@ -552,6 +553,9 @@ if(BUILD_TESTING)
     if(LR_ENABLE_CUDA)
         add_executable(cuda_volume_smoke EXCLUDE_FROM_ALL tests/eulerian_particle/CudaVolumeSmoke.cpp)
         target_link_libraries(cuda_volume_smoke PRIVATE lr_eulerian_particle_feature)
+
+        add_executable(smoke_solver_smoke EXCLUDE_FROM_ALL tests/eulerian_particle/SmokeSolverSmoke.cpp)
+        target_link_libraries(smoke_solver_smoke PRIVATE lr_eulerian_particle_feature)
     endif()
 
     add_executable(editor_state_controller_tests
