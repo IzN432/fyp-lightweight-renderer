@@ -31,6 +31,11 @@ public:
 
     void build(FrameGraph &frameGraph);
     void setPositions(std::span<const glm::vec3> positions);
+    void setStyle(float radius, const glm::vec3 &color)
+    {
+        m_config.radius = radius;
+        m_config.color  = color;
+    }
 
     uint32_t particleCount() const { return m_particleCount; }
 
