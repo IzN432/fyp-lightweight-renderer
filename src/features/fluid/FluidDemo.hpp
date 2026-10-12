@@ -5,6 +5,10 @@
 
 #include <glm/glm.hpp>
 
+#include <condition_variable>
+#include <exception>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 namespace lr
@@ -51,11 +55,12 @@ public:
     };
 
     explicit FluidDemo(Config config);
+    ~FluidDemo();
 
     // Rebuilds the particle block and clears velocities.
     void reset();
 
-    // Advances the solver by whole fixed steps covering frameDeltaTime.
+    // Polls the last worker batch and queues whole fixed steps without blocking the frame.
     void update(float frameDeltaTime);
     void stepOnce();
 
@@ -65,11 +70,12 @@ public:
     bool paused() const { return m_paused; }
     void setPaused(bool paused) { m_paused = paused; }
 
-    std::size_t particleCount() const { return m_solver.particleCount(); }
+    std::size_t particleCount() const { return m_positions.size(); }
     // Mean density over rest density. 1.0 means converged; well above means overcompressed.
     float meanDensityRatio() const;
 
-    const FluidSolverCpu &solver() const { return m_solver; }
+    // Last completed worker result. Rendering never touches the live solver.
+    const std::vector<glm::vec3> &positions() const { return m_positions; }
     const Config         &config() const { return m_config; }
 
     // Draws controls only; the caller owns the containing ImGui window.
@@ -77,11 +83,27 @@ public:
 
 private:
     void rebuildSolverConfig();
+    bool collectUpdate(bool wait);
+    void dispatchSteps(int steps, float deltaTime);
+    void refreshSnapshot();
+    void runWorker(std::stop_token stop);
 
-    Config         m_config;
-    FluidSolverCpu m_solver;
-    bool           m_paused;
-    float          m_stepAccumulator = 0.0f;
+    Config                 m_config;
+    FluidSolverCpu         m_solver;
+    std::vector<glm::vec3> m_positions;
+    float                  m_meanDensityRatio = 0.0f;
+    bool                   m_paused;
+    float                  m_stepAccumulator = 0.0f;
+
+    std::mutex              m_workerMutex;
+    std::condition_variable m_workAvailable;
+    std::condition_variable m_workerIdle;
+    int                     m_pendingSteps     = 0;
+    float                   m_pendingDeltaTime = 0.0f;
+    bool                    m_workerBusy       = false;
+    bool                    m_snapshotReady    = false;
+    std::exception_ptr      m_workerError;
+    std::jthread            m_worker;
 };
 
 } // namespace lr

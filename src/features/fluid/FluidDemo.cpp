@@ -11,10 +11,99 @@ namespace lr
 FluidDemo::FluidDemo(Config config) : m_config(config), m_paused(config.startPaused)
 {
     reset();
+    m_worker = std::jthread([this](std::stop_token stop) { runWorker(stop); });
+}
+
+FluidDemo::~FluidDemo()
+{
+    m_worker.request_stop();
+    m_workAvailable.notify_one();
+    if (m_worker.joinable()) m_worker.join();
+}
+
+bool FluidDemo::collectUpdate(bool wait)
+{
+    std::unique_lock lock(m_workerMutex);
+    if (wait)
+    {
+        m_workerIdle.wait(lock, [this] { return m_pendingSteps == 0 && !m_workerBusy; });
+    } else if (m_pendingSteps > 0 || m_workerBusy)
+    {
+        return false;
+    }
+
+    const bool         snapshotReady = m_snapshotReady;
+    std::exception_ptr error         = m_workerError;
+    m_snapshotReady                   = false;
+    m_workerError                     = nullptr;
+    lock.unlock();
+
+    if (error) std::rethrow_exception(error);
+    if (snapshotReady) refreshSnapshot();
+    return true;
+}
+
+void FluidDemo::dispatchSteps(int steps, float deltaTime)
+{
+    {
+        std::lock_guard lock(m_workerMutex);
+        m_pendingSteps     = steps;
+        m_pendingDeltaTime = deltaTime;
+    }
+    m_workAvailable.notify_one();
+}
+
+void FluidDemo::runWorker(std::stop_token stop)
+{
+    while (!stop.stop_requested())
+    {
+        int   steps;
+        float deltaTime;
+        {
+            std::unique_lock lock(m_workerMutex);
+            m_workAvailable.wait(lock, [&] { return stop.stop_requested() || m_pendingSteps > 0; });
+            if (stop.stop_requested()) return;
+            steps              = m_pendingSteps;
+            deltaTime          = m_pendingDeltaTime;
+            m_pendingSteps     = 0;
+            m_workerBusy       = true;
+        }
+
+        try
+        {
+            for (int i = 0; i < steps; ++i) m_solver.step(deltaTime);
+        } catch (...)
+        {
+            std::lock_guard lock(m_workerMutex);
+            m_workerError = std::current_exception();
+        }
+
+        {
+            std::lock_guard lock(m_workerMutex);
+            m_workerBusy    = false;
+            m_snapshotReady = true;
+        }
+        m_workerIdle.notify_all();
+    }
+}
+
+void FluidDemo::refreshSnapshot()
+{
+    m_positions = m_solver.positions();
+    const auto &densities = m_solver.densities();
+    if (densities.empty() || m_solver.config().restDensity <= 0.0f)
+    {
+        m_meanDensityRatio = 0.0f;
+        return;
+    }
+    double total = 0.0;
+    for (const float density : densities) total += density;
+    m_meanDensityRatio = static_cast<float>(total / densities.size()) / m_solver.config().restDensity;
 }
 
 void FluidDemo::rebuildSolverConfig()
 {
+    collectUpdate(true);
     const float spacing = std::max(m_config.particleSpacing, 1e-4f);
     const float radius  = spacing * std::max(m_config.smoothingRadiusScale, 1.0f);
 
@@ -32,6 +121,7 @@ void FluidDemo::rebuildSolverConfig()
     solverConfig.boundsMin        = m_config.boundsMin;
     solverConfig.boundsMax        = m_config.boundsMax;
     m_solver.setConfig(solverConfig);
+    refreshSnapshot();
 }
 
 void FluidDemo::reset()
@@ -48,15 +138,19 @@ void FluidDemo::reset()
     m_solver.setParticles(FluidSolverCpu::makeParticleBlock(min, max, spacing));
     m_stepAccumulator = 0.0f;
     m_paused          = m_config.startPaused;
+    refreshSnapshot();
 }
 
 void FluidDemo::stepOnce()
 {
-    m_solver.step(std::max(m_config.fixedDeltaTime, 1e-5f));
+    collectUpdate(true);
+    const float step = std::max(m_config.fixedDeltaTime, 1e-5f);
+    dispatchSteps(1, step);
 }
 
 void FluidDemo::update(float frameDeltaTime)
 {
+    const bool workerReady = collectUpdate(false);
     if (m_paused || frameDeltaTime <= 0.0f)
     {
         return;
@@ -64,12 +158,12 @@ void FluidDemo::update(float frameDeltaTime)
 
     const float step = std::max(m_config.fixedDeltaTime, 1e-5f);
     m_stepAccumulator += frameDeltaTime;
+    if (!workerReady) return;
 
     const int maxSteps = std::max(m_config.maxStepsPerFrame, 1);
     int       steps    = 0;
     while (m_stepAccumulator >= step && steps < maxSteps)
     {
-        stepOnce();
         m_stepAccumulator -= step;
         ++steps;
     }
@@ -79,33 +173,25 @@ void FluidDemo::update(float frameDeltaTime)
     {
         m_stepAccumulator = 0.0f;
     }
+    if (steps > 0)
+    {
+        dispatchSteps(steps, step);
+    }
 }
 
 float FluidDemo::meanDensityRatio() const
 {
-    const auto &densities = m_solver.densities();
-    if (densities.empty() || m_solver.config().restDensity <= 0.0f)
-    {
-        return 0.0f;
-    }
-    double total = 0.0;
-    for (const float density : densities)
-    {
-        total += density;
-    }
-    return static_cast<float>(total / densities.size()) / m_solver.config().restDensity;
+    return m_meanDensityRatio;
 }
 
 std::vector<OverlayInstance> FluidDemo::buildOverlayInstances() const
 {
-    const auto &positions = m_solver.positions();
-
     std::vector<OverlayInstance> instances;
-    instances.reserve(positions.size() + 1);
+    instances.reserve(m_positions.size() + 1);
 
     // OverlayMesh::sphere() is a unit-radius sphere, so scale by the radius rather than diameter.
     const float radius = m_config.particleSpacing * m_config.particleRenderScale * 0.5f;
-    for (const glm::vec3 &position : positions)
+    for (const glm::vec3 &position : m_positions)
     {
         instances.push_back(OverlayInstance{
             .primitive = OverlayPrimitive::Sphere,
