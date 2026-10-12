@@ -170,6 +170,66 @@ uint32_t VulkanContext::findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags 
     throw std::runtime_error("VulkanContext: no suitable memory type found");
 }
 
+void VulkanContext::checkExternalImageSupport(const VkImageCreateInfo           &imageCI,
+                                              VkExternalMemoryHandleTypeFlagBits handleType) const
+{
+    // vkGetPhysicalDeviceImageFormatProperties2 and VkPhysicalDeviceExternalImageFormatInfo are
+    // core in 1.1; on 1.0 they would need VK_KHR_external_memory_capabilities on the instance.
+    if (m_apiVersion < VK_API_VERSION_1_1)
+    {
+        throw std::runtime_error("VulkanContext: external memory images require Vulkan 1.1 or newer");
+    }
+
+    VkPhysicalDeviceExternalImageFormatInfo externalInfo{};
+    externalInfo.sType      = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO;
+    externalInfo.handleType = handleType;
+
+    VkPhysicalDeviceImageFormatInfo2 formatInfo{};
+    formatInfo.sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2;
+    formatInfo.pNext  = &externalInfo;
+    formatInfo.format = imageCI.format;
+    formatInfo.type   = imageCI.imageType;
+    formatInfo.tiling = imageCI.tiling;
+    formatInfo.usage  = imageCI.usage;
+    formatInfo.flags  = imageCI.flags;
+
+    VkExternalImageFormatProperties externalProps{};
+    externalProps.sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES;
+
+    VkImageFormatProperties2 props{};
+    props.sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2;
+    props.pNext = &externalProps;
+
+    // Names the rejected combination, since "vkCreateImage failed" alone does not say which of
+    // format, image type, usage or handle type the driver refused.
+    const auto describe = [&imageCI, handleType] {
+        return std::string("image (format=") + std::to_string(static_cast<int>(imageCI.format)) +
+               ", type=" + std::to_string(static_cast<int>(imageCI.imageType)) +
+               ", usage=" + std::to_string(imageCI.usage) + ", flags=" + std::to_string(imageCI.flags) +
+               ", handleType=" + std::to_string(static_cast<uint32_t>(handleType)) + ")";
+    };
+
+    const VkResult result = vkGetPhysicalDeviceImageFormatProperties2(m_physicalDevice, &formatInfo, &props);
+    if (result != VK_SUCCESS)
+    {
+        throw std::runtime_error("VulkanContext: no external-memory support for " + describe() + ": " +
+                                 std::string(vkResultName(result)));
+    }
+
+    const VkExternalMemoryFeatureFlags features = externalProps.externalMemoryProperties.externalMemoryFeatures;
+    if ((features & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) == 0)
+    {
+        throw std::runtime_error("VulkanContext: handle type is not exportable for " + describe());
+    }
+
+    // A driver that demands a dedicated allocation is already satisfied: createImage always chains
+    // VkMemoryDedicatedAllocateInfo for exported images, which CUDA's import requires anyway.
+    if ((features & VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT) != 0)
+    {
+        spdlog::debug("VulkanContext: dedicated allocation required for {}", describe());
+    }
+}
+
 VkFormat VulkanContext::findSupportedFormat(const std::vector<VkFormat> &candidates, VkImageTiling tiling,
                                             VkFormatFeatureFlags features) const
 {

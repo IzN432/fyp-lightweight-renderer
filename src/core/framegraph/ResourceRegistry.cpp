@@ -161,6 +161,41 @@ void ResourceRegistry::registerPersistentImage(const std::string &name, VkFormat
     spdlog::debug("ResourceRegistry: persistent image '{}' ({}x{})", name, extent.width, extent.height);
 }
 
+void ResourceRegistry::registerPersistentVolume(const std::string &name, VkFormat format, VkImageUsageFlags usage,
+                                                VkExtent3D extent, bool exportMemory, VkImageAspectFlags aspect)
+{
+    if (m_images.count(name))
+        throw std::runtime_error("ResourceRegistry: duplicate image '" + name + "'");
+    if (extent.width == 0 || extent.height == 0 || extent.depth == 0)
+        throw std::invalid_argument("ResourceRegistry: volume dimensions must be non-zero");
+
+    ImageEntry entry{};
+    entry.format     = format;
+    entry.usage      = usage;
+    entry.aspect     = aspect;
+    entry.extentSpec = ExtentSpec::absolute(extent.width, extent.height);
+    entry.extent     = {extent.width, extent.height};
+    entry.depth      = extent.depth;
+    entry.persistent = true;
+    entry.imageType  = VK_IMAGE_TYPE_3D;
+    entry.viewType   = VK_IMAGE_VIEW_TYPE_3D;
+    if (exportMemory)
+    {
+#if defined(_WIN32)
+        entry.externalMemoryHandleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#elif defined(__linux__)
+        entry.externalMemoryHandleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+#else
+        throw std::runtime_error("ResourceRegistry: external volume memory is unsupported on this platform");
+#endif
+    }
+
+    allocateImageEntry(name, entry);
+    m_images.emplace(name, std::move(entry));
+    spdlog::debug("ResourceRegistry: persistent volume '{}' ({}x{}x{}, exportable={})", name, extent.width,
+                  extent.height, extent.depth, exportMemory);
+}
+
 void ResourceRegistry::registerPersistentImageArray(const std::string &name, VkFormat format,
                                                      VkImageUsageFlags usage, VkExtent2D extent, uint32_t layers,
                                                      VkImageAspectFlags aspect)
@@ -539,6 +574,15 @@ void ResourceRegistry::rebuild(VkExtent2D newExtent)
             continue;
         }
 
+        // Recreating an exported image would invalidate the handle CUDA already imported, and
+        // there is no channel to signal that. Exported volumes are registered persistent with an
+        // absolute extent so they never reach here; fail loudly if that ever stops holding.
+        if (entry.externalMemoryHandleType != 0)
+        {
+            throw std::logic_error("ResourceRegistry: cannot resize exported image '" + name +
+                                   "' — its external handle is already imported");
+        }
+
         m_allocator.destroy(entry.image);
         entry.extent        = resolved;
         entry.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -549,7 +593,7 @@ void ResourceRegistry::rebuild(VkExtent2D newExtent)
 
 void ResourceRegistry::allocateImageEntry(const std::string &name, ImageEntry &entry)
 {
-    VkExtent3D extent3d{entry.extent.width, entry.extent.height, 1};
+    VkExtent3D extent3d{entry.extent.width, entry.extent.height, entry.depth};
     entry.image = m_allocator.createImage(ImageConfig{
         .extent        = extent3d,
         .format        = entry.format,
@@ -560,6 +604,8 @@ void ResourceRegistry::allocateImageEntry(const std::string &name, ImageEntry &e
         .flags         = entry.imageFlags,
         .viewType      = entry.viewType,
         .initialLayout = entry.initialLayout,
+        .imageType     = entry.imageType,
+        .externalMemoryHandleType = entry.externalMemoryHandleType,
     });
     if (entry.hasMipViews)
     {
@@ -1230,6 +1276,44 @@ void ResourceRegistry::setImageLayout(const std::string &name, VkImageLayout lay
     {
         it->second.currentLayout = layout;
     }
+}
+
+void ResourceRegistry::prepareImageForExternalWrite(const std::string &name)
+{
+    auto it = m_images.find(name);
+    if (it == m_images.end())
+        throw std::runtime_error("ResourceRegistry: image '" + name + "' not found");
+
+    ImageEntry &entry = it->second;
+    if (!entry.image.isExternal())
+        throw std::invalid_argument("ResourceRegistry: image '" + name + "' is not exportable");
+
+    // Queue order covers previous graphics submissions. Waiting for this one-shot barrier before
+    // returning transfers access to the external API without requiring a semaphore for the initial
+    // bring-up path.
+    const VkImageLayout oldLayout = entry.currentLayout;
+    runOneShotCommands([&entry, oldLayout](VkCommandBuffer cmd) {
+        VkImageMemoryBarrier2 barrier{};
+        barrier.sType         = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        barrier.srcStageMask  = oldLayout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_PIPELINE_STAGE_2_NONE
+                                                                       : VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        barrier.srcAccessMask = oldLayout == VK_IMAGE_LAYOUT_UNDEFINED
+                                    ? VK_ACCESS_2_NONE
+                                    : VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+        barrier.dstStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+        barrier.oldLayout     = oldLayout;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.image         = entry.image.image;
+        barrier.subresourceRange = {entry.aspect, 0, entry.mipLevels, 0, entry.arrayLayers};
+
+        VkDependencyInfo dependency{};
+        dependency.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        dependency.imageMemoryBarrierCount = 1;
+        dependency.pImageMemoryBarriers    = &barrier;
+        vkCmdPipelineBarrier2(cmd, &dependency);
+    });
+    entry.currentLayout = VK_IMAGE_LAYOUT_GENERAL;
 }
 
 void ResourceRegistry::setDebugName(VkObjectType objectType, uint64_t objectHandle, const std::string &name)

@@ -62,6 +62,12 @@ public:
     uint32_t findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags flags) const;
     VkFormat findSupportedFormat(const std::vector<VkFormat> &candidates, VkImageTiling tiling,
                                  VkFormatFeatureFlags features) const;
+    // Throws with a diagnostic naming the rejected combination if this image description cannot
+    // back memory exportable as handleType. The spec requires this query before creating an image
+    // with VkExternalMemoryImageCreateInfo (VUID-VkImageCreateInfo-pNext-00990); 3D images with
+    // OPAQUE_WIN32 are the combination most likely to be unsupported in practice.
+    void checkExternalImageSupport(const VkImageCreateInfo         &imageCI,
+                                   VkExternalMemoryHandleTypeFlagBits handleType) const;
 
     // Properties
     const VkPhysicalDeviceProperties2      &getDeviceProperties() const { return m_deviceProperties2; }

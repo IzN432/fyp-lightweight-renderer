@@ -13,7 +13,7 @@
 namespace lr
 {
 
-Allocator::Allocator(const VulkanContext &ctx)
+Allocator::Allocator(const VulkanContext &ctx) : m_ctx(ctx)
 {
     VmaAllocatorCreateInfo ci{};
     ci.instance         = ctx.getInstance();
@@ -83,10 +83,18 @@ void Allocator::destroy(AllocatedBuffer &buffer)
 
 AllocatedImage Allocator::createImage(const ImageConfig &cfg)
 {
+    VkExternalMemoryImageCreateInfo externalImageCI{};
+    if (cfg.externalMemoryHandleType != 0)
+    {
+        externalImageCI.sType       = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+        externalImageCI.handleTypes = cfg.externalMemoryHandleType;
+    }
+
     VkImageCreateInfo imageCI{};
     imageCI.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageCI.pNext         = cfg.externalMemoryHandleType != 0 ? &externalImageCI : nullptr;
     imageCI.flags         = cfg.flags;
-    imageCI.imageType     = VK_IMAGE_TYPE_2D;
+    imageCI.imageType     = cfg.imageType;
     imageCI.format        = cfg.format;
     imageCI.extent        = cfg.extent;
     imageCI.mipLevels     = cfg.mipLevels;
@@ -96,23 +104,65 @@ AllocatedImage Allocator::createImage(const ImageConfig &cfg)
     imageCI.usage         = cfg.usage;
     imageCI.initialLayout = cfg.initialLayout;
 
-    VmaAllocationCreateInfo allocCI{};
-    allocCI.usage         = VMA_MEMORY_USAGE_GPU_ONLY;
-    allocCI.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
     AllocatedImage result;
     result.extent      = cfg.extent;
     result.format      = cfg.format;
     result.mipLevels   = cfg.mipLevels;
     result.arrayLayers = cfg.arrayLayers;
     result.samples     = cfg.samples;
-
-    checkVk(vmaCreateImage(m_allocator, &imageCI, &allocCI, &result.image, &result.allocation, nullptr),
-            "Allocator: vmaCreateImage");
+    result.externalMemoryHandleType = cfg.externalMemoryHandleType;
 
     VmaAllocatorInfo allocInfo;
     vmaGetAllocatorInfo(m_allocator, &allocInfo);
     VkDevice device = allocInfo.device;
+
+    if (cfg.externalMemoryHandleType == 0)
+    {
+        VmaAllocationCreateInfo allocCI{};
+        allocCI.usage         = VMA_MEMORY_USAGE_GPU_ONLY;
+        allocCI.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        checkVk(vmaCreateImage(m_allocator, &imageCI, &allocCI, &result.image, &result.allocation, nullptr),
+                "Allocator: vmaCreateImage");
+    } else
+    {
+        // Validate the format/type/usage/handle-type combination before creating, so an
+        // unsupported exportable volume reports what was refused instead of an opaque failure.
+        m_ctx.checkExternalImageSupport(imageCI, cfg.externalMemoryHandleType);
+
+        checkVk(vkCreateImage(device, &imageCI, nullptr, &result.image), "Allocator: vkCreateImage(exportable)");
+        try
+        {
+            VkMemoryRequirements requirements{};
+            vkGetImageMemoryRequirements(device, result.image, &requirements);
+
+            VkMemoryDedicatedAllocateInfo dedicatedCI{};
+            dedicatedCI.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+            dedicatedCI.image = result.image;
+
+            VkExportMemoryAllocateInfo exportCI{};
+            exportCI.sType       = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+            exportCI.pNext       = &dedicatedCI;
+            exportCI.handleTypes = cfg.externalMemoryHandleType;
+
+            VkMemoryAllocateInfo memoryCI{};
+            memoryCI.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            memoryCI.pNext           = &exportCI;
+            memoryCI.allocationSize  = requirements.size;
+            memoryCI.memoryTypeIndex = m_ctx.findMemoryType(requirements.memoryTypeBits,
+                                                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            checkVk(vkAllocateMemory(device, &memoryCI, nullptr, &result.deviceMemory),
+                    "Allocator: vkAllocateMemory(exportable)");
+            result.allocationSize = requirements.size;
+            checkVk(vkBindImageMemory(device, result.image, result.deviceMemory, 0),
+                    "Allocator: vkBindImageMemory(exportable)");
+        } catch (...)
+        {
+            if (result.deviceMemory != VK_NULL_HANDLE)
+                vkFreeMemory(device, result.deviceMemory, nullptr);
+            vkDestroyImage(device, result.image, nullptr);
+            throw;
+        }
+    }
 
     // Full-range view covering all mips and all layers
     VkImageViewCreateInfo viewCI{};
@@ -129,7 +179,13 @@ AllocatedImage Allocator::createImage(const ImageConfig &cfg)
     const VkResult viewResult = vkCreateImageView(device, &viewCI, nullptr, &result.view);
     if (viewResult != VK_SUCCESS)
     {
-        vmaDestroyImage(m_allocator, result.image, result.allocation);
+        if (result.isExternal())
+        {
+            vkDestroyImage(device, result.image, nullptr);
+            if (result.deviceMemory != VK_NULL_HANDLE)
+                vkFreeMemory(device, result.deviceMemory, nullptr);
+        } else
+            vmaDestroyImage(m_allocator, result.image, result.allocation);
         throwVkError(viewResult, "Allocator: vkCreateImageView");
     }
 
@@ -153,7 +209,12 @@ void Allocator::createMipViews(AllocatedImage &image, VkImageAspectFlags aspect)
     vmaGetAllocatorInfo(m_allocator, &allocInfo);
     VkDevice device = allocInfo.device;
 
-    // Infer the view type for per-mip views (cube stays cube, 2D stays 2D)
+    // Infer the view type for per-mip views (cube stays cube, 2D stays 2D). A 3D image has no
+    // valid 2D/cube interpretation here, so reject it rather than create invalid views.
+    if (image.extent.depth > 1)
+    {
+        throw std::logic_error("Allocator: createMipViews does not support 3D images");
+    }
     VkImageViewType viewType = (image.arrayLayers == 6) ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
 
     if (!image.mipViews.empty())
@@ -196,6 +257,9 @@ void Allocator::createLayerViews(AllocatedImage &image, VkImageAspectFlags aspec
     VmaAllocatorInfo allocInfo;
     vmaGetAllocatorInfo(m_allocator, &allocInfo);
     const VkDevice device = allocInfo.device;
+    // Layer views are single-layer 2D views; a 3D image has depth slices, not array layers.
+    if (image.extent.depth > 1)
+        throw std::logic_error("Allocator: createLayerViews does not support 3D images");
     if (!image.layerViews.empty())
         throw std::runtime_error("Allocator: layer views already exist");
     image.layerViews.resize(image.arrayLayers, VK_NULL_HANDLE);
@@ -250,12 +314,23 @@ void Allocator::destroy(AllocatedImage &image)
     }
     if (image.image != VK_NULL_HANDLE)
     {
-        vmaDestroyImage(m_allocator, image.image, image.allocation);
+        if (image.isExternal())
+            vkDestroyImage(device, image.image, nullptr);
+        else
+            vmaDestroyImage(m_allocator, image.image, image.allocation);
+    }
+    // Only an external image owns its memory separately; VMA freed it with the image above.
+    if (image.deviceMemory != VK_NULL_HANDLE)
+    {
+        vkFreeMemory(device, image.deviceMemory, nullptr);
     }
 
-    image.image       = VK_NULL_HANDLE;
-    image.view        = VK_NULL_HANDLE;
-    image.allocation  = nullptr;
+    image.image          = VK_NULL_HANDLE;
+    image.view           = VK_NULL_HANDLE;
+    image.allocation     = nullptr;
+    image.deviceMemory   = VK_NULL_HANDLE;
+    image.allocationSize = 0;
+    image.externalMemoryHandleType = static_cast<VkExternalMemoryHandleTypeFlagBits>(0);
     image.extent      = {};
     image.format      = VK_FORMAT_UNDEFINED;
     image.mipLevels   = 1;

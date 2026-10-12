@@ -24,7 +24,17 @@ struct AllocatedImage
     VkImageView              view  = VK_NULL_HANDLE; // full range (all mips, all layers)
     std::vector<VkImageView> mipViews;               // per-mip views, created by createMipViews()
     std::vector<VkImageView> layerViews;             // per-layer 2D views, created by createLayerViews()
-    VmaAllocation            allocation = nullptr;
+    // Memory is owned in exactly one of two modes: VMA owns `allocation` for ordinary images, or
+    // this struct owns `deviceMemory` for exportable ones. isExternal() is the discriminator; the
+    // two handle fields are never both set.
+    VmaAllocation allocation = nullptr;
+    // Only populated for external-memory images; CUDA imports this dedicated allocation.
+    VkDeviceMemory                     deviceMemory   = VK_NULL_HANDLE;
+    VkDeviceSize                       allocationSize = 0;
+    VkExternalMemoryHandleTypeFlagBits externalMemoryHandleType =
+        static_cast<VkExternalMemoryHandleTypeFlagBits>(0);
+
+    bool isExternal() const { return externalMemoryHandleType != 0; }
     VkExtent3D               extent{};
     VkFormat                 format      = VK_FORMAT_UNDEFINED;
     uint32_t                 mipLevels   = 1;
@@ -45,6 +55,9 @@ struct ImageConfig
     VkImageViewType    viewType      = VK_IMAGE_VIEW_TYPE_2D;
     VkImageLayout      initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkSampleCountFlagBits samples     = VK_SAMPLE_COUNT_1_BIT;
+    VkImageType           imageType   = VK_IMAGE_TYPE_2D;
+    VkExternalMemoryHandleTypeFlagBits externalMemoryHandleType =
+        static_cast<VkExternalMemoryHandleTypeFlagBits>(0);
 };
 
 class Allocator
@@ -78,7 +91,8 @@ public:
     VmaAllocator getHandle() const { return m_allocator; }
 
 private:
-    VmaAllocator m_allocator = nullptr;
+    const VulkanContext &m_ctx;        // must outlive this allocator; copy/move are deleted
+    VmaAllocator         m_allocator = nullptr;
 };
 
 } // namespace lr

@@ -219,6 +219,17 @@ target_compile_definitions(lr_core PUBLIC
     LR_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders/"
     LR_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/"
 )
+# Exposes the platform-specific external-memory declarations (VK_KHR_external_memory_win32 /
+# _fd and their Get*Handle structs) that the CUDA interop layer imports volumes through.
+if(WIN32)
+    # PRIVATE: VK_USE_PLATFORM_WIN32_KHR makes vulkan.h pull in windows.h, which defines `near`,
+    # `far`, `min` and `max` as macros. Propagating that to consumers breaks unrelated code (a
+    # test with a function named `near`), so it stays inside this target, and WIN32_LEAN_AND_MEAN
+    # plus NOMINMAX trim what windows.h brings with it.
+    target_compile_definitions(lr_core PRIVATE VK_USE_PLATFORM_WIN32_KHR WIN32_LEAN_AND_MEAN NOMINMAX)
+endif()
+# Linux needs no platform define: VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME and the
+# VkMemoryGetFdInfoKHR family are declared in core vulkan.h.
 
 add_shaders(lr_core
     src/core/passes/fullscreen.vert
@@ -328,6 +339,31 @@ add_library(lr_rigid_body_feature STATIC
 )
 target_include_directories(lr_rigid_body_feature PUBLIC src)
 target_link_libraries(lr_rigid_body_feature PUBLIC lr_core glm::glm ReactPhysics3D::ReactPhysics3D)
+
+# CUDA/Vulkan volume interop used by the Eulerian particle simulation. Kept optional so the
+# renderer remains buildable on machines without an NVIDIA toolkit.
+option(LR_ENABLE_CUDA "Build CUDA Eulerian-particle support" OFF)
+if(LR_ENABLE_CUDA)
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+
+    add_library(lr_eulerian_particle_feature STATIC
+        src/features/eulerian_particle/CudaVolume.cpp
+        src/features/eulerian_particle/CudaVolumeKernels.cu
+    )
+    target_include_directories(lr_eulerian_particle_feature PUBLIC src)
+    target_link_libraries(lr_eulerian_particle_feature PUBLIC lr_core CUDA::cudart)
+    target_compile_definitions(lr_eulerian_particle_feature PUBLIC LR_ENABLE_CUDA=1)
+    if(WIN32)
+        target_compile_definitions(lr_eulerian_particle_feature PRIVATE
+            VK_USE_PLATFORM_WIN32_KHR WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    set_target_properties(lr_eulerian_particle_feature PROPERTIES
+        CUDA_STANDARD 20
+        CUDA_STANDARD_REQUIRED ON
+        CUDA_ARCHITECTURES native
+    )
+endif()
 
 # Native scene persistence spans the core scene model and optional component feature libraries, so
 # keep it above those libraries rather than making lr_core depend back on its own features.
@@ -512,6 +548,11 @@ if(BUILD_TESTING)
     add_executable(brdf_lut_gpu_smoke EXCLUDE_FROM_ALL tests/vulkan/BrdfLutGpuSmoke.cpp)
     target_link_libraries(brdf_lut_gpu_smoke PRIVATE lr_core)
     add_dependencies(brdf_lut_gpu_smoke lr_core_shaders)
+
+    if(LR_ENABLE_CUDA)
+        add_executable(cuda_volume_smoke EXCLUDE_FROM_ALL tests/eulerian_particle/CudaVolumeSmoke.cpp)
+        target_link_libraries(cuda_volume_smoke PRIVATE lr_eulerian_particle_feature)
+    endif()
 
     add_executable(editor_state_controller_tests
         tests/editor/EditorStateControllerTests.cpp

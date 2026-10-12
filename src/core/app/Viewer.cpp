@@ -22,15 +22,22 @@ Viewer::Viewer(const Config &config)
     });
 
     auto extensions = GlfwContext::getRequiredInstanceExtensions();
+    std::vector<const char *> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+                                                  VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+                                                  VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME,
+                                                  VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME};
+#if defined(_WIN32)
+    deviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
+#elif defined(__linux__)
+    deviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+#endif
 
     m_ctx = std::make_unique<VulkanContext>(VulkanContext::Config{
         .appName                 = config.title,
         .enableValidation        = config.enableValidation,
         .enableDebugNames        = config.enableValidation,
         .extraInstanceExtensions = extensions,
-        .extraDeviceExtensions   = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-                                    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-                                    VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME},
+        .extraDeviceExtensions   = std::move(deviceExtensions),
     });
 
     spdlog::info("Device: {}", m_ctx->getDeviceProperties().properties.deviceName);

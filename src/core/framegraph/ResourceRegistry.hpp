@@ -42,6 +42,12 @@ public:
     void registerPersistentImage(const std::string &name, VkFormat format, VkImageUsageFlags usage, VkExtent2D extent,
                                  VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
 
+    // Persistent 3D image. Exported volumes use dedicated external memory that CUDA can import;
+    // getImage() exposes its VkDeviceMemory and allocationSize for the interop layer.
+    void registerPersistentVolume(const std::string &name, VkFormat format, VkImageUsageFlags usage,
+                                  VkExtent3D extent, bool exportMemory = false,
+                                  VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT);
+
     // Persistent 2D array with a full-array sampling view and one 2D attachment view per layer.
     void registerPersistentImageArray(const std::string &name, VkFormat format, VkImageUsageFlags usage,
                                       VkExtent2D extent, uint32_t layers,
@@ -89,6 +95,11 @@ public:
 
     VkImageLayout getImageLayout(const std::string &name) const;
     void          setImageLayout(const std::string &name, VkImageLayout layout);
+
+    // Quiesces prior graphics work, transitions an exported image to GENERAL, and waits for the
+    // barrier to complete. This is the conservative synchronization path used before CUDA writes;
+    // external semaphores can replace the waits once frame-loop integration is in place.
+    void prepareImageForExternalWrite(const std::string &name);
 
     std::vector<const AllocatedImage *> getImageArray(const std::string &arrayName) const;
     std::vector<VkImageLayout>          getImageArrayLayouts(const std::string &arrayName) const;
@@ -193,6 +204,7 @@ private:
         VkImageAspectFlags aspect;
         ExtentSpec         extentSpec = ExtentSpec::swapchain();
         VkExtent2D         extent;
+        uint32_t           depth = 1;
         bool               persistent = false;
         bool               external   = false;
         // Extended image properties — used by allocateImageEntry and rebuild
@@ -200,6 +212,9 @@ private:
         uint32_t           arrayLayers   = 1;
         VkImageCreateFlags imageFlags    = 0;
         VkImageViewType    viewType      = VK_IMAGE_VIEW_TYPE_2D;
+        VkImageType        imageType     = VK_IMAGE_TYPE_2D;
+        VkExternalMemoryHandleTypeFlagBits externalMemoryHandleType =
+            static_cast<VkExternalMemoryHandleTypeFlagBits>(0);
         bool               hasMipViews   = false;
         bool               hasLayerViews = false;
         VkImageLayout      initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
