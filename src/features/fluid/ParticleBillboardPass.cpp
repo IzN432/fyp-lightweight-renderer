@@ -47,7 +47,7 @@ void ParticleBillboardPass::build(FrameGraph &frameGraph)
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(1, frameGraph.buffer(m_config.particleBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
         .sampledDepth(2, frameGraph.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
-        .blend(BlendMode::Alpha)
+        .blend(BlendMode::Opaque)
         .depth(true, true, VK_COMPARE_OP_LESS)
         .cull(VK_CULL_MODE_NONE)
         .colorAttachment(frameGraph.image("overlay"), VK_FORMAT_R16G16B16A16_SFLOAT,

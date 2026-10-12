@@ -26,9 +26,11 @@ void main()
         discard;
     }
 
-    // The camera looks down -Z, so positive view-space Z is the sphere surface nearest the camera.
-    vec3 normal = vec3(inSphereCoord, sqrt(max(0.0, 1.0 - radiusSquared)));
-    vec3 viewPosition = inViewCenter + normal * inRadius;
+    // The camera looks down -Z, so the surface nearest the camera is offset toward -Z from the
+    // centre, while the normal used for shading points back at the camera along +Z.
+    float nearZ = sqrt(max(0.0, 1.0 - radiusSquared));
+    vec3 normal = vec3(inSphereCoord, nearZ);
+    vec3 viewPosition = inViewCenter + vec3(inSphereCoord, -nearZ) * inRadius;
     vec4 clipPosition = cameraUbo.proj * vec4(viewPosition, 1.0);
     float particleDepth = clipPosition.z / clipPosition.w;
 
@@ -40,8 +42,10 @@ void main()
     }
 
     gl_FragDepth = particleDepth;
-    vec3 lightDirection = normalize(vec3(-0.35, 0.7, 0.6));
+    // The normal is view-space, so the world-space key direction has to be rotated to match or the
+    // light would swing around with the camera.
+    vec3 lightDirection = normalize(mat3(cameraUbo.view) * vec3(-0.35, 0.7, 0.6));
     float diffuse = 0.3 + 0.7 * max(dot(normal, lightDirection), 0.0);
     float rim = pow(1.0 - normal.z, 2.0);
-    outColor = vec4(inColorAndType.rgb * diffuse + vec3(0.12) * rim, 0.9);
+    outColor = vec4(inColorAndType.rgb * diffuse + vec3(0.12) * rim, 1.0);
 }
