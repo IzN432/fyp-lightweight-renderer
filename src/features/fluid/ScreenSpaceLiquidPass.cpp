@@ -33,24 +33,21 @@ static_assert(sizeof(LiquidParams) == 64);
 LiquidParams buildParams(const ScreenSpaceLiquidPass::Config &config)
 {
     const glm::vec3 tint = glm::clamp(config.liquidColor, glm::vec3(0.0f), glm::vec3(1.0f));
-    const float spatialSigma = std::max(config.spatialSigma, 0.01f);
-    // A Gaussian is effectively zero past three sigma. Sizing the kernel from the sigma stops a
-    // wide blur from being silently truncated by a small radius, which would leave a boxy
-    // footprint instead of the intended falloff. The configured radius remains the upper bound so
-    // the cost per pixel stays predictable.
-    const int sigmaRadius = static_cast<int>(std::ceil(3.0f * spatialSigma));
-    const int radius = std::clamp(std::min(config.filterRadius, sigmaRadius), 1, 12);
+    // The kernel is sized in world units and projected per pixel by the shader, so the only
+    // clamp here is the cost ceiling on the resulting pixel radius.
+    const float smoothingRadius = std::max(config.smoothingRadius, 0.0f);
+    const int maxRadius = std::clamp(config.maxFilterRadius, 1, 256);
     return {
         .absorptionAndRefraction = glm::vec4(
             screen_space_liquid::absorptionCoefficient(tint, config.absorptionScale),
             std::max(config.refractionStrength, 0.0f)),
-        .filterAndMaterial = glm::vec4(spatialSigma,
+        .filterAndMaterial = glm::vec4(smoothingRadius,
                                       std::max(config.depthSigma, 0.0001f),
                                       std::max(config.thicknessScale, 0.0f),
                                       std::max(config.indexOfRefraction, 1.0f)),
         .tintAndFresnel = glm::vec4(tint, screen_space_liquid::fresnelF0(
                                               std::max(config.indexOfRefraction, 1.0f))),
-        .filterRadius = glm::ivec4(radius, 0, 0, 0),
+        .filterRadius = glm::ivec4(maxRadius, 0, 0, 0),
     };
 }
 
@@ -100,6 +97,17 @@ void ScreenSpaceLiquidPass::setLiquidColor(const glm::vec3 &color)
     updateParams();
 }
 
+void ScreenSpaceLiquidPass::setSmoothingRadius(float radius)
+{
+    const float clamped = std::max(radius, 0.0f);
+    if (m_config.smoothingRadius == clamped)
+    {
+        return;
+    }
+    m_config.smoothingRadius = clamped;
+    updateParams();
+}
+
 void ScreenSpaceLiquidPass::updateParams()
 {
     const LiquidParams params = buildParams(m_config);
@@ -145,6 +153,8 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
             .sampledImage(0, input, VK_SHADER_STAGE_COMPUTE_BIT, SamplerDesc::clampToEdge())
             .uniformBuffer(1, frameGraph.buffer(kParams), VK_SHADER_STAGE_COMPUTE_BIT)
             .storageImageWrite(2, output, VK_SHADER_STAGE_COMPUTE_BIT)
+            .uniformBuffer(3, frameGraph.buffer(m_config.cameraBufferResourceName),
+                           VK_SHADER_STAGE_COMPUTE_BIT)
             .execute([output, direction](PassContext &context) {
                 const VkExtent2D extent = context.extent(output);
                 context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, direction);

@@ -280,15 +280,22 @@ void Engine::run()
         .startPaused     = false,
     });
 
+    // The smoothing kernel has to span roughly a particle diameter to fuse neighbouring
+    // impostors, so derive it from the simulation's particle size instead of fixing a pixel count.
+    const float fluidParticleRadius =
+        fluidDemo.config().particleSpacing * fluidDemo.config().particleRenderScale * 0.5f;
+
     lr::ScreenSpaceLiquidPass liquidPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
         .maxParticles = 65536,
+        .smoothingRadius = lr::screen_space_liquid::smoothingRadiusFromParticle(fluidParticleRadius),
         .liquidColor = fluidDemo.config().particleColor,
     }, viewer.resources());
     std::vector<lr::ParticleGpuData> fluidParticleUpload;
     const auto updateFluidParticleUpload = [&] {
         const auto &fluidConfig = fluidDemo.config();
         const float radius = fluidConfig.particleSpacing * fluidConfig.particleRenderScale * 0.5f;
+        liquidPass.setSmoothingRadius(lr::screen_space_liquid::smoothingRadiusFromParticle(radius));
         const auto &positions = fluidDemo.solver().positions();
 
         fluidParticleUpload.clear();

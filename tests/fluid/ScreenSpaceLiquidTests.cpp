@@ -40,6 +40,16 @@ void absorptionPreservesTheSelectedHue()
     assert(clamped == glm::vec3(0.0f));
 }
 
+// The kernel must span roughly a particle diameter for neighbouring impostors to merge into one
+// surface; anything narrower leaves each sphere with its own depth profile.
+void smoothingRadiusSpansAParticleDiameter()
+{
+    using lr::screen_space_liquid::smoothingRadiusFromParticle;
+    assert(near(smoothingRadiusFromParticle(0.07f), 0.14f));
+    assert(near(smoothingRadiusFromParticle(0.0f), 0.0f));
+    assert(near(smoothingRadiusFromParticle(-1.0f), 0.0f));
+}
+
 } // namespace
 
 int main()
@@ -47,5 +57,6 @@ int main()
     dispatchRoundsUpWithoutExtraGroups();
     waterFresnelMatchesPhysicalNormalIncidence();
     absorptionPreservesTheSelectedHue();
+    smoothingRadiusSpansAParticleDiameter();
     return 0;
 }

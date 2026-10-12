@@ -6,6 +6,8 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
+
 #include <cstdint>
 #include <span>
 #include <string>
@@ -25,13 +27,16 @@ public:
         std::string particleBufferResourceName = "fluid_liquid_particles";
         uint32_t    maxParticles               = 65536;
 
-        // Bilateral kernel half-width in pixels. The effective radius is the smaller of this and
-        // three times spatialSigma, so widening the blur means raising BOTH: whichever is lower
-        // binds. Fusing neighbouring impostors into one surface needs a radius on the order of a
-        // particle's on-screen diameter, so the default here is only right for particles of a few
-        // pixels; larger impostors stay visibly separate until this is raised to match.
-        int   filterRadius      = 5;
-        float spatialSigma      = 3.0f;
+        // Bilateral kernel half-width in WORLD units. The shader projects this to a per-pixel
+        // radius at the sampled depth, so the kernel covers the same amount of liquid at any
+        // camera distance. Fusing neighbouring impostors into one surface takes a radius on the
+        // order of a particle diameter, so this tracks the particle size rather than a fixed
+        // pixel count; smoothingRadiusFromParticle() derives a sensible value.
+        float smoothingRadius   = 0.14f;
+        // Hard ceiling on the projected radius, in pixels. This bounds the per-pixel cost when
+        // the liquid comes close to the camera; it is a performance guard, not a tuning knob, so
+        // it sits far above the radius any reasonable shot needs.
+        int   maxFilterRadius   = 96;
         // Fraction of the centre sample's view distance, not an absolute length, so the filter
         // preserves a silhouette the same way at two metres and at fifty.
         float depthSigma        = 0.02f;
@@ -47,6 +52,9 @@ public:
     void build(FrameGraph &frameGraph);
     void setParticles(std::span<const ParticleGpuData> particles);
     void setLiquidColor(const glm::vec3 &color);
+    // Kernel width in world units; the shader projects it per pixel. Kept in sync with the
+    // simulation's particle size, so it changes whenever spacing or render scale do.
+    void setSmoothingRadius(float radius);
     void updateParams();
 
     uint32_t particleCount() const { return m_particleCount; }
@@ -74,6 +82,13 @@ inline glm::vec3 absorptionCoefficient(const glm::vec3 &color, float scale)
 {
     return glm::max(glm::vec3(1.0f) - glm::clamp(color, glm::vec3(0.0f), glm::vec3(1.0f)), glm::vec3(0.02f)) *
            glm::max(scale, 0.0f);
+}
+
+// Neighbouring impostors only merge into a continuous surface once the kernel spans roughly a
+// particle diameter; below that each sphere keeps its own depth profile and shades separately.
+inline float smoothingRadiusFromParticle(float particleRadius)
+{
+    return std::max(particleRadius, 0.0f) * 2.0f;
 }
 
 inline uint32_t dispatchSize(uint32_t pixels, uint32_t groupSize = 16)
