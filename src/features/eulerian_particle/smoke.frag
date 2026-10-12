@@ -23,7 +23,7 @@ layout(push_constant) uniform SmokeRenderPC
     float densityScale;
     uint sampleCount;
     uint enabled;
-    uint padding;
+    uint frameIndex;
 } pc;
 
 layout(location = 0) out vec4 outColor;
@@ -51,6 +51,23 @@ bool intersectBox(vec3 origin, vec3 direction, out float nearT, out float farT)
 float randomOffset(vec2 pixel)
 {
     return fract(sin(dot(pixel, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+// Interleaved gradient noise. Unlike the sine hash above it decorrelates neighbouring pixels, which
+// matters for the output dither: a correlated pattern would trade contours for visible clumping.
+float interleavedGradientNoise(vec2 pixel)
+{
+    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+}
+
+// One LSB of the 8-bit sRGB-encoded target, expressed in the linear space the shader writes in.
+// The colour attachment is an _SRGB format, so the hardware encodes after this shader runs; a flat
+// 1/255 would be far too small in the darks, which is exactly where the plume's banding appears.
+// This is d(linear)/d(encoded) at the current value, i.e. the linear width of one output code.
+vec3 linearQuantisationStep(vec3 linearColor)
+{
+    vec3 encoded = sqrt(max(linearColor, vec3(0.0))); // cheap sRGB-ish encode, gamma 2
+    return max(2.0 * encoded, vec3(1e-3)) / 255.0;    // derivative of encoded^2, floored near black
 }
 
 void main()
@@ -81,7 +98,9 @@ void main()
 
     uint steps = max(pc.sampleCount, 1u);
     float stepLength = (farT - nearT) / float(steps);
-    float t = nearT + randomOffset(gl_FragCoord.xy) * stepLength;
+    // Jittering the ray's starting phase hides step-count striping. Varying it per frame keeps the
+    // residual from freezing into a fixed screen-space pattern.
+    float t = nearT + fract(randomOffset(gl_FragCoord.xy) + 0.618034 * float(pc.frameIndex & 1023u)) * stepLength;
     vec3 boxSize = max(pc.boundsMax.xyz - pc.boundsMin.xyz, vec3(1e-6));
 
     vec3 accumulated = vec3(0.0);
@@ -101,5 +120,14 @@ void main()
     float alpha = 1.0 - transmittance;
     if (alpha < 1e-4)
         discard;
-    outColor = vec4(accumulated / alpha, alpha);
+
+    // The ray integral is effectively exact at this step count; the visible contours come from
+    // quantising it to the 8-bit target. A sub-LSB offset breaks those contours into fine noise,
+    // which the eye integrates away. Alpha is blended into the same 8-bit buffer, so it bands
+    // independently of colour and needs its own offset.
+    vec3  color  = accumulated / alpha;
+    float noise  = interleavedGradientNoise(gl_FragCoord.xy + 5.588238 * float(pc.frameIndex & 1023u));
+    vec3  dither = (noise - 0.5) * linearQuantisationStep(color);
+
+    outColor = vec4(color + dither, alpha + (noise - 0.5) / 255.0);
 }

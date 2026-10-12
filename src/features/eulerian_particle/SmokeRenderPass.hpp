@@ -5,6 +5,7 @@
 #include <glm/vec3.hpp>
 #include <vulkan/vulkan.h>
 
+#include <cstdint>
 #include <string>
 
 namespace lr::eulerian
@@ -41,6 +42,9 @@ public:
 
 private:
     Config m_config;
+    // Incremented by the render lambda each frame to animate the output dither. Mutable because
+    // build() installs a const lambda; the frame graph runs it once per frame on one thread.
+    mutable uint32_t m_frameIndex = 0;
 };
 
 } // namespace lr::eulerian

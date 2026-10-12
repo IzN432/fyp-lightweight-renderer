@@ -21,7 +21,7 @@ struct alignas(16) SmokeRenderPC
     float     densityScale;
     uint32_t  sampleCount;
     uint32_t  enabled;
-    uint32_t  padding;
+    uint32_t  frameIndex;
 };
 
 static_assert(sizeof(SmokeRenderPC) == 64);
@@ -65,7 +65,9 @@ void SmokeRenderPass::build(FrameGraph &frameGraph) const
                 .densityScale = std::max(m_config.densityScale, 0.0f),
                 .sampleCount  = static_cast<uint32_t>(std::clamp(m_config.sampleCount, 8, 512)),
                 .enabled      = m_config.enabled ? 1u : 0u,
-                .padding      = 0,
+                // Advances the output dither pattern so its noise averages out over time rather
+                // than freezing into a fixed screen-space texture.
+                .frameIndex   = m_frameIndex++,
             };
             context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_FRAGMENT_BIT, constants);
             context.cmd().draw(3);
