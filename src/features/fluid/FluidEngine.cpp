@@ -15,7 +15,6 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
-#include <cmath>
 #include <vector>
 
 namespace lr
@@ -27,7 +26,9 @@ namespace
 // particle size all derive from it, so the sim cannot be set up inconsistently.
 struct SimSetup
 {
-    float spacing = 0.05f;
+    // Fixed to roughly 140k particles for the standalone GPU demo. The source volume and lattice
+    // discretisation produce 137,700 particles at this spacing.
+    float spacing = 0.0089f;
     // Multiple of spacing used as the kernel support radius. Around 2 gives each particle the
     // ~30-40 neighbours SPH needs to estimate density well.
     float smoothingRadius() const { return spacing * 2.0f; }
@@ -43,51 +44,16 @@ struct SimSetup
     int       solverIterations = 8;
     float     fixedDeltaTime   = 1.0f / 60.0f;
     int       maxStepsPerFrame = 4;
-
-    // Smallest spacing the GUI will allow. Every solver buffer is sized for the particle count this
-    // produces, because capacity is fixed at construction -- so this, not the starting spacing,
-    // is what decides how much memory the solve takes and how far the count can be turned up.
-    float minSpacing = 0.005f;
 };
 
-std::vector<glm::vec3> makeSourceBlock(const SimSetup &setup, float spacing)
+std::vector<glm::vec3> makeSourceBlock(const SimSetup &setup)
 {
     // Inset by one spacing so no particle starts exactly on a wall, where the boundary clamp would
     // fight the density solve on the very first step.
     const glm::vec3 extent = setup.boundsMax - setup.boundsMin;
-    const glm::vec3 min    = setup.boundsMin + glm::vec3(spacing);
+    const glm::vec3 min    = setup.boundsMin + glm::vec3(setup.spacing);
     const glm::vec3 max    = min + extent * setup.sourceFraction;
-    return FluidSolverCpu::makeParticleBlock(min, max, spacing);
-}
-
-// How many particles makeSourceBlock would produce, without building the lattice. The GUI shows
-// this every frame while the spacing slider is dragged, so it must not allocate.
-//
-// The per-axis loop is repeated rather than computed as floor(extent / spacing) + 1, because
-// makeParticleBlock advances by repeated addition and the rounding error that accumulates decides
-// whether the last row clears `<= max` at all. At spacing 0.02 the closed-form answer is 13671 and
-// the real lattice is 12400, so the two have to step the same way to agree.
-std::size_t sourceBlockCount(const SimSetup &setup, float spacing)
-{
-    if (spacing <= 0.0f)
-    {
-        return 0;
-    }
-    const glm::vec3 extent = (setup.boundsMax - setup.boundsMin) * setup.sourceFraction;
-    const glm::vec3 min    = setup.boundsMin + glm::vec3(spacing);
-    const glm::vec3 max    = min + extent;
-
-    std::size_t count = 1;
-    for (int axis = 0; axis < 3; ++axis)
-    {
-        std::size_t perAxis = 0;
-        for (float value = min[axis]; value <= max[axis]; value += spacing)
-        {
-            ++perAxis;
-        }
-        count *= perAxis;
-    }
-    return count;
+    return FluidSolverCpu::makeParticleBlock(min, max, setup.spacing);
 }
 
 FluidSolverGpu::Config gpuConfig(const SimSetup &setup, uint32_t capacity)
@@ -156,14 +122,9 @@ void FluidEngine::run()
     // -------------------------------------------------------------------------
     SimSetup setup;
 
-    // Capacity comes from the smallest spacing the GUI allows, not from the starting spacing: every
-    // solver buffer is allocated once, so the sim can only be turned up as far as what was reserved
-    // here. Spacing then re-fills the domain within that capacity on reset.
-    const uint32_t capacity = static_cast<uint32_t>(sourceBlockCount(setup, setup.minSpacing));
-
-    std::vector<glm::vec3> source = makeSourceBlock(setup, setup.spacing);
-    spdlog::info("fluid: {} particles at spacing {:.3f}, capacity {} at minimum spacing {:.3f}", source.size(),
-                 setup.spacing, capacity, setup.minSpacing);
+    const std::vector<glm::vec3> source = makeSourceBlock(setup);
+    const uint32_t capacity = static_cast<uint32_t>(source.size());
+    spdlog::info("fluid: {} particles at fixed spacing {:.4f}", source.size(), setup.spacing);
 
     FluidSolverGpu solver(gpuConfig(setup, capacity), viewer.resources());
     solver.setParticles(source);
@@ -193,27 +154,9 @@ void FluidEngine::run()
     FluidRenderer::appendBoxOutline(lines, setup.boundsMin, setup.boundsMax, glm::vec3(0.45f, 0.45f, 0.5f));
     renderer.setLines(lines);
 
-    // Refills the domain at the current spacing. Spacing changes the particle count and everything
-    // derived from it, so it cannot be applied live -- the whole config is rebuilt and the lattice
-    // laid out again, which is why the GUI marks it as needing a reset. The capacity reserved above
-    // is kept, so the frame graph is untouched and no pass is rebuilt.
+    // Restore the fixed source lattice while preserving the current live solver controls.
     const auto resetSimulation = [&] {
         const bool wasPaused = solver.paused();
-
-        FluidSolverGpu::Config rebuilt = gpuConfig(setup, capacity);
-        // Carry across the knobs that are live, so a reset does not silently undo them.
-        rebuilt.viscosity      = solver.config().viscosity;
-        rebuilt.boundsDensity  = solver.config().boundsDensity;
-        rebuilt.boundsFriction = solver.config().boundsFriction;
-        rebuilt.particleColor  = solver.config().particleColor;
-        // maxSolverIterations fixes the declared pass count, so it must not change after build().
-        rebuilt.maxSolverIterations = solver.config().maxSolverIterations;
-        rebuilt.solverIterations    = std::min(solver.config().solverIterations, rebuilt.maxSolverIterations);
-
-        solver.config() = rebuilt;
-        solver.updateParams();
-
-        source = makeSourceBlock(setup, setup.spacing);
         solver.setParticles(source);
         solver.setPaused(wasPaused);
     };
@@ -289,20 +232,6 @@ void FluidEngine::run()
             solver.updateParams();
         }
         ImGui::Separator();
-
-        // Spacing is what turns the particle count up. It changes the count and everything derived
-        // from it, so it only takes effect on reset; the count it would produce is shown first so
-        // the cost is visible before committing to it. The floor is the capacity reserved at
-        // startup -- below it the lattice would not fit the buffers.
-        if (ImGui::DragFloat("Spacing (needs reset)", &setup.spacing, 0.001f, setup.minSpacing, 0.2f, "%.4f"))
-        {
-            setup.spacing = std::clamp(setup.spacing, setup.minSpacing, 0.2f);
-        }
-        const std::size_t pendingCount = sourceBlockCount(setup, setup.spacing);
-        if (pendingCount != solver.particleCount())
-        {
-            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Reset to apply: %zu particles", pendingCount);
-        }
 
         // Purely visual: the drawn sphere size, which the publish pass writes into each record.
         if (ImGui::DragFloat("Particle Size", &setup.particleRenderScale, 0.01f, 0.1f, 2.0f, "%.2f"))
