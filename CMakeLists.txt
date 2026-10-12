@@ -369,7 +369,9 @@ add_library(lr_fluid_app STATIC
     src/features/fluid/FluidRenderer.cpp
 )
 target_include_directories(lr_fluid_app PUBLIC src)
-target_link_libraries(lr_fluid_app PUBLIC lr_fluid_demo lr_core imgui)
+# The viewer drives the GPU solver directly; FluidDemo (the CPU solver's controller) is the
+# editor's, so this links the feature library rather than the demo one.
+target_link_libraries(lr_fluid_app PUBLIC lr_fluid_feature lr_core imgui)
 
 add_shaders(lr_fluid_app
     src/features/fluid/fluid_particles.vert
