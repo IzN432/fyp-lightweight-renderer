@@ -1,0 +1,46 @@
+#pragma once
+
+#include "core/framegraph/FrameGraph.hpp"
+
+#include <glm/vec3.hpp>
+#include <vulkan/vulkan.h>
+
+#include <string>
+
+namespace lr::eulerian
+{
+
+// Ray-marches a simulation density volume through an axis-aligned world-space box and alpha
+// composites it over the renderer's finished image. Opaque scene depth shortens each ray, so smoke
+// behind geometry stays hidden while smoke in front remains visible.
+class SmokeRenderPass
+{
+public:
+    struct Config
+    {
+        std::string densityResourceName;
+        std::string cameraBufferResourceName;
+        std::string depthResourceName = "gbufferDepth";
+        std::string outputImage       = "swapchain";
+        VkFormat    outputFormat      = VK_FORMAT_UNDEFINED;
+
+        glm::vec3 boundsMin{-1.0f, 0.0f, -1.0f};
+        glm::vec3 boundsMax{1.0f, 2.0f, 1.0f};
+        glm::vec3 color{0.82f, 0.86f, 0.92f};
+        float     densityScale = 5.0f;
+        int       sampleCount  = 128;
+        bool      enabled      = true;
+    };
+
+    explicit SmokeRenderPass(Config config);
+
+    void build(FrameGraph &frameGraph) const;
+
+    Config       &config() { return m_config; }
+    const Config &config() const { return m_config; }
+
+private:
+    Config m_config;
+};
+
+} // namespace lr::eulerian

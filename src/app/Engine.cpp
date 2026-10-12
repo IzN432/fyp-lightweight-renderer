@@ -34,9 +34,14 @@
 #include "core/scene/Scene.hpp"
 
 #include "features/rigid_body/PhysicsWorld.hpp"
+#if defined(LR_ENABLE_CUDA)
+#include "features/eulerian_particle/SmokeRenderPass.hpp"
+#include "features/eulerian_particle/SmokeSolver.hpp"
+#endif
 
 #include <ImGuiFileDialog.h>
 #include <imgui.h>
+#include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 #include <spdlog/spdlog.h>
 
@@ -61,7 +66,11 @@ void Engine::run()
 {
     spdlog::set_level(spdlog::level::debug);
 
-    lr::Viewer viewer({.title = "lr"});
+    lr::Viewer::Config viewerConfig{.title = "lr"};
+#if defined(LR_ENABLE_CUDA)
+    viewerConfig.enableExternalSemaphoreInterop = true;
+#endif
+    lr::Viewer viewer(viewerConfig);
 
     namespace fs = std::filesystem;
 
@@ -132,6 +141,37 @@ void Engine::run()
     // see SceneManager::initialize().
     sceneManager.initialize(areaLightVisualConfig, gpuMaterialLayout, lr::conventions::geometryVertexAttributes(),
                             viewer.input());
+
+#if defined(LR_ENABLE_CUDA)
+    // The simulation volumes are persistent registry images. CUDA writes them through exported
+    // memory, then SmokeRenderPass samples the published density image in the normal frame graph.
+    lr::eulerian::SmokeSolver::Config smokeConfig{};
+    smokeConfig.extent             = VkExtent3D{64, 96, 64};
+    smokeConfig.jacobiIterations   = 40;
+    smokeConfig.step.buoyancy      = 8.0f;
+    smokeConfig.step.densityDamp   = 0.15f;
+    smokeConfig.step.vorticity     = 2.0f;
+    smokeConfig.source.density     = 18.0f;
+    smokeConfig.source.velocity[1] = 5.0f;
+    lr::eulerian::SmokeSolver smokeSolver(viewer.resources(), viewer.context(), smokeConfig);
+
+    // World-space box the density volume is ray-marched through. The smoke shader maps this box to
+    // the volume with a plain normalized divide, so the box has to carry the grid's aspect ratio or
+    // the plume renders stretched along whichever axis disagrees. Deriving it from the extent keeps
+    // the two in step if the grid is ever resized: the widest axis spans `kSmokeWorldWidth` and the
+    // others scale with their cell counts, so cells stay cubic in world space.
+    constexpr float kSmokeWorldWidth = 2.0f;
+    const float     smokeLargestAxis =
+        static_cast<float>(std::max({smokeConfig.extent.width, smokeConfig.extent.height, smokeConfig.extent.depth}));
+    const glm::vec3 smokeWorldSize = kSmokeWorldWidth / smokeLargestAxis *
+                                     glm::vec3(static_cast<float>(smokeConfig.extent.width),
+                                               static_cast<float>(smokeConfig.extent.height),
+                                               static_cast<float>(smokeConfig.extent.depth));
+    // Centred on the origin horizontally and resting on the ground plane, so the emitter near the
+    // bottom of the grid sits just above y = 0.
+    const glm::vec3 smokeBoundsMin{-0.5f * smokeWorldSize.x, 0.0f, -0.5f * smokeWorldSize.z};
+    const glm::vec3 smokeBoundsMax = smokeBoundsMin + smokeWorldSize;
+#endif
 
     // -------------------------------------------------------------------------
     // Frame graph passes
@@ -281,6 +321,19 @@ void Engine::run()
     });
     finalPass.build(viewer.frameGraph());
 
+#if defined(LR_ENABLE_CUDA)
+    // Blend the ray-marched volume over the completed scene but before selection outlines and
+    // ImGui. The pass also samples the opaque depth buffer to stop rays at scene geometry.
+    lr::eulerian::SmokeRenderPass smokeRenderPass({
+        .densityResourceName      = smokeSolver.densityResourceName(),
+        .cameraBufferResourceName = sceneManager.cameraBufferName(),
+        .outputFormat             = swapchainFormat,
+        .boundsMin                = smokeBoundsMin,
+        .boundsMax                = smokeBoundsMax,
+    });
+    smokeRenderPass.build(viewer.frameGraph());
+#endif
+
     // Blender's selected-object outline, derived from the picking IDs. Blending into a LOAD
     // attachment counts as reading the swapchain, so the compiler orders this after every pass that
     // writes it — FinalPass included.
@@ -383,6 +436,44 @@ void Engine::run()
                   .settings = {std::move(sphereRadius), std::move(numSteps), std::move(numDirs),
                                std::move(angleBias), std::move(aoScalar)},
                   .onChanged = [&] { aoPass.updateParams(viewer.resources()); }});
+
+#if defined(LR_ENABLE_CUDA)
+    auto smokeEnabled = Setting::bind("enabled", "Enabled", SettingEditor::Checkbox,
+                                      smokeRenderPass.config().enabled);
+    auto smokeDensityScale = Setting::bind("density_scale", "Render Density", SettingEditor::Slider,
+                                           smokeRenderPass.config().densityScale);
+    smokeDensityScale.minimum = 0.1f; smokeDensityScale.maximum = 20.0f;
+    smokeDensityScale.logarithmic = true;
+    auto smokeSamples = Setting::bind("samples", "Ray-march Samples", SettingEditor::Slider,
+                                      smokeRenderPass.config().sampleCount);
+    smokeSamples.minimum = 16.0f; smokeSamples.maximum = 256.0f;
+    auto smokeColor = Setting::bind("color", "Color", SettingEditor::Color3,
+                                    smokeRenderPass.config().color);
+    auto smokeBuoyancy = Setting::bind("buoyancy", "Buoyancy", SettingEditor::Slider,
+                                       smokeSolver.stepParams().buoyancy);
+    smokeBuoyancy.minimum = 0.0f; smokeBuoyancy.maximum = 20.0f;
+    auto smokeDissipation = Setting::bind("density_damp", "Dissipation", SettingEditor::Slider,
+                                          smokeSolver.stepParams().densityDamp);
+    smokeDissipation.minimum = 0.0f; smokeDissipation.maximum = 5.0f;
+    auto smokeVorticity = Setting::bind("vorticity", "Vorticity", SettingEditor::Slider,
+                                        smokeSolver.stepParams().vorticity);
+    smokeVorticity.minimum = 0.0f; smokeVorticity.maximum = 10.0f;
+    auto smokeSourceDensity = Setting::bind("source_density", "Source Density", SettingEditor::Slider,
+                                            smokeSolver.sourceParams().density);
+    smokeSourceDensity.minimum = 0.0f; smokeSourceDensity.maximum = 50.0f;
+    settings.add({
+        .key         = "gpu_smoke",
+        .title       = "GPU Smoke",
+        .defaultOpen = true,
+        .settings    = {std::move(smokeEnabled), std::move(smokeDensityScale), std::move(smokeSamples),
+                        std::move(smokeColor), std::move(smokeBuoyancy), std::move(smokeDissipation),
+                        std::move(smokeVorticity), std::move(smokeSourceDensity)},
+        .drawExtra   = [&] {
+            if (ImGui::Button("Reset Smoke"))
+                smokeSolver.reset();
+        },
+    });
+#endif
 
     auto shadowDistance = Setting::bind("shadow_distance", "Shadow Distance", SettingEditor::Drag,
                                         cascadedShadowPass.config().shadowDistance);
@@ -581,6 +672,17 @@ void Engine::run()
     // controller / gizmo / GUI edits and does at most one GPU re-upload per dirtied resource
     // rather than one per individual mutation) callbacks — see SceneManager::registerCallbacks.
     sceneManager.registerCallbacks(viewer);
+
+#if defined(LR_ENABLE_CUDA)
+    // Queue the external-memory handshake before this frame's frame-graph submission. The calls do
+    // not wait on the host: queue order is Vulkan release -> CUDA step -> Vulkan acquire -> render.
+    appConnections.push_back(viewer.onLateUpdate([&](float dt, VkExtent2D) {
+        if (!smokeRenderPass.config().enabled)
+            return;
+        smokeSolver.step(std::clamp(dt, 1.0f / 240.0f, 1.0f / 30.0f));
+        smokeSolver.endStep();
+    }));
+#endif
 
     viewer.addImguiPass();
     viewer.run();

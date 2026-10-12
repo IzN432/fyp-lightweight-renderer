@@ -31,6 +31,15 @@ Viewer::Viewer(const Config &config)
 #elif defined(__linux__)
     deviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
 #endif
+    if (config.enableExternalSemaphoreInterop)
+    {
+        deviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME);
+#if defined(_WIN32)
+        deviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME);
+#elif defined(__linux__)
+        deviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
+#endif
+    }
 
     m_ctx = std::make_unique<VulkanContext>(VulkanContext::Config{
         .appName                 = config.title,

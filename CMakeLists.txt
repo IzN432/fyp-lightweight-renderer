@@ -351,6 +351,7 @@ if(LR_ENABLE_CUDA)
         src/features/eulerian_particle/CudaInteropSemaphore.cpp
         src/features/eulerian_particle/CudaVolume.cpp
         src/features/eulerian_particle/CudaVolumeKernels.cu
+        src/features/eulerian_particle/SmokeRenderPass.cpp
         src/features/eulerian_particle/SmokeSolver.cpp
     )
     target_include_directories(lr_eulerian_particle_feature PUBLIC src)
@@ -365,6 +366,15 @@ if(LR_ENABLE_CUDA)
         CUDA_STANDARD_REQUIRED ON
         CUDA_ARCHITECTURES native
     )
+    add_shaders(lr_eulerian_particle_feature
+        src/features/eulerian_particle/smoke.frag
+    )
+
+    # Minimal end-to-end CUDA simulation -> Vulkan volume sampling demo. It deliberately uses a
+    # procedural opaque scene so the smoke/depth interaction is visible without external assets.
+    add_executable(smoke_plume_demo src/features/eulerian_particle/SmokePlumeDemo.cpp)
+    target_link_libraries(smoke_plume_demo PRIVATE lr_eulerian_particle_feature)
+    add_shaders(smoke_plume_demo src/features/eulerian_particle/smoke_demo_scene.frag)
 endif()
 
 # Native scene persistence spans the core scene model and optional component feature libraries, so
@@ -394,6 +404,9 @@ target_include_directories(lr_editor_app PUBLIC src)
 target_link_libraries(lr_editor_app PUBLIC lr_core lr_arap_feature lr_laplace_beltrami_feature
     lr_rigid_body_feature lr_linear_blend_skinning_feature
     lr_scene_serialization imguiFileDialog)
+if(LR_ENABLE_CUDA)
+    target_link_libraries(lr_editor_app PUBLIC lr_eulerian_particle_feature)
+endif()
 
 # Application executable
 add_executable(renderer src/main.cpp)

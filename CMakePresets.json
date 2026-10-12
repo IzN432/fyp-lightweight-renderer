@@ -13,7 +13,8 @@
             "inherits": "vcpkg-base",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "LR_ENABLE_CUDA": "ON"
             }
         }
     ],

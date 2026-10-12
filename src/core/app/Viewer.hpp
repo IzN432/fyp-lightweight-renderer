@@ -37,6 +37,10 @@ public:
         bool        enableValidation = true;
         // Without it there is no ImGui context: onGui() throws, and nothing is drawn over the frame.
         bool enableGui = true;
+        // Enables the platform external-semaphore extensions used to order CUDA simulation work
+        // against the renderer without blocking the host. Kept opt-in so ordinary renderers do
+        // not require interop support from their Vulkan device.
+        bool enableExternalSemaphoreInterop = false;
     };
 
     // Runs a call that may block on the GPU or the display (fence waits, image acquire, present,
