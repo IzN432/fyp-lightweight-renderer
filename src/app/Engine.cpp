@@ -279,10 +279,23 @@ void Engine::run()
     lr::ParticleBillboardPass particleBillboards({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
         .maxParticles = 65536,
-        .radius = fluidDemo.config().particleSpacing * fluidDemo.config().particleRenderScale * 0.5f,
-        .color = fluidDemo.config().particleColor,
     }, viewer.resources());
-    particleBillboards.setPositions(fluidDemo.solver().positions());
+    std::vector<lr::ParticleGpuData> fluidParticleUpload;
+    const auto updateFluidParticleUpload = [&] {
+        const auto &fluidConfig = fluidDemo.config();
+        const float radius = fluidConfig.particleSpacing * fluidConfig.particleRenderScale * 0.5f;
+        const auto &positions = fluidDemo.solver().positions();
+
+        fluidParticleUpload.clear();
+        fluidParticleUpload.reserve(positions.size());
+        for (const glm::vec3 &position : positions)
+        {
+            fluidParticleUpload.push_back(lr::makeParticleGpuData(
+                position, radius, fluidConfig.particleColor, lr::ParticleType::Liquid));
+        }
+        particleBillboards.setParticles(fluidParticleUpload);
+    };
+    updateFluidParticleUpload();
     particleBillboards.build(viewer.frameGraph());
 
     // As with the heatmap pass: one empty draw entry until EditorRenderBridge points it at a mesh.
@@ -596,11 +609,7 @@ void Engine::run()
         sceneManager.animationSystem().update(dt);
         physicsWorld.update(dt);
         fluidDemo.update(dt);
-
-        const auto &fluidConfig = fluidDemo.config();
-        particleBillboards.setStyle(fluidConfig.particleSpacing * fluidConfig.particleRenderScale * 0.5f,
-                                    fluidConfig.particleColor);
-        particleBillboards.setPositions(fluidDemo.solver().positions());
+        updateFluidParticleUpload();
     }));
 
     appConnections.push_back(viewer.onUpdate([&](float dt, VkExtent2D extent) {

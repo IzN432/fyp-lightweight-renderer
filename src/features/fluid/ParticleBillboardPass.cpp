@@ -8,14 +8,6 @@
 namespace lr
 {
 
-namespace
-{
-struct ParticleBillboardPC
-{
-    glm::vec4 colorAndRadius;
-};
-} // namespace
-
 ParticleBillboardPass::ParticleBillboardPass(Config config, ResourceRegistry &resources)
     : m_config(std::move(config)), m_resources(&resources)
 {
@@ -25,29 +17,22 @@ ParticleBillboardPass::ParticleBillboardPass(Config config, ResourceRegistry &re
     }
 
     resources.registerDynamicBuffer(m_config.particleBufferResourceName,
-                                    sizeof(glm::vec4) * m_config.maxParticles,
+                                    sizeof(ParticleGpuData) * m_config.maxParticles,
                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-    m_upload.reserve(m_config.maxParticles);
 }
 
-void ParticleBillboardPass::setPositions(std::span<const glm::vec3> positions)
+void ParticleBillboardPass::setParticles(std::span<const ParticleGpuData> particles)
 {
-    if (positions.size() > m_config.maxParticles)
+    if (particles.size() > m_config.maxParticles)
     {
         throw std::length_error("ParticleBillboardPass particle count exceeds configured capacity");
     }
 
-    m_upload.clear();
-    for (const glm::vec3 &position : positions)
+    m_particleCount = static_cast<uint32_t>(particles.size());
+    if (!particles.empty())
     {
-        m_upload.emplace_back(position, 1.0f);
-    }
-
-    m_particleCount = static_cast<uint32_t>(m_upload.size());
-    if (!m_upload.empty())
-    {
-        m_resources->updateBuffer(m_config.particleBufferResourceName, m_upload.data(),
-                                  sizeof(glm::vec4) * m_upload.size());
+        m_resources->updateBuffer(m_config.particleBufferResourceName, particles.data(),
+                                  sizeof(ParticleGpuData) * particles.size());
     }
 }
 
@@ -58,7 +43,6 @@ void ParticleBillboardPass::build(FrameGraph &frameGraph)
         .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
         .vertShader((paths::shaderDir / "particle_billboard.vert.spv").string())
         .fragShader((paths::shaderDir / "particle_billboard.frag.spv").string())
-        .pushConstantSize(sizeof(ParticleBillboardPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(1, frameGraph.buffer(m_config.particleBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
@@ -74,9 +58,6 @@ void ParticleBillboardPass::build(FrameGraph &frameGraph)
             {
                 return;
             }
-            const ParticleBillboardPC pc{glm::vec4(m_config.color, m_config.radius)};
-            context.cmd().pushConstants(context.pipelineLayout(),
-                                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, pc);
             context.cmd().draw(6, m_particleCount);
         });
 }

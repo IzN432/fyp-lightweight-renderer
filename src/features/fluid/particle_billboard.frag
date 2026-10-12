@@ -12,13 +12,10 @@ layout(set = 0, binding = 0) uniform CameraUbo
 
 layout(set = 0, binding = 2) uniform sampler2D gbufferDepth;
 
-layout(push_constant) uniform ParticleBillboardPC
-{
-    vec4 colorAndRadius;
-} pc;
-
 layout(location = 0) in vec2 inSphereCoord;
 layout(location = 1) in vec3 inViewCenter;
+layout(location = 2) flat in vec4 inColorAndType;
+layout(location = 3) flat in float inRadius;
 layout(location = 0) out vec4 outColor;
 
 void main()
@@ -31,7 +28,7 @@ void main()
 
     // The camera looks down -Z, so positive view-space Z is the sphere surface nearest the camera.
     vec3 normal = vec3(inSphereCoord, sqrt(max(0.0, 1.0 - radiusSquared)));
-    vec3 viewPosition = inViewCenter + normal * pc.colorAndRadius.w;
+    vec3 viewPosition = inViewCenter + normal * inRadius;
     vec4 clipPosition = cameraUbo.proj * vec4(viewPosition, 1.0);
     float particleDepth = clipPosition.z / clipPosition.w;
 
@@ -46,5 +43,5 @@ void main()
     vec3 lightDirection = normalize(vec3(-0.35, 0.7, 0.6));
     float diffuse = 0.3 + 0.7 * max(dot(normal, lightDirection), 0.0);
     float rim = pow(1.0 - normal.z, 2.0);
-    outColor = vec4(pc.colorAndRadius.rgb * diffuse + vec3(0.12) * rim, 0.9);
+    outColor = vec4(inColorAndType.rgb * diffuse + vec3(0.12) * rim, 0.9);
 }
