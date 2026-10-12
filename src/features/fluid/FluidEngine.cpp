@@ -40,20 +40,13 @@ void FluidEngine::run()
     CameraUploader cameraUploader(viewer.resources());
 
     // -------------------------------------------------------------------------
-    // Simulation and renderer.
-    //
-    // The solve runs entirely in compute passes, and the renderer's per-instance data is the
-    // solver's published particle buffer, so solved positions reach the rasteriser without touching
-    // the host. Those records start with a vec4 of centre and radius, which is exactly what the
-    // instance attribute reads; the stride steps over the colour that follows.
-    //
-    // FluidSolverCpu remains the reference the GPU solve is diffed against, but that comparison
-    // lives in fluid_solver_gpu_smoke, which can read buffers back without stalling a frame loop.
-    // Drawing it here would take a second FluidRenderer, and two of them clear the same swapchain
-    // image -- whichever ran second blanked the other's particles, which is exactly what left this
-    // viewer showing nothing when it was tried.
+    // GPU simulation with an exact 50 x 56 x 50 lattice: 140,000 particles, matching the
+    // large real-time examples used to evaluate PBF-scale behaviour.
     // -------------------------------------------------------------------------
-    FluidSimulation simulation({.startPaused = true}, viewer.resources());
+    FluidSimulation simulation({.sourceDimensions = {50, 56, 50},
+                                .maxParticles     = 140000,
+                                .startPaused      = false},
+                               viewer.resources());
     spdlog::info("fluid: {} GPU particles", simulation.particleCount());
 
     FluidRenderer renderer({.cameraBufferResourceName   = cameraUploader.bufferName(),
@@ -97,7 +90,7 @@ void FluidEngine::run()
         cameraUploader.upload(cameraObject, aspect);
 
         simulation.update(dt);
-        // Only a count: the instance records themselves are written by the solver's publish pass.
+        // The instance records themselves are written by the GPU solver's publish pass.
         renderer.setParticleCount(simulation.particleCount(), simulation.particleColor());
     }));
 

@@ -22,17 +22,22 @@ public:
         glm::uvec3 sourceDimensions{50, 56, 50};
         uint32_t   maxParticles = 140000;
 
-        float particleSpacing      = 0.0089f;
+        // Normalized paper units: h = 2 * spacing = 1. This lets the paper's numerical
+        // coefficients be used literally instead of inventing a world-scale conversion.
+        float particleSpacing      = 0.5f;
         float smoothingRadiusScale = 2.0f;
         float particleRenderScale  = 0.9f;
         int   solverIterations     = 8;
-        float viscosity            = 0.05f;
+        // Equations (13) and (17), used literally in normalized h=1 units.
+        float artificialPressureK  = 0.1f;
+        float vorticityEpsilon     = 0.0f;
+        float viscosity            = 0.01f;
         float boundsFriction       = 0.98f;
 
-        glm::vec3 boundsMin{-0.5f, 0.0f, -0.5f};
-        glm::vec3 boundsMax{0.5f, 1.0f, 0.5f};
-        float     fixedDeltaTime   = 1.0f / 60.0f;
-        int       maxStepsPerFrame = 4;
+        glm::vec3 boundsMin{-15.0f, 0.0f, -15.0f};
+        glm::vec3 boundsMax{15.0f, 35.0f, 15.0f};
+        float     fixedDeltaTime   = 0.016f;
+        int       maxStepsPerFrame = 2;
         bool      startPaused      = false;
         glm::vec3 particleColor{0.25f, 0.5f, 0.95f};
 

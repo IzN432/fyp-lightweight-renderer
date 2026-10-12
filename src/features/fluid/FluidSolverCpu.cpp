@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <stdexcept>
 
 namespace lr
 {
@@ -23,6 +24,7 @@ void FluidSolverCpu::setParticles(std::vector<glm::vec3> positions)
     m_corrections.resize(m_positions.size());
     m_densities.assign(m_positions.size(), 0.0f);
     m_lambdas.assign(m_positions.size(), 0.0f);
+    m_vorticities.assign(m_positions.size(), glm::vec3(0.0f));
     m_neighbourOffsets.assign(m_positions.size() + 1, 0u);
     m_neighbours.clear();
     m_particleBuckets.assign(m_positions.size(), 0u);
@@ -33,6 +35,15 @@ void FluidSolverCpu::setParticles(std::vector<glm::vec3> positions)
 void FluidSolverCpu::clear()
 {
     setParticles({});
+}
+
+void FluidSolverCpu::setVelocities(std::vector<glm::vec3> velocities)
+{
+    if (velocities.size() != m_positions.size())
+    {
+        throw std::invalid_argument("Fluid velocity count must match the particle count");
+    }
+    m_velocities = std::move(velocities);
 }
 
 float FluidSolverCpu::poly6(float squaredDistance, float smoothingRadius)
@@ -208,22 +219,21 @@ void FluidSolverCpu::computeDensitiesAndLambdas()
             const glm::vec3   offset = m_predicted[i] - m_predicted[j];
             density += m_config.particleMass * poly6(glm::dot(offset, offset), h);
 
-            const glm::vec3 gradient = spikyGradient(offset, h) / rho0;
+            // Equations (7)-(8), retaining the mass that the paper drops after assuming unit,
+            // equal-mass particles. The inverse-mass factor below is the corresponding PBD weight.
+            const glm::vec3 gradient = m_config.particleMass * spikyGradient(offset, h) / rho0;
             gradientSelf += gradient;
-            squaredGradientSum += glm::dot(gradient, gradient);
+            const float inverseMass = m_config.particleMass > 0.0f ? 1.0f / m_config.particleMass : 0.0f;
+            squaredGradientSum += inverseMass * glm::dot(gradient, gradient);
         }
-        squaredGradientSum += glm::dot(gradientSelf, gradientSelf);
+        const float inverseMass = m_config.particleMass > 0.0f ? 1.0f / m_config.particleMass : 0.0f;
+        squaredGradientSum += inverseMass * glm::dot(gradientSelf, gradientSelf);
 
         m_densities[i] = density;
 
         const float constraint = density / rho0 - 1.0f;
-        // Only compression is resolved. Letting the solve pull particles together as well makes
-        // the free surface clump into blobs.
-        if (constraint <= 0.0f)
-        {
-            m_lambdas[i] = 0.0f;
-            continue;
-        }
+        // Equation (11). Negative pressure is retained; equations (13)-(14) counter its tensile
+        // instability instead of replacing the paper's model with a one-sided constraint.
         m_lambdas[i] = -constraint / (squaredGradientSum + m_config.relaxation);
     }
 }
@@ -233,6 +243,8 @@ void FluidSolverCpu::computePositionCorrections()
     const std::size_t count = m_predicted.size();
     const float       h     = m_config.smoothingRadius;
     const float       rho0  = m_config.restDensity;
+    const float       deltaQ = std::clamp(m_config.artificialPressureDeltaQ, 0.0f, 1.0f) * h;
+    const float       pressureReference = poly6(deltaQ * deltaQ, h);
 
     // Separate pass from the lambda computation on purpose: every correction has to be built from
     // the same iteration's lambdas, or the result depends on particle ordering and stops matching
@@ -246,7 +258,18 @@ void FluidSolverCpu::computePositionCorrections()
             const glm::vec3   offset = m_predicted[i] - m_predicted[j];
             // The symmetric (lambda_i + lambda_j) weight is what makes each pair push itself apart
             // equally and oppositely, conserving momentum.
-            correction += (m_lambdas[i] + m_lambdas[j]) * spikyGradient(offset, h);
+            // Equations (13)-(14): the artificial pressure prevents tensile clumping while
+            // preserving the paper's negative density constraints.
+            float artificialPressure = 0.0f;
+            if (pressureReference > 0.0f && m_config.artificialPressureK > 0.0f)
+            {
+                const float ratio = poly6(glm::dot(offset, offset), h) / pressureReference;
+                const float powered = m_config.artificialPressureExponent == 4.0f
+                                          ? (ratio * ratio) * (ratio * ratio)
+                                          : std::pow(ratio, m_config.artificialPressureExponent);
+                artificialPressure = -m_config.artificialPressureK * powered;
+            }
+            correction += (m_lambdas[i] + m_lambdas[j] + artificialPressure) * spikyGradient(offset, h);
         }
         m_corrections[i] = correction / rho0;
     }
@@ -255,6 +278,51 @@ void FluidSolverCpu::computePositionCorrections()
     {
         m_predicted[i] += m_corrections[i];
     }
+}
+
+void FluidSolverCpu::applyVorticityConfinement(float deltaTime)
+{
+    if (m_config.vorticityEpsilon <= 0.0f)
+    {
+        return;
+    }
+
+    const std::size_t count = m_velocities.size();
+    const float       h     = m_config.smoothingRadius;
+    m_vorticities.assign(count, glm::vec3(0.0f));
+
+    // Equation (15). This must finish for every particle before |omega| is differentiated below.
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        for (unsigned int n = m_neighbourOffsets[i]; n < m_neighbourOffsets[i + 1]; ++n)
+        {
+            const std::size_t j      = m_neighbours[n];
+            const glm::vec3   offset = m_positions[i] - m_positions[j];
+            m_vorticities[i] +=
+                glm::cross(m_velocities[j] - m_velocities[i], spikyGradient(offset, h));
+        }
+    }
+
+    std::vector<glm::vec3> confined(m_velocities);
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        glm::vec3 eta(0.0f);
+        for (unsigned int n = m_neighbourOffsets[i]; n < m_neighbourOffsets[i + 1]; ++n)
+        {
+            const std::size_t j      = m_neighbours[n];
+            const glm::vec3   offset = m_positions[i] - m_positions[j];
+            eta += glm::length(m_vorticities[j]) * spikyGradient(offset, h);
+        }
+
+        const float etaLength = glm::length(eta);
+        if (etaLength > 1e-6f)
+        {
+            // Equation (16). It is a force post-process, so integrate it into velocity over dt.
+            const glm::vec3 direction = eta / etaLength;
+            confined[i] += deltaTime * m_config.vorticityEpsilon * glm::cross(direction, m_vorticities[i]);
+        }
+    }
+    m_velocities = std::move(confined);
 }
 
 void FluidSolverCpu::applyViscosity(float deltaTime)
@@ -273,20 +341,15 @@ void FluidSolverCpu::applyViscosity(float deltaTime)
     for (std::size_t i = 0; i < count; ++i)
     {
         glm::vec3 delta(0.0f);
-        float     weightSum = 0.0f;
         for (unsigned int n = m_neighbourOffsets[i]; n < m_neighbourOffsets[i + 1]; ++n)
         {
             const std::size_t j      = m_neighbours[n];
             const glm::vec3   offset = m_positions[i] - m_positions[j];
             const float       weight = poly6(glm::dot(offset, offset), h);
             delta += weight * (m_velocities[j] - m_velocities[i]);
-            weightSum += weight;
         }
-        blended[i] = m_velocities[i];
-        if (weightSum > 0.0f)
-        {
-            blended[i] += m_config.viscosity * delta / weightSum;
-        }
+        // Equation (17), deliberately not normalized by the kernel-weight sum.
+        blended[i] = m_velocities[i] + m_config.viscosity * delta;
     }
     m_velocities = std::move(blended);
 
@@ -386,8 +449,23 @@ void FluidSolverCpu::step(float deltaTime)
         m_positions[i]  = m_predicted[i];
     }
 
-    // After positions are committed, so neighbours blend against the velocities they just got.
+    // Algorithm 1 line 22: velocity post-processes after the positional solve.
+    applyVorticityConfinement(deltaTime);
     applyViscosity(deltaTime);
+
+    // The existing safety cap belongs after Algorithm 1's velocity post-processes; applying it
+    // before equations (16)-(17) left their result completely unbounded until the following step.
+    if (maxSpeedSqr > 0.0f)
+    {
+        for (glm::vec3 &velocity : m_velocities)
+        {
+            const float speedSqr = glm::dot(velocity, velocity);
+            if (speedSqr > maxSpeedSqr)
+            {
+                velocity *= maxSpeed / std::sqrt(speedSqr);
+            }
+        }
+    }
 }
 
 std::vector<glm::vec3> FluidSolverCpu::makeParticleBlock(const glm::vec3 &min, const glm::vec3 &max,

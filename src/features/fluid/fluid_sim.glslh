@@ -22,6 +22,7 @@ layout(set = 0, binding = 0) uniform FluidParams
     vec4 boundsMax;               // xyz max, w rest density
     vec4 massRelaxViscosity;      // x mass, y relaxation, z viscosity, w unused
     vec4 restitutionFrictionSpeed; // x restitution, y friction, z max speed, w unused
+    vec4 pressureAndVorticity;    // x pressure k, y delta-q / h, z exponent n, w vorticity epsilon
     uvec4 counts;                 // x particle count, y bucket count, z bucket mask, w iterations
 } params;
 
@@ -32,6 +33,10 @@ float restDensity()     { return params.boundsMax.w; }
 float particleMass()    { return params.massRelaxViscosity.x; }
 float relaxation()      { return params.massRelaxViscosity.y; }
 float viscosity()       { return params.massRelaxViscosity.z; }
+float artificialPressureK()        { return params.pressureAndVorticity.x; }
+float artificialPressureDeltaQ()   { return params.pressureAndVorticity.y; }
+float artificialPressureExponent() { return params.pressureAndVorticity.z; }
+float vorticityEpsilon()            { return params.pressureAndVorticity.w; }
 float restitution()     { return params.restitutionFrictionSpeed.x; }
 float friction()        { return params.restitutionFrictionSpeed.y; }
 float maxSpeedRadii()   { return params.restitutionFrictionSpeed.z; }
@@ -74,6 +79,7 @@ layout(std430, set = 0, binding = 14) buffer SortedPredicted     { vec4 sortedPr
 layout(std430, set = 0, binding = 15) buffer SortedParticleCells { ivec4 sortedParticleCells[]; };
 layout(std430, set = 0, binding = 16) buffer ParticleIds         { uint particleIds[]; };
 layout(std430, set = 0, binding = 17) buffer SortedParticleIds   { uint sortedParticleIds[]; };
+layout(std430, set = 0, binding = 18) buffer Vorticities         { vec4 vorticities[]; };
 
 // Poly6, density only: its gradient vanishes as r approaches zero, so particles sitting on top of
 // each other would feel no separating force.

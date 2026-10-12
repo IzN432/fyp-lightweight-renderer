@@ -34,15 +34,18 @@ public:
         float particleRenderScale = 0.9f;
         int   solverIterations    = 8;
 
-        // Forwarded to the solver; see FluidSolverCpu::Config for what each one is for.
-        float viscosity     = 0.05f;
+        // Paper coefficients consumed literally by equations (13) and (17).
+        float artificialPressureK = 0.1f;
+        float vorticityEpsilon    = 0.0f;
+        float viscosity            = 0.01f;
         float boundsFriction = 0.98f;
 
         // Simulation domain. The fluid is dropped into one corner of it.
         glm::vec3 boundsMin{-0.5f, 0.0f, -0.5f};
         glm::vec3 boundsMax{0.5f, 1.0f, 0.5f};
-        // Fraction of the domain the initial block of fluid occupies, per axis.
-        glm::vec3 sourceFraction{0.4f, 0.6f, 0.4f};
+        // Exact source-lattice dimensions. Keeping this explicit makes small-particle-count
+        // regressions reproducible instead of depending on floating-point loop endpoints.
+        glm::uvec3 sourceDimensions{2, 5, 2};
 
         // Fixed simulation timestep, independent of frame rate.
         float fixedDeltaTime = 1.0f / 60.0f;

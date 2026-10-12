@@ -351,6 +351,8 @@ add_shaders(lr_fluid_feature
     src/features/fluid/fluid_correct.comp
     src/features/fluid/fluid_apply.comp
     src/features/fluid/fluid_finalise.comp
+    src/features/fluid/fluid_vorticity.comp
+    src/features/fluid/fluid_vorticity_apply.comp
     src/features/fluid/fluid_viscosity.comp
     src/features/fluid/fluid_viscosity_apply.comp
     src/features/fluid/fluid_publish.comp

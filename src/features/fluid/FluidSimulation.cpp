@@ -27,13 +27,18 @@ FluidSolverGpu::Config FluidSimulation::solverConfig(const Config &config)
     result.particleMass        = 1.0f;
     result.restDensity         = FluidSolverCpu::restDensityForSpacing(std::max(config.particleSpacing, 1e-4f),
                                                                        result.smoothingRadius, result.particleMass);
-    result.relaxation          = result.restDensity * 0.01f;
+    // Equation (11) leaves epsilon user-specified. 100 is a conservative normalized-unit CFM
+    // regularizer; unlike the paper's published constants there is no reported scene value.
+    result.relaxation          = 100.0f;
     result.solverIterations    = config.solverIterations;
     result.maxSolverIterations = std::max(config.solverIterations, 16);
     result.boundsMin           = config.boundsMin;
     result.boundsMax           = config.boundsMax;
     result.boundsFriction      = config.boundsFriction;
+    result.artificialPressureK = config.artificialPressureK;
+    result.vorticityEpsilon    = config.vorticityEpsilon;
     result.viscosity           = config.viscosity;
+    result.maxSpeedInRadiiPerSecond = 0.0f;
     result.maxParticles        = config.maxParticles;
     result.fixedDeltaTime      = config.fixedDeltaTime;
     result.maxStepsPerFrame    = config.maxStepsPerFrame;
@@ -93,12 +98,14 @@ void FluidSimulation::applyRuntimeConfig()
     solver.smoothingRadius  = m_config.smoothingRadius();
     solver.restDensity      = FluidSolverCpu::restDensityForSpacing(std::max(m_config.particleSpacing, 1e-4f),
                                                                     solver.smoothingRadius, solver.particleMass);
-    solver.relaxation       = solver.restDensity * 0.01f;
+    solver.relaxation       = 100.0f;
     solver.solverIterations = std::clamp(m_config.solverIterations, 0, solver.maxSolverIterations);
     solver.boundsMin        = m_config.boundsMin;
     solver.boundsMax        = m_config.boundsMax;
     solver.boundsFriction   = m_config.boundsFriction;
-    solver.viscosity        = m_config.viscosity;
+    solver.artificialPressureK = m_config.artificialPressureK;
+    solver.vorticityEpsilon = m_config.vorticityEpsilon;
+    solver.viscosity = m_config.viscosity;
     solver.particleRadius   = m_config.particleRadius();
     solver.particleColor    = m_config.particleColor;
     m_solver.setFixedDeltaTime(m_config.fixedDeltaTime);
@@ -166,9 +173,19 @@ void FluidSimulation::onGUI()
         solver.solverIterations   = m_config.solverIterations;
         m_solver.updateParams();
     }
-    if (ImGui::DragFloat("Viscosity", &m_config.viscosity, 0.005f, 0.0f, 0.5f, "%.3f"))
+    if (ImGui::DragFloat("XSPH scale", &m_config.viscosity, 0.001f, 0.0f, 0.5f, "%.3f"))
     {
         solver.viscosity = m_config.viscosity;
+        m_solver.updateParams();
+    }
+    if (ImGui::DragFloat("Artificial pressure scale", &m_config.artificialPressureK, 0.005f, 0.0f, 1.0f, "%.3f"))
+    {
+        solver.artificialPressureK = m_config.artificialPressureK;
+        m_solver.updateParams();
+    }
+    if (ImGui::DragFloat("Vorticity", &m_config.vorticityEpsilon, 0.001f, 0.0f, 10.0f, "%.3f"))
+    {
+        solver.vorticityEpsilon = m_config.vorticityEpsilon;
         m_solver.updateParams();
     }
     if (ImGui::DragFloat("Wall Friction", &m_config.boundsFriction, 0.005f, 0.0f, 1.0f, "%.3f"))
@@ -177,7 +194,7 @@ void FluidSimulation::onGUI()
         m_solver.updateParams();
     }
 
-    ImGui::DragFloat("Spacing (needs reset)", &m_config.particleSpacing, 0.0001f, 0.005f, 0.015f, "%.4f");
+    ImGui::DragFloat("Spacing (needs reset)", &m_config.particleSpacing, 0.01f, 0.05f, 1.0f, "%.3f");
     ImGui::DragFloat("Particle Size", &m_config.particleRenderScale, 0.01f, 0.1f, 2.0f, "%.2f");
     ImGui::ColorEdit3("Color", &m_config.particleColor.x);
     if (!m_error.empty())

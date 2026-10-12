@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 
 namespace lr
 {
@@ -115,7 +117,10 @@ void FluidDemo::rebuildSolverConfig()
     solverConfig.restDensity      = FluidSolverCpu::restDensityForSpacing(spacing, radius, 1.0f);
     solverConfig.relaxation       = solverConfig.restDensity * 0.01f;
     solverConfig.solverIterations = std::max(m_config.solverIterations, 0);
-    solverConfig.viscosity        = m_config.viscosity;
+    // Equations (13) and (17): use the configured coefficients literally.
+    solverConfig.artificialPressureK = m_config.artificialPressureK;
+    solverConfig.vorticityEpsilon    = m_config.vorticityEpsilon;
+    solverConfig.viscosity = m_config.viscosity;
     solverConfig.boundsFriction   = m_config.boundsFriction;
     solverConfig.boundsMin        = m_config.boundsMin;
     solverConfig.boundsMax        = m_config.boundsMax;
@@ -128,15 +133,34 @@ void FluidDemo::reset()
     rebuildSolverConfig();
 
     const float     spacing = std::max(m_config.particleSpacing, 1e-4f);
-    const glm::vec3 extent  = m_config.boundsMax - m_config.boundsMin;
+    if (glm::any(glm::equal(m_config.sourceDimensions, glm::uvec3(0))))
+    {
+        throw std::invalid_argument("Fluid source dimensions must be greater than zero");
+    }
+    const std::size_t count = static_cast<std::size_t>(m_config.sourceDimensions.x) *
+                              static_cast<std::size_t>(m_config.sourceDimensions.y) *
+                              static_cast<std::size_t>(m_config.sourceDimensions.z);
+    if (count > std::numeric_limits<uint32_t>::max())
+    {
+        throw std::invalid_argument("Fluid source particle count exceeds the supported range");
+    }
+
     // Inset by one spacing so no particle starts exactly on a wall, where the boundary clamp would
     // fight the density solve on the very first step.
     const glm::vec3 min = m_config.boundsMin + glm::vec3(spacing);
-    const glm::vec3 max = min + extent * m_config.sourceFraction;
+    const glm::vec3 max = min + glm::vec3(m_config.sourceDimensions - glm::uvec3(1)) * spacing;
+    if (glm::any(glm::greaterThan(max, m_config.boundsMax - glm::vec3(spacing))))
+    {
+        throw std::invalid_argument("Fluid source lattice does not fit inside the simulation bounds");
+    }
 
     m_solver.setParticles(FluidSolverCpu::makeParticleBlock(min, max, spacing));
+    if (m_solver.particleCount() != count)
+    {
+        throw std::runtime_error("Fluid source lattice produced an unexpected particle count");
+    }
     m_stepAccumulator = 0.0f;
-    m_paused          = m_config.startPaused;
+    m_paused          = true;
     refreshSnapshot();
 }
 
@@ -232,7 +256,15 @@ void FluidDemo::onGUI()
 
     // Energy has to leave the system somewhere: with viscosity at zero the positional solve feeds
     // its own corrections back into velocity and a dropped block never settles.
-    if (ImGui::DragFloat("Viscosity", &m_config.viscosity, 0.005f, 0.0f, 0.5f, "%.3f"))
+    if (ImGui::DragFloat("XSPH scale", &m_config.viscosity, 0.001f, 0.0f, 0.5f, "%.3f"))
+    {
+        rebuildSolverConfig();
+    }
+    if (ImGui::DragFloat("Artificial pressure scale", &m_config.artificialPressureK, 0.005f, 0.0f, 1.0f, "%.3f"))
+    {
+        rebuildSolverConfig();
+    }
+    if (ImGui::DragFloat("Vorticity", &m_config.vorticityEpsilon, 0.001f, 0.0f, 10.0f, "%.3f"))
     {
         rebuildSolverConfig();
     }

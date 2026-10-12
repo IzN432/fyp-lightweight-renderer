@@ -24,10 +24,11 @@ struct alignas(16) GpuFluidParams
     glm::vec4  boundsMax;
     glm::vec4  massRelaxViscosity;
     glm::vec4  restitutionFrictionSpeed;
+    glm::vec4  pressureAndVorticity;
     glm::uvec4 counts;
 };
 
-static_assert(sizeof(GpuFluidParams) == 96);
+static_assert(sizeof(GpuFluidParams) == 112);
 
 // The appearance push constant in fluid_publish.comp.
 struct alignas(16) GpuAppearance
@@ -66,6 +67,10 @@ FluidSolverCpu::Config FluidSolverGpu::toCpuConfig(const Config &config)
     cpu.particleMass             = config.particleMass;
     cpu.gravity                  = config.gravity;
     cpu.relaxation               = config.relaxation;
+    cpu.artificialPressureK        = config.artificialPressureK;
+    cpu.artificialPressureDeltaQ   = config.artificialPressureDeltaQ;
+    cpu.artificialPressureExponent = config.artificialPressureExponent;
+    cpu.vorticityEpsilon           = config.vorticityEpsilon;
     cpu.solverIterations         = config.solverIterations;
     cpu.boundsMin                = config.boundsMin;
     cpu.boundsMax                = config.boundsMax;
@@ -104,6 +109,7 @@ FluidSolverGpu::FluidSolverGpu(Config config, ResourceRegistry &resources)
     m_corrections            = prefix + "_corrections";
     m_densities              = prefix + "_densities";
     m_lambdas                = prefix + "_lambdas";
+    m_vorticities            = prefix + "_vorticities";
     m_cellStarts             = prefix + "_cell_starts";
     m_cellCounts             = prefix + "_cell_counts";
     m_cellParticles          = prefix + "_cell_particles";
@@ -137,6 +143,7 @@ FluidSolverGpu::FluidSolverGpu(Config config, ResourceRegistry &resources)
     resources.registerStaticBuffer(m_corrections, vectorBytes, storage);
     resources.registerStaticBuffer(m_densities, scalarBytes, storage);
     resources.registerStaticBuffer(m_lambdas, scalarBytes, storage);
+    resources.registerStaticBuffer(m_vorticities, vectorBytes, storage);
     // One extra entry so a bucket's span reads as [starts[b], starts[b + 1]) without the last
     // bucket needing a special case.
     resources.registerStaticBuffer(m_cellStarts, VkDeviceSize(buckets + 1) * sizeof(uint32_t), storage);
@@ -183,6 +190,9 @@ void FluidSolverGpu::updateParams()
         .massRelaxViscosity = glm::vec4(m_config.particleMass, m_config.relaxation, m_config.viscosity, 0.0f),
         .restitutionFrictionSpeed =
             glm::vec4(m_config.boundsRestitution, m_config.boundsFriction, m_config.maxSpeedInRadiiPerSecond, 0.0f),
+        .pressureAndVorticity =
+            glm::vec4(m_config.artificialPressureK, m_config.artificialPressureDeltaQ,
+                      m_config.artificialPressureExponent, m_config.vorticityEpsilon),
         .counts = glm::uvec4(m_particleCount, resolvedHashBuckets(m_config), resolvedHashBuckets(m_config) - 1u,
                              static_cast<uint32_t>(std::max(m_config.solverIterations, 0))),
     };
@@ -277,7 +287,8 @@ PassBuilder FluidSolverGpu::addComputePass(FrameGraph &frameGraph, const std::st
         .storageBufferReadWrite(7, frameGraph.buffer(m_cellStarts), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageBufferReadWrite(8, frameGraph.buffer(m_cellCounts), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageBufferReadWrite(9, frameGraph.buffer(m_cellParticles), VK_SHADER_STAGE_COMPUTE_BIT)
-        .storageBufferReadWrite(11, frameGraph.buffer(m_particleCells), VK_SHADER_STAGE_COMPUTE_BIT);
+        .storageBufferReadWrite(11, frameGraph.buffer(m_particleCells), VK_SHADER_STAGE_COMPUTE_BIT)
+        .storageBufferReadWrite(18, frameGraph.buffer(m_vorticities), VK_SHADER_STAGE_COMPUTE_BIT);
 }
 
 // Whether the stages of `step` run this frame. Passes are declared once, at build time, but how
@@ -421,6 +432,8 @@ void FluidSolverGpu::build(FrameGraph &frameGraph)
         }
 
         stepStage("fluid_finalise" + suffix, "fluid_finalise.comp", step);
+        stepStage("fluid_vorticity" + suffix, "fluid_vorticity.comp", step);
+        stepStage("fluid_vorticity_apply" + suffix, "fluid_vorticity_apply.comp", step);
         stepStage("fluid_viscosity" + suffix, "fluid_viscosity.comp", step);
         stepStage("fluid_viscosity_apply" + suffix, "fluid_viscosity_apply.comp", step);
     }

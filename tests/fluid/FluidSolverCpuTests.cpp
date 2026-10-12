@@ -15,6 +15,15 @@ bool isFinite(const glm::vec3 &value)
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
 
+float paperPoly6(float squaredDistance, float h)
+{
+    constexpr float pi = 3.14159265358979323846f;
+    const float h2 = h * h;
+    if (squaredDistance >= h2) return 0.0f;
+    const float deficit = h2 - squaredDistance;
+    return 315.0f / (64.0f * pi * std::pow(h, 9.0f)) * deficit * deficit * deficit;
+}
+
 void testEmptyPositionList()
 {
     lr::FluidSolverCpu solver;
@@ -43,6 +52,9 @@ void testKernels()
     config.boundsMin       = glm::vec3(-10.0f);
     config.boundsMax       = glm::vec3(10.0f);
     config.gravity         = glm::vec3(0.0f);
+    config.solverIterations    = 1;
+    config.artificialPressureK = 0.0f;
+    config.viscosity           = 0.0f;
     lr::FluidSolverCpu solver(config);
 
     // A particle's own poly6(0) term is most of its density, so comparing totals puts the
@@ -63,6 +75,192 @@ void testKernels()
 
     assert(nearDensity > aloneDensity); // Neighbour inside the radius contributes.
     assert(farDensity == aloneDensity); // Neighbour at 2h contributes exactly nothing.
+}
+
+// Equations (13)-(14): even at zero density error, s_corr is a repulsive correction. This also
+// guards against accidentally returning to the old compression-only lambda clamp.
+void testArtificialPressureCorrection()
+{
+    constexpr float h = 1.0f;
+    const std::vector<glm::vec3> particles{glm::vec3(0.0f), glm::vec3(0.5f, 0.0f, 0.0f)};
+
+    lr::FluidSolverCpu::Config base;
+    base.smoothingRadius          = h;
+    base.restDensity              = paperPoly6(0.0f, h) + paperPoly6(0.25f, h);
+    base.gravity                  = glm::vec3(0.0f);
+    base.relaxation               = 0.0f;
+    base.solverIterations         = 1;
+    base.viscosity                = 0.0f;
+    base.maxSpeedInRadiiPerSecond = 0.0f;
+    base.boundsMin                = glm::vec3(-10.0f);
+    base.boundsMax                = glm::vec3(10.0f);
+
+    auto withoutPressure = base;
+    withoutPressure.artificialPressureK = 0.0f;
+    lr::FluidSolverCpu baseline(withoutPressure);
+    baseline.setParticles(particles);
+    baseline.step(1.0f / 60.0f);
+
+    lr::FluidSolverCpu paper(base);
+    paper.setParticles(particles);
+    paper.step(1.0f / 60.0f);
+
+    const float baselineDistance = glm::distance(baseline.positions()[0], baseline.positions()[1]);
+    const float correctedDistance = glm::distance(paper.positions()[0], paper.positions()[1]);
+    assert(std::fabs(baselineDistance - 0.5f) < 1e-5f);
+    assert(correctedDistance > baselineDistance);
+}
+
+// Equation (17): c multiplies the raw kernel-weighted velocity difference. Dividing by the weight
+// sum, as the previous implementation did, produces a measurably different answer here.
+void testPaperXsphEquation()
+{
+    constexpr float h  = 1.0f;
+    constexpr float c  = 1e-4f;
+    constexpr float dt = 1e-4f;
+
+    lr::FluidSolverCpu::Config config;
+    config.smoothingRadius          = h;
+    config.gravity                  = glm::vec3(0.0f);
+    config.solverIterations         = 0;
+    config.artificialPressureK      = 0.0f;
+    config.vorticityEpsilon         = 0.0f;
+    config.viscosity                = c;
+    config.maxSpeedInRadiiPerSecond = 0.0f;
+    config.boundsMin                = glm::vec3(-10.0f);
+    config.boundsMax                = glm::vec3(10.0f);
+
+    const std::vector<glm::vec3> particles{glm::vec3(0.0f), glm::vec3(0.5f, 0.0f, 0.0f)};
+    const std::vector<glm::vec3> velocities{glm::vec3(0.0f), glm::vec3(1.0f, 0.0f, 0.0f)};
+
+    auto withoutViscosity = config;
+    withoutViscosity.viscosity = 0.0f;
+    lr::FluidSolverCpu baseline(withoutViscosity);
+    baseline.setParticles(particles);
+    baseline.setVelocities(velocities);
+    baseline.step(dt);
+
+    lr::FluidSolverCpu solver(config);
+    solver.setParticles(particles);
+    solver.setVelocities(velocities);
+    solver.step(dt);
+
+    const float separation = glm::distance(baseline.positions()[0], baseline.positions()[1]);
+    const float weight = paperPoly6(separation * separation, h);
+    const float delta = baseline.velocities()[1].x - baseline.velocities()[0].x;
+    assert(std::fabs(solver.velocities()[0].x - (baseline.velocities()[0].x + c * weight * delta)) < 1e-6f);
+    assert(std::fabs(solver.velocities()[1].x - (baseline.velocities()[1].x - c * weight * delta)) < 1e-6f);
+}
+
+// Equations (15)-(16): an asymmetric rotating neighbourhood must receive a non-zero confinement
+// update, while the otherwise identical disabled solve must retain its input velocity field.
+void testVorticityConfinement()
+{
+    lr::FluidSolverCpu::Config config;
+    config.smoothingRadius          = 2.0f;
+    config.gravity                  = glm::vec3(0.0f);
+    config.solverIterations         = 0;
+    config.artificialPressureK      = 0.0f;
+    config.viscosity                = 0.0f;
+    config.maxSpeedInRadiiPerSecond = 0.0f;
+    config.boundsMin                = glm::vec3(-10.0f);
+    config.boundsMax                = glm::vec3(10.0f);
+
+    const std::vector<glm::vec3> particles{glm::vec3(0.0f), glm::vec3(0.5f, 0.0f, 0.0f),
+                                            glm::vec3(0.0f, 0.75f, 0.0f)};
+    const std::vector<glm::vec3> velocities{glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f),
+                                             glm::vec3(-0.5f, 0.0f, 0.0f)};
+
+    lr::FluidSolverCpu disabled(config);
+    disabled.setParticles(particles);
+    disabled.setVelocities(velocities);
+    disabled.step(1e-4f);
+
+    config.vorticityEpsilon = 1.0f;
+    lr::FluidSolverCpu enabled(config);
+    enabled.setParticles(particles);
+    enabled.setVelocities(velocities);
+    enabled.step(1e-4f);
+
+    float totalDifference = 0.0f;
+    for (std::size_t i = 0; i < particles.size(); ++i)
+    {
+        totalDifference += glm::length(enabled.velocities()[i] - disabled.velocities()[i]);
+    }
+    assert(totalDifference > 1e-6f);
+}
+
+// Retaining particle mass in equations (2), (7) and the PBD inverse-mass denominator must not
+// change an equal-mass fluid when both particle mass and rest density are scaled together.
+void testMassConsistentConstraintGradient()
+{
+    constexpr float h = 1.0f;
+    const float unitRestDensity = paperPoly6(0.0f, h) + paperPoly6(0.25f, h);
+
+    lr::FluidSolverCpu::Config unit;
+    unit.smoothingRadius          = h;
+    unit.restDensity              = unitRestDensity;
+    unit.gravity                  = glm::vec3(0.0f);
+    unit.relaxation               = 0.0f;
+    unit.solverIterations         = 1;
+    unit.artificialPressureK      = 0.0f;
+    unit.viscosity                = 0.0f;
+    unit.maxSpeedInRadiiPerSecond = 0.0f;
+    unit.boundsMin                = glm::vec3(-10.0f);
+    unit.boundsMax                = glm::vec3(10.0f);
+
+    const std::vector<glm::vec3> compressed{glm::vec3(0.0f), glm::vec3(0.25f, 0.0f, 0.0f)};
+    lr::FluidSolverCpu unitMass(unit);
+    unitMass.setParticles(compressed);
+    unitMass.step(1.0f / 60.0f);
+
+    auto doubled = unit;
+    doubled.particleMass = 2.0f;
+    doubled.restDensity  = 2.0f * unitRestDensity;
+    lr::FluidSolverCpu doubleMass(doubled);
+    doubleMass.setParticles(compressed);
+    doubleMass.step(1.0f / 60.0f);
+
+    for (std::size_t i = 0; i < compressed.size(); ++i)
+    {
+        assert(glm::distance(unitMass.positions()[i], doubleMass.positions()[i]) < 1e-5f);
+    }
+}
+
+// Regression for the visible failure that prompted the scale audit: the current 2 x 5 x 2 demo
+// must remain a compact block after its first frame rather than snapping particles to the walls.
+void testPaperTermsStayBoundedAtDemoScale()
+{
+    constexpr float spacing = 0.05f;
+    constexpr float h       = 0.1f;
+
+    lr::FluidSolverCpu::Config config;
+    config.smoothingRadius          = h;
+    config.particleMass             = 1.0f;
+    config.restDensity              = lr::FluidSolverCpu::restDensityForSpacing(spacing, h, 1.0f);
+    config.relaxation               = config.restDensity * 0.01f;
+    config.solverIterations         = 8;
+    config.artificialPressureK      = 0.001f * h * h;
+    config.viscosity                = 0.01f * config.particleMass / config.restDensity;
+    config.boundsMin                = glm::vec3(-0.5f, 0.0f, -0.5f);
+    config.boundsMax                = glm::vec3(0.5f, 1.0f, 0.5f);
+
+    const glm::vec3 first = config.boundsMin + glm::vec3(spacing);
+    const glm::vec3 last  = first + glm::vec3(1.0f, 4.0f, 1.0f) * spacing;
+    const std::vector<glm::vec3> initial = lr::FluidSolverCpu::makeParticleBlock(first, last, spacing);
+    assert(initial.size() == 20);
+
+    lr::FluidSolverCpu solver(config);
+    solver.setParticles(initial);
+    solver.step(1.0f / 60.0f);
+
+    float largestDisplacement = 0.0f;
+    for (std::size_t i = 0; i < initial.size(); ++i)
+    {
+        assert(isFinite(solver.positions()[i]));
+        largestDisplacement = std::max(largestDisplacement, glm::distance(initial[i], solver.positions()[i]));
+    }
+    assert(largestDisplacement < spacing);
 }
 
 // Gravity, integration and the boundary. No fluid behaviour involved: this is the harness check.
@@ -103,6 +301,8 @@ void testBlockSettlesNearRestDensity()
     config.restDensity      = lr::FluidSolverCpu::restDensityForSpacing(spacing, h, 1.0f);
     config.solverIterations = 4;
     config.relaxation       = config.restDensity * 0.01f;
+    config.artificialPressureK = 0.001f * h * h;
+    config.viscosity = 0.01f * config.particleMass / config.restDensity;
     // The container is kept narrow and tall, and filled deep enough that the settled fluid stays
     // more than a smoothing radius deep. A wider box lets the same volume spread into a puddle
     // shallower than h, and then no particle is a full radius clear of the floor, so the interior
@@ -178,6 +378,8 @@ void testCompressionIsResolved()
     config.gravity          = glm::vec3(0.0f); // Isolate the constraint solve.
     config.solverIterations = 10;
     config.relaxation       = config.restDensity * 0.01f;
+    config.artificialPressureK = 0.001f * h * h;
+    config.viscosity        = 0.0f;
     config.boundsMin        = glm::vec3(-1.0f);
     config.boundsMax        = glm::vec3(1.0f);
 
@@ -220,14 +422,12 @@ void testFluidSettlesWithoutClimbingWalls()
     lr::FluidSolverCpu::Config config;
     config.smoothingRadius  = h;
     config.restDensity      = lr::FluidSolverCpu::restDensityForSpacing(spacing, h, 1.0f);
-    // Relaxation an order of magnitude above the settling test's, and viscosity well above the
-    // default. At restDensity * 0.01 the constraint solve is stiff enough to overshoot and keep
-    // feeding energy back as velocity faster than the default viscosity of 0.05 can absorb it, and
-    // the column then sloshes indefinitely instead of settling -- peak speed sits near the
-    // maxSpeedInRadiiPerSecond clamp out to thousands of steps. These values converge by step 400
-    // and stay converged.
+    // Relaxation an order of magnitude above the settling test's, with a strong equation (17)
+    // coefficient expressed at this kernel scale. These values converge by step 400 and stay
+    // converged.
     config.relaxation       = config.restDensity * 0.1f;
-    config.viscosity        = 1.0f;
+    config.artificialPressureK = 0.001f * h * h;
+    config.viscosity        = 1.0f / config.restDensity;
     config.solverIterations = 20;
     config.boundsMin        = glm::vec3(-0.1f, 0.0f, -0.1f);
     config.boundsMax        = glm::vec3(0.1f, 0.5f, 0.1f);
@@ -279,6 +479,11 @@ int main()
 {
     testEmptyPositionList();
     testKernels();
+    testArtificialPressureCorrection();
+    testPaperXsphEquation();
+    testVorticityConfinement();
+    testMassConsistentConstraintGradient();
+    testPaperTermsStayBoundedAtDemoScale();
     testFreeFallAndFloor();
     testBlockSettlesNearRestDensity();
     testCompressionIsResolved();

@@ -37,7 +37,6 @@ void main()
     vec3 self = positions[i].xyz;
 
     vec3 delta = vec3(0.0);
-    float weightSum = 0.0;
 
     // The neighbour traversal keys off the grid, which was built from the predicted positions of
     // this step. Those are the positions that have just been committed, so the grid still describes
@@ -48,12 +47,11 @@ void main()
         {
             float weight = poly6(dot(offset, offset), h);
             delta += weight * (velocities[j].xyz - velocity);
-            weightSum += weight;
         }
     })
 
-    if (weightSum > 0.0)
-        velocity += viscosity() * delta / weightSum;
+    // Equation (17), with no neighbourhood-weight normalization.
+    velocity += viscosity() * delta;
 
     corrections[i] = vec4(velocity, 0.0);
 }

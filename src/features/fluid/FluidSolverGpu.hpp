@@ -44,6 +44,10 @@ public:
         float     particleMass    = 1.0f;
         glm::vec3 gravity{0.0f, -9.81f, 0.0f};
         float     relaxation       = 1000.0f;
+        float     artificialPressureK        = 1e-5f;
+        float     artificialPressureDeltaQ   = 0.3f;
+        float     artificialPressureExponent = 4.0f;
+        float     vorticityEpsilon           = 0.0f;
         int       solverIterations = 4;
         // Ceiling on solverIterations. The solve is unrolled into declared passes, so this fixes
         // how many are built; solverIterations can then be tuned at runtime up to this without
@@ -54,7 +58,7 @@ public:
         glm::vec3 boundsMax{0.5f, 1.0f, 0.5f};
         float     boundsRestitution        = 0.0f;
         float     boundsFriction           = 0.98f;
-        float     viscosity                = 0.05f;
+        float     viscosity                = 1e-5f;
         float     maxSpeedInRadiiPerSecond = 20.0f;
 
         // Buffer capacity. Unlike the CPU solver this is fixed at construction: every buffer below
@@ -152,6 +156,7 @@ private:
     std::string m_corrections;
     std::string m_densities;
     std::string m_lambdas;
+    std::string m_vorticities;
     std::string m_cellStarts;
     std::string m_cellCounts;
     std::string m_cellParticles;

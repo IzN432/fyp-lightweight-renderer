@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -66,8 +67,13 @@ FluidSolverGpu::Config makeConfig(uint32_t capacity)
     // independently of spacing is the usual reason a first step inflates or implodes.
     config.restDensity         = FluidSolverCpu::restDensityForSpacing(spacing, radius, 1.0f);
     config.relaxation          = config.restDensity * 0.01f;
-    config.solverIterations    = 4;
-    config.maxSolverIterations = 4;
+    config.artificialPressureK = 0.001f * radius * radius;
+    config.viscosity           = 0.01f * config.particleMass / config.restDensity;
+    // One Jacobi iteration keeps this a transcription test. With the paper's negative free-surface
+    // pressure enabled, different floating-point neighbour orders become chaotic across repeated
+    // iterations; convergence is tested independently below rather than mistaken for bitwise parity.
+    config.solverIterations    = 1;
+    config.maxSolverIterations = 1;
     config.boundsMin           = glm::vec3(-0.5f, 0.0f, -0.5f);
     config.boundsMax           = glm::vec3(0.5f, 1.0f, 0.5f);
     config.maxParticles        = capacity;
@@ -103,12 +109,92 @@ float maxDeviation(const std::vector<glm::vec3> &gpu, const std::vector<glm::vec
 
 } // namespace
 
-int main()
+int main(int argc, char **argv)
 try
 {
     VulkanContext    context({.appName = "Fluid GPU solver smoke", .enableValidation = true});
     Allocator        allocator(context);
     ResourceRegistry registry(context, allocator, {1, 1});
+
+    if (argc > 1 && std::string(argv[1]) == "--large")
+    {
+        constexpr glm::uvec3 dimensions{50, 56, 50};
+        constexpr float spacing = 0.5f;
+        FluidSolverGpu::Config large;
+        large.smoothingRadius = spacing * 2.0f;
+        large.particleMass = 1.0f;
+        large.restDensity = FluidSolverCpu::restDensityForSpacing(spacing, large.smoothingRadius, 1.0f);
+        large.relaxation = 100.0f;
+        large.artificialPressureK = 0.1f;
+        large.viscosity = 0.01f;
+        large.solverIterations = 8;
+        large.maxSolverIterations = 8;
+        large.boundsMin = glm::vec3(-15.0f, 0.0f, -15.0f);
+        large.boundsMax = glm::vec3(15.0f, 35.0f, 15.0f);
+        large.fixedDeltaTime = 0.016f;
+        large.maxSpeedInRadiiPerSecond = 0.0f;
+        large.maxParticles = dimensions.x * dimensions.y * dimensions.z;
+        large.maxStepsPerFrame = 1;
+        large.startPaused = true;
+
+        std::vector<glm::vec3> particles;
+        particles.reserve(large.maxParticles);
+        const glm::vec3 first = large.boundsMin + glm::vec3(spacing);
+        for (uint32_t x = 0; x < dimensions.x; ++x)
+            for (uint32_t y = 0; y < dimensions.y; ++y)
+                for (uint32_t z = 0; z < dimensions.z; ++z)
+                    particles.emplace_back(first + glm::vec3(x, y, z) * spacing);
+
+        FluidSolverGpu diagnostic(large, registry);
+        diagnostic.setParticles(particles);
+        FrameGraph diagnosticGraph(context, registry);
+        diagnostic.build(diagnosticGraph);
+        std::vector<glm::vec3> previous = particles;
+
+        for (int step = 1; step <= 240; ++step)
+        {
+            diagnostic.stepOnce();
+            diagnosticGraph.executeAndWait();
+            const auto positions = diagnostic.readPositions();
+            const auto velocities = diagnostic.readVelocities();
+            const auto densities = diagnostic.readDensities();
+            glm::vec3 minimum(std::numeric_limits<float>::max());
+            glm::vec3 maximum(-std::numeric_limits<float>::max());
+            float maxSpeed = 0.0f;
+            float maxDisplacement = 0.0f;
+            std::size_t worst = 0;
+            bool finite = true;
+            for (std::size_t i = 0; i < positions.size(); ++i)
+            {
+                finite &= isFinite(positions[i]) && isFinite(velocities[i]);
+                minimum = glm::min(minimum, positions[i]);
+                maximum = glm::max(maximum, positions[i]);
+                maxSpeed = std::max(maxSpeed, glm::length(velocities[i]));
+                const float displacement = glm::length(positions[i] - previous[i]);
+                if (displacement > maxDisplacement)
+                {
+                    maxDisplacement = displacement;
+                    worst = i;
+                }
+            }
+            if (step <= 40 || step % 20 == 0)
+                std::printf("step %03d finite=%d bounds=(%.4f %.4f %.4f)-(%.4f %.4f %.4f) "
+                            "maxSpeed=%.4f maxMove=%.4f id=%zu y=%.4f->%.4f rho/rho0=%.3f\n",
+                            step, finite ? 1 : 0, minimum.x, minimum.y, minimum.z,
+                            maximum.x, maximum.y, maximum.z, maxSpeed, maxDisplacement, worst,
+                            previous[worst].y, positions[worst].y, densities[worst] / large.restDensity);
+            if (maxDisplacement > large.smoothingRadius)
+            {
+                std::fprintf(stderr, "large regression: step %d teleported %.4f kernel radii\n",
+                             step, maxDisplacement / large.smoothingRadius);
+                return 1;
+            }
+            previous = positions;
+            if (!finite)
+                return 1;
+        }
+        return 0;
+    }
 
     const std::vector<glm::vec3> initial = makeBlock(makeConfig(1));
     const FluidSolverGpu::Config config  = makeConfig(static_cast<uint32_t>(initial.size()));
@@ -156,7 +242,10 @@ try
     constexpr int kComparedSteps = 4;
     // Generous next to the ~2e-06 that reassociation actually produces, and still far below the
     // percent-level error a single missing neighbour causes.
-    constexpr float kDensityTolerance = 1e-4f;
+    // With the paper's negative free-surface pressure restored, reassociation noise grows faster
+    // across time steps than it did under the old one-sided clamp. This remains an order of
+    // magnitude below the percent-level signature of a missing neighbour.
+    constexpr float kDensityTolerance = 1e-3f;
 
     for (int step = 0; step < kComparedSteps; ++step)
     {

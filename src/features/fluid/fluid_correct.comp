@@ -21,6 +21,8 @@ void main()
     float h = smoothingRadius();
     vec3 self = predicted[i].xyz;
     float lambdaSelf = lambdas[i];
+    float deltaQ = clamp(artificialPressureDeltaQ(), 0.0, 1.0) * h;
+    float pressureReference = poly6(deltaQ * deltaQ, h);
 
     vec3 correction = vec3(0.0);
     FLUID_FOR_EACH_NEIGHBOUR(i, j, {
@@ -29,7 +31,16 @@ void main()
         {
             // The symmetric (lambda_i + lambda_j) weight is what makes each pair push itself apart
             // equally and oppositely, conserving momentum.
-            correction += (lambdaSelf + lambdas[j]) * spikyGradient(offset, h);
+            float artificialPressure = 0.0;
+            if (pressureReference > 0.0 && artificialPressureK() > 0.0)
+            {
+                float ratio = poly6(dot(offset, offset), h) / pressureReference;
+                float powered = artificialPressureExponent() == 4.0
+                                    ? (ratio * ratio) * (ratio * ratio)
+                                    : pow(ratio, artificialPressureExponent());
+                artificialPressure = -artificialPressureK() * powered;
+            }
+            correction += (lambdaSelf + lambdas[j] + artificialPressure) * spikyGradient(offset, h);
         }
     })
 

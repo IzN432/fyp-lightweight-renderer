@@ -31,6 +31,12 @@ public:
         // Constraint force mixing / relaxation. Prevents division by a near-zero gradient sum
         // where a particle has too few neighbours to constrain, i.e. at the free surface.
         float relaxation = 1000.0f;
+        // Artificial pressure from equations (13)-(14). deltaQ is expressed as a fraction of h.
+        // This is the effective k in world-space units. The paper's reported 0.1 is for its own
+        // particle scale; controllers convert their dimensionless tuning value using h^2.
+        float artificialPressureK        = 1e-5f;
+        float artificialPressureDeltaQ   = 0.3f;
+        float artificialPressureExponent = 4.0f;
         // Jacobi iterations per step. More iterations means less compressible.
         int solverIterations = 4;
         // Particles are confined to [boundsMin, boundsMax] and lose normal velocity on contact.
@@ -41,10 +47,11 @@ public:
         // sheet of particles from sliding along a wall indefinitely.
         float boundsFriction = 0.98f;
 
-        // XSPH viscosity: each particle blends a fraction of its neighbourhood's mean velocity.
-        // Without this PBF has no way to dissipate energy and a dropped block never comes to rest,
-        // because the positional solve keeps converting its own corrections back into velocity.
-        float viscosity = 0.05f;
+        // Optional equation (16) vorticity-confinement strength. Zero disables the post-process.
+        float vorticityEpsilon = 0.0f;
+        // Effective equation (17) coefficient c. Controllers scale the paper's nominal 0.01 by
+        // particleMass/restDensity so the same physical blend is retained at this kernel scale.
+        float viscosity = 1e-5f;
         // Speed cap applied after the velocity update, as a multiple of smoothingRadius per second.
         // Stops a single bad step from throwing a particle clean out of its neighbourhood.
         float maxSpeedInRadiiPerSecond = 20.0f;
@@ -63,6 +70,9 @@ public:
 
     // Replaces all particles. Velocities start at zero.
     void setParticles(std::vector<glm::vec3> positions);
+    // Replaces velocities without disturbing positions; primarily useful for authored initial flow
+    // fields and equation-level tests of the velocity post-processes.
+    void setVelocities(std::vector<glm::vec3> velocities);
     void clear();
 
     void step(float deltaTime);
@@ -106,6 +116,7 @@ private:
     void computeDensitiesAndLambdas();
     void computePositionCorrections();
     void resolveBoundaryCollisions();
+    void applyVorticityConfinement(float deltaTime);
     void applyViscosity(float deltaTime);
 
     Config m_config;
@@ -118,6 +129,7 @@ private:
     std::vector<glm::vec3> m_corrections;
     std::vector<float>     m_densities;
     std::vector<float>     m_lambdas;
+    std::vector<glm::vec3> m_vorticities;
     // Flattened neighbour lists: neighbours of i are m_neighbours[m_neighbourOffsets[i]) up to
     // m_neighbourOffsets[i + 1]).
     std::vector<unsigned int> m_neighbours;
