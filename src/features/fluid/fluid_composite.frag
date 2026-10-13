@@ -13,7 +13,7 @@ layout(set = 0, binding = 0) uniform CameraUbo
 } cameraUbo;
 layout(set = 0, binding = 1) uniform sampler2D fluidDepth;
 layout(set = 0, binding = 2) uniform sampler2D fluidNormal;
-layout(set = 0, binding = 3) uniform sampler2D fluidThickness;
+layout(set = 0, binding = 3) uniform sampler2D fluidBackDepth;
 layout(set = 0, binding = 4) uniform sampler2D sceneColor;
 layout(set = 0, binding = 5) uniform sampler2D sceneDepth;
 layout(set = 0, binding = 6) uniform samplerCube environmentMap;
@@ -79,9 +79,12 @@ void main()
     vec3 normal = normalize(normalSample.xyz);
     vec3 incident = viewRay(inUV);
     vec3 viewDirection = -incident;
-    // Clamped so a dense pile of overlapping spheres cannot push the exponentials below into
-    // saturation, where thickness would stop modulating absorption and displacement entirely.
-    float thickness = clamp(texture(fluidThickness, inUV).r, 0.0, kMaxThickness);
+    // The front and back targets are the two rasterized boundaries of the particle volume.
+    // Their difference measures the body once; unlike summed particle chords it does not grow
+    // with the number of overlapping particles along the ray. Clamp exceptionally deep volumes
+    // once absorption and displacement are already visually saturated.
+    float backDepth = texture(fluidBackDepth, inUV).r;
+    float thickness = clamp(max(backDepth - depth, 0.0) * params.filterAndMaterial.z, 0.0, kMaxThickness);
 
     // Snell's law gives the true bend for this index of refraction, so the IOR drives both the
     // Fresnel mix below and the displacement here from one value. refractionStrength stays as a

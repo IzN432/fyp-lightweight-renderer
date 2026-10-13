@@ -67,6 +67,15 @@ void smoothingRadiusSpansAParticleDiameter()
     assert(near(smoothingRadiusFromParticle(-1.0f), 0.0f));
 }
 
+void thicknessUsesTheRasterizedVolumeBoundaries()
+{
+    using lr::screen_space_liquid::thicknessFromDepths;
+    assert(near(thicknessFromDepths(2.0f, 5.5f), 3.5f));
+    assert(near(thicknessFromDepths(2.0f, 5.5f, 0.5f), 1.75f));
+    assert(near(thicknessFromDepths(5.5f, 2.0f), 0.0f));
+    assert(near(thicknessFromDepths(2.0f, 5.5f, -1.0f), 0.0f));
+}
+
 } // namespace
 
 int main()
@@ -76,5 +85,6 @@ int main()
     absorptionPreservesTheSelectedHue();
     bulkTintKeepsCyanVisibleWithoutTurningGreen();
     smoothingRadiusSpansAParticleDiameter();
+    thicknessUsesTheRasterizedVolumeBoundaries();
     return 0;
 }

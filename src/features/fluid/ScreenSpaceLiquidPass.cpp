@@ -17,8 +17,9 @@ constexpr const char *kDepthTemp    = "fluidDepthTemp";
 constexpr const char *kDepthSmooth  = "fluidDepthSmooth";
 constexpr const char *kSurfaceDepth = "fluidSurfaceDepth";
 constexpr const char *kNormal       = "fluidNormal";
-constexpr const char *kThickness    = "fluidThickness";
-constexpr const char *kParams       = "fluidLiquidParams";
+constexpr const char *kBackDepth        = "fluidBackDepth";
+constexpr const char *kBackSurfaceDepth = "fluidBackSurfaceDepth";
+constexpr const char *kParams           = "fluidLiquidParams";
 
 struct alignas(16) LiquidParams
 {
@@ -137,6 +138,8 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
     VkClearValue zero{};
     VkClearValue farDepth{};
     farDepth.depthStencil = {1.0f, 0};
+    VkClearValue nearDepth{};
+    nearDepth.depthStencil = {0.0f, 0};
 
     // The depth attachment resolves overlapping impostors exactly; the R32 target keeps the
     // corresponding positive view-space distance for filtering and reconstruction.
@@ -195,9 +198,10 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
                                    screen_space_liquid::dispatchSize(extent.height), 1);
         });
 
-    // Every visible sphere contributes its analytic chord length. Additive blending turns the
-    // overlapping cloud into an optical path length without sorting particles.
-    frameGraph.addPass("fluid_thickness")
+    // Rasterize the farthest visible particle surface. Together with the nearest surface above,
+    // this brackets the complete particle volume and avoids counting overlapping particles more
+    // than once when the composite derives its optical thickness.
+    frameGraph.addPass("fluid_back_depth")
         .type(PassType::Geometry)
         .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
         .vertShader((paths::shaderDir / "fluid_surface.vert.spv").string())
@@ -208,10 +212,12 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .storageBufferRead(1, frameGraph.buffer(m_config.particleBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
         .sampledDepth(2, frameGraph.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::depthFetch())
         .uniformBuffer(3, frameGraph.buffer(kParams), VK_SHADER_STAGE_FRAGMENT_BIT)
-        .blend(BlendMode::Additive)
-        .depth(false, false)
+        .blend(BlendMode::Opaque)
+        .depth(true, true, VK_COMPARE_OP_GREATER)
         .cull(VK_CULL_MODE_NONE)
-        .colorAttachment(frameGraph.image(kThickness), VK_FORMAT_R32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR, zero)
+        .colorAttachment(frameGraph.image(kBackDepth), VK_FORMAT_R32_SFLOAT, VK_ATTACHMENT_LOAD_OP_CLEAR, zero)
+        .depthAttachment(frameGraph.image(kBackSurfaceDepth), VK_FORMAT_D32_SFLOAT,
+                         VK_ATTACHMENT_LOAD_OP_CLEAR, nearDepth)
         .execute([this](PassContext &context) {
             if (m_particleCount != 0)
             {
@@ -228,7 +234,7 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(1, frameGraph.image(kDepthSmooth), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::clampToEdge())
         .sampledImage(2, frameGraph.image(kNormal), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::clampToEdge())
-        .sampledImage(3, frameGraph.image(kThickness), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::clampToEdge())
+        .sampledImage(3, frameGraph.image(kBackDepth), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::clampToEdge())
         .sampledImage(4, frameGraph.image("pbr"), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::clampToEdge())
         .sampledDepth(5, frameGraph.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::depthFetch())
         .sampledImage(6, frameGraph.image("ibl_env"), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::clampToEdge())

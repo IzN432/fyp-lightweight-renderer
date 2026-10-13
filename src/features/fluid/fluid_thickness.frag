@@ -22,7 +22,7 @@ layout(location = 0) in vec2 inSphereCoord;
 layout(location = 1) in vec3 inViewCenter;
 layout(location = 2) flat in float inRadius;
 layout(location = 3) flat in uint inType;
-layout(location = 0) out float outThickness;
+layout(location = 0) out float outBackDepth;
 
 void main()
 {
@@ -42,10 +42,9 @@ void main()
     if (particleDepth < 0.0 || particleDepth > opaqueDepth + 1e-5)
         discard;
 
-    // Clip the far half of the sphere at opaque scene geometry. Testing only the front surface
-    // prevents hidden particles, but without this clip a visible particle intersecting a wall
-    // would still absorb light through its complete diameter.
-    float nearLinearDepth = -nearestPoint.z;
+    // Keep the farthest visible analytic surface. The pass uses a GREATER depth comparison, so
+    // overlapping particles produce the back of the complete particle volume instead of adding
+    // every overlapping chord and making dense liquid artificially opaque.
     float farLinearDepth = -(inViewCenter.z - halfChord);
     if (opaqueDepth < 1.0 - 1e-6)
     {
@@ -54,5 +53,14 @@ void main()
         farLinearDepth = min(farLinearDepth, opaqueLinearDepth);
     }
 
-    outThickness = max(farLinearDepth - nearLinearDepth, 0.0) * params.filterAndMaterial.z;
+    // gl_FragDepth must describe the same clipped surface as the linear depth target. Projection
+    // depth is a function of view-space Z, so replacing Z is sufficient even though the opaque
+    // clip point can lie between the sphere's analytic front and back surfaces.
+    vec3 farPoint = vec3(nearestPoint.xy, -farLinearDepth);
+    vec4 farClip = cameraUbo.proj * vec4(farPoint, 1.0);
+    if (farClip.w <= 0.0)
+        discard;
+
+    gl_FragDepth = farClip.z / farClip.w;
+    outBackDepth = farLinearDepth;
 }

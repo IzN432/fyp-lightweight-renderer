@@ -108,6 +108,14 @@ inline glm::vec3 compositeTransmission(const glm::vec3 &background, const glm::v
     return glm::mix(background * transmittance, tint, tintWeight);
 }
 
+// Optical path through the rasterized particle volume. Invalid or crossed surfaces yield no
+// thickness; the scale remains an artistic density control rather than compensating for particle
+// overlap as the former additive-chord approximation required.
+inline float thicknessFromDepths(float frontDepth, float backDepth, float scale = 1.0f)
+{
+    return std::max(backDepth - frontDepth, 0.0f) * std::max(scale, 0.0f);
+}
+
 // Neighbouring impostors only merge into a continuous surface once the kernel spans roughly a
 // particle diameter; below that each sphere keeps its own depth profile and shades separately.
 inline float smoothingRadiusFromParticle(float particleRadius) { return std::max(particleRadius, 0.0f) * 2.0f; }
