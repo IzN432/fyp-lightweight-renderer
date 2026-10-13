@@ -24,6 +24,8 @@ layout(set = 0, binding = 7) uniform LiquidParams
     vec4 tintAndFresnel;
     ivec4 filterRadius;
 } params;
+layout(set = 0, binding = 8) uniform sampler2D fluidRawDepth;
+layout(set = 0, binding = 9) uniform usampler2D fluidOccupancy;
 
 layout(location = 0) out vec4 outColor;
 
@@ -39,6 +41,7 @@ const int kRefractionSearchSteps = 4;
 // Fractional slack when comparing scene distance against the liquid surface, covering the
 // depth-buffer round-trip error that grows with distance.
 const float kOcclusionTolerance = 1e-3;
+const float kOccupancySlices = 32.0;
 
 vec3 viewRay(vec2 uv)
 {
@@ -79,12 +82,26 @@ void main()
     vec3 normal = normalize(normalSample.xyz);
     vec3 incident = viewRay(inUV);
     vec3 viewDirection = -incident;
-    // The front and back targets are the two rasterized boundaries of the particle volume.
-    // Their difference measures the body once; unlike summed particle chords it does not grow
-    // with the number of overlapping particles along the ray. Clamp exceptionally deep volumes
-    // once absorption and displacement are already visually saturated.
+    // The nearest/farthest depths define a bounded range, while the occupancy bits say which
+    // slices in that range actually contain at least one particle chord. This retains the old
+    // overlap-safe union behaviour but no longer treats empty gaps between separate bodies as
+    // liquid. The raw front matches the range used while rasterizing the bit field; the smoothed
+    // front above remains the visible surface used for normals and shading.
     float backDepth = texture(fluidBackDepth, inUV).r;
-    float thickness = clamp(max(backDepth - depth, 0.0) * params.filterAndMaterial.z, 0.0, kMaxThickness);
+    ivec2 occupancyPixel = clamp(ivec2(gl_FragCoord.xy), ivec2(0), textureSize(fluidOccupancy, 0) - 1);
+    float rawDepth = texelFetch(fluidRawDepth, occupancyPixel, 0).r;
+    uint occupancyMask = texelFetch(fluidOccupancy, occupancyPixel, 0).r;
+    float occupiedFraction = float(bitCount(occupancyMask)) / kOccupancySlices;
+    float occupiedSpan = max(backDepth - rawDepth, 0.0);
+    float thickness = clamp(occupiedSpan * occupiedFraction * params.filterAndMaterial.z,
+                            0.0, kMaxThickness);
+
+    // Refraction through the front surface follows only its first connected occupied run. Later
+    // bodies still contribute absorption, but an air gap is not folded into one continuous bend.
+    int firstGap = findLSB(~occupancyMask);
+    float firstRunSlices = float(firstGap < 0 ? 32 : firstGap);
+    float refractionThickness = min(occupiedSpan * firstRunSlices / kOccupancySlices *
+                                    params.filterAndMaterial.z, kMaxThickness);
 
     // Snell's law gives the true bend for this index of refraction, so the IOR drives both the
     // Fresnel mix below and the displacement here from one value. refractionStrength stays as a
@@ -104,7 +121,7 @@ void main()
         // fluidDepth stores positive view-space distance along -Z, while `incident` is a unit
         // ray, so scale it onto that depth plane rather than treating depth as a ray length.
         vec3 entryPoint = incident * (depth / max(-incident.z, 1e-6));
-        vec4 exitClip = cameraUbo.proj * vec4(entryPoint + refractedDirection * thickness, 1.0);
+        vec4 exitClip = cameraUbo.proj * vec4(entryPoint + refractedDirection * refractionThickness, 1.0);
         if (exitClip.w > 0.0)
             refractionOffset = (exitClip.xy / exitClip.w) * 0.5 + 0.5 - inUV;
     }

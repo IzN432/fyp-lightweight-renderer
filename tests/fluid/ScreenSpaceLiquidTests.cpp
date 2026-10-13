@@ -76,6 +76,23 @@ void thicknessUsesTheRasterizedVolumeBoundaries()
     assert(near(thicknessFromDepths(2.0f, 5.5f, -1.0f), 0.0f));
 }
 
+void occupancyExcludesEmptyDepthSlices()
+{
+    using lr::screen_space_liquid::firstIntervalThickness;
+    using lr::screen_space_liquid::occupiedThickness;
+
+    assert(near(occupiedThickness(2.0f, 10.0f, 0xffffffffu), 8.0f));
+    assert(near(occupiedThickness(2.0f, 10.0f, 0x0000ffffu), 4.0f));
+    assert(near(occupiedThickness(2.0f, 10.0f, 0x00ff00ffu), 4.0f));
+    assert(near(occupiedThickness(10.0f, 2.0f, 0xffffffffu), 0.0f));
+    assert(near(occupiedThickness(2.0f, 10.0f, 0xffffffffu, -1.0f), 0.0f));
+
+    // Refraction follows only the first connected run; a later body changes absorption without
+    // pretending that the intervening air is one continuous refractive medium.
+    assert(near(firstIntervalThickness(2.0f, 10.0f, 0x00ff000fu), 1.0f));
+    assert(near(firstIntervalThickness(2.0f, 10.0f, 0xffffffffu), 8.0f));
+}
+
 } // namespace
 
 int main()
@@ -86,5 +103,6 @@ int main()
     bulkTintKeepsCyanVisibleWithoutTurningGreen();
     smoothingRadiusSpansAParticleDiameter();
     thicknessUsesTheRasterizedVolumeBoundaries();
+    occupancyExcludesEmptyDepthSlices();
     return 0;
 }

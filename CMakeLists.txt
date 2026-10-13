@@ -357,6 +357,8 @@ add_shaders(lr_fluid_feature
     src/features/fluid/fluid_viscosity_apply.comp
     src/features/fluid/fluid_publish.comp
     src/features/fluid/fluid_thickness.frag
+    src/features/fluid/fluid_occupancy_clear.comp
+    src/features/fluid/fluid_occupancy.frag
     src/features/fluid/fluid_composite.frag
 )
 

@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <bit>
 
 #include <cstdint>
 #include <span>
@@ -114,6 +115,31 @@ inline glm::vec3 compositeTransmission(const glm::vec3 &background, const glm::v
 inline float thicknessFromDepths(float frontDepth, float backDepth, float scale = 1.0f)
 {
     return std::max(backDepth - frontDepth, 0.0f) * std::max(scale, 0.0f);
+}
+
+// The GPU divides the front-to-back span into this many slices and marks only slices intersected
+// by a particle chord. This bounded representation preserves empty gaps without storing an
+// unbounded per-pixel fragment list.
+inline constexpr uint32_t occupancySliceCount = 32;
+
+inline float occupiedThickness(float frontDepth, float backDepth, uint32_t occupancyMask, float scale = 1.0f)
+{
+    const float span = std::max(backDepth - frontDepth, 0.0f);
+    return span * (static_cast<float>(std::popcount(occupancyMask)) / static_cast<float>(occupancySliceCount)) *
+           std::max(scale, 0.0f);
+}
+
+inline float firstIntervalThickness(float frontDepth, float backDepth, uint32_t occupancyMask,
+                                    float scale = 1.0f)
+{
+    uint32_t occupiedSlices = 0;
+    while (occupiedSlices < occupancySliceCount && (occupancyMask & (uint32_t{1} << occupiedSlices)) != 0)
+    {
+        ++occupiedSlices;
+    }
+    const float span = std::max(backDepth - frontDepth, 0.0f);
+    return span * (static_cast<float>(occupiedSlices) / static_cast<float>(occupancySliceCount)) *
+           std::max(scale, 0.0f);
 }
 
 // Neighbouring impostors only merge into a continuous surface once the kernel spans roughly a

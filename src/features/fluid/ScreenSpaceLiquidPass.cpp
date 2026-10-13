@@ -19,6 +19,7 @@ constexpr const char *kSurfaceDepth = "fluidSurfaceDepth";
 constexpr const char *kNormal       = "fluidNormal";
 constexpr const char *kBackDepth        = "fluidBackDepth";
 constexpr const char *kBackSurfaceDepth = "fluidBackSurfaceDepth";
+constexpr const char *kOccupancy         = "fluidOccupancy";
 constexpr const char *kParams           = "fluidLiquidParams";
 
 struct alignas(16) LiquidParams
@@ -80,6 +81,7 @@ ScreenSpaceLiquidPass::ScreenSpaceLiquidPass(Config config, ResourceRegistry &re
     resources.registerImage(kDepthTemp, VK_FORMAT_R32_SFLOAT, storageAndSampled);
     resources.registerImage(kDepthSmooth, VK_FORMAT_R32_SFLOAT, storageAndSampled);
     resources.registerImage(kNormal, VK_FORMAT_R16G16B16A16_SFLOAT, storageAndSampled);
+    resources.registerImage(kOccupancy, VK_FORMAT_R32_UINT, storageAndSampled);
     updateParams();
 }
 
@@ -227,6 +229,44 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
             }
         });
 
+    // Clear the per-pixel bit field before particle fragments atomically mark the depth slices
+    // occupied by their analytic sphere chords.
+    frameGraph.addPass("fluid_occupancy_clear")
+        .type(PassType::Compute)
+        .computeShader((paths::shaderDir / "fluid_occupancy_clear.comp.spv").string())
+        .storageImageWrite(0, frameGraph.image(kOccupancy), VK_SHADER_STAGE_COMPUTE_BIT)
+        .execute([occupancy = frameGraph.image(kOccupancy)](PassContext &context) {
+            const VkExtent2D extent = context.extent(occupancy);
+            context.cmd().dispatch(screen_space_liquid::dispatchSize(extent.width),
+                                   screen_space_liquid::dispatchSize(extent.height), 1);
+        });
+
+    // A single uint represents 32 ordered samples between the nearest and farthest liquid
+    // boundaries. Each particle ORs in the samples covered by its chord: overlap is counted once,
+    // while genuinely empty nearest-to-farthest gaps remain clear.
+    frameGraph.addPass("fluid_occupancy")
+        .type(PassType::Geometry)
+        .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+        .vertShader((paths::shaderDir / "fluid_surface.vert.spv").string())
+        .fragShader((paths::shaderDir / "fluid_occupancy.frag.spv").string())
+        .pushConstantSize(sizeof(float), VK_SHADER_STAGE_VERTEX_BIT)
+        .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName),
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+        .storageBufferRead(1, frameGraph.buffer(m_config.particleBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
+        .sampledDepth(2, frameGraph.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::depthFetch())
+        .sampledImage(3, frameGraph.image(kDepthRaw), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::depthFetch())
+        .sampledImage(4, frameGraph.image(kBackDepth), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::depthFetch())
+        .storageImageReadWrite(5, frameGraph.image(kOccupancy), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .cull(VK_CULL_MODE_NONE)
+        .execute([this](PassContext &context) {
+            if (m_particleCount != 0)
+            {
+                context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT,
+                                            m_config.renderScale);
+                context.cmd().draw(6, m_particleCount);
+            }
+        });
+
     frameGraph.addPass("fluid_composite")
         .type(PassType::Fullscreen)
         .vertShader((paths::shaderDir / "fullscreen.vert.spv").string())
@@ -239,6 +279,8 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .sampledDepth(5, frameGraph.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::depthFetch())
         .sampledImage(6, frameGraph.image("ibl_env"), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::clampToEdge())
         .uniformBuffer(7, frameGraph.buffer(kParams), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledImage(8, frameGraph.image(kDepthRaw), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::depthFetch())
+        .sampledImage(9, frameGraph.image(kOccupancy), VK_SHADER_STAGE_FRAGMENT_BIT, SamplerDesc::depthFetch())
         .colorAttachment(frameGraph.image(compositeImageName()), VK_FORMAT_R16G16B16A16_SFLOAT,
                          VK_ATTACHMENT_LOAD_OP_CLEAR, zero)
         .execute([](PassContext &context) {

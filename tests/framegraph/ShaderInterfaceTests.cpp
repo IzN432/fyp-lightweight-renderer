@@ -227,6 +227,26 @@ void particleBillboardShadersMatchTheirPassInterface()
             "the billboard pass declarations should match the production shaders:\n" + errorOf(f.pass()));
 }
 
+void fluidOccupancyShadersMatchTheirPassInterface()
+{
+    Fixture                     f;
+    const std::filesystem::path shaderRoot = LR_FLUID_SHADER_SOURCE_DIR;
+    f.builder.type(lr::PassType::Geometry)
+        .vertShader(lr::compileGlslFile(shaderRoot / "fluid_surface.vert"), "fluid_surface.vert")
+        .fragShader(lr::compileGlslFile(shaderRoot / "fluid_occupancy.frag"), "fluid_occupancy.frag")
+        .pushConstantSize(sizeof(float), VK_SHADER_STAGE_VERTEX_BIT)
+        .uniformBuffer(0, f.definition.buffer("camera"),
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+        .storageBufferRead(1, f.definition.buffer("particles"), VK_SHADER_STAGE_VERTEX_BIT)
+        .sampledDepth(2, f.definition.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledImage(3, f.definition.image("fluidFrontDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .sampledImage(4, f.definition.image("fluidBackDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .storageImageReadWrite(5, f.definition.image("fluidOccupancy"), VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    require(errorOf(f.pass()).empty(),
+            "the fluid occupancy pass declarations should match the production shaders:\n" + errorOf(f.pass()));
+}
+
 } // namespace
 
 int main()
@@ -243,6 +263,7 @@ int main()
         {"only set 0 exists", onlySetZeroExists},
         {"every problem is reported at once", everyProblemIsReportedAtOnce},
         {"particle billboard interface", particleBillboardShadersMatchTheirPassInterface},
+        {"fluid occupancy interface", fluidOccupancyShadersMatchTheirPassInterface},
     };
 
     size_t failures = 0;
