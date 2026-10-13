@@ -12,8 +12,8 @@ cudaError_t launchDensityTestPattern(cudaSurfaceObject_t surface, cudaExtent ext
 //
 // Grid spacing is uniform and implicit: every stage works in cell units, i.e. h = dx = 1. That is
 // a consistent non-dimensionalization rather than a missing factor — the 1/dx the textbook
-// stencils carry becomes 1, and divergence and the pressure gradient both use the same halved
-// central difference, so the pair stays self-consistent. Velocities are therefore in cells per
+// stencils carry becomes 1, and MAC divergence and pressure gradient use the same face spacing,
+// so the pair stays self-consistent. Velocities are therefore in cells per
 // second, which is what lets advection backtrace with `dt` alone.
 //
 // What it costs: the force strengths below are not resolution-independent. Fedkiw's confinement
@@ -52,8 +52,8 @@ struct SmokeStepParams
     // the plume lower, and the buoyancy coefficient has to come up with it to keep the same reach.
     //
     // Both are bounded above by the pressure solve, not by taste: a faster plume needs more Jacobi
-    // iterations to stay divergence-free, and past roughly twice these values the default 40 sweeps
-    // visibly stop converging.
+    // iterations to stay divergence-free, and past roughly twice these values even the default
+    // 140 sweeps visibly stop converging.
     float cooling       = 1.0f;
     // Ad-hoc drag, not viscosity: the solver has no diffusion stage, because smoke is modelled
     // with the inviscid Euler equations. This is a plain per-second decay on the velocity field.
@@ -69,10 +69,9 @@ struct SmokeStepParams
     // cell and smoke deflected sideways by an obstacle is pushed under rather than around it. That
     // is correct for a sealed box and wrong for the open air a plume is usually meant to read as.
     //
-    // Open replaces the top face's conditions with the outflow pair: a Dirichlet p = 0 there,
+    // Open replaces the top face's conditions with the outflow pair: a Dirichlet p = 0 outside,
     // which lets the pressure solve vent the displaced fluid instead of balancing it against a
-    // lid, and a velocity border that copies the interior outward rather than reflecting its
-    // normal component. The other five faces stay closed walls.
+    // lid, and an unconstrained outward MAC face. The other five faces stay closed walls.
     bool  openTop       = false;
 };
 
@@ -97,7 +96,8 @@ struct SmokeSourceParams
 // per step and read by every Jacobi iteration, so it needs no second copy.
 struct SmokeFields
 {
-    cudaSurfaceObject_t velocity     = 0;  // float4, xyz = velocity
+    // Packed MAC grid: xyz are the velocities on this cell's positive X/Y/Z faces, respectively.
+    cudaSurfaceObject_t velocity     = 0;  // float4
     cudaSurfaceObject_t velocityNext = 0;
     cudaSurfaceObject_t density      = 0;  // float
     cudaSurfaceObject_t densityNext  = 0;
@@ -116,9 +116,10 @@ struct SmokeFields
 };
 
 cudaError_t launchInjectSources(const SmokeFields &fields, cudaExtent extent, const SmokeSourceParams &source,
-                               float dt, cudaStream_t stream);
+                               float dt, bool openTop, cudaStream_t stream);
 
-cudaError_t launchAdvectVelocity(const SmokeFields &fields, cudaExtent extent, float dt, cudaStream_t stream);
+cudaError_t launchAdvectVelocity(const SmokeFields &fields, cudaExtent extent, float dt, bool openTop,
+                                 cudaStream_t stream);
 
 cudaError_t launchApplyForces(const SmokeFields &fields, cudaExtent extent, const SmokeStepParams &params,
                               cudaStream_t stream);
@@ -153,8 +154,8 @@ cudaError_t launchAdvectDensity(const SmokeFields &fields, cudaExtent extent, co
 cudaError_t launchAdvectTemperature(const SmokeFields &fields, cudaExtent extent, const SmokeStepParams &params,
                                     cudaStream_t stream);
 
-// Clamps the one-cell border: velocity reflects to no-slip and pressure/density mirror inward.
-// With `openTop` the top face instead copies the interior outward, so flow and smoke leave there.
+// Enforces solid MAC faces and mirrors scalar fields at the five closed domain boundaries. With
+// `openTop`, the top face and its advected scalars are left as outflow.
 cudaError_t launchApplyBoundaries(const SmokeFields &fields, cudaExtent extent, bool openTop,
                                   float ambientTemperature, cudaStream_t stream);
 
@@ -171,6 +172,11 @@ cudaError_t launchFillScalar(cudaSurfaceObject_t surface, cudaExtent extent, flo
 // exclusive, both in cells, so an empty or inverted range clears the whole volume.
 cudaError_t launchFillObstacleBox(cudaSurfaceObject_t obstacle, cudaExtent extent, int3 min, int3 max,
                                   cudaStream_t stream);
+
+// Test/debug analogue of the scene voxelizer for a curved obstacle. Centre and radius are in cell
+// coordinates; cells whose centres lie inside the sphere are marked solid.
+cudaError_t launchFillObstacleSphere(cudaSurfaceObject_t obstacle, cudaExtent extent, float3 centre,
+                                     float radius, cudaStream_t stream);
 
 cudaError_t launchCopyVolume(cudaSurfaceObject_t destination, cudaSurfaceObject_t source, cudaExtent extent,
                              int channels, cudaStream_t stream);

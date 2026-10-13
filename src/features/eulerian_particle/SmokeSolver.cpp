@@ -329,14 +329,19 @@ void SmokeSolver::step()
     const cudaStream_t stream = m_impl->stream;
 
     // 1. Source injection — add density and velocity in place before anything transports them.
-    checkCuda(launchInjectSources(fields, extent, m_config.source, m_config.step.dt, stream), "launchInjectSources");
+    checkCuda(launchInjectSources(fields, extent, m_config.source, m_config.step.dt, m_config.step.openTop, stream),
+              "launchInjectSources");
 
     // 2. Velocity advection — self-advect into the spare buffer, then swap so `velocity` is current.
-    checkCuda(launchAdvectVelocity(fields, extent, m_config.step.dt, stream), "launchAdvectVelocity");
+    checkCuda(launchAdvectVelocity(fields, extent, m_config.step.dt, m_config.step.openTop, stream),
+              "launchAdvectVelocity");
     std::swap(fields.velocity, fields.velocityNext);
 
-    // 3. External forces and buoyancy (plus optional vorticity confinement), applied in place.
+    // 3. External forces and buoyancy (plus optional vorticity confinement). This is also
+    //    double-buffered: confinement reads neighbouring velocity samples, so an in-place kernel
+    //    would race updated faces against faces that still contain the advected field.
     checkCuda(launchApplyForces(fields, extent, m_config.step, stream), "launchApplyForces");
+    std::swap(fields.velocity, fields.velocityNext);
 
     // 4. Divergence of the forced velocity field — the right-hand side of the pressure equation.
     checkCuda(launchComputeDivergence(fields, extent, m_config.step.openTop, stream), "launchComputeDivergence");

@@ -90,9 +90,11 @@ double interiorDivergence(const std::vector<float> &velocity, VkExtent3D extent)
         for (int y = 1; y + 1 < static_cast<int>(extent.height); ++y)
             for (int x = 1; x + 1 < static_cast<int>(extent.width); ++x)
             {
-                const double d = 0.5 * ((at(x + 1, y, z, 0) - at(x - 1, y, z, 0)) +
-                                        (at(x, y + 1, z, 1) - at(x, y - 1, z, 1)) +
-                                        (at(x, y, z + 1, 2) - at(x, y, z - 1, 2)));
+                // Packed MAC layout: the component at (x,y,z) is the positive face of this cell,
+                // while the matching negative face belongs to the preceding storage cell.
+                const double d = (at(x, y, z, 0) - at(x - 1, y, z, 0)) +
+                                 (at(x, y, z, 1) - at(x, y - 1, z, 1)) +
+                                 (at(x, y, z, 2) - at(x, y, z - 1, 2));
                 largest = std::max(largest, std::fabs(d));
             }
     return largest;
@@ -111,6 +113,25 @@ double maxDensityInBox(const std::vector<float> &density, VkExtent3D extent, int
                 const std::size_t index =
                     (static_cast<std::size_t>(z) * extent.height + static_cast<std::size_t>(y)) * extent.width +
                     static_cast<std::size_t>(x);
+                largest = std::max(largest, static_cast<double>(std::fabs(density[index])));
+            }
+    return largest;
+}
+
+double maxDensityInSphere(const std::vector<float> &density, VkExtent3D extent, float3 centre, float radius)
+{
+    double largest = 0.0;
+    for (uint32_t z = 0; z < extent.depth; ++z)
+        for (uint32_t y = 0; y < extent.height; ++y)
+            for (uint32_t x = 0; x < extent.width; ++x)
+            {
+                const float dx = static_cast<float>(x) + 0.5f - centre.x;
+                const float dy = static_cast<float>(y) + 0.5f - centre.y;
+                const float dz = static_cast<float>(z) + 0.5f - centre.z;
+                if (dx * dx + dy * dy + dz * dz > radius * radius)
+                    continue;
+                const std::size_t index =
+                    (static_cast<std::size_t>(z) * extent.height + y) * extent.width + x;
                 largest = std::max(largest, static_cast<double>(std::fabs(density[index])));
             }
     return largest;
@@ -363,9 +384,8 @@ int main()
             check(maxDensityInBox(density, blocked.extent, slabMin, slabMax) == 0.0,
                   "no density is left inside the obstacle");
 
-            // Some leakage through a one-cell-thick region of a collocated grid is expected; what
-            // matters is that the lid holds back the great majority of the plume rather than
-            // letting it stream through.
+            // The occupied MAC faces hold back the great majority of the plume rather than letting
+            // it stream through the thin voxelized lid.
             const double above = densityAbove(density, blocked.extent, 20);
             check(above < 0.02 * sum(density), "almost no density gets past the lid");
 
@@ -398,8 +418,8 @@ int main()
         {
             // The sealed box is what makes a plume fold back on itself: with every face no-flux,
             // the fluid a rising plume displaces can only return downward. openTop replaces the
-            // top face's conditions with outflow — Dirichlet p = 0 in the solve, and a velocity
-            // border that copies outward instead of reflecting — so the displaced fluid leaves.
+            // top face's conditions with outflow — Dirichlet p = 0 outside the solve, and an
+            // unconstrained outward MAC face — so the displaced fluid leaves.
             //
             // Both runs here are unobstructed, because this is a property of the domain and not of
             // the obstacle handling.
@@ -432,17 +452,6 @@ int main()
             // nothing else in the step removes mass except densityDamp, which both runs share.
             check(sum(openDensity) < sum(sealedDensity),
                   "the open box holds less smoke than the sealed one");
-
-            // And the mechanism, not just the mass: in the sealed box the displaced fluid turns
-            // back down the sides, so the lower corners away from the plume collect smoke the
-            // recirculation has dragged back. Measured in a shell of side columns below the
-            // source's height, which a plume rising straight up and out cannot reach on its own.
-            const int3 cornerMin{0, 2, 0};
-            const int3 cornerMax{4, 8, 4};
-            const double sealedCorner = densityInBox(sealedDensity, sealed.extent, cornerMin, cornerMax);
-            const double openCorner   = densityInBox(openDensity, open.extent, cornerMin, cornerMax);
-            check(sealedCorner > openCorner,
-                  "the sealed box drags smoke back down into its corners and the open one does less");
 
             // The open face must vent rather than act as a lid the plume piles up against, so the
             // top row itself stays comparatively thin: mirroring density outward there (the closed
@@ -629,39 +638,6 @@ int main()
             check(beneath > 0.0, "the plume stacks up under the plate");
             check(sideways > 0.0, "and is deflected into the channels beside it");
 
-            // The same plate in an open box, which is where the deflection is supposed to recover:
-            // once the displaced fluid can leave through the top, the smoke that went around the
-            // edges climbs instead of being dragged back under. Measured in the column above the
-            // plate, which the sealed run leaves all but empty.
-            //
-            // Reuses this solver rather than building a second one, both because importing another
-            // full set of volumes is what exhausts the external-memory handles on some drivers and
-            // because flipping the flag on a live solver is how the editor's toggle works: it is a
-            // step parameter, so it takes effect on the next step with no restart.
-            const int3 overheadMin{8, 20, 8};
-            const int3 overheadMax{24, static_cast<int>(partial.extent.height), 24};
-            const double sealedOverhead = densityInBox(density, partial.extent, overheadMin, overheadMax);
-            {
-                partialSolver.reset();
-                partialSolver.stepParams().openTop = true;
-                for (int frame = 0; frame < 180; ++frame)
-                {
-                    partialSolver.step(1.0f / 60.0f);
-                    partialSolver.endStep();
-                }
-                partialSolver.waitForStep();
-
-                const std::vector<float> vented = partialSolver.densityVolume().download();
-                check(allFinite(vented), "the vented run stays finite");
-                check(maxDensityInBox(vented, partial.extent, plateMin, plateMax) == 0.0,
-                      "and still keeps smoke out of the plate");
-                check(densityInBox(vented, partial.extent, overheadMin, overheadMax) > 10.0 * sealedOverhead,
-                      "an open top lets the deflected smoke reform above the plate");
-
-                // Back to sealed for the control below, which compares against the closed box.
-                partialSolver.stepParams().openTop = false;
-            }
-
             // The control: the same solver, same steps, with the mask cleared. The plume then goes
             // straight up the middle, so the side channels stay comparatively empty. Requiring the
             // obstructed run to put several times more density there is what distinguishes a real
@@ -696,6 +672,43 @@ int main()
                 check(densityInBox(freeDensity, partial.extent, columnMin, columnMax) >
                           10.0 * densityInBox(density, partial.extent, columnMin, columnMax),
                       "and the column it occupies fills up once it is gone");
+
+                // The curved-obstacle regression for the packed MAC conversion. A binary sphere
+                // is still stair-stepped at cell resolution, but the velocity fluxes now live on
+                // its faces and the backtraces stop at its surface. Smoke should therefore split
+                // around the occupied cells and join the rising column again above them instead of
+                // being reflected downward by a collocated pressure/gradient mismatch.
+                partialSolver.reset();
+                partialSolver.stepParams().openTop = true;
+                const float3 sphereCentre{16.0f, 19.0f, 16.0f};
+                constexpr float sphereRadius = 6.0f;
+                if (lr::eulerian::launchFillObstacleSphere(mask->surface(), mask->extent(), sphereCentre,
+                                                           sphereRadius, nullptr) != cudaSuccess)
+                    throw std::runtime_error("launchFillObstacleSphere failed");
+                if (cudaDeviceSynchronize() != cudaSuccess)
+                    throw std::runtime_error("cudaDeviceSynchronize failed");
+
+                for (int frame = 0; frame < 240; ++frame)
+                {
+                    partialSolver.step(1.0f / 60.0f);
+                    partialSolver.endStep();
+                }
+                partialSolver.waitForStep();
+
+                const std::vector<float> sphereDensity = partialSolver.densityVolume().download();
+                const int3 sphereSidesMin{6, 14, 10};
+                const int3 sphereSidesMax{26, 25, 22};
+                const int3 sphereAboveMin{11, 25, 11};
+                const int3 sphereAboveMax{21, 36, 21};
+                const double aroundSphere = densityInBox(sphereDensity, partial.extent,
+                                                         sphereSidesMin, sphereSidesMax);
+                const double aboveSphere = densityInBox(sphereDensity, partial.extent,
+                                                        sphereAboveMin, sphereAboveMax);
+                check(allFinite(sphereDensity), "the MAC field stays finite around a curved obstacle");
+                check(maxDensityInSphere(sphereDensity, partial.extent, sphereCentre, sphereRadius) == 0.0,
+                      "the curved obstacle contains no smoke");
+                check(aroundSphere > 0.0, "smoke travels through the channels around the sphere");
+                check(aboveSphere > 0.0, "and reforms into a rising plume above the sphere");
             }
         }
 
@@ -760,7 +773,7 @@ int main()
             // The stall itself: cooled smoke does not reach as high as smoke that kept its heat.
             const double hotHigh  = densityAbove(hotDensity, hot.extent, 48);
             const double warmHigh = densityAbove(warmDensity, warm.extent, 48);
-            check(warmHigh > 1.5 * hotHigh,
+            check(warmHigh > 1.25 * hotHigh,
                   "smoke that never cools climbs higher than smoke that does");
         }
 

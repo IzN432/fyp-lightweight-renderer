@@ -25,23 +25,16 @@ namespace lr::eulerian
 //   4. compute divergence    5. Jacobi pressure solve 6. project velocity
 //   7. advect density and temperature                 8. enforce boundaries
 //
-// The discretization follows Harris, "Fast Fluid Dynamics Simulation on the GPU" (GPU Gems 38):
-// a collocated, cell-centred grid, semi-Lagrangian advection, and a Jacobi-relaxed Poisson
-// pressure solve. Buoyancy and vorticity confinement follow Fedkiw, Stam and Jensen, "Visual
-// Simulation of Smoke" (SIGGRAPH 2001), equations 8 to 11: temperature is advected as its own
+// The discretization follows Fedkiw, Stam and Jensen, "Visual Simulation of Smoke" (SIGGRAPH
+// 2001): scalar fields are cell-centred and velocity is staggered on a MAC grid. Its three face
+// components are packed into one float4 volume to preserve the renderer-facing resource. The
+// solver uses semi-Lagrangian advection and a Jacobi-relaxed Poisson pressure solve. Buoyancy and
+// vorticity confinement follow the same paper's equations 8 to 11: temperature is advected as its own
 // field and drives the plume upward while density weighs it down, so a parcel climbs while it is
-// hot and spreads once it has cooled. Two deliberate departures:
+// hot and spreads once it has cooled. One deliberate departure remains:
 //
-//   - Collocated, not staggered. The smoke paper uses a MAC grid and says so for a reason — less
-//     artificial dissipation — but the collocated layout is what GPU Gems 38 describes, and it is
-//     what lets every field be one texel per cell in a volume the renderer can sample directly.
 //   - No viscous diffusion stage, since smoke is modelled as inviscid. SmokeStepParams::
 //     velocityDamp is ad-hoc drag, not a solve of the diffusion equation.
-
-// A fourth departure is forced by the finite iteration count: 40 Jacobi sweeps leave a residual,
-// so projectVelocity additionally clamps the normal velocity component on obstacle faces to
-// outward-or-zero. That clamp is in neither paper; it removes the seepage the unconverged solve
-// leaves behind, which would otherwise creep density through a thin wall over many steps.
 //
 // Density and velocity live in ResourceRegistry volumes so the renderer can sample them; pressure
 // and divergence are registered too, which keeps them inspectable for debug views. Register the
@@ -49,7 +42,7 @@ namespace lr::eulerian
 //
 // Obstacles are optional and come from outside: Config::obstacleMaskName names a volume that
 // SmokeVoxelizePass rasterizes from live scene geometry on the Vulkan side, and stages 2-8 treat
-// its set cells as immovable no-slip walls, exactly as they treat the box's own border. The mask
+// its set cells as immovable free-slip walls, exactly as they treat the box's own border. The mask
 // joins the semaphore handshake below as another named image, so each frame's rasterization is
 // ordered before the kernels that read it without any extra synchronization.
 //
@@ -75,7 +68,7 @@ public:
         VkExtent3D        activeExtent      = {0, 0, 0};
 
         // An already-registered R32_UINT volume holding the obstacle mask: non-zero cells are
-        // treated as immovable no-slip walls, exactly as the box's own border is. The solver does
+        // treated as immovable free-slip walls, exactly as the box's own border is. The solver does
         // not own, register or write it — SmokeVoxelizePass rasterizes it on the Vulkan side each
         // frame, and the solver only imports it and reads it. It must be exportable and allocated
         // at `extent`, since the kernels index it with the same cell coordinates as the fields.
