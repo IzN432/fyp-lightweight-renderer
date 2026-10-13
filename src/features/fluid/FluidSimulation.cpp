@@ -300,6 +300,13 @@ void FluidSimulation::onGUI()
     ImGui::Text("Particles: %u", particleCount());
     ImGui::Text("GPU steps this frame: %u", pendingSteps());
 
+    if (ImGui::DragFloat("Spacing (needs reset)", &m_config.particleSpacing, 0.01f, 0.05f, 1.0f, "%.3f"))
+    {
+        m_sourcesDirty = true;
+        m_sourceEditorError.clear();
+    }
+    ImGui::DragFloat("Particle Size", &m_config.particleRenderScale, 0.01f, 0.1f, 2.0f, "%.2f");
+
     if (ImGui::CollapsingHeader("Starting Water", ImGuiTreeNodeFlags_DefaultOpen))
     {
         const std::optional<uint64_t> configuredCount = configuredParticleCount(m_config);
