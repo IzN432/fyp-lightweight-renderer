@@ -92,6 +92,18 @@ inline glm::vec3 absorptionCoefficient(const glm::vec3 &color, float scale)
            glm::max(scale, 0.0f);
 }
 
+// CPU reference for fluid_composite.frag. Absorption remains coloured, while one scalar extinction
+// weight controls the visible bulk tint so its hue cannot be inverted channel by channel.
+inline glm::vec3 compositeTransmission(const glm::vec3 &background, const glm::vec3 &color,
+                                       float absorptionScale, float thickness)
+{
+    const glm::vec3 tint = glm::clamp(color, glm::vec3(0.0f), glm::vec3(1.0f));
+    const glm::vec3 transmittance =
+        glm::exp(-absorptionCoefficient(tint, absorptionScale) * std::max(thickness, 0.0f));
+    const float tintWeight = 1.0f - (transmittance.r + transmittance.g + transmittance.b) / 3.0f;
+    return glm::mix(background * transmittance, tint, tintWeight);
+}
+
 // Neighbouring impostors only merge into a continuous surface once the kernel spans roughly a
 // particle diameter; below that each sphere keeps its own depth profile and shades separately.
 inline float smoothingRadiusFromParticle(float particleRadius) { return std::max(particleRadius, 0.0f) * 2.0f; }

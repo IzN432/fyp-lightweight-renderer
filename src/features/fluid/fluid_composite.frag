@@ -128,7 +128,12 @@ void main()
 
     vec3 transmitted = backgroundAt(refractedUv);
     vec3 transmittance = exp(-params.absorptionAndRefraction.xyz * thickness);
-    transmitted = transmitted * transmittance + params.tintAndFresnel.rgb * (1.0 - transmittance);
+    // Absorption is coloured, but the amount of visible bulk tint must be one scalar. Applying
+    // (1 - transmittance) to the tint per channel makes the most-absorbed channel glow most, which
+    // turns cyan green. The mean extinction supplies a hue-neutral density and keeps liquid visible
+    // even when the refracted background is black.
+    float tintWeight = 1.0 - dot(transmittance, vec3(1.0 / 3.0));
+    transmitted = mix(transmitted * transmittance, params.tintAndFresnel.rgb, tintWeight);
 
     vec3 reflectedView = reflect(incident, normal);
     vec3 reflectedWorld = mat3(cameraUbo.invView) * reflectedView;
