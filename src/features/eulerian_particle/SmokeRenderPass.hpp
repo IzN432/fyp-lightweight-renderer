@@ -20,6 +20,7 @@ public:
     struct Config
     {
         std::string densityResourceName;
+        std::string temperatureResourceName;
         std::string cameraBufferResourceName;
         std::string depthResourceName = "gbufferDepth";
         std::string outputImage       = "swapchain";
@@ -33,7 +34,16 @@ public:
         // fills its allocation; smaller after the grid has been resized down.
         glm::vec3 uvScale{1.0f};
 
-        glm::vec3 color{0.82f, 0.86f, 0.92f};
+        // The smoke is shaded by a two-point ramp over the advected temperature field rather
+        // than by one flat colour: hot smoke near the emitter takes warmColor, and smoke that has
+        // cooled towards ambient on the way up takes coolColor. The defaults put the cool end at
+        // the simulation's ambient temperature and the warm end part-way to the emitter's, so the
+        // ramp spans the range a parcel actually passes through instead of saturating at the base.
+        glm::vec3 coolColor{0.74f, 0.79f, 0.90f};
+        glm::vec3 warmColor{1.00f, 0.58f, 0.26f};
+        float     coolTemperature = 20.0f;
+        float     warmTemperature = 180.0f;
+
         float     densityScale = 5.0f;
         int       sampleCount  = 128;
         bool      enabled      = true;

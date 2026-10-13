@@ -88,6 +88,7 @@ SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, con
       m_renderPass([&] {
           return SmokeRenderPass::Config{
               .densityResourceName      = m_solver.densityResourceName(),
+              .temperatureResourceName  = m_solver.temperatureResourceName(),
               .cameraBufferResourceName = m_config.cameraBufferResourceName,
               .depthResourceName        = m_config.depthResourceName,
               .outputImage              = m_config.outputImage,
@@ -96,7 +97,10 @@ SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, con
               // that would be right for this box.
               .boundsMin                = m_config.boundsCentre,
               .boundsMax                = m_config.boundsCentre,
-              .color                    = m_config.color,
+              .coolColor                = m_config.coolColor,
+              .warmColor                = m_config.warmColor,
+              .coolTemperature          = m_config.coolTemperature,
+              .warmTemperature          = m_config.warmTemperature,
               .densityScale             = m_config.densityScale,
               .sampleCount              = m_config.sampleCount,
               .enabled                  = m_config.enabled,
@@ -461,7 +465,13 @@ void SmokeSimulation::onGUI()
         ImGui::SliderFloat("Render Density", &render.densityScale, 0.1f, 20.0f, "%.3f",
                            ImGuiSliderFlags_Logarithmic);
         ImGui::SliderInt("Ray-march Samples", &render.sampleCount, 16, 256);
-        ImGui::ColorEdit3("Color", &render.color.x);
+        ImGui::ColorEdit3("Cool Color", &render.coolColor.x);
+        ImGui::ColorEdit3("Warm Color", &render.warmColor.x);
+        // The ramp's ends are in the solver's temperature units, so the useful range runs from
+        // ambient up towards the emitter's temperature. Dragging the cool end past the warm one is
+        // allowed here and resolved by the render pass, which keeps the span non-degenerate.
+        ImGui::DragFloat("Cool Temperature", &render.coolTemperature, 1.0f);
+        ImGui::DragFloat("Warm Temperature", &render.warmTemperature, 1.0f);
     }
 }
 

@@ -89,7 +89,13 @@ public:
         std::string outputImage       = "swapchain";
         VkFormat    outputFormat      = VK_FORMAT_UNDEFINED;
 
-        glm::vec3 color{0.82f, 0.86f, 0.92f};
+        // Endpoints of the temperature ramp the smoke is shaded with; see
+        // SmokeRenderPass::Config, which these feed directly.
+        glm::vec3 coolColor{0.74f, 0.79f, 0.90f};
+        glm::vec3 warmColor{1.00f, 0.58f, 0.26f};
+        float     coolTemperature = 20.0f;
+        float     warmTemperature = 180.0f;
+
         float     densityScale = 5.0f;
         int       sampleCount  = 128;
         bool      enabled      = true;

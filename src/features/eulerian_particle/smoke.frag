@@ -14,17 +14,23 @@ layout(set = 0, binding = 0) uniform CameraUbo
 
 layout(set = 0, binding = 1) uniform sampler3D densityVolume;
 layout(set = 0, binding = 2) uniform sampler2D sceneDepth;
+layout(set = 0, binding = 3) uniform sampler3D temperatureVolume;
 
 layout(push_constant) uniform SmokeRenderPC
 {
     vec4 boundsMin;
     vec4 boundsMax;
-    vec4 color;
+    // Endpoints of the smoke's colour ramp: warmColor where the sampled temperature reaches
+    // warmTemperature and above, coolColor at coolTemperature and below.
+    vec4 coolColor;
+    vec4 warmColor;
     // activeExtent / allocatedExtent. The volume is allocated at the largest grid the simulation
     // allows but only the origin corner of it is simulated, so the box maps to that sub-region
     // rather than to the whole texture. All ones when the two match.
     vec4 uvScale;
     float densityScale;
+    float coolTemperature;
+    float warmTemperature;
     uint sampleCount;
     uint enabled;
     uint frameIndex;
@@ -106,6 +112,9 @@ void main()
     // residual from freezing into a fixed screen-space pattern.
     float t = nearT + fract(randomOffset(gl_FragCoord.xy) + 0.618034 * float(pc.frameIndex & 1023u)) * stepLength;
     vec3 boxSize = max(pc.boundsMax.xyz - pc.boundsMin.xyz, vec3(1e-6));
+    // Guarded so a degenerate ramp (warm <= cool) collapses to the warm end instead of dividing
+    // by zero, which would otherwise show up as NaN-black pixels across the whole plume.
+    float span = max(pc.warmTemperature - pc.coolTemperature, 1e-4);
 
     vec3 accumulated = vec3(0.0);
     float transmittance = 1.0;
@@ -115,7 +124,12 @@ void main()
         vec3 uvw = (worldPosition - pc.boundsMin.xyz) / boxSize * pc.uvScale.xyz;
         float density = max(texture(densityVolume, uvw).r, 0.0) * pc.densityScale;
         float opacity = 1.0 - exp(-density * stepLength);
-        accumulated += transmittance * opacity * pc.color.rgb;
+        // Shade each sample by its own temperature rather than tinting the finished ray: a ray
+        // that grazes the hot base and then the cooled top has to come out as a mix of the two,
+        // and a single tint applied afterwards cannot express that.
+        float temperature = texture(temperatureVolume, uvw).r;
+        float warmth = clamp((temperature - pc.coolTemperature) / span, 0.0, 1.0);
+        accumulated += transmittance * opacity * mix(pc.coolColor.rgb, pc.warmColor.rgb, warmth);
         transmittance *= 1.0 - opacity;
         if (transmittance < 0.01)
             break;

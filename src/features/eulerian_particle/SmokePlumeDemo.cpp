@@ -104,6 +104,7 @@ int main(int argc, char **argv)
 
         lr::eulerian::SmokeRenderPass smokePass({
             .densityResourceName      = solver.densityResourceName(),
+            .temperatureResourceName  = solver.temperatureResourceName(),
             .cameraBufferResourceName = kCameraBuffer,
             .depthResourceName        = "smoke_demo_scene_depth",
             .outputImage              = lr::Viewer::kBackbufferName,
@@ -111,7 +112,10 @@ int main(int argc, char **argv)
             // 2 x 3 x 2 world units matches the grid's 48:72:48 aspect.
             .boundsMin                = {-1.0f, 0.0f, -1.0f},
             .boundsMax                = {1.0f, 3.0f, 1.0f},
-            .color                    = {0.72f, 0.76f, 0.82f},
+            .coolColor                = {0.72f, 0.76f, 0.82f},
+            .warmColor                = {1.00f, 0.55f, 0.22f},
+            .coolTemperature          = simulation.step.ambientTemperature,
+            .warmTemperature          = 0.5f * simulation.source.temperature,
             .densityScale             = 1.35f,
             .sampleCount              = 144,
         });
