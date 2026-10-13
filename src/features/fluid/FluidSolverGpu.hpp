@@ -33,6 +33,10 @@ namespace lr
 class FluidSolverGpu
 {
 public:
+    // Deliberate application safety ceiling. Beyond this the current solver's memory footprint and
+    // per-frame neighbour workload are not an interactive workload, even on a high-end desktop GPU.
+    static constexpr uint32_t kMaxParticles = 250'000;
+
     // Mirrors FluidSolverCpu::Config. Held separately rather than reused directly because the GPU
     // solver needs its buffers sized up front, which a CPU solver that can resize freely does not.
     struct Config

@@ -35,9 +35,9 @@ public:
 
         // Normalized paper units: h = 2 * spacing = 1. This lets the paper's numerical
         // coefficients be used literally instead of inventing a world-scale conversion.
-        float particleSpacing      = 0.5f;
+        float particleSpacing      = 0.370f;
         float smoothingRadiusScale = 2.0f;
-        float particleRenderScale  = 1.25f;
+        float particleRenderScale  = 0.9f;
         int   solverIterations     = 8;
         // Equations (13) and (17), used literally in normalized h=1 units.
         float artificialPressureK  = 0.1f;

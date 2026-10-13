@@ -92,6 +92,10 @@ FluidSolverGpu::FluidSolverGpu(Config config, ResourceRegistry &resources)
     {
         throw std::invalid_argument("FluidSolverGpu maxParticles must be greater than zero");
     }
+    if (m_config.maxParticles > kMaxParticles)
+    {
+        throw std::length_error("FluidSolverGpu maxParticles exceeds the 250,000 particle limit");
+    }
     if (m_config.particleBufferResourceName.empty())
     {
         throw std::invalid_argument("FluidSolverGpu requires a particle buffer resource name");
@@ -233,6 +237,10 @@ void FluidSolverGpu::setParticles(std::span<const glm::vec3> positions)
 
 void FluidSolverGpu::reserve(uint32_t particleCapacity)
 {
+    if (particleCapacity > kMaxParticles)
+    {
+        throw std::length_error("FluidSolverGpu particle capacity exceeds the 250,000 particle limit");
+    }
     if (particleCapacity <= m_config.maxParticles)
     {
         return;
@@ -359,18 +367,21 @@ bool FluidSolverGpu::shouldDispatchIteration(uint32_t step, uint32_t iteration) 
 
 void FluidSolverGpu::addGridPasses(FrameGraph &frameGraph, uint32_t step)
 {
-    const std::string suffix  = "_s" + std::to_string(step);
-    const uint32_t    buckets = resolvedHashBuckets(m_config);
+    const std::string suffix = "_s" + std::to_string(step);
 
     // Dispatched over buckets rather than particles: this clears the table, so it has to cover
     // every bucket whatever the live particle count is.
     addComputePass(frameGraph, "fluid_grid_clear" + suffix, "fluid_grid_clear.comp")
-        .execute([this, step, buckets](PassContext &context) {
+        .execute([this, step](PassContext &context) {
             if (!shouldDispatchStep(step))
             {
                 return;
             }
-            context.cmd().dispatch(dispatchGroups(buckets), 1, 1);
+            // Capacity can grow after build(). Do not capture the original table size here: the
+            // replacement buffer and uniform both use the new size, and leaving its new tail
+            // uncleared feeds garbage counts into the prefix scan and can produce OOB scatter
+            // offsets.
+            context.cmd().dispatch(dispatchGroups(resolvedHashBuckets(m_config)), 1, 1);
         });
 
     addComputePass(frameGraph, "fluid_grid_count" + suffix, "fluid_grid_count.comp")

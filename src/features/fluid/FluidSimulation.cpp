@@ -70,9 +70,13 @@ std::string validateSources(const FluidSimulation::Config &config)
     }
 
     const std::optional<uint64_t> total = configuredParticleCount(config);
-    if (!total || *total > std::numeric_limits<uint32_t>::max())
+    if (!total)
     {
         return "Configured particle count exceeds the supported range";
+    }
+    if (*total > FluidSolverGpu::kMaxParticles)
+    {
+        return "Configured particle count exceeds the 250,000 particle limit";
     }
     const float     spacing  = std::max(config.particleSpacing, 1e-4f);
     const glm::vec3 insetMin = config.boundsMin + glm::vec3(spacing);
@@ -312,7 +316,10 @@ void FluidSimulation::onGUI()
         const std::optional<uint64_t> configuredCount = configuredParticleCount(m_config);
         if (configuredCount)
         {
-            ImGui::TextColored(ImVec4(0.7f, 0.85f, 1.0f, 1.0f), "Configured particles: %llu",
+            const bool overLimit = *configuredCount > FluidSolverGpu::kMaxParticles;
+            ImGui::TextColored(overLimit ? ImVec4(1.0f, 0.35f, 0.35f, 1.0f)
+                                         : ImVec4(0.7f, 0.85f, 1.0f, 1.0f),
+                               "Configured particles: %llu / 250,000",
                                static_cast<unsigned long long>(*configuredCount));
         } else
         {
