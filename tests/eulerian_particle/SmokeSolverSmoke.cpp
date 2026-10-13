@@ -693,6 +693,101 @@ int main()
         }
 
 
+        std::cout << "vorticity confinement pushes along N x omega\n";
+        {
+            // Fedkiw equations 9-11 on a field whose vorticity is known analytically, so the force
+            // can be checked against a closed form rather than against "it looks turbulent".
+            //
+            // Take u = (0, f(x), 0) with f(x) = exp(-(x - xc)^2 / s). Then omega = curl(u) is
+            // (0, 0, df/dx), so omega is purely along z and |omega| = |df/dx| peaks either side of
+            // xc, dipping to zero at xc itself. Since |omega| varies with x alone, eta = grad|omega|
+            // points along +/-x only, giving N = (+/-1, 0, 0). The force is then
+            //     f_conf = eps * (N x omega) = eps * (N.y*w.z - 0, -N.x*w.z, 0) = (0, -eps*N.x*w.z, 0),
+            // i.e. purely along y, with x and z components identically zero.
+            //
+            // Those two zeros are the discriminating check. A correct eta has no y or z component
+            // on this field, so the cross product cannot produce any x or z force. The old
+            // implementation differenced a *different* curl component per axis, so its eta picked
+            // up spurious y and z terms here and the force tilted off the y axis.
+            lr::eulerian::SmokeSolver::Config vort{};
+            vort.extent           = VkExtent3D{24, 24, 24};
+            vort.jacobiIterations = 0;      // pressure stays zero, so the projection is a no-op
+            // Small enough that the advection preceding the force stage barely moves the seeded
+            // field, so what the confinement sees is still the analytic one. Large enough that the
+            // force it adds clears the noise floor.
+            vort.step.dt          = 0.01f;
+            vort.step.buoyancy    = 0.0f;   // no buoyancy, no source: only confinement acts
+            vort.step.vorticity   = 50.0f;  // scaled up to compensate for the small dt
+            vort.source.density   = 0.0f;
+            vort.source.velocity[0] = 0.0f;
+            vort.source.velocity[1] = 0.0f;
+            vort.source.velocity[2] = 0.0f;
+            vort.namePrefix       = "smokeVorticity";
+
+            lr::eulerian::SmokeSolver vortSolver(resources, context, vort);
+
+            const uint32_t w = vort.extent.width, h = vort.extent.height, d = vort.extent.depth;
+            const double   centre  = 0.5 * static_cast<double>(w);
+            const double   falloff = 8.0;
+
+            // vy varies with x only, so omega is purely along z. The constructor's reset() already
+            // cleared the field through CUDA, so the image is in the layout the kernel needs and
+            // no further transition is required — the same way the obstacle cases above seed a mask.
+            if (lr::eulerian::launchFillShearField(vortSolver.velocityVolume().surface(),
+                                                   vortSolver.velocityVolume().extent(),
+                                                   static_cast<float>(centre), static_cast<float>(falloff),
+                                                   nullptr) != cudaSuccess)
+                throw std::runtime_error("launchFillShearField failed");
+            vortSolver.velocityVolume().synchronize();
+
+            vortSolver.step();
+            vortSolver.waitForStep();
+
+            const std::vector<float> forced = vortSolver.velocityVolume().download();
+            check(allFinite(forced), "the confinement force stays finite");
+
+            // The same step with confinement off. Advection runs before the force stage and smears
+            // the seeded field slightly, so differencing the two runs isolates the force itself
+            // rather than measuring it against the analytic seed.
+            lr::eulerian::SmokeSolver::Config plain = vort;
+            plain.step.vorticity                    = 0.0f;
+            plain.namePrefix                        = "smokeVorticityOff";
+            lr::eulerian::SmokeSolver plainSolver(resources, context, plain);
+            if (lr::eulerian::launchFillShearField(plainSolver.velocityVolume().surface(),
+                                                   plainSolver.velocityVolume().extent(),
+                                                   static_cast<float>(centre), static_cast<float>(falloff),
+                                                   nullptr) != cudaSuccess)
+                throw std::runtime_error("launchFillShearField failed");
+            plainSolver.velocityVolume().synchronize();
+            plainSolver.step();
+            plainSolver.waitForStep();
+            const std::vector<float> unforced = plainSolver.velocityVolume().download();
+
+            // Interior only: the border rows are overwritten by applyBoundaries, and the one-cell
+            // ring inside them has a clamped stencil, so neither reflects the force alone.
+            double largestX = 0.0, largestY = 0.0, largestZ = 0.0;
+            for (uint32_t z = 2; z + 2 < d; ++z)
+                for (uint32_t y = 2; y + 2 < h; ++y)
+                    for (uint32_t x = 2; x + 2 < w; ++x)
+                    {
+                        const std::size_t index = ((static_cast<std::size_t>(z) * h + y) * w + x) * 4;
+                        largestX = std::max(largestX, std::fabs(static_cast<double>(forced[index]) -
+                                                                static_cast<double>(unforced[index])));
+                        largestY = std::max(largestY, std::fabs(static_cast<double>(forced[index + 1]) -
+                                                                static_cast<double>(unforced[index + 1])));
+                        largestZ = std::max(largestZ, std::fabs(static_cast<double>(forced[index + 2]) -
+                                                                static_cast<double>(unforced[index + 2])));
+                    }
+
+            // N x omega is along y here, so y is where the whole force must land. x and z are the
+            // discriminating checks: a mis-built eta leaks into them.
+            check(largestY > 1e-4, "confinement drives flow along y, which is where N x omega points");
+            check(largestX < 1e-6 * std::max(1.0, largestY),
+                  "and adds no x component, since eta has no y or z part on this field");
+            check(largestZ < 1e-6 * std::max(1.0, largestY),
+                  "and no z component, since omega is purely along z");
+        }
+
         std::cout << "a solver destroyed mid-step tears down cleanly\n";
         {
             // Destroying a solver with an open handshake has to close it: the CUDA-side signal of

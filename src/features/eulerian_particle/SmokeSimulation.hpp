@@ -58,6 +58,13 @@ public:
         // World-space size of one grid cell, and so the overall scale of the simulation: the box's
         // world size is its cell counts times this. Scaling it zooms the whole plume, box and all,
         // without changing the resolution or costing a restart.
+        //
+        // It is a rendering scale, not a physical one. The solver works in cells per second and is
+        // handed `dt` unconverted, so the plume rises at a fixed rate in *cells*: doubling this
+        // leaves the motion identical in grid terms while the box it is drawn into is twice as
+        // big, which reads as a plume moving twice as fast in world units. Dividing `dt` by this
+        // on the way into the solver would make the motion scale-invariant instead, at the cost of
+        // changing what every existing tuned value means.
         float simulationScale = 2.0f / 64.0f;
 
         // The authored box, in cells. This is the grid resolution and the box size both: world
@@ -161,8 +168,10 @@ public:
     // the plume inside it without touching the grid, so it never costs a restart.
     void setBoundsCentre(const glm::vec3 &boundsCentre);
 
-    // World units per cell, so the overall size of the simulation. Free to change at any time:
-    // like the position it rescales the box and the plume without altering the grid.
+    // World units per cell, so the overall size of the simulation. Safe to change at any time: it
+    // rescales the box and the plume without altering the grid or costing a restart. Unlike the
+    // position it is not physically neutral — the plume's speed in cells is unchanged, so it reads
+    // as faster in world units at a larger scale. See Config::simulationScale.
     void  setSimulationScale(float scale);
     float simulationScale() const { return m_config.simulationScale; }
 

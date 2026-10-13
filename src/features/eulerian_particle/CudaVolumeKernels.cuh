@@ -8,17 +8,30 @@ namespace lr::eulerian
 cudaError_t launchDensityTestPattern(cudaSurfaceObject_t surface, cudaExtent extent, float timeSeconds,
                                      cudaStream_t stream);
 
-// Parameters shared by every stage of one smoke step. Grid spacing is uniform and implicit: the
-// solver works in cell units, so `dt` is pre-divided by the cell size where a stage needs it.
+// Parameters shared by every stage of one smoke step.
+//
+// Grid spacing is uniform and implicit: every stage works in cell units, i.e. h = dx = 1. That is
+// a consistent non-dimensionalization rather than a missing factor — the 1/dx the textbook
+// stencils carry becomes 1, and divergence and the pressure gradient both use the same halved
+// central difference, so the pair stays self-consistent. Velocities are therefore in cells per
+// second, which is what lets advection backtrace with `dt` alone.
+//
+// What it costs: the force strengths below are not resolution-independent. Fedkiw's confinement
+// force carries an explicit h so that it vanishes as the mesh is refined; with h folded into the
+// coefficient, doubling the grid resolution changes how much turbulence a given `vorticity` adds,
+// and `buoyancy` shifts the same way. Retune them after a large resolution change rather than
+// expecting the look to carry over.
 struct SmokeStepParams
 {
     float dt            = 1.0f / 60.0f;
-    float buoyancy      = 1.0f;  // upward force per unit density
+    float buoyancy      = 1.0f;  // upward force per unit density (per cell, see above)
     float ambient       = 0.0f;  // density that produces no buoyant force
     float gravity       = 0.0f;  // downward force per unit density, applied with buoyancy
+    // Ad-hoc drag, not viscosity: the solver has no diffusion stage, because smoke is modelled
+    // with the inviscid Euler equations. This is a plain per-second decay on the velocity field.
     float velocityDamp  = 0.0f;  // fraction of velocity removed per second
     float densityDamp   = 0.0f;  // fraction of density removed per second (dissipation)
-    float vorticity     = 0.0f;  // vorticity-confinement strength, 0 disables the stage
+    float vorticity     = 0.0f;  // vorticity-confinement strength (epsilon*h), 0 disables the stage
 
     // Opens the top face of the box, so smoke and the flow carrying it leave instead of being
     // turned back into the domain.
@@ -106,5 +119,13 @@ cudaError_t launchFillObstacleBox(cudaSurfaceObject_t obstacle, cudaExtent exten
 
 cudaError_t launchCopyVolume(cudaSurfaceObject_t destination, cudaSurfaceObject_t source, cudaExtent extent,
                              int channels, cudaStream_t stream);
+
+// Writes the shear field u = (0, exp(-(x - centre)^2 / falloff), 0) into a float4 velocity volume.
+//
+// For tests of the vorticity stage. Its curl is purely along z and its |omega| has a known shape,
+// so the confinement force it produces can be checked against the closed form of Fedkiw equations
+// 10-11 rather than against an eyeball judgement of turbulence. Not used by the application.
+cudaError_t launchFillShearField(cudaSurfaceObject_t velocity, cudaExtent extent, float centre, float falloff,
+                                 cudaStream_t stream);
 
 } // namespace lr::eulerian

@@ -345,6 +345,34 @@ __global__ void advectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t
 // 3. External forces / buoyancy
 // -------------------------------------------------------------------------------------------
 
+// Vorticity omega = curl(u), central differences in cell units. Fedkiw et al. equation 9.
+__device__ inline float3 curlAt(cudaSurfaceObject_t velocity, int x, int y, int z, GridInfo grid)
+{
+    const float4 xp = readVector(velocity, x + 1, y, z, grid);
+    const float4 xm = readVector(velocity, x - 1, y, z, grid);
+    const float4 yp = readVector(velocity, x, y + 1, z, grid);
+    const float4 ym = readVector(velocity, x, y - 1, z, grid);
+    const float4 zp = readVector(velocity, x, y, z + 1, grid);
+    const float4 zm = readVector(velocity, x, y, z - 1, grid);
+
+    return make_float3(0.5f * ((yp.z - ym.z) - (zp.y - zm.y)),
+                       0.5f * ((zp.x - zm.x) - (xp.z - xm.z)),
+                       0.5f * ((xp.y - xm.y) - (yp.x - ym.x)));
+}
+
+// |omega| at one cell, for the eta = grad|omega| difference below.
+//
+// It has to be the full three-component norm, and the same one at every tap. Differencing the
+// absolute value of a single curl component instead — a different component per axis, as this
+// once did — is not the gradient of any one scalar field, so the eta it produces points somewhere
+// that is not "towards denser vorticity" and the confinement force bears no particular relation to
+// equation 10. It still looks like turbulence, which is why it survives an eyeball test.
+__device__ inline float curlMagnitude(cudaSurfaceObject_t velocity, int x, int y, int z, GridInfo grid)
+{
+    const float3 c = curlAt(velocity, x, y, z, grid);
+    return sqrtf(c.x * c.x + c.y * c.y + c.z * c.z);
+}
+
 __global__ void applyForces(cudaSurfaceObject_t velocity, cudaSurfaceObject_t density,
                             cudaSurfaceObject_t obstacle, cudaExtent extent, SmokeStepParams params)
 {
@@ -368,52 +396,33 @@ __global__ void applyForces(cudaSurfaceObject_t velocity, cudaSurfaceObject_t de
 
     if (params.vorticity > 0.0f)
     {
-        // Vorticity confinement: push velocity back along the curl's gradient to restore the small
-        // eddies that semi-Lagrangian advection smooths away.
-        const float4 xp = readVector(velocity, x + 1, y, z, grid);
-        const float4 xm = readVector(velocity, x - 1, y, z, grid);
-        const float4 yp = readVector(velocity, x, y + 1, z, grid);
-        const float4 ym = readVector(velocity, x, y - 1, z, grid);
-        const float4 zp = readVector(velocity, x, y, z + 1, grid);
-        const float4 zm = readVector(velocity, x, y, z - 1, grid);
+        // Vorticity confinement, Fedkiw et al. equations 9-11: push velocity along N x omega to
+        // restore the small eddies semi-Lagrangian advection smooths away.
+        const int ix = static_cast<int>(x);
+        const int iy = static_cast<int>(y);
+        const int iz = static_cast<int>(z);
 
-        const float3 curl = make_float3(0.5f * ((yp.z - ym.z) - (zp.y - zm.y)),
-                                        0.5f * ((zp.x - zm.x) - (xp.z - xm.z)),
-                                        0.5f * ((xp.y - xm.y) - (yp.x - ym.x)));
+        const float3 curl = curlAt(velocity, ix, iy, iz, grid);
 
-        // Gradient of |curl|, built from the same six neighbours' curl magnitudes.
-        const float mxp = fabsf(0.5f * ((readVector(velocity, x + 1, y + 1, z, grid).z -
-                                         readVector(velocity, x + 1, y - 1, z, grid).z) -
-                                        (readVector(velocity, x + 1, y, z + 1, grid).y -
-                                         readVector(velocity, x + 1, y, z - 1, grid).y)));
-        const float mxm = fabsf(0.5f * ((readVector(velocity, x - 1, y + 1, z, grid).z -
-                                         readVector(velocity, x - 1, y - 1, z, grid).z) -
-                                        (readVector(velocity, x - 1, y, z + 1, grid).y -
-                                         readVector(velocity, x - 1, y, z - 1, grid).y)));
-        const float myp = fabsf(0.5f * ((readVector(velocity, x, y + 1, z + 1, grid).x -
-                                         readVector(velocity, x, y + 1, z - 1, grid).x) -
-                                        (readVector(velocity, x + 1, y + 1, z, grid).z -
-                                         readVector(velocity, x - 1, y + 1, z, grid).z)));
-        const float mym = fabsf(0.5f * ((readVector(velocity, x, y - 1, z + 1, grid).x -
-                                         readVector(velocity, x, y - 1, z - 1, grid).x) -
-                                        (readVector(velocity, x + 1, y - 1, z, grid).z -
-                                         readVector(velocity, x - 1, y - 1, z, grid).z)));
-        const float mzp = fabsf(0.5f * ((readVector(velocity, x + 1, y, z + 1, grid).y -
-                                         readVector(velocity, x - 1, y, z + 1, grid).y) -
-                                        (readVector(velocity, x, y + 1, z + 1, grid).x -
-                                         readVector(velocity, x, y - 1, z + 1, grid).x)));
-        const float mzm = fabsf(0.5f * ((readVector(velocity, x + 1, y, z - 1, grid).y -
-                                         readVector(velocity, x - 1, y, z - 1, grid).y) -
-                                        (readVector(velocity, x, y + 1, z - 1, grid).x -
-                                         readVector(velocity, x, y - 1, z - 1, grid).x)));
+        // eta = grad|omega| (equation 10), central-differenced from the same six neighbours. Each
+        // tap is the full |omega| at that cell, so this really is the gradient of one scalar field.
+        float3 eta = make_float3(0.5f * (curlMagnitude(velocity, ix + 1, iy, iz, grid) -
+                                         curlMagnitude(velocity, ix - 1, iy, iz, grid)),
+                                 0.5f * (curlMagnitude(velocity, ix, iy + 1, iz, grid) -
+                                         curlMagnitude(velocity, ix, iy - 1, iz, grid)),
+                                 0.5f * (curlMagnitude(velocity, ix, iy, iz + 1, grid) -
+                                         curlMagnitude(velocity, ix, iy, iz - 1, grid)));
 
-        float3      eta  = make_float3(0.5f * (mxp - mxm), 0.5f * (myp - mym), 0.5f * (mzp - mzm));
         const float norm = sqrtf(eta.x * eta.x + eta.y * eta.y + eta.z * eta.z);
         if (norm > 1e-8f)
         {
+            // N = eta / |eta|, pointing from thinner towards denser vorticity.
             eta.x /= norm;
             eta.y /= norm;
             eta.z /= norm;
+            // f_conf = epsilon * h * (N x omega). The grid spacing h is 1 in the cell units the
+            // solver works in, so it folds into epsilon; see SmokeStepParams::vorticity for what
+            // that costs in resolution independence.
             const float scale = params.vorticity * params.dt;
             v.x += scale * (eta.y * curl.z - eta.z * curl.y);
             v.y += scale * (eta.z * curl.x - eta.x * curl.z);
@@ -784,6 +793,19 @@ __global__ void copyVolume(cudaSurfaceObject_t destination, cudaSurfaceObject_t 
         writeScalar(destination, x, y, z, readScalar(source, x, y, z, grid));
 }
 
+// u = (0, exp(-(x - centre)^2 / falloff), 0). See launchFillShearField for why.
+__global__ void fillShearField(cudaSurfaceObject_t velocity, cudaExtent extent, float centre, float falloff)
+{
+    const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    const uint32_t z = blockIdx.z * blockDim.z + threadIdx.z;
+    if (outside(x, y, z, extent))
+        return;
+
+    const float dx = (static_cast<float>(x) + 0.5f) - centre;
+    writeVector(velocity, x, y, z, make_float4(0.0f, expf(-dx * dx / falloff), 0.0f, 0.0f));
+}
+
 } // namespace
 
 cudaError_t launchDensityTestPattern(cudaSurfaceObject_t surface, cudaExtent extent, float timeSeconds,
@@ -869,6 +891,13 @@ cudaError_t launchCopyVolume(cudaSurfaceObject_t destination, cudaSurfaceObject_
                              int channels, cudaStream_t stream)
 {
     copyVolume<<<gridFor(extent), kBlock, 0, stream>>>(destination, source, extent, channels);
+    return cudaGetLastError();
+}
+
+cudaError_t launchFillShearField(cudaSurfaceObject_t velocity, cudaExtent extent, float centre, float falloff,
+                                 cudaStream_t stream)
+{
+    fillShearField<<<gridFor(extent), kBlock, 0, stream>>>(velocity, extent, centre, falloff);
     return cudaGetLastError();
 }
 
