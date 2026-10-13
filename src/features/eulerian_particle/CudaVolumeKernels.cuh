@@ -19,6 +19,20 @@ struct SmokeStepParams
     float velocityDamp  = 0.0f;  // fraction of velocity removed per second
     float densityDamp   = 0.0f;  // fraction of density removed per second (dissipation)
     float vorticity     = 0.0f;  // vorticity-confinement strength, 0 disables the stage
+
+    // Opens the top face of the box, so smoke and the flow carrying it leave instead of being
+    // turned back into the domain.
+    //
+    // With every face closed the pressure problem is pure Neumann, which is a sealed box: the only
+    // way out for fluid a rising plume displaces is back down, so the plume drives a recirculation
+    // cell and smoke deflected sideways by an obstacle is pushed under rather than around it. That
+    // is correct for a sealed box and wrong for the open air a plume is usually meant to read as.
+    //
+    // Open replaces the top face's conditions with the outflow pair: a Dirichlet p = 0 there,
+    // which lets the pressure solve vent the displaced fluid instead of balancing it against a
+    // lid, and a velocity border that copies the interior outward rather than reflecting its
+    // normal component. The other five faces stay closed walls.
+    bool  openTop       = false;
 };
 
 // A spherical source splatted into the density and velocity fields each step.
@@ -61,15 +75,22 @@ cudaError_t launchComputeDivergence(const SmokeFields &fields, cudaExtent extent
 
 // One Jacobi relaxation sweep: reads `pressure`, writes `pressureNext`. The caller swaps between
 // sweeps, so an even iteration count leaves the result back in `pressure`.
-cudaError_t launchPressureJacobi(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream);
+//
+// Takes `openTop` because an open face is a Dirichlet condition on this solve, not something a
+// later stage can patch up: the pressure that vents the plume has to be the pressure the sweeps
+// converged on.
+cudaError_t launchPressureJacobi(const SmokeFields &fields, cudaExtent extent, bool openTop, cudaStream_t stream);
 
-cudaError_t launchProjectVelocity(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream);
+// `openTop` must match what launchPressureJacobi was given: the projection subtracts the gradient
+// of the field the solve produced, so the two have to agree about the top face's condition.
+cudaError_t launchProjectVelocity(const SmokeFields &fields, cudaExtent extent, bool openTop, cudaStream_t stream);
 
 cudaError_t launchAdvectDensity(const SmokeFields &fields, cudaExtent extent, const SmokeStepParams &params,
                                cudaStream_t stream);
 
 // Clamps the one-cell border: velocity reflects to no-slip and pressure/density mirror inward.
-cudaError_t launchApplyBoundaries(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream);
+// With `openTop` the top face instead copies the interior outward, so flow and smoke leave there.
+cudaError_t launchApplyBoundaries(const SmokeFields &fields, cudaExtent extent, bool openTop, cudaStream_t stream);
 
 cudaError_t launchClearVolume(cudaSurfaceObject_t surface, cudaExtent extent, int channels, cudaStream_t stream);
 

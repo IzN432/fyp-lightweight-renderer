@@ -315,12 +315,12 @@ void SmokeSolver::step()
     //    Pressure is not re-zeroed: starting from the previous step's solution converges faster.
     for (int iteration = 0; iteration < m_config.jacobiIterations; ++iteration)
     {
-        checkCuda(launchPressureJacobi(fields, extent, stream), "launchPressureJacobi");
+        checkCuda(launchPressureJacobi(fields, extent, m_config.step.openTop, stream), "launchPressureJacobi");
         std::swap(fields.pressure, fields.pressureNext);
     }
 
     // 6. Pressure projection — subtract the pressure gradient to make the velocity divergence-free.
-    checkCuda(launchProjectVelocity(fields, extent, stream), "launchProjectVelocity");
+    checkCuda(launchProjectVelocity(fields, extent, m_config.step.openTop, stream), "launchProjectVelocity");
 
     // 7. Density advection along the now-incompressible velocity field.
     checkCuda(launchAdvectDensity(fields, extent, m_config.step, stream), "launchAdvectDensity");
@@ -328,7 +328,7 @@ void SmokeSolver::step()
 
     // 8. Boundary conditions, applied last so the border is consistent with what the renderer
     //    samples and with what the next step's stencils read.
-    checkCuda(launchApplyBoundaries(fields, extent, stream), "launchApplyBoundaries");
+    checkCuda(launchApplyBoundaries(fields, extent, m_config.step.openTop, stream), "launchApplyBoundaries");
 
     // The swaps above are local aliases, so copy whatever ended up current back into the volume
     // the renderer samples. A real pipeline would instead publish the resource name that holds the

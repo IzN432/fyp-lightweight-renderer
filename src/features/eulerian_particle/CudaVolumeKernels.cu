@@ -145,6 +145,13 @@ __device__ inline bool onBorder(int x, int y, int z, GridInfo grid)
     return x == 0 || y == 0 || z == 0 || x == grid.width - 1 || y == grid.height - 1 || z == grid.depth - 1;
 }
 
+// The open face, when there is one: the top row of cells, +y. Everything that treats the box as
+// sealed asks this first, so the five closed faces keep their existing behaviour exactly.
+__device__ inline bool onOpenFace(int y, GridInfo grid, bool openTop)
+{
+    return openTop && y == grid.height - 1;
+}
+
 // -------------------------------------------------------------------------------------------
 // Obstacles
 //
@@ -478,13 +485,22 @@ __global__ void computeDivergence(cudaSurfaceObject_t velocity, cudaSurfaceObjec
 // the interior faces an obstacle introduces, and it keeps the stencil's six-neighbour divisor valid
 // without a per-cell count.
 __device__ inline float neighbourPressure(cudaSurfaceObject_t pressure, cudaSurfaceObject_t obstacle, int x, int y,
-                                          int z, float centre, GridInfo grid)
+                                          int z, float centre, GridInfo grid, bool openTop)
 {
-    return isSolid(obstacle, x, y, z, grid) ? centre : readScalar(pressure, x, y, z, grid);
+    if (isSolid(obstacle, x, y, z, grid))
+        return centre;
+    // Past the open face the pressure is ambient, which is the zero this solve measures against.
+    // Returning it rather than letting clampIndex mirror the top row back is the whole Dirichlet
+    // condition: the cell below sees somewhere for its pressure to fall away to, so the solve
+    // vents the plume instead of balancing it against a lid.
+    if (openTop && y >= grid.height)
+        return 0.0f;
+    return readScalar(pressure, x, y, z, grid);
 }
 
 __global__ void pressureJacobi(cudaSurfaceObject_t pressure, cudaSurfaceObject_t pressureNext,
-                               cudaSurfaceObject_t divergence, cudaSurfaceObject_t obstacle, cudaExtent extent)
+                               cudaSurfaceObject_t divergence, cudaSurfaceObject_t obstacle, cudaExtent extent,
+                               bool openTop)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -508,15 +524,25 @@ __global__ void pressureJacobi(cudaSurfaceObject_t pressure, cudaSurfaceObject_t
         return;
     }
 
+    // The open face is held at ambient, which is the Dirichlet half of the outflow condition and
+    // what makes the system non-singular when it is enabled. Writing it every sweep rather than
+    // once keeps it from drifting as the swaps alternate the buffers.
+    if (onOpenFace(iy, grid, openTop))
+    {
+        writeScalar(pressureNext, ix, iy, iz, 0.0f);
+        return;
+    }
+
     // Solving laplacian(p) = divergence. clampIndex gives each border cell its own value back as
     // the missing neighbour, which is the pure-Neumann (dp/dn = 0) condition a closed box wants;
-    // neighbourPressure extends the same rule to obstacle faces.
-    const float sum = neighbourPressure(pressure, obstacle, ix + 1, iy, iz, centre, grid) +
-                      neighbourPressure(pressure, obstacle, ix - 1, iy, iz, centre, grid) +
-                      neighbourPressure(pressure, obstacle, ix, iy + 1, iz, centre, grid) +
-                      neighbourPressure(pressure, obstacle, ix, iy - 1, iz, centre, grid) +
-                      neighbourPressure(pressure, obstacle, ix, iy, iz + 1, centre, grid) +
-                      neighbourPressure(pressure, obstacle, ix, iy, iz - 1, centre, grid);
+    // neighbourPressure extends the same rule to obstacle faces, and overrides it with ambient
+    // past an open one.
+    const float sum = neighbourPressure(pressure, obstacle, ix + 1, iy, iz, centre, grid, openTop) +
+                      neighbourPressure(pressure, obstacle, ix - 1, iy, iz, centre, grid, openTop) +
+                      neighbourPressure(pressure, obstacle, ix, iy + 1, iz, centre, grid, openTop) +
+                      neighbourPressure(pressure, obstacle, ix, iy - 1, iz, centre, grid, openTop) +
+                      neighbourPressure(pressure, obstacle, ix, iy, iz + 1, centre, grid, openTop) +
+                      neighbourPressure(pressure, obstacle, ix, iy, iz - 1, centre, grid, openTop);
     const float d = readScalar(divergence, ix, iy, iz, grid);
     writeScalar(pressureNext, ix, iy, iz, (sum - d) / 6.0f);
 }
@@ -526,7 +552,7 @@ __global__ void pressureJacobi(cudaSurfaceObject_t pressure, cudaSurfaceObject_t
 // -------------------------------------------------------------------------------------------
 
 __global__ void projectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t pressure,
-                                cudaSurfaceObject_t obstacle, cudaExtent extent)
+                                cudaSurfaceObject_t obstacle, cudaExtent extent, bool openTop)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -552,12 +578,12 @@ __global__ void projectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_
     // The same reflected neighbours the solve used. Using the raw pressure here instead would
     // subtract a gradient the solve never balanced, and the mismatch shows up as flow seeping into
     // the obstacle.
-    const float gradX = 0.5f * (neighbourPressure(pressure, obstacle, ix + 1, iy, iz, centre, grid) -
-                                neighbourPressure(pressure, obstacle, ix - 1, iy, iz, centre, grid));
-    const float gradY = 0.5f * (neighbourPressure(pressure, obstacle, ix, iy + 1, iz, centre, grid) -
-                                neighbourPressure(pressure, obstacle, ix, iy - 1, iz, centre, grid));
-    const float gradZ = 0.5f * (neighbourPressure(pressure, obstacle, ix, iy, iz + 1, centre, grid) -
-                                neighbourPressure(pressure, obstacle, ix, iy, iz - 1, centre, grid));
+    const float gradX = 0.5f * (neighbourPressure(pressure, obstacle, ix + 1, iy, iz, centre, grid, openTop) -
+                                neighbourPressure(pressure, obstacle, ix - 1, iy, iz, centre, grid, openTop));
+    const float gradY = 0.5f * (neighbourPressure(pressure, obstacle, ix, iy + 1, iz, centre, grid, openTop) -
+                                neighbourPressure(pressure, obstacle, ix, iy - 1, iz, centre, grid, openTop));
+    const float gradZ = 0.5f * (neighbourPressure(pressure, obstacle, ix, iy, iz + 1, centre, grid, openTop) -
+                                neighbourPressure(pressure, obstacle, ix, iy, iz - 1, centre, grid, openTop));
     v.x -= gradX;
     v.y -= gradY;
     v.z -= gradZ;
@@ -621,7 +647,8 @@ __global__ void advectDensity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t 
 // -------------------------------------------------------------------------------------------
 
 __global__ void applyBoundaries(cudaSurfaceObject_t velocity, cudaSurfaceObject_t density,
-                                cudaSurfaceObject_t pressure, cudaSurfaceObject_t obstacle, cudaExtent extent)
+                                cudaSurfaceObject_t pressure, cudaSurfaceObject_t obstacle, cudaExtent extent,
+                                bool openTop)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -659,7 +686,11 @@ __global__ void applyBoundaries(cudaSurfaceObject_t velocity, cudaSurfaceObject_
     float4 v = readVector(velocity, nx, ny, nz, grid);
     if (ix != nx)
         v.x = -v.x;
-    if (iy != ny)
+    // The open face is the exception: copying vy outward instead of negating it lets the flow
+    // leave, where the reflection is exactly what turned a rising plume back down into the box.
+    // A cell on the top row and a side wall at once still reflects on the side's axis, which is
+    // why this only overrides the y term.
+    if (iy != ny && !onOpenFace(iy, grid, openTop))
         v.y = -v.y;
     if (iz != nz)
         v.z = -v.z;
@@ -667,6 +698,18 @@ __global__ void applyBoundaries(cudaSurfaceObject_t velocity, cudaSurfaceObject_
 
     // Pressure and density mirror inward (zero normal derivative), matching the Neumann condition
     // the Jacobi sweep assumes.
+    //
+    // On the open face pressure is held at the same ambient zero the solve used, and density is
+    // left alone rather than mirrored: mirroring would copy the interior's smoke back into the
+    // border every step, which reads as a lid that the plume piles up against. advectDensity
+    // already backtraces this row like any other, so what stays here is what genuinely flowed in,
+    // and the next step carries it out through the open face.
+    if (onOpenFace(iy, grid, openTop))
+    {
+        writeScalar(pressure, ix, iy, iz, 0.0f);
+        return;
+    }
+
     writeScalar(pressure, ix, iy, iz, readScalar(pressure, nx, ny, nz, grid));
     writeScalar(density, ix, iy, iz, readScalar(density, nx, ny, nz, grid));
 }
@@ -758,16 +801,17 @@ cudaError_t launchComputeDivergence(const SmokeFields &fields, cudaExtent extent
     return cudaGetLastError();
 }
 
-cudaError_t launchPressureJacobi(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream)
+cudaError_t launchPressureJacobi(const SmokeFields &fields, cudaExtent extent, bool openTop, cudaStream_t stream)
 {
     pressureJacobi<<<gridFor(extent), kBlock, 0, stream>>>(fields.pressure, fields.pressureNext, fields.divergence,
-                                                           fields.obstacle, extent);
+                                                           fields.obstacle, extent, openTop);
     return cudaGetLastError();
 }
 
-cudaError_t launchProjectVelocity(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream)
+cudaError_t launchProjectVelocity(const SmokeFields &fields, cudaExtent extent, bool openTop, cudaStream_t stream)
 {
-    projectVelocity<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.pressure, fields.obstacle, extent);
+    projectVelocity<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.pressure, fields.obstacle, extent,
+                                                            openTop);
     return cudaGetLastError();
 }
 
@@ -779,10 +823,10 @@ cudaError_t launchAdvectDensity(const SmokeFields &fields, cudaExtent extent, co
     return cudaGetLastError();
 }
 
-cudaError_t launchApplyBoundaries(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream)
+cudaError_t launchApplyBoundaries(const SmokeFields &fields, cudaExtent extent, bool openTop, cudaStream_t stream)
 {
     applyBoundaries<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.pressure,
-                                                            fields.obstacle, extent);
+                                                            fields.obstacle, extent, openTop);
     return cudaGetLastError();
 }
 

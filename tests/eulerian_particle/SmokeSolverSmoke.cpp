@@ -387,6 +387,66 @@ int main()
             }
         }
 
+        std::cout << "an open top lets the plume leave instead of recirculating\n";
+        {
+            // The sealed box is what makes a plume fold back on itself: with every face no-flux,
+            // the fluid a rising plume displaces can only return downward. openTop replaces the
+            // top face's conditions with outflow — Dirichlet p = 0 in the solve, and a velocity
+            // border that copies outward instead of reflecting — so the displaced fluid leaves.
+            //
+            // Both runs here are unobstructed, because this is a property of the domain and not of
+            // the obstacle handling.
+            lr::eulerian::SmokeSolver::Config sealed = config;
+            sealed.namePrefix                        = "sealed";
+            lr::eulerian::SmokeSolver sealedSolver(resources, context, sealed);
+
+            lr::eulerian::SmokeSolver::Config open = config;
+            open.namePrefix                        = "open";
+            open.step.openTop                      = true;
+            lr::eulerian::SmokeSolver openSolver(resources, context, open);
+
+            for (int frame = 0; frame < 180; ++frame)
+            {
+                sealedSolver.step(1.0f / 60.0f);
+                sealedSolver.endStep();
+                openSolver.step(1.0f / 60.0f);
+                openSolver.endStep();
+            }
+            sealedSolver.waitForStep();
+            openSolver.waitForStep();
+
+            const std::vector<float> sealedDensity = sealedSolver.densityVolume().download();
+            const std::vector<float> openDensity   = openSolver.densityVolume().download();
+            check(allFinite(sealedDensity) && allFinite(openDensity),
+                  "both the sealed and the open box stay finite");
+
+            // Smoke leaves through the open face, so the open box has to hold strictly less of it
+            // after the same number of steps against the same source. This is the outflow itself:
+            // nothing else in the step removes mass except densityDamp, which both runs share.
+            check(sum(openDensity) < sum(sealedDensity),
+                  "the open box holds less smoke than the sealed one");
+
+            // And the mechanism, not just the mass: in the sealed box the displaced fluid turns
+            // back down the sides, so the lower corners away from the plume collect smoke the
+            // recirculation has dragged back. Measured in a shell of side columns below the
+            // source's height, which a plume rising straight up and out cannot reach on its own.
+            const int3 cornerMin{0, 2, 0};
+            const int3 cornerMax{4, 8, 4};
+            const double sealedCorner = densityInBox(sealedDensity, sealed.extent, cornerMin, cornerMax);
+            const double openCorner   = densityInBox(openDensity, open.extent, cornerMin, cornerMax);
+            check(sealedCorner > openCorner,
+                  "the sealed box drags smoke back down into its corners and the open one does less");
+
+            // The open face must vent rather than act as a lid the plume piles up against, so the
+            // top row itself stays comparatively thin: mirroring density outward there (the closed
+            // box's Neumann copy) is exactly what would make it accumulate.
+            const int3 topMin{0, static_cast<int>(open.extent.height) - 1, 0};
+            const int3 topMax{static_cast<int>(open.extent.width), static_cast<int>(open.extent.height),
+                              static_cast<int>(open.extent.depth)};
+            check(densityInBox(openDensity, open.extent, topMin, topMax) < 0.1 * sum(openDensity),
+                  "smoke does not pile up against the open face");
+        }
+
         std::cout << "a partial obstacle deflects the plume around itself\n";
         {
             // The scenario the full-span lid cannot test: a plate covering the middle of the box
@@ -456,6 +516,39 @@ int main()
 
             check(beneath > 0.0, "the plume stacks up under the plate");
             check(sideways > 0.0, "and is deflected into the channels beside it");
+
+            // The same plate in an open box, which is where the deflection is supposed to recover:
+            // once the displaced fluid can leave through the top, the smoke that went around the
+            // edges climbs instead of being dragged back under. Measured in the column above the
+            // plate, which the sealed run leaves all but empty.
+            //
+            // Reuses this solver rather than building a second one, both because importing another
+            // full set of volumes is what exhausts the external-memory handles on some drivers and
+            // because flipping the flag on a live solver is how the editor's toggle works: it is a
+            // step parameter, so it takes effect on the next step with no restart.
+            const int3 overheadMin{8, 20, 8};
+            const int3 overheadMax{24, static_cast<int>(partial.extent.height), 24};
+            const double sealedOverhead = densityInBox(density, partial.extent, overheadMin, overheadMax);
+            {
+                partialSolver.reset();
+                partialSolver.stepParams().openTop = true;
+                for (int frame = 0; frame < 180; ++frame)
+                {
+                    partialSolver.step(1.0f / 60.0f);
+                    partialSolver.endStep();
+                }
+                partialSolver.waitForStep();
+
+                const std::vector<float> vented = partialSolver.densityVolume().download();
+                check(allFinite(vented), "the vented run stays finite");
+                check(maxDensityInBox(vented, partial.extent, plateMin, plateMax) == 0.0,
+                      "and still keeps smoke out of the plate");
+                check(densityInBox(vented, partial.extent, overheadMin, overheadMax) > 10.0 * sealedOverhead,
+                      "an open top lets the deflected smoke reform above the plate");
+
+                // Back to sealed for the control below, which compares against the closed box.
+                partialSolver.stepParams().openTop = false;
+            }
 
             // The control: the same solver, same steps, with the mask cleared. The plume then goes
             // straight up the middle, so the side channels stay comparatively empty. Requiring the

@@ -407,6 +407,15 @@ void SmokeSimulation::onGUI()
         ImGui::SliderFloat("Velocity Damp", &step.velocityDamp, 0.0f, 5.0f);
         ImGui::SliderFloat("Vorticity", &step.vorticity, 0.0f, 10.0f);
 
+        ImGui::Checkbox("Open Top", &step.openTop);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Lets smoke and flow leave through the top of the box.\n"
+                              "Closed, the box is sealed: fluid the plume displaces can only "
+                              "return downward, so the plume\nrecirculates and smoke deflected by "
+                              "an obstacle is pushed under it rather than around it.");
+        }
+
         ImGui::PopID();
     }
 
