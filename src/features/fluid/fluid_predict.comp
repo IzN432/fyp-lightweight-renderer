@@ -14,6 +14,7 @@ void main()
         return;
 
     vec3 velocity = velocities[i].xyz + gravity() * deltaTime();
+    velocity = clampStepDisplacement(velocity * deltaTime()) / deltaTime();
     velocities[i] = vec4(velocity, 0.0);
     predicted[i]  = vec4(positions[i].xyz + velocity * deltaTime(), 0.0);
 }

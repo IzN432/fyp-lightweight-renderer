@@ -175,9 +175,11 @@ FluidSolverGpu::Config FluidSimulation::solverConfig(const Config &config)
     result.boundsMax           = config.boundsMax;
     result.boundsFriction      = config.boundsFriction;
     result.artificialPressureK = config.artificialPressureK;
-    result.vorticityEpsilon    = config.vorticityEpsilon;
-    result.viscosity           = config.viscosity;
-    result.maxSpeedInRadiiPerSecond = 0.0f;
+    result.vorticityEpsilon = config.vorticityEpsilon;
+    result.viscosity         = config.viscosity;
+    result.maxDisplacementInRadiiPerStep =
+        std::max(config.maxDisplacementScale, 0.0f) * std::max(config.particleSpacing, 1e-4f) /
+        result.smoothingRadius;
     result.maxParticles        = config.maxParticles;
     result.fixedDeltaTime      = config.fixedDeltaTime;
     result.maxStepsPerFrame    = config.maxStepsPerFrame;
@@ -236,8 +238,11 @@ void FluidSimulation::applyRuntimeConfig()
     solver.boundsMax        = m_config.boundsMax;
     solver.boundsFriction   = m_config.boundsFriction;
     solver.artificialPressureK = m_config.artificialPressureK;
-    solver.vorticityEpsilon = m_config.vorticityEpsilon;
-    solver.viscosity = m_config.viscosity;
+    solver.vorticityEpsilon    = m_config.vorticityEpsilon;
+    solver.viscosity            = m_config.viscosity;
+    solver.maxDisplacementInRadiiPerStep =
+        std::max(m_config.maxDisplacementScale, 0.0f) * std::max(m_config.particleSpacing, 1e-4f) /
+        solver.smoothingRadius;
     solver.particleRadius   = m_config.particleRadius();
     solver.particleColor    = m_config.particleColor;
     m_solver.setFixedDeltaTime(m_config.fixedDeltaTime);

@@ -15,9 +15,8 @@ void main()
         return;
 
     vec3 velocity = corrections[i].xyz;
-    float maxSpeed = maxSpeedRadii() * smoothingRadius();
-    float speedSquared = dot(velocity, velocity);
-    if (maxSpeed > 0.0 && speedSquared > maxSpeed * maxSpeed)
-        velocity *= maxSpeed / sqrt(speedSquared);
+    // Post-processes run after positions are committed. Bound their result so the next prediction
+    // cannot cross more than the configured distance in one step.
+    velocity = clampStepDisplacement(velocity * deltaTime()) / deltaTime();
     velocities[i] = vec4(velocity, 0.0);
 }

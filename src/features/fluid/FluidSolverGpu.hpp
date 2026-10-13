@@ -63,7 +63,9 @@ public:
         float     boundsRestitution        = 0.0f;
         float     boundsFriction           = 0.98f;
         float     viscosity                = 1e-5f;
-        float     maxSpeedInRadiiPerSecond = 20.0f;
+        // CFL-style travel limit per timestep. Controllers derive this from particle spacing;
+        // zero disables it. See FluidSolverCpu::Config for details.
+        float     maxDisplacementInRadiiPerStep = 0.5f;
 
         // Initial buffer capacity. reserve() grows every dependent GPU buffer when a later source
         // layout requires more particles.

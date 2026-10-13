@@ -10,6 +10,16 @@ namespace lr
 namespace
 {
 constexpr float kPi = 3.14159265358979323846f;
+
+glm::vec3 clampMagnitude(glm::vec3 value, float limit)
+{
+    const float squaredLength = glm::dot(value, value);
+    if (limit > 0.0f && squaredLength > limit * limit)
+    {
+        value *= limit / std::sqrt(squaredLength);
+    }
+    return value;
+}
 } // namespace
 
 FluidSolverCpu::FluidSolverCpu() = default;
@@ -379,9 +389,13 @@ void FluidSolverCpu::step(float deltaTime)
         return;
     }
 
+    const float maxDisplacement = m_config.maxDisplacementInRadiiPerStep * m_config.smoothingRadius;
+    const float maxSpeed        = maxDisplacement > 0.0f ? maxDisplacement / deltaTime : 0.0f;
+
     for (std::size_t i = 0; i < count; ++i)
     {
         m_velocities[i] += m_config.gravity * deltaTime;
+        m_velocities[i] = clampMagnitude(m_velocities[i], maxSpeed);
         m_predicted[i] = m_positions[i] + m_velocities[i] * deltaTime;
     }
 
@@ -400,11 +414,13 @@ void FluidSolverCpu::step(float deltaTime)
     // is how the integration path is tested in isolation.
     resolveBoundaryCollisions();
 
-    const float maxSpeed    = m_config.maxSpeedInRadiiPerSecond * m_config.smoothingRadius;
-    const float maxSpeedSqr = maxSpeed * maxSpeed;
-
     for (std::size_t i = 0; i < count; ++i)
     {
+        // The constraint solve can create a larger jump than prediction did. Clamp the committed
+        // displacement too, so the visible particle never crosses the configured distance in a
+        // single step. Both endpoints are inside the convex domain, so the clamped point is too.
+        m_predicted[i] = m_positions[i] + clampMagnitude(m_predicted[i] - m_positions[i], maxDisplacement);
+
         // Velocity follows from the total displacement the solve settled on, which is what makes
         // this position based.
         glm::vec3 velocity = (m_predicted[i] - m_positions[i]) / deltaTime;
@@ -436,15 +452,6 @@ void FluidSolverCpu::step(float deltaTime)
             }
         }
 
-        if (maxSpeedSqr > 0.0f)
-        {
-            const float speedSqr = glm::dot(velocity, velocity);
-            if (speedSqr > maxSpeedSqr)
-            {
-                velocity *= maxSpeed / std::sqrt(speedSqr);
-            }
-        }
-
         m_velocities[i] = velocity;
         m_positions[i]  = m_predicted[i];
     }
@@ -453,17 +460,13 @@ void FluidSolverCpu::step(float deltaTime)
     applyVorticityConfinement(deltaTime);
     applyViscosity(deltaTime);
 
-    // The existing safety cap belongs after Algorithm 1's velocity post-processes; applying it
-    // before equations (16)-(17) left their result completely unbounded until the following step.
-    if (maxSpeedSqr > 0.0f)
+    // Reapply the timestep-aware safety cap after Algorithm 1's velocity post-processes; applying
+    // it only before equations (16)-(17) would leave their result unbounded until the next step.
+    if (maxSpeed > 0.0f)
     {
         for (glm::vec3 &velocity : m_velocities)
         {
-            const float speedSqr = glm::dot(velocity, velocity);
-            if (speedSqr > maxSpeedSqr)
-            {
-                velocity *= maxSpeed / std::sqrt(speedSqr);
-            }
+            velocity = clampMagnitude(velocity, maxSpeed);
         }
     }
 }

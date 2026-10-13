@@ -77,7 +77,7 @@ FluidSolverCpu::Config FluidSolverGpu::toCpuConfig(const Config &config)
     cpu.boundsRestitution        = config.boundsRestitution;
     cpu.boundsFriction           = config.boundsFriction;
     cpu.viscosity                = config.viscosity;
-    cpu.maxSpeedInRadiiPerSecond = config.maxSpeedInRadiiPerSecond;
+    cpu.maxDisplacementInRadiiPerStep = config.maxDisplacementInRadiiPerStep;
     // The GPU table is fixed, so pin the CPU one to the same size. Bucket counts change which
     // cells collide, and a collision changes nothing about the neighbour sets -- the distance test
     // decides membership -- but matching them keeps the two solvers comparable step for step.
@@ -192,8 +192,8 @@ void FluidSolverGpu::updateParams()
         .boundsMin           = glm::vec4(m_config.boundsMin, h),
         .boundsMax           = glm::vec4(m_config.boundsMax, std::max(m_config.restDensity, 1e-6f)),
         .massRelaxViscosity = glm::vec4(m_config.particleMass, m_config.relaxation, m_config.viscosity, 0.0f),
-        .restitutionFrictionSpeed =
-            glm::vec4(m_config.boundsRestitution, m_config.boundsFriction, m_config.maxSpeedInRadiiPerSecond, 0.0f),
+        .restitutionFrictionSpeed = glm::vec4(m_config.boundsRestitution, m_config.boundsFriction,
+                                              m_config.maxDisplacementInRadiiPerStep, 0.0f),
         .pressureAndVorticity =
             glm::vec4(m_config.artificialPressureK, m_config.artificialPressureDeltaQ,
                       m_config.artificialPressureExponent, m_config.vorticityEpsilon),

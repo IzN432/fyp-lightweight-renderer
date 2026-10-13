@@ -52,9 +52,10 @@ public:
         // Effective equation (17) coefficient c. Controllers scale the paper's nominal 0.01 by
         // particleMass/restDensity so the same physical blend is retained at this kernel scale.
         float viscosity = 1e-5f;
-        // Speed cap applied after the velocity update, as a multiple of smoothingRadius per second.
-        // Stops a single bad step from throwing a particle clean out of its neighbourhood.
-        float maxSpeedInRadiiPerSecond = 20.0f;
+        // Maximum distance a particle may travel in one timestep, as a multiple of the smoothing
+        // radius. This is a CFL-style safety limit: controllers should derive it from particle
+        // spacing (typically half a spacing). Zero disables the limit.
+        float maxDisplacementInRadiiPerStep = 0.5f;
 
         // Buckets in the neighbour-search hash table. The grid itself is unbounded -- cells are
         // only ever reached through the hash -- so this trades memory against how often two

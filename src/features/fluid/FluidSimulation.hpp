@@ -44,6 +44,9 @@ public:
         float vorticityEpsilon     = 0.0f;
         float viscosity            = 0.01f;
         float boundsFriction       = 0.98f;
+        // CFL-style safety limit. Half a particle spacing preserves the local neighbour set while
+        // still allowing visible motion; zero disables the cap.
+        float maxDisplacementScale = 0.5f;
 
         glm::vec3 boundsMin{-15.0f, 0.0f, -15.0f};
         glm::vec3 boundsMax{15.0f, 35.0f, 15.0f};

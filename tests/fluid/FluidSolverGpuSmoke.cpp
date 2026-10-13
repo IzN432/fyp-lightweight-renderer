@@ -132,7 +132,7 @@ try
         large.boundsMin = glm::vec3(-15.0f, 0.0f, -15.0f);
         large.boundsMax = glm::vec3(15.0f, 35.0f, 15.0f);
         large.fixedDeltaTime = 0.016f;
-        large.maxSpeedInRadiiPerSecond = 0.0f;
+        large.maxDisplacementInRadiiPerStep = 0.0f;
         large.maxParticles = dimensions.x * dimensions.y * dimensions.z;
         large.maxStepsPerFrame = 1;
         large.startPaused = true;
@@ -247,6 +247,7 @@ try
     // across time steps than it did under the old one-sided clamp. This remains an order of
     // magnitude below the percent-level signature of a missing neighbour.
     constexpr float kDensityTolerance = 1e-3f;
+    std::vector<glm::vec3> previousGpuPositions = initial;
 
     for (int step = 0; step < kComparedSteps; ++step)
     {
@@ -286,14 +287,19 @@ try
                         static_cast<double>(worstRelative), static_cast<double>(kDensityTolerance));
         }
 
-        for (const glm::vec3 &position : gpuPositions)
+        const float travelLimit = config.maxDisplacementInRadiiPerStep * config.smoothingRadius;
+        for (std::size_t i = 0; i < gpuPositions.size(); ++i)
         {
+            const glm::vec3 &position = gpuPositions[i];
             if (!isFinite(position))
             {
                 check(false, "GPU positions stayed finite");
                 break;
             }
+            check(glm::distance(position, previousGpuPositions[i]) <= travelLimit + 1e-5f,
+                  "GPU particle travel stayed within the per-step cap");
         }
+        previousGpuPositions = gpuPositions;
     }
 
     // Positions are still checked, but only on the step where chaos has had no time to act: one

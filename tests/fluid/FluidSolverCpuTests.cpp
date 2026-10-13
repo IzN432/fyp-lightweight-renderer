@@ -91,9 +91,9 @@ void testArtificialPressureCorrection()
     base.relaxation               = 0.0f;
     base.solverIterations         = 1;
     base.viscosity                = 0.0f;
-    base.maxSpeedInRadiiPerSecond = 0.0f;
-    base.boundsMin                = glm::vec3(-10.0f);
-    base.boundsMax                = glm::vec3(10.0f);
+    base.maxDisplacementInRadiiPerStep = 0.0f;
+    base.boundsMin                    = glm::vec3(-10.0f);
+    base.boundsMax                    = glm::vec3(10.0f);
 
     auto withoutPressure = base;
     withoutPressure.artificialPressureK = 0.0f;
@@ -126,9 +126,9 @@ void testPaperXsphEquation()
     config.artificialPressureK      = 0.0f;
     config.vorticityEpsilon         = 0.0f;
     config.viscosity                = c;
-    config.maxSpeedInRadiiPerSecond = 0.0f;
-    config.boundsMin                = glm::vec3(-10.0f);
-    config.boundsMax                = glm::vec3(10.0f);
+    config.maxDisplacementInRadiiPerStep = 0.0f;
+    config.boundsMin                    = glm::vec3(-10.0f);
+    config.boundsMax                    = glm::vec3(10.0f);
 
     const std::vector<glm::vec3> particles{glm::vec3(0.0f), glm::vec3(0.5f, 0.0f, 0.0f)};
     const std::vector<glm::vec3> velocities{glm::vec3(0.0f), glm::vec3(1.0f, 0.0f, 0.0f)};
@@ -162,9 +162,9 @@ void testVorticityConfinement()
     config.solverIterations         = 0;
     config.artificialPressureK      = 0.0f;
     config.viscosity                = 0.0f;
-    config.maxSpeedInRadiiPerSecond = 0.0f;
-    config.boundsMin                = glm::vec3(-10.0f);
-    config.boundsMax                = glm::vec3(10.0f);
+    config.maxDisplacementInRadiiPerStep = 0.0f;
+    config.boundsMin                    = glm::vec3(-10.0f);
+    config.boundsMax                    = glm::vec3(10.0f);
 
     const std::vector<glm::vec3> particles{glm::vec3(0.0f), glm::vec3(0.5f, 0.0f, 0.0f),
                                             glm::vec3(0.0f, 0.75f, 0.0f)};
@@ -205,9 +205,9 @@ void testMassConsistentConstraintGradient()
     unit.solverIterations         = 1;
     unit.artificialPressureK      = 0.0f;
     unit.viscosity                = 0.0f;
-    unit.maxSpeedInRadiiPerSecond = 0.0f;
-    unit.boundsMin                = glm::vec3(-10.0f);
-    unit.boundsMax                = glm::vec3(10.0f);
+    unit.maxDisplacementInRadiiPerStep = 0.0f;
+    unit.boundsMin                    = glm::vec3(-10.0f);
+    unit.boundsMax                    = glm::vec3(10.0f);
 
     const std::vector<glm::vec3> compressed{glm::vec3(0.0f), glm::vec3(0.25f, 0.0f, 0.0f)};
     lr::FluidSolverCpu unitMass(unit);
@@ -261,6 +261,34 @@ void testPaperTermsStayBoundedAtDemoScale()
         largestDisplacement = std::max(largestDisplacement, glm::distance(initial[i], solver.positions()[i]));
     }
     assert(largestDisplacement < spacing);
+}
+
+// The travel limit is expressed per timestep, so changing dt changes the speed ceiling while the
+// maximum visible displacement remains fixed. This prevents fast particles from skipping their
+// entire neighbour region in one solve.
+void testPerStepDisplacementCap()
+{
+    constexpr float h                 = 0.2f;
+    constexpr float displacementScale = 0.25f;
+    constexpr float dt                = 0.1f;
+    constexpr float expectedTravel    = h * displacementScale;
+
+    lr::FluidSolverCpu::Config config;
+    config.smoothingRadius               = h;
+    config.gravity                       = glm::vec3(0.0f);
+    config.solverIterations              = 0;
+    config.viscosity                     = 0.0f;
+    config.maxDisplacementInRadiiPerStep = displacementScale;
+    config.boundsMin                     = glm::vec3(-10.0f);
+    config.boundsMax                     = glm::vec3(10.0f);
+
+    lr::FluidSolverCpu solver(config);
+    solver.setParticles({glm::vec3(0.0f)});
+    solver.setVelocities({glm::vec3(100.0f, 0.0f, 0.0f)});
+    solver.step(dt);
+
+    assert(std::fabs(solver.positions()[0].x - expectedTravel) < 1e-6f);
+    assert(std::fabs(solver.velocities()[0].x - expectedTravel / dt) < 1e-6f);
 }
 
 // Gravity, integration and the boundary. No fluid behaviour involved: this is the harness check.
@@ -484,6 +512,7 @@ int main()
     testVorticityConfinement();
     testMassConsistentConstraintGradient();
     testPaperTermsStayBoundedAtDemoScale();
+    testPerStepDisplacementCap();
     testFreeFallAndFloor();
     testBlockSettlesNearRestDensity();
     testCompressionIsResolved();

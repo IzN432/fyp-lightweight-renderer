@@ -19,6 +19,10 @@ void main()
     // enforces it outside its iteration loop for the same reason -- it is how the integration path
     // is tested in isolation.
     vec3 settled = clamp(predicted[i].xyz, domainMin(), domainMax());
+    // Constraint corrections can also create a large jump, so bound the final displacement as
+    // well as the velocity used by fluid_predict. The domain is convex, hence moving from the
+    // previous in-bounds point towards the clamped point stays in bounds.
+    settled = previous + clampStepDisplacement(settled - previous);
 
     // Velocity follows from the total displacement, which is what makes this position based.
     vec3 velocity = (settled - previous) / deltaTime();
@@ -44,15 +48,6 @@ void main()
             if (tangent != axis)
                 velocity[tangent] *= friction();
         }
-    }
-
-    // Stops a single bad step from throwing a particle clean out of its neighbourhood.
-    float maxSpeed = maxSpeedRadii() * smoothingRadius();
-    if (maxSpeed > 0.0)
-    {
-        float speedSquared = dot(velocity, velocity);
-        if (speedSquared > maxSpeed * maxSpeed)
-            velocity *= maxSpeed / sqrt(speedSquared);
     }
 
     velocities[i] = vec4(velocity, 0.0);

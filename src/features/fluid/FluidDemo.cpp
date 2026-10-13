@@ -121,6 +121,8 @@ void FluidDemo::rebuildSolverConfig()
     solverConfig.artificialPressureK = m_config.artificialPressureK;
     solverConfig.vorticityEpsilon    = m_config.vorticityEpsilon;
     solverConfig.viscosity = m_config.viscosity;
+    solverConfig.maxDisplacementInRadiiPerStep =
+        std::max(m_config.maxDisplacementScale, 0.0f) * spacing / radius;
     solverConfig.boundsFriction   = m_config.boundsFriction;
     solverConfig.boundsMin        = m_config.boundsMin;
     solverConfig.boundsMax        = m_config.boundsMax;

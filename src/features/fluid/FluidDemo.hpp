@@ -39,6 +39,8 @@ public:
         float vorticityEpsilon    = 0.0f;
         float viscosity            = 0.01f;
         float boundsFriction = 0.98f;
+        // Maximum travel per fixed step, in particle spacings. Zero disables the cap.
+        float maxDisplacementScale = 0.5f;
 
         // Simulation domain. The fluid is dropped into one corner of it.
         glm::vec3 boundsMin{-0.5f, 0.0f, -0.5f};
