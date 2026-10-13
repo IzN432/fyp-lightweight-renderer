@@ -173,7 +173,7 @@ FluidSolverGpu::FluidSolverGpu(Config config, ResourceRegistry &resources)
     // solver owns the buffer it writes; ParticleBillboardPass and ScreenSpaceLiquidPass take the
     // name through their config and bind it read-only.
     // VERTEX_BUFFER as well as STORAGE: the screen-space liquid and billboard passes read these
-    // records through a storage buffer, while FluidRenderer binds the same memory as instance data,
+    // records through a storage buffer, while render passes consume the same memory directly,
     // reading the leading vec4 of centre and radius in place.
     resources.registerStaticBuffer(m_config.particleBufferResourceName,
                                    VkDeviceSize(capacity) * sizeof(ParticleGpuData),

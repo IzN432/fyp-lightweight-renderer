@@ -360,31 +360,12 @@ add_shaders(lr_fluid_feature
     src/features/fluid/fluid_composite.frag
 )
 
-# Application-facing fluid controllers and their ImGui controls.
-add_library(lr_fluid_demo STATIC
-    src/features/fluid/FluidDemo.cpp
+# Application-facing GPU fluid controller and its ImGui controls.
+add_library(lr_fluid_simulation STATIC
     src/features/fluid/FluidSimulation.cpp
 )
-target_include_directories(lr_fluid_demo PUBLIC src)
-target_link_libraries(lr_fluid_demo PUBLIC lr_fluid_feature lr_core imgui)
-
-# Minimal standalone viewer retained from fluid-sim for focused solver tuning.
-add_library(lr_fluid_app STATIC
-    src/features/fluid/FluidEngine.cpp
-    src/features/fluid/FluidRenderer.cpp
-)
-target_include_directories(lr_fluid_app PUBLIC src)
-target_link_libraries(lr_fluid_app PUBLIC lr_fluid_demo lr_core imgui)
-
-add_shaders(lr_fluid_app
-    src/features/fluid/fluid_particles.vert
-    src/features/fluid/fluid_particles.frag
-    src/features/fluid/fluid_lines.vert
-    src/features/fluid/fluid_lines.frag
-)
-
-add_executable(fluid src/features/fluid/fluidMain.cpp)
-target_link_libraries(fluid PRIVATE lr_fluid_app)
+target_include_directories(lr_fluid_simulation PUBLIC src)
+target_link_libraries(lr_fluid_simulation PUBLIC lr_fluid_feature lr_core imgui)
 
 add_library(lr_rigid_body_feature STATIC
     src/features/rigid_body/ColliderComponent.cpp
@@ -420,7 +401,7 @@ add_library(lr_editor_app STATIC
 )
 target_include_directories(lr_editor_app PUBLIC src)
 target_link_libraries(lr_editor_app PUBLIC lr_core lr_arap_feature lr_laplace_beltrami_feature
-    lr_rigid_body_feature lr_linear_blend_skinning_feature lr_fluid_demo
+    lr_rigid_body_feature lr_linear_blend_skinning_feature lr_fluid_simulation
     lr_scene_serialization imguiFileDialog)
 
 # Application executable

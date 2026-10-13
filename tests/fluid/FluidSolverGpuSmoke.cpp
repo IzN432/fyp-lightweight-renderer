@@ -63,7 +63,7 @@ FluidSolverGpu::Config makeConfig(uint32_t capacity)
     FluidSolverGpu::Config config;
     config.smoothingRadius = radius;
     config.particleMass    = 1.0f;
-    // Derived from the lattice the particles start on, as FluidDemo does: picking rest density
+    // Derived from the lattice the particles start on, as FluidSimulation does: picking rest density
     // independently of spacing is the usual reason a first step inflates or implodes.
     config.restDensity         = FluidSolverCpu::restDensityForSpacing(spacing, radius, 1.0f);
     config.relaxation          = config.restDensity * 0.01f;

@@ -72,7 +72,7 @@ public:
         uint32_t maxParticles = 65536;
 
         // Fixed simulation timestep, independent of frame rate, and the ceiling on steps per frame
-        // so a slow frame cannot spiral into an ever-growing backlog -- both as in FluidDemo. The
+        // so a slow frame cannot spiral into an ever-growing backlog. The
         // ceiling also fixes how many pass chains build() declares, so it is read at build time and
         // changing it afterwards has no effect.
         float fixedDeltaTime   = 1.0f / 60.0f;
@@ -106,7 +106,7 @@ public:
     // ResourceRegistry generations; capacity never shrinks during a run.
     void reserve(uint32_t particleCapacity);
 
-    // Advances by whole fixed steps covering frameDeltaTime, matching FluidDemo's fixed-step
+    // Advances by whole fixed steps covering frameDeltaTime, matching the application's fixed-step
     // accumulator. The work is recorded when the graph executes, not here.
     void update(float frameDeltaTime);
     void stepOnce();
