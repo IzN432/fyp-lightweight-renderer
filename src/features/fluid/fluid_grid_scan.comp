@@ -1,0 +1,66 @@
+#version 450
+
+// Spatial hash, pass 2: exclusive prefix sum over the bucket tallies, turning them into the start
+// offset of each bucket's span -- the serial loop in FluidSolverCpu::buildSpatialHash.
+//
+// Deliberately a single workgroup. A multi-pass scan would need either device-wide atomics between
+// dependent passes or a second dispatch per level, and the bucket count here is a few tens of
+// thousands at most, so one workgroup striding over the array in chunks finishes in microseconds
+// and keeps the pass count fixed. The host dispatches exactly one group; gl_WorkGroupID is unused.
+//
+// Each chunk is scanned in shared memory with Hillis-Steele, then offset by the running total of
+// every chunk before it, which carries across chunk boundaries in `carry`.
+
+#include "fluid_sim.glslh"
+
+layout(local_size_x = FLUID_WORKGROUP_SIZE) in;
+
+shared uint scratch[FLUID_WORKGROUP_SIZE];
+shared uint carry;
+
+void main()
+{
+    uint lane = gl_LocalInvocationID.x;
+    uint buckets = bucketCount();
+
+    if (lane == 0u)
+        carry = 0u;
+    barrier();
+
+    for (uint base = 0u; base < buckets; base += FLUID_WORKGROUP_SIZE)
+    {
+        uint index = base + lane;
+        uint value = index < buckets ? cellCounts[index] : 0u;
+
+        // Inclusive scan of this chunk.
+        scratch[lane] = value;
+        barrier();
+        for (uint offset = 1u; offset < FLUID_WORKGROUP_SIZE; offset <<= 1u)
+        {
+            uint addend = lane >= offset ? scratch[lane - offset] : 0u;
+            barrier();
+            scratch[lane] += addend;
+            barrier();
+        }
+
+        // Exclusive result: drop this lane's own contribution and add everything before the chunk.
+        uint chunkTotal = scratch[FLUID_WORKGROUP_SIZE - 1u];
+        if (index < buckets)
+        {
+            cellStarts[index] = carry + scratch[lane] - value;
+            // The tally has been consumed into the offset above, so the slot is free for the
+            // scatter pass to use as its per-bucket cursor. Zeroed here rather than in another
+            // pass because this invocation has just finished reading it.
+            cellCounts[index] = 0u;
+        }
+
+        barrier();
+        if (lane == 0u)
+            carry += chunkTotal;
+        barrier();
+    }
+
+    // The trailing entry closes the last bucket's span, so a lookup never special-cases it.
+    if (lane == 0u)
+        cellStarts[buckets] = carry;
+}

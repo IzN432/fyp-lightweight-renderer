@@ -31,6 +31,9 @@ layout(set = 0, binding = 8) uniform sampler2D hbaoAo;
 // TransparentPass's layer: premultiplied HDR colour, alpha = accumulated opacity.
 layout(set = 0, binding = 9) uniform sampler2D transparent;
 
+// Screen-space liquid is already refracted and lit in HDR. Alpha is a surface-presence mask.
+layout(set = 0, binding = 10) uniform sampler2D fluidComposite;
+
 layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform FinalPC
@@ -64,6 +67,12 @@ void main()
         // pbr alpha is the fraction of MSAA samples covered by geometry; blending in display space keeps
         // bright silhouettes from staying stair-stepped after tone mapping.
         baseColor = mix(background, reinhard(litColor), pbrSample.a);
+    }
+
+    vec4 fluidSample = texture(fluidComposite, inUV);
+    if (fluidSample.a > 0.0)
+    {
+        baseColor = mix(baseColor, reinhard(fluidSample.rgb), fluidSample.a);
     }
 
     // Transparent surfaces go over the opaque scene (and the sky — they don't write depth), and under

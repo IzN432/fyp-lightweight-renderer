@@ -171,6 +171,10 @@ public:
     // resolving. Like replaceUploadedImage(), the old buffer is retired rather than destroyed.
     void replaceUploadedBuffer(const std::string &name, const void *data, VkDeviceSize size, VkBufferUsageFlags usage);
 
+    // Reallocates a GPU-only buffer without uploading initial contents. Existing descriptor and
+    // vertex-buffer references keep using the same registry name and observe the replacement.
+    void replaceStaticBuffer(const std::string &name, VkDeviceSize size, VkBufferUsageFlags usage);
+
     // Reallocates a dynamic buffer (all its per-frame copies) while preserving its registry name; the
     // old allocations are retired, and the contents start zeroed.
     void replaceDynamicBuffer(const std::string &name, VkDeviceSize size, VkBufferUsageFlags usage);

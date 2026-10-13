@@ -153,7 +153,6 @@ void EditorRenderBridge::updateSceneOverlays(const Scene &scene, const EditorFra
         const std::vector<OverlayLine> &extraLines = extra.lines();
         overlayLines.insert(overlayLines.end(), extraLines.begin(), extraLines.end());
     }
-
     m_passes.overlayLines->setLines(overlayLines);
     m_passes.outline->setSelection(selectedPickingIds(scene, m_sceneManager.geometryObjects()));
 }

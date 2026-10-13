@@ -50,10 +50,6 @@ std::unique_ptr<CompiledFrameGraph> FrameGraphCompiler::compile(const FrameGraph
     buildPipelines(*result);
     buildBarriers(*result);
 
-    if (spdlog::should_log(spdlog::level::debug))
-    {
-        spdlog::debug("{}", result->debugDump());
-    }
     spdlog::info("FrameGraph: compiled OK");
     return result;
 }

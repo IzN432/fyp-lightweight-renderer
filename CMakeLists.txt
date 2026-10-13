@@ -14,8 +14,10 @@ find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin REQUIRED)
 function(add_shaders TARGET)
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/shaders")
     
-    # Collect all shader headers (.glslh files) as implicit dependencies
-    file(GLOB_RECURSE SHADER_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/passes/*.glslh")
+    # Collect all shader headers (.glslh files) as implicit dependencies. Features carry their own
+    # alongside their shaders (e.g. the fluid solver's), so this covers src rather than core/passes
+    # only -- a header missing from here means editing it does not rebuild the shaders including it.
+    file(GLOB_RECURSE SHADER_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.glslh")
     
     set(SPV_FILES)
     foreach(GLSL ${ARGN})
@@ -331,6 +333,54 @@ add_library(lr_linear_blend_skinning_feature STATIC
 target_include_directories(lr_linear_blend_skinning_feature PUBLIC src)
 target_link_libraries(lr_linear_blend_skinning_feature PUBLIC lr_core glm::glm)
 
+# Position Based Fluids reference solver. Pure CPU and dependency-free on purpose: it is the
+# ground truth the GPU compute solver gets diffed against.
+add_library(lr_fluid_feature STATIC
+    src/features/fluid/FluidComponent.cpp
+    src/features/fluid/FluidSolverCpu.cpp
+    src/features/fluid/FluidSolverGpu.cpp
+    src/features/fluid/ParticleBillboardPass.cpp
+    src/features/fluid/ScreenSpaceLiquidPass.cpp
+)
+target_include_directories(lr_fluid_feature PUBLIC src)
+target_link_libraries(lr_fluid_feature PUBLIC lr_core glm::glm)
+
+add_shaders(lr_fluid_feature
+    src/features/fluid/particle_billboard.vert
+    src/features/fluid/particle_billboard.frag
+    src/features/fluid/fluid_surface.vert
+    src/features/fluid/fluid_depth.frag
+    src/features/fluid/fluid_bilateral.comp
+    src/features/fluid/fluid_normal.comp
+    src/features/fluid/fluid_predict.comp
+    src/features/fluid/fluid_grid_clear.comp
+    src/features/fluid/fluid_grid_count.comp
+    src/features/fluid/fluid_grid_scan.comp
+    src/features/fluid/fluid_grid_scatter.comp
+    src/features/fluid/fluid_reorder.comp
+    src/features/fluid/fluid_reorder_copyback.comp
+    src/features/fluid/fluid_density.comp
+    src/features/fluid/fluid_correct.comp
+    src/features/fluid/fluid_apply.comp
+    src/features/fluid/fluid_finalise.comp
+    src/features/fluid/fluid_vorticity.comp
+    src/features/fluid/fluid_vorticity_apply.comp
+    src/features/fluid/fluid_viscosity.comp
+    src/features/fluid/fluid_viscosity_apply.comp
+    src/features/fluid/fluid_publish.comp
+    src/features/fluid/fluid_thickness.frag
+    src/features/fluid/fluid_occupancy_clear.comp
+    src/features/fluid/fluid_occupancy.frag
+    src/features/fluid/fluid_composite.frag
+)
+
+# Application-facing GPU fluid controller and its ImGui controls.
+add_library(lr_fluid_simulation STATIC
+    src/features/fluid/FluidSimulation.cpp
+)
+target_include_directories(lr_fluid_simulation PUBLIC src)
+target_link_libraries(lr_fluid_simulation PUBLIC lr_fluid_feature lr_core imgui)
+
 add_library(lr_rigid_body_feature STATIC
     src/features/rigid_body/ColliderComponent.cpp
     src/features/rigid_body/ColliderVisual.cpp
@@ -391,10 +441,11 @@ add_library(lr_scene_serialization STATIC
     src/core/scene/serialization/JsonUtils.cpp
     src/features/linear_blend_skinning/SkinComponentCodec.cpp
     src/features/rigid_body/RigidBodyComponentCodecs.cpp
+    src/features/fluid/FluidComponentCodec.cpp
 )
 target_include_directories(lr_scene_serialization PUBLIC src)
 target_link_libraries(lr_scene_serialization PUBLIC lr_core
-    lr_linear_blend_skinning_feature lr_rigid_body_feature nlohmann_json::nlohmann_json)
+    lr_linear_blend_skinning_feature lr_rigid_body_feature lr_fluid_feature nlohmann_json::nlohmann_json)
 
 # Application-level editor composition. This stays above lr_core because it combines optional
 # feature libraries which themselves depend on lr_core.
@@ -407,7 +458,7 @@ add_library(lr_editor_app STATIC
 )
 target_include_directories(lr_editor_app PUBLIC src)
 target_link_libraries(lr_editor_app PUBLIC lr_core lr_arap_feature lr_laplace_beltrami_feature
-    lr_rigid_body_feature lr_linear_blend_skinning_feature
+    lr_rigid_body_feature lr_linear_blend_skinning_feature lr_fluid_simulation
     lr_scene_serialization imguiFileDialog)
 if(LR_ENABLE_CUDA)
     target_link_libraries(lr_editor_app PUBLIC lr_eulerian_particle_feature)
@@ -577,6 +628,11 @@ if(BUILD_TESTING)
         target_link_libraries(smoke_solver_smoke PRIVATE lr_eulerian_particle_feature)
     endif()
 
+    # Diffs the GPU compute fluid solver against the CPU reference on real hardware.
+    add_executable(fluid_solver_gpu_smoke EXCLUDE_FROM_ALL tests/fluid/FluidSolverGpuSmoke.cpp)
+    target_link_libraries(fluid_solver_gpu_smoke PRIVATE lr_fluid_feature)
+    add_dependencies(fluid_solver_gpu_smoke lr_fluid_feature_shaders)
+
     add_executable(editor_state_controller_tests
         tests/editor/EditorStateControllerTests.cpp
         src/core/editor/EditorInputRouter.cpp
@@ -676,6 +732,24 @@ if(BUILD_TESTING)
     target_link_libraries(animation_tests PRIVATE lr_core)
     add_test(NAME animation.model COMMAND animation_tests)
 
+    add_executable(fluid_solver_cpu_tests
+        tests/fluid/FluidSolverCpuTests.cpp
+    )
+    target_link_libraries(fluid_solver_cpu_tests PRIVATE lr_fluid_feature)
+    add_test(NAME fluid.solver_cpu COMMAND fluid_solver_cpu_tests)
+
+    add_executable(particle_billboard_tests
+        tests/fluid/ParticleBillboardTests.cpp
+    )
+    target_link_libraries(particle_billboard_tests PRIVATE lr_fluid_feature)
+    add_test(NAME fluid.particle_billboard COMMAND particle_billboard_tests)
+
+    add_executable(screen_space_liquid_tests
+        tests/fluid/ScreenSpaceLiquidTests.cpp
+    )
+    target_link_libraries(screen_space_liquid_tests PRIVATE lr_fluid_feature)
+    add_test(NAME fluid.screen_space_liquid COMMAND screen_space_liquid_tests)
+
     add_executable(rigid_body_collider_tests
         tests/rigid_body/ColliderTests.cpp
     )
@@ -710,6 +784,9 @@ if(BUILD_TESTING)
         tests/framegraph/ShaderInterfaceTests.cpp
     )
     target_link_libraries(shader_interface_tests PRIVATE lr_core)
+    target_compile_definitions(shader_interface_tests PRIVATE
+        LR_FLUID_SHADER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src/features/fluid"
+    )
     add_test(NAME framegraph.shader_interface COMMAND shader_interface_tests)
 
     add_executable(framegraph_model_tests

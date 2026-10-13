@@ -1,0 +1,57 @@
+#version 450
+
+// Solver stage: XSPH viscosity. Transcribed from FluidSolverCpu::applyViscosity.
+//
+// Without this PBF has no way to dissipate energy and a dropped block never comes to rest, because
+// the positional solve keeps converting its own corrections back into velocity.
+//
+// The blended result goes to the corrections buffer, not to velocities: every particle has to blend
+// against the same pre-viscosity velocity field, for the same ordering-independence reason as the
+// position corrections. That buffer has done its job for this step, so it stands in for the CPU
+// solver's scratch vector instead of a dedicated allocation. fluid_viscosity_apply.comp copies it
+// back.
+//
+// Note this runs after positions are committed, so neighbours blend against the velocities they
+// just got -- and the offsets below use committed positions, matching the CPU reference, which also
+// reads m_positions here rather than the predicted ones.
+
+#include "fluid_sim.glslh"
+
+layout(local_size_x = FLUID_WORKGROUP_SIZE) in;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= particleCount())
+        return;
+
+    vec3 velocity = velocities[i].xyz;
+
+    if (viscosity() <= 0.0)
+    {
+        corrections[i] = vec4(velocity, 0.0);
+        return;
+    }
+
+    float h = smoothingRadius();
+    vec3 self = positions[i].xyz;
+
+    vec3 delta = vec3(0.0);
+
+    // The neighbour traversal keys off the grid, which was built from the predicted positions of
+    // this step. Those are the positions that have just been committed, so the grid still describes
+    // where the particles are.
+    FLUID_FOR_EACH_NEIGHBOUR(i, j, {
+        vec3 offset = self - positions[j].xyz;
+        if (dot(offset, offset) < h * h)
+        {
+            float weight = poly6(dot(offset, offset), h);
+            delta += weight * (velocities[j].xyz - velocity);
+        }
+    })
+
+    // Equation (17), with no neighbourhood-weight normalization.
+    velocity += viscosity() * delta;
+
+    corrections[i] = vec4(velocity, 0.0);
+}

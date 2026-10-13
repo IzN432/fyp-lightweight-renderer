@@ -46,6 +46,7 @@ ComponentCodecRegistry makeSceneComponentCodecs()
     addCoreComponentCodecs(registry);
     addSkinComponentCodecs(registry);
     addRigidBodyComponentCodecs(registry);
+    addFluidComponentCodecs(registry);
     return registry;
 }
 

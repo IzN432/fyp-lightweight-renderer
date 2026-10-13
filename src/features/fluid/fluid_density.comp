@@ -1,0 +1,48 @@
+#version 450
+
+// Solver stage: per-particle density and its constraint multiplier lambda. Transcribed from
+// FluidSolverCpu::computeDensitiesAndLambdas.
+
+#include "fluid_sim.glslh"
+
+layout(local_size_x = FLUID_WORKGROUP_SIZE) in;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= particleCount())
+        return;
+
+    float h = smoothingRadius();
+    float rho0 = restDensity();
+    vec3 self = predicted[i].xyz;
+
+    // A particle contributes to its own density, so start from the r = 0 kernel value.
+    float density = particleMass() * poly6(0.0, h);
+
+    // Gradient of this particle's constraint with respect to itself, accumulated as the negated sum
+    // of its neighbour gradients.
+    vec3 gradientSelf = vec3(0.0);
+    float squaredGradientSum = 0.0;
+
+    FLUID_FOR_EACH_NEIGHBOUR(i, j, {
+        vec3 offset = self - predicted[j].xyz;
+        if (dot(offset, offset) < h * h)
+        {
+            density += particleMass() * poly6(dot(offset, offset), h);
+            vec3 gradient = particleMass() * spikyGradient(offset, h) / rho0;
+            gradientSelf += gradient;
+            float inverseMass = particleMass() > 0.0 ? 1.0 / particleMass() : 0.0;
+            squaredGradientSum += inverseMass * dot(gradient, gradient);
+        }
+    })
+
+    float inverseMass = particleMass() > 0.0 ? 1.0 / particleMass() : 0.0;
+    squaredGradientSum += inverseMass * dot(gradientSelf, gradientSelf);
+
+    densities[i] = density;
+
+    float constraint = density / rho0 - 1.0;
+    // Equation (11). Artificial pressure in fluid_correct handles the tensile instability.
+    lambdas[i] = -constraint / (squaredGradientSum + relaxation());
+}

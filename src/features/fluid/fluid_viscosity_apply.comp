@@ -1,0 +1,22 @@
+#version 450
+
+// Solver stage: commit the blended velocities computed by fluid_viscosity.comp, completing the
+// step. Separate pass for the same reason the position corrections are: the blend has to read an
+// unmodified velocity field.
+
+#include "fluid_sim.glslh"
+
+layout(local_size_x = FLUID_WORKGROUP_SIZE) in;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= particleCount())
+        return;
+
+    vec3 velocity = corrections[i].xyz;
+    // Post-processes run after positions are committed. Bound their result so the next prediction
+    // cannot cross more than the configured distance in one step.
+    velocity = clampStepDisplacement(velocity * deltaTime()) / deltaTime();
+    velocities[i] = vec4(velocity, 0.0);
+}

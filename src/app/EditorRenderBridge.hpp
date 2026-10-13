@@ -60,7 +60,6 @@ public:
     // as a simulation's bounding box. The bridge owns the single setLines() call, so anything that
     // wants lines on screen contributes through here rather than driving the pass itself.
     void addOverlayLineProducer(std::function<void(OverlayLineBuilder &)> producer);
-
     void setOverlayGeometry(std::vector<OverlayInstance> instances);
     void setHoveredOverlay(uint32_t pickingId);
     void updateSceneOverlays(const Scene &scene, const EditorFrameContext &frame);

@@ -831,6 +831,42 @@ void ResourceRegistry::replaceUploadedBuffer(const std::string &name, const void
     spdlog::debug("ResourceRegistry: replaced buffer '{}' ({} bytes)", name, size);
 }
 
+void ResourceRegistry::replaceStaticBuffer(const std::string &name, VkDeviceSize size, VkBufferUsageFlags usage)
+{
+    auto it = m_buffers.find(name);
+    if (it == m_buffers.end())
+    {
+        throw std::runtime_error("ResourceRegistry: replaceStaticBuffer '" + name + "' not found");
+    }
+    if (it->second.memoryUsage != VMA_MEMORY_USAGE_GPU_ONLY)
+    {
+        throw std::runtime_error("ResourceRegistry: replaceStaticBuffer '" + name + "' is not a static buffer");
+    }
+
+    BufferEntry entry{};
+    entry.size        = size;
+    entry.usage       = usage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    entry.memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY;
+    entry.buffer      = m_allocator.createBuffer(size, entry.usage, VMA_MEMORY_USAGE_GPU_ONLY);
+
+    // A queued upload targets the registry name, so it would otherwise be redirected into this
+    // differently sized replacement. A subsequent setParticles() queues the correct new payload.
+    std::erase_if(m_pendingUploads, [&](PendingUpload &pending) {
+        if (pending.type != PendingUpload::Type::Buffer || pending.resourceName != name)
+        {
+            return false;
+        }
+        m_allocator.destroy(pending.staging);
+        return true;
+    });
+
+    retire(it->second.buffer);
+    it->second = std::move(entry);
+    ++m_generations[name];
+    setDebugName(VK_OBJECT_TYPE_BUFFER, reinterpret_cast<uint64_t>(it->second.buffer.buffer), name);
+    spdlog::debug("ResourceRegistry: resized static buffer '{}' ({} bytes)", name, size);
+}
+
 void ResourceRegistry::replaceDynamicBuffer(const std::string &name, VkDeviceSize size, VkBufferUsageFlags usage)
 {
     auto it = m_buffers.find(name);

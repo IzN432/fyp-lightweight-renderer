@@ -1,0 +1,170 @@
+// Shared declarations for the Position Based Fluids compute solver.
+//
+// Every stage includes this so the buffer bindings, the simulation parameters and the SPH kernels
+// are written once. The kernels are transcriptions of FluidSolverCpu::poly6 and
+// FluidSolverCpu::spikyGradient, including their guard conditions -- the CPU solver is the
+// reference these are diffed against, so a divergence here is a bug, not a tuning choice.
+
+#ifndef FLUID_SIM_GLSLH
+#define FLUID_SIM_GLSLH
+
+const float kPi = 3.14159265358979323846;
+
+// Matches FluidSolverGpu::kWorkgroupSize.
+#define FLUID_WORKGROUP_SIZE 256
+
+// std140 to match the uniform buffer the host packs. vec3s are padded to vec4 explicitly rather
+// than relying on the implicit padding, so the C++ struct and this agree member for member.
+layout(set = 0, binding = 0) uniform FluidParams
+{
+    vec4 gravityAndDeltaTime;     // xyz gravity, w timestep
+    vec4 boundsMin;               // xyz min, w smoothing radius
+    vec4 boundsMax;               // xyz max, w rest density
+    vec4 massRelaxViscosity;      // x mass, y relaxation, z viscosity, w unused
+    vec4 restitutionFrictionSpeed; // x restitution, y friction, z max displacement / h, w unused
+    vec4 pressureAndVorticity;    // x pressure k, y delta-q / h, z exponent n, w vorticity epsilon
+    uvec4 counts;                 // x particle count, y bucket count, z bucket mask, w iterations
+} params;
+
+// Named accessors. The packing above exists to satisfy std140 alignment; the solve reads through
+// these so it stays legible.
+float smoothingRadius() { return params.boundsMin.w; }
+float restDensity()     { return params.boundsMax.w; }
+float particleMass()    { return params.massRelaxViscosity.x; }
+float relaxation()      { return params.massRelaxViscosity.y; }
+float viscosity()       { return params.massRelaxViscosity.z; }
+float artificialPressureK()        { return params.pressureAndVorticity.x; }
+float artificialPressureDeltaQ()   { return params.pressureAndVorticity.y; }
+float artificialPressureExponent() { return params.pressureAndVorticity.z; }
+float vorticityEpsilon()            { return params.pressureAndVorticity.w; }
+float restitution()     { return params.restitutionFrictionSpeed.x; }
+float friction()        { return params.restitutionFrictionSpeed.y; }
+float maxDisplacementRadii() { return params.restitutionFrictionSpeed.z; }
+float deltaTime()       { return params.gravityAndDeltaTime.w; }
+vec3  gravity()         { return params.gravityAndDeltaTime.xyz; }
+vec3  domainMin()       { return params.boundsMin.xyz; }
+vec3  domainMax()       { return params.boundsMax.xyz; }
+uint  particleCount()   { return params.counts.x; }
+uint  bucketCount()     { return params.counts.y; }
+uint  bucketMask()      { return params.counts.z; }
+
+vec3 clampStepDisplacement(vec3 displacement)
+{
+    float limit = maxDisplacementRadii() * smoothingRadius();
+    float squaredLength = dot(displacement, displacement);
+    if (limit > 0.0 && squaredLength > limit * limit)
+        displacement *= limit / sqrt(squaredLength);
+    return displacement;
+}
+
+// Positions and velocities are vec4 with an unused w: a std430 array of vec3 is laid out with
+// 16-byte stride anyway, so storing vec4 makes the padding explicit instead of inviting an
+// indexing bug.
+layout(std430, set = 0, binding = 1) buffer Positions     { vec4 positions[]; };
+layout(std430, set = 0, binding = 2) buffer Velocities    { vec4 velocities[]; };
+layout(std430, set = 0, binding = 3) buffer Predicted     { vec4 predicted[]; };
+layout(std430, set = 0, binding = 4) buffer Corrections   { vec4 corrections[]; };
+layout(std430, set = 0, binding = 5) buffer Densities     { float densities[]; };
+layout(std430, set = 0, binding = 6) buffer Lambdas       { float lambdas[]; };
+// Counting-sort spatial hash, the same layout FluidSolverCpu builds: the particles in bucket b are
+// cellParticles[cellStarts[b] .. cellStarts[b + 1]). cellCounts is the tally the prefix sum reads,
+// and is reused as the scatter cursor.
+layout(std430, set = 0, binding = 7) buffer CellStarts    { uint cellStarts[]; };
+layout(std430, set = 0, binding = 8) buffer CellCounts    { uint cellCounts[]; };
+layout(std430, set = 0, binding = 9) buffer CellParticles { uint cellParticles[]; };
+// The cell each particle was filed under when the grid was built, recorded by the scatter pass.
+// The constraint iterations move the predicted positions afterwards, so a cell recomputed from a
+// current position no longer matches the bucket the particle actually sits in; the traversal needs
+// the cell as of the build to reproduce the CPU reference, which finds neighbours once per step and
+// keeps them. ivec4 rather than ivec3: std430 gives a three-component vector a 16-byte stride
+// anyway, so the padding is explicit. Binding 10 is the renderer's output in fluid_publish.comp.
+layout(std430, set = 0, binding = 11) buffer ParticleCells { ivec4 particleCells[]; };
+// Scratch arrays used to put the live particle state into the bucket order produced by the grid.
+// This is deliberately a physical reorder rather than just a sorted index list: the 16 hot
+// density/correction traversals then fetch adjacent predicted positions and lambdas from L2.
+layout(std430, set = 0, binding = 12) buffer SortedPositions     { vec4 sortedPositions[]; };
+layout(std430, set = 0, binding = 13) buffer SortedVelocities    { vec4 sortedVelocities[]; };
+layout(std430, set = 0, binding = 14) buffer SortedPredicted     { vec4 sortedPredicted[]; };
+layout(std430, set = 0, binding = 15) buffer SortedParticleCells { ivec4 sortedParticleCells[]; };
+layout(std430, set = 0, binding = 16) buffer ParticleIds         { uint particleIds[]; };
+layout(std430, set = 0, binding = 17) buffer SortedParticleIds   { uint sortedParticleIds[]; };
+layout(std430, set = 0, binding = 18) buffer Vorticities         { vec4 vorticities[]; };
+
+// Poly6, density only: its gradient vanishes as r approaches zero, so particles sitting on top of
+// each other would feel no separating force.
+float poly6(float squaredDistance, float h)
+{
+    float h2 = h * h;
+    if (squaredDistance >= h2)
+        return 0.0;
+    float h9 = pow(h, 9.0);
+    float deficit = h2 - squaredDistance;
+    return (315.0 / (64.0 * kPi * h9)) * deficit * deficit * deficit;
+}
+
+// Spiky gradient, used for every gradient term for the reason above.
+vec3 spikyGradient(vec3 offset, float h)
+{
+    float distance = length(offset);
+    // Coincident particles have no defined direction to separate along. Returning zero leaves them
+    // to be pushed apart by their other neighbours.
+    if (distance <= 1e-6 || distance >= h)
+        return vec3(0.0);
+    float h6 = pow(h, 6.0);
+    float deficit = h - distance;
+    return (-45.0 / (kPi * h6) * deficit * deficit) * (offset / distance);
+}
+
+// Cell a position falls in. floor() rather than a cast so negative coordinates round towards -inf
+// and the lattice stays uniform across the origin.
+ivec3 cellForPosition(vec3 position)
+{
+    return ivec3(floor(position / smoothingRadius()));
+}
+
+// Bucket a cell hashes to. Three distinct large primes: with a shared multiplier on any pair of
+// axes, cells that are permutations of each other collapse onto the same hash.
+uint bucketForCell(ivec3 cell)
+{
+    uint hash = (uint(cell.x) * 73856093u) ^ (uint(cell.y) * 19349663u) ^ (uint(cell.z) * 83492791u);
+    return hash & bucketMask();
+}
+
+// Walks the 27 cells around a position. Callers supply the body through the FLUID_FOR_EACH_NEIGHBOUR
+// macro below, which keeps the triple loop and the collision guards in one place -- every stage
+// that needs neighbours uses exactly the same traversal as the CPU reference.
+//
+// The guard rejects candidates that landed in this bucket from an unrelated cell, either through a
+// hash collision or because two of the 27 offsets wrapped onto the same bucket. Without it a
+// particle would be visited twice and counted twice.
+//
+// It compares against the cell each candidate was filed under when the grid was built -- see
+// ParticleCells above -- rather than one recomputed from its current position. The constraint
+// iterations move the predicted positions, so a recomputed cell stops matching the bucket as soon
+// as a correction carries the particle over a cell boundary, and the candidate is wrongly rejected:
+// real neighbours disappear from the sets mid-step, worst exactly where the corrections are largest.
+// The CPU reference finds neighbours once per step and keeps them for every iteration; taking the
+// centre from the same record is what reproduces that.
+#define FLUID_FOR_EACH_NEIGHBOUR(selfIndex, neighbourIndex, body)                                  \
+    {                                                                                              \
+        ivec3 centreCell = particleCells[selfIndex].xyz;                                           \
+        for (int dz = -1; dz <= 1; ++dz)                                                           \
+        for (int dy = -1; dy <= 1; ++dy)                                                           \
+        for (int dx = -1; dx <= 1; ++dx)                                                           \
+        {                                                                                          \
+            ivec3 cell = centreCell + ivec3(dx, dy, dz);                                           \
+            uint bucket = bucketForCell(cell);                                                     \
+            uint spanEnd = cellStarts[bucket + 1u];                                                \
+            for (uint s = cellStarts[bucket]; s < spanEnd; ++s)                                    \
+            {                                                                                      \
+                uint neighbourIndex = s;                                                           \
+                if (neighbourIndex == selfIndex)                                                   \
+                    continue;                                                                      \
+                if (particleCells[neighbourIndex].xyz != cell)                                      \
+                    continue;                                                                      \
+                body                                                                               \
+            }                                                                                      \
+        }                                                                                          \
+    }
+
+#endif // FLUID_SIM_GLSLH
