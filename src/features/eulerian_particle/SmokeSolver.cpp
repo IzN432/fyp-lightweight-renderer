@@ -47,6 +47,17 @@ constexpr VolumeSpec kVolumes[] = {
     {"_divergence", VK_FORMAT_R32_SFLOAT},
 };
 
+// The one-cell boundary the solver enforces has to leave an interior to simulate.
+constexpr uint32_t kMinCellsPerAxis = 3;
+
+void validateExtent(VkExtent3D extent, const char *what)
+{
+    if (extent.width < kMinCellsPerAxis || extent.height < kMinCellsPerAxis || extent.depth < kMinCellsPerAxis)
+        throw std::invalid_argument(std::string("SmokeSolver: ") + what +
+                                    " must be at least 3 cells on every axis so the one-cell "
+                                    "boundary leaves an interior to simulate");
+}
+
 } // namespace
 
 struct SmokeSolver::Impl
@@ -57,6 +68,8 @@ struct SmokeSolver::Impl
     std::vector<std::string>                 volumeNames;
     ResourceRegistry                        *resources = nullptr;
     cudaStream_t                             stream    = nullptr;
+    // The sub-region the kernels are told to simulate. Smaller than the allocated texture whenever
+    // the grid has been resized below its allocation; reset() clears the allocation in full.
     cudaExtent                               extent{};
     int                                      device = 0;
 
@@ -147,9 +160,14 @@ void SmokeSolver::registerVolumes(ResourceRegistry &resources, const Config &con
 SmokeSolver::SmokeSolver(ResourceRegistry &resources, const VulkanContext &context, Config config)
     : m_config(std::move(config)), m_impl(std::make_unique<Impl>())
 {
-    if (m_config.extent.width < 3 || m_config.extent.height < 3 || m_config.extent.depth < 3)
-        throw std::invalid_argument("SmokeSolver: the grid must be at least 3 cells on every axis so the one-cell "
-                                    "boundary leaves an interior to simulate");
+    validateExtent(m_config.extent, "the allocated grid");
+    if (m_config.activeExtent.width == 0 && m_config.activeExtent.height == 0 && m_config.activeExtent.depth == 0)
+        m_config.activeExtent = m_config.extent;
+    validateExtent(m_config.activeExtent, "the active grid");
+    if (m_config.activeExtent.width > m_config.extent.width ||
+        m_config.activeExtent.height > m_config.extent.height ||
+        m_config.activeExtent.depth > m_config.extent.depth)
+        throw std::invalid_argument("SmokeSolver: the active grid cannot exceed the allocated extent");
     if (m_config.jacobiIterations < 0)
         throw std::invalid_argument("SmokeSolver: jacobiIterations cannot be negative");
 
@@ -172,7 +190,8 @@ SmokeSolver::SmokeSolver(ResourceRegistry &resources, const VulkanContext &conte
         m_impl->volumeNames.push_back(name);
     }
 
-    m_impl->extent = m_impl->volumes.front()->extent();
+    m_impl->extent = cudaExtent{m_config.activeExtent.width, m_config.activeExtent.height,
+                                m_config.activeExtent.depth};
     m_impl->device = m_impl->volumes.front()->device();
     checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
     checkCuda(cudaStreamCreate(&m_impl->stream), "cudaStreamCreate");
@@ -200,6 +219,8 @@ void SmokeSolver::reset()
     m_impl->pending = true;
 
     // Imported Vulkan memory starts undefined, so zero every field before accumulating into it.
+    // This clears the whole allocation rather than just the active region: cells outside it are
+    // never written again, and the renderer must not sample stale density from a previous size.
     for (std::unique_ptr<CudaVolume> &volume : m_impl->volumes)
         checkCuda(launchClearVolume(volume->surface(), volume->extent(), volume->channels(), m_impl->stream),
                   "launchClearVolume");
@@ -326,6 +347,32 @@ void SmokeSolver::waitForStep()
 
     checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
     checkCuda(cudaStreamSynchronize(m_impl->stream), "cudaStreamSynchronize");
+}
+
+void SmokeSolver::setActiveExtent(VkExtent3D extent)
+{
+    if (!m_impl)
+        throw std::logic_error("SmokeSolver: cannot use a moved-from solver");
+
+    validateExtent(extent, "the active grid");
+    if (extent.width > m_config.extent.width || extent.height > m_config.extent.height ||
+        extent.depth > m_config.extent.depth)
+        throw std::invalid_argument("SmokeSolver: the active grid cannot exceed the allocated extent");
+
+    if (extent.width == m_config.activeExtent.width && extent.height == m_config.activeExtent.height &&
+        extent.depth == m_config.activeExtent.depth)
+        return;
+
+    // A step in flight is writing the old region; let it finish before the kernels are retargeted.
+    waitForStep();
+
+    m_config.activeExtent = extent;
+    m_impl->extent        = cudaExtent{extent.width, extent.height, extent.depth};
+}
+
+VkExtent3D SmokeSolver::activeExtent() const
+{
+    return m_config.activeExtent;
 }
 
 bool SmokeSolver::stepPending() const

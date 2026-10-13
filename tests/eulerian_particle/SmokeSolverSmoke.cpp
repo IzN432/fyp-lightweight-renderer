@@ -7,9 +7,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -48,6 +50,24 @@ double maxAbs(const std::vector<float> &values)
 bool allFinite(const std::vector<float> &values)
 {
     return std::all_of(values.begin(), values.end(), [](float value) { return std::isfinite(value); });
+}
+
+// Largest density found strictly outside an origin-anchored sub-region of the allocated volume.
+// A solver told to simulate only that sub-region must never write past it.
+double maxDensityOutside(const std::vector<float> &density, VkExtent3D allocated, VkExtent3D active)
+{
+    double largest = 0.0;
+    for (uint32_t z = 0; z < allocated.depth; ++z)
+        for (uint32_t y = 0; y < allocated.height; ++y)
+            for (uint32_t x = 0; x < allocated.width; ++x)
+            {
+                if (x < active.width && y < active.height && z < active.depth)
+                    continue;
+                const std::size_t index =
+                    (static_cast<std::size_t>(z) * allocated.height + y) * allocated.width + x;
+                largest = std::max(largest, static_cast<double>(std::fabs(density[index])));
+            }
+    return largest;
 }
 
 // Divergence of the solver's published velocity field, recomputed on the host. The projection
@@ -186,6 +206,50 @@ int main()
         std::cout << "reset clears the simulation again\n";
         solver.reset();
         check(maxAbs(solver.densityVolume().download()) == 0.0, "reset() empties a running simulation");
+
+        std::cout << "a solver simulating a sub-region leaves the rest of its allocation alone\n";
+        {
+            // The whole point of allocating at the maximum: the grid can be resized afterwards and
+            // the kernels, which bound-check against the extent they are handed, simply stop short.
+            lr::eulerian::SmokeSolver::Config sub = config;
+            sub.namePrefix                        = "subregion";
+            sub.activeExtent                      = VkExtent3D{16, 24, 16};
+            lr::eulerian::SmokeSolver subSolver(resources, context, sub);
+            check(subSolver.activeExtent().width == 16 && subSolver.activeExtent().height == 24 &&
+                      subSolver.activeExtent().depth == 16,
+                  "the active extent is the one that was configured");
+
+            for (int i = 0; i < 30; ++i)
+            {
+                subSolver.step(1.0f / 60.0f);
+                subSolver.endStep();
+            }
+            subSolver.waitForStep();
+
+            const std::vector<float> density = subSolver.densityVolume().download();
+            check(allFinite(density), "a sub-region simulation stays finite");
+            check(sum(density) > 0.0, "the sub-region actually accumulated density");
+            check(maxDensityOutside(density, config.extent, sub.activeExtent) == 0.0,
+                  "no density is written outside the active sub-region");
+
+            // Growing the active extent must clear: density laid down at the old size describes a
+            // grid that no longer exists, so reset() is what makes the new size meaningful.
+            subSolver.setActiveExtent(VkExtent3D{24, 32, 24});
+            check(subSolver.activeExtent().height == 32, "setActiveExtent() retargets the solver");
+            subSolver.reset();
+            check(maxAbs(subSolver.densityVolume().download()) == 0.0,
+                  "reset() after a resize clears the whole allocation");
+
+            bool rejected = false;
+            try
+            {
+                subSolver.setActiveExtent(VkExtent3D{64, 64, 64});
+            } catch (const std::invalid_argument &)
+            {
+                rejected = true;
+            }
+            check(rejected, "an active extent larger than the allocation is refused");
+        }
 
         std::cout << "a solver destroyed mid-step tears down cleanly\n";
         {

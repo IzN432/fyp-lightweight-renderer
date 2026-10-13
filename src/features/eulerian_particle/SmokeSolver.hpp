@@ -40,7 +40,16 @@ public:
     {
         // Resource names for the four registered volumes. The ping-pong copies append "_next".
         std::string       namePrefix        = "smoke";
+
+        // The allocated volume size, fixed for the solver's lifetime. Every kernel bounds-checks
+        // against the extent it is handed rather than the texture's, so the simulated region may
+        // be smaller than this; see setActiveExtent(). Allocating once at the maximum is what lets
+        // the grid be resized without re-importing the volumes or rebuilding the semaphores.
         VkExtent3D        extent            = {64, 64, 64};
+
+        // The simulated sub-region, anchored at the origin corner. Zero means "all of extent".
+        VkExtent3D        activeExtent      = {0, 0, 0};
+
         int               jacobiIterations  = 40;
         SmokeStepParams   step{};
         SmokeSourceParams source{};
@@ -92,6 +101,12 @@ public:
     // Zeroes every field. Called by the constructor; call again to restart the simulation. Closes
     // any outstanding step and blocks until the clears are done, so it is safe to sample after.
     void reset();
+
+    // The simulated sub-region. Must be at least 3 cells per axis and no larger than the allocated
+    // extent. Changing it does not clear the fields: the caller resets, because density left over
+    // from a different grid size is meaningless rather than merely stale.
+    void       setActiveExtent(VkExtent3D extent);
+    VkExtent3D activeExtent() const;
 
     SmokeStepParams   &stepParams() { return m_config.step; }
     SmokeSourceParams &sourceParams() { return m_config.source; }

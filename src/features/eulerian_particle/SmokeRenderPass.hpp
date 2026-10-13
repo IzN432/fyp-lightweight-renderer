@@ -27,6 +27,12 @@ public:
 
         glm::vec3 boundsMin{-1.0f, 0.0f, -1.0f};
         glm::vec3 boundsMax{1.0f, 2.0f, 1.0f};
+
+        // Fraction of the density volume that is actually simulated, per axis: the box maps to
+        // this sub-region of the texture rather than to all of it. One when the simulated grid
+        // fills its allocation; smaller after the grid has been resized down.
+        glm::vec3 uvScale{1.0f};
+
         glm::vec3 color{0.82f, 0.86f, 0.92f};
         float     densityScale = 5.0f;
         int       sampleCount  = 128;

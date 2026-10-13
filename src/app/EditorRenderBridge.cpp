@@ -114,6 +114,11 @@ void EditorRenderBridge::setEditableTarget(const EditableMeshContext &target)
                                             transform);
 }
 
+void EditorRenderBridge::addOverlayLineProducer(std::function<void(OverlayLineBuilder &)> producer)
+{
+    if (producer) m_lineProducers.push_back(std::move(producer));
+}
+
 void EditorRenderBridge::setOverlayGeometry(std::vector<OverlayInstance> instances)
 {
     m_passes.overlayGeometry->setInstances(std::move(instances));
@@ -140,6 +145,15 @@ void EditorRenderBridge::updateSceneOverlays(const Scene &scene, const EditorFra
         std::vector<OverlayLine> selectionLines = selectionGizmo.takeLines();
         overlayLines.insert(overlayLines.end(), selectionLines.begin(), selectionLines.end());
     }
+    if (!m_lineProducers.empty())
+    {
+        OverlayLineBuilder extra;
+        for (const std::function<void(OverlayLineBuilder &)> &producer : m_lineProducers)
+            producer(extra);
+        const std::vector<OverlayLine> &extraLines = extra.lines();
+        overlayLines.insert(overlayLines.end(), extraLines.begin(), extraLines.end());
+    }
+
     m_passes.overlayLines->setLines(overlayLines);
     m_passes.outline->setSelection(selectedPickingIds(scene, m_sceneManager.geometryObjects()));
 }

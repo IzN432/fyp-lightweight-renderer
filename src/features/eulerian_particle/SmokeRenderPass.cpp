@@ -18,13 +18,14 @@ struct alignas(16) SmokeRenderPC
     glm::vec4 boundsMin;
     glm::vec4 boundsMax;
     glm::vec4 color;
+    glm::vec4 uvScale;
     float     densityScale;
     uint32_t  sampleCount;
     uint32_t  enabled;
     uint32_t  frameIndex;
 };
 
-static_assert(sizeof(SmokeRenderPC) == 64);
+static_assert(sizeof(SmokeRenderPC) == 80);
 
 } // namespace
 
@@ -62,6 +63,7 @@ void SmokeRenderPass::build(FrameGraph &frameGraph) const
                 .boundsMin    = glm::vec4(m_config.boundsMin, 0.0f),
                 .boundsMax    = glm::vec4(m_config.boundsMax, 0.0f),
                 .color        = glm::vec4(m_config.color, 1.0f),
+                .uvScale      = glm::vec4(m_config.uvScale, 0.0f),
                 .densityScale = std::max(m_config.densityScale, 0.0f),
                 .sampleCount  = static_cast<uint32_t>(std::clamp(m_config.sampleCount, 8, 512)),
                 .enabled      = m_config.enabled ? 1u : 0u,

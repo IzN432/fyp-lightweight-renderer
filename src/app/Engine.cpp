@@ -151,16 +151,26 @@ void Engine::run()
     // writes through exported memory; the simulation's own ray-march pass then samples the
     // published density image in the normal frame graph. It owns all of its own settings and
     // draws them in the "Smoke" window, so nothing here configures it per-knob.
+    // The volumes are allocated at maxCellsPerAxis on every axis, so the grid below can be resized
+    // in the editor without any reallocation. The box is authored in cells and scaled into world
+    // space by simulationScale, so scale and position are free to change mid-simulation.
     lr::eulerian::SmokeSimulation smokeSimulation(
         {
-            .solver = {.extent           = VkExtent3D{64, 96, 64},
-                       .jacobiIterations = 40,
+            .solver = {.jacobiIterations = 40,
                        .step             = {.buoyancy    = 8.0f,
                                             .densityDamp = 0.15f,
                                             .vorticity   = 2.0f},
                        .source           = {.density = 18.0f, .velocity = {0.0f, 5.0f, 0.0f}}},
+            .simulationScale          = 2.0f / 64.0f,
+            .gridSize                 = {64, 96, 64},
+            // The box is centred here, so at 64 x 96 x 64 cells of 2/64 units it spans
+            // 2 x 3 x 2 world units and sits on the ground plane.
+            .boundsCentre             = {0.0f, 1.5f, 0.0f},
+            .maxCellsPerAxis          = 100,
             .cameraBufferResourceName = sceneManager.cameraBufferName(),
             .outputFormat             = swapchainFormat,
+            .sourcePosition           = {0.0f, 0.45f, 0.0f},
+            .sourceRadius             = 0.25f,
         },
         viewer.resources(), viewer.context());
 #endif
@@ -335,6 +345,12 @@ void Engine::run()
         .outline        = &outlinePass,
     };
     lr::EditorRenderBridge editorRendering(sceneManager, editorPasses);
+#if defined(LR_ENABLE_CUDA)
+    // The simulation box is not a scene object, so it contributes its outline through the bridge's
+    // producer hook rather than through the scene's collider and gizmo overlays.
+    editorRendering.addOverlayLineProducer(
+        [&smokeSimulation](lr::OverlayLineBuilder &builder) { smokeSimulation.appendOverlayLines(builder); });
+#endif
     lr::ErrorReporter      errorReporter;
     lr::EditorSession editor(viewer, sceneManager, *camera, editorRendering, errorReporter);
 
