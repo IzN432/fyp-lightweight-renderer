@@ -42,9 +42,9 @@ public:
         float particleRenderScale  = 0.9f;
         int   solverIterations     = 8;
         // Equations (13) and (17), used literally in normalized h=1 units.
-        float artificialPressureK  = 0.1f;
+        float artificialPressureK  = 0.02f;
         float vorticityEpsilon     = 0.0f;
-        float viscosity            = 0.01f;
+        float viscosity            = 0.03f;
         float boundsFriction       = 0.98f;
         // CFL-style safety limit. Half a particle spacing preserves the local neighbour set while
         // still allowing visible motion; zero disables the cap.
