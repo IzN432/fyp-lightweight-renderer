@@ -71,10 +71,13 @@ cudaError_t launchAdvectVelocity(const SmokeFields &fields, cudaExtent extent, f
 cudaError_t launchApplyForces(const SmokeFields &fields, cudaExtent extent, const SmokeStepParams &params,
                               cudaStream_t stream);
 
-cudaError_t launchComputeDivergence(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream);
+// Takes `openTop` for the same reason the solve does: the open face is a cell flow crosses, so it
+// carries a divergence, and the right-hand side has to agree with the operator about that.
+cudaError_t launchComputeDivergence(const SmokeFields &fields, cudaExtent extent, bool openTop, cudaStream_t stream);
 
 // One Jacobi relaxation sweep: reads `pressure`, writes `pressureNext`. The caller swaps between
-// sweeps, so an even iteration count leaves the result back in `pressure`.
+// sweeps, so an even iteration count leaves the result back in `pressure`; an odd one leaves it in
+// the spare, which the step's copy-back then publishes either way.
 //
 // Takes `openTop` because an open face is a Dirichlet condition on this solve, not something a
 // later stage can patch up: the pressure that vents the plume has to be the pressure the sweeps

@@ -66,7 +66,7 @@ public:
         // behaves exactly as it did before obstacles existed.
         std::string       obstacleMaskName;
 
-        int               jacobiIterations  = 40;
+        int               jacobiIterations  = 140;
         SmokeStepParams   step{};
         SmokeSourceParams source{};
     };

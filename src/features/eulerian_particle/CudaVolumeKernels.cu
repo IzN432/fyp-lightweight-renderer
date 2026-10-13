@@ -165,8 +165,16 @@ __device__ inline bool onOpenFace(int y, GridInfo grid, bool openTop)
 // keeps the uncollided behaviour bit-identical for the standalone demo, which has no scene.
 // -------------------------------------------------------------------------------------------
 
-__device__ inline bool isSolid(cudaSurfaceObject_t obstacle, int x, int y, int z, GridInfo grid)
+// `openTop` makes the open face win over the mask on its row. A voxelized scene ceiling lands in
+// the top row like any other geometry, and because every kernel tests isSolid before onOpenFace, a
+// solid cell there would otherwise turn the vent back into a lid — silently, since the toggle is
+// still on. Reporting that row as fluid is what keeps "open top" meaning open regardless of what
+// the scene put there. The five sealed faces are unaffected: they are not the open face.
+__device__ inline bool isSolid(cudaSurfaceObject_t obstacle, int x, int y, int z, GridInfo grid,
+                               bool openTop = false)
 {
+    if (openTop && y >= grid.height - 1)
+        return false;
     if (obstacle == 0)
         return false;
     const int cx = clampIndex(x, grid.width);
@@ -429,7 +437,7 @@ __global__ void applyForces(cudaSurfaceObject_t velocity, cudaSurfaceObject_t de
 // -------------------------------------------------------------------------------------------
 
 __global__ void computeDivergence(cudaSurfaceObject_t velocity, cudaSurfaceObject_t divergence,
-                                  cudaSurfaceObject_t obstacle, cudaExtent extent)
+                                  cudaSurfaceObject_t obstacle, cudaExtent extent, bool openTop)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -445,7 +453,13 @@ __global__ void computeDivergence(cudaSurfaceObject_t velocity, cudaSurfaceObjec
     // Solid walls: no flow through the border or through an obstacle, so neither has a divergence
     // to correct. Writing zero rather than skipping matters: the Jacobi sweep reads this cell as
     // the right-hand side for its own relaxation.
-    if (onBorder(ix, iy, iz, grid) || isSolid(obstacle, ix, iy, iz, grid))
+    //
+    // The open face is not such a wall. Flow does cross it, so its row carries a real divergence
+    // like any interior cell, and zeroing it here would tell the solve that no mass leaves — the
+    // displaced fluid would then have to find a free face elsewhere, which is the sideways push an
+    // open top is supposed to remove.
+    const bool openFace = onOpenFace(iy, grid, openTop);
+    if ((onBorder(ix, iy, iz, grid) && !openFace) || isSolid(obstacle, ix, iy, iz, grid, openTop))
     {
         writeScalar(divergence, ix, iy, iz, 0.0f);
         return;
@@ -465,12 +479,12 @@ __global__ void computeDivergence(cudaSurfaceObject_t velocity, cudaSurfaceObjec
     // from the wall and no room to push into it, so it builds exactly the pressure that deflects
     // the flow along the surface. Substituting zero instead would read as fluid rushing *out* of
     // the wall and produce a spurious source at every boundary cell.
-    if (isSolid(obstacle, ix + 1, iy, iz, grid)) xp.x = self.x;
-    if (isSolid(obstacle, ix - 1, iy, iz, grid)) xm.x = self.x;
-    if (isSolid(obstacle, ix, iy + 1, iz, grid)) yp.y = self.y;
-    if (isSolid(obstacle, ix, iy - 1, iz, grid)) ym.y = self.y;
-    if (isSolid(obstacle, ix, iy, iz + 1, grid)) zp.z = self.z;
-    if (isSolid(obstacle, ix, iy, iz - 1, grid)) zm.z = self.z;
+    if (isSolid(obstacle, ix + 1, iy, iz, grid, openTop)) xp.x = self.x;
+    if (isSolid(obstacle, ix - 1, iy, iz, grid, openTop)) xm.x = self.x;
+    if (isSolid(obstacle, ix, iy + 1, iz, grid, openTop)) yp.y = self.y;
+    if (isSolid(obstacle, ix, iy - 1, iz, grid, openTop)) ym.y = self.y;
+    if (isSolid(obstacle, ix, iy, iz + 1, grid, openTop)) zp.z = self.z;
+    if (isSolid(obstacle, ix, iy, iz - 1, grid, openTop)) zm.z = self.z;
 
     const float d = 0.5f * ((xp.x - xm.x) + (yp.y - ym.y) + (zp.z - zm.z));
     writeScalar(divergence, ix, iy, iz, d);
@@ -487,7 +501,7 @@ __global__ void computeDivergence(cudaSurfaceObject_t velocity, cudaSurfaceObjec
 __device__ inline float neighbourPressure(cudaSurfaceObject_t pressure, cudaSurfaceObject_t obstacle, int x, int y,
                                           int z, float centre, GridInfo grid, bool openTop)
 {
-    if (isSolid(obstacle, x, y, z, grid))
+    if (isSolid(obstacle, x, y, z, grid, openTop))
         return centre;
     // Past the open face the pressure is ambient, which is the zero this solve measures against.
     // Returning it rather than letting clampIndex mirror the top row back is the whole Dirichlet
@@ -518,7 +532,7 @@ __global__ void pressureJacobi(cudaSurfaceObject_t pressure, cudaSurfaceObject_t
     // Interior of an obstacle: there is no fluid here to solve for, so the cell just carries its
     // current value forward. Propagating it rather than zeroing keeps the reflected neighbour
     // values above consistent between sweeps, and this cell is never projected anyway.
-    if (isSolid(obstacle, ix, iy, iz, grid))
+    if (isSolid(obstacle, ix, iy, iz, grid, openTop))
     {
         writeScalar(pressureNext, ix, iy, iz, centre);
         return;
@@ -566,11 +580,19 @@ __global__ void projectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_
     const int      iz   = static_cast<int>(z);
 
     // An obstacle cell is a wall, not fluid: hold it at rest instead of projecting it.
-    if (isSolid(obstacle, ix, iy, iz, grid))
+    if (isSolid(obstacle, ix, iy, iz, grid, openTop))
     {
         writeVector(velocity, ix, iy, iz, make_float4(0.0f, 0.0f, 0.0f, 0.0f));
         return;
     }
+
+    // The open face is held at ambient by the solve rather than relaxed, so there is no converged
+    // pressure here whose gradient is meaningful. Projecting it anyway would subtract a one-sided
+    // gradient the sweeps never balanced; applyBoundaries copies this row's velocity outward from
+    // the interior immediately afterwards, so the only thing that projection could do is disagree
+    // with the field the vent is supposed to carry.
+    if (onOpenFace(iy, grid, openTop))
+        return;
 
     const float centre = readScalar(pressure, ix, iy, iz, grid);
 
@@ -593,12 +615,12 @@ __global__ void projectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_
     // on each solid face removes exactly that residue, and is what stops density creeping through a
     // thin obstacle over many steps. Only obstacle faces are clamped here; the box's own border is
     // left to applyBoundaries, which already reflects it.
-    if (isSolid(obstacle, ix + 1, iy, iz, grid)) v.x = fminf(v.x, 0.0f);
-    if (isSolid(obstacle, ix - 1, iy, iz, grid)) v.x = fmaxf(v.x, 0.0f);
-    if (isSolid(obstacle, ix, iy + 1, iz, grid)) v.y = fminf(v.y, 0.0f);
-    if (isSolid(obstacle, ix, iy - 1, iz, grid)) v.y = fmaxf(v.y, 0.0f);
-    if (isSolid(obstacle, ix, iy, iz + 1, grid)) v.z = fminf(v.z, 0.0f);
-    if (isSolid(obstacle, ix, iy, iz - 1, grid)) v.z = fmaxf(v.z, 0.0f);
+    if (isSolid(obstacle, ix + 1, iy, iz, grid, openTop)) v.x = fminf(v.x, 0.0f);
+    if (isSolid(obstacle, ix - 1, iy, iz, grid, openTop)) v.x = fmaxf(v.x, 0.0f);
+    if (isSolid(obstacle, ix, iy + 1, iz, grid, openTop)) v.y = fminf(v.y, 0.0f);
+    if (isSolid(obstacle, ix, iy - 1, iz, grid, openTop)) v.y = fmaxf(v.y, 0.0f);
+    if (isSolid(obstacle, ix, iy, iz + 1, grid, openTop)) v.z = fminf(v.z, 0.0f);
+    if (isSolid(obstacle, ix, iy, iz - 1, grid, openTop)) v.z = fmaxf(v.z, 0.0f);
 
     writeVector(velocity, ix, iy, iz, v);
 }
@@ -665,7 +687,7 @@ __global__ void applyBoundaries(cudaSurfaceObject_t velocity, cudaSurfaceObject_
     // renderer samples and what the next step's stencils read agree: at rest and empty. Pressure is
     // left alone — the Jacobi sweep carries it forward, and overwriting it here would discard the
     // value the reflected neighbours depend on.
-    if (isSolid(obstacle, ix, iy, iz, grid))
+    if (isSolid(obstacle, ix, iy, iz, grid, openTop))
     {
         writeVector(velocity, ix, iy, iz, make_float4(0.0f, 0.0f, 0.0f, 0.0f));
         writeScalar(density, ix, iy, iz, 0.0f);
@@ -794,10 +816,10 @@ cudaError_t launchApplyForces(const SmokeFields &fields, cudaExtent extent, cons
     return cudaGetLastError();
 }
 
-cudaError_t launchComputeDivergence(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream)
+cudaError_t launchComputeDivergence(const SmokeFields &fields, cudaExtent extent, bool openTop, cudaStream_t stream)
 {
     computeDivergence<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.divergence, fields.obstacle,
-                                                              extent);
+                                                              extent, openTop);
     return cudaGetLastError();
 }
 

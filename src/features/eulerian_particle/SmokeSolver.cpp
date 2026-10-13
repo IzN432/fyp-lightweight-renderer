@@ -308,7 +308,7 @@ void SmokeSolver::step()
     checkCuda(launchApplyForces(fields, extent, m_config.step, stream), "launchApplyForces");
 
     // 4. Divergence of the forced velocity field — the right-hand side of the pressure equation.
-    checkCuda(launchComputeDivergence(fields, extent, stream), "launchComputeDivergence");
+    checkCuda(launchComputeDivergence(fields, extent, m_config.step.openTop, stream), "launchComputeDivergence");
 
     // 5. Jacobi pressure solve. Each sweep reads `pressure` and writes `pressureNext`, so swapping
     //    after every sweep leaves the result in `pressure` whenever the iteration count is even.

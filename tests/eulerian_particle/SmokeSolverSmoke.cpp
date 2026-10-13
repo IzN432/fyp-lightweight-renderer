@@ -447,6 +447,111 @@ int main()
                   "smoke does not pile up against the open face");
         }
 
+        std::cout << "a mask covering the open face does not seal it\n";
+        {
+            // Scene geometry is voxelized into the same grid the solver steps, so a ceiling lands
+            // in the top row like anything else. Every kernel tests isSolid before onOpenFace, so
+            // without the override in isSolid a mask there turns the vent back into a lid while the
+            // toggle still reads "open" — the plume then spreads along the underside of the mask
+            // instead of leaving, which is the failure this pins.
+            lr::eulerian::SmokeSolver::Config ceiling = config;
+            ceiling.namePrefix                        = "ceiling";
+            ceiling.step.openTop                      = true;
+            ceiling.obstacleMaskName                  = "ceiling_obstacle_mask";
+            resources.registerPersistentVolume(ceiling.obstacleMaskName, VK_FORMAT_R32_UINT,
+                                               VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                               ceiling.extent, true);
+
+            lr::eulerian::SmokeSolver       ceilingSolver(resources, context, ceiling);
+            const lr::eulerian::CudaVolume *mask = ceilingSolver.obstacleVolume();
+            check(mask != nullptr, "naming a ceiling mask imports it into the solver");
+
+            // Exactly the open face's own row, which is the case the override covers: geometry
+            // flush with the top of the box.
+            const int  top = static_cast<int>(ceiling.extent.height);
+            const int3 ceilingMin{0, top - 1, 0};
+            const int3 ceilingMax{static_cast<int>(ceiling.extent.width), top,
+                                  static_cast<int>(ceiling.extent.depth)};
+            if (mask != nullptr)
+            {
+                if (cudaSetDevice(mask->device()) != cudaSuccess)
+                    throw std::runtime_error("cudaSetDevice failed");
+                if (lr::eulerian::launchFillObstacleBox(mask->surface(), mask->extent(), ceilingMin, ceilingMax,
+                                                        nullptr) != cudaSuccess)
+                    throw std::runtime_error("launchFillObstacleBox failed");
+                if (cudaDeviceSynchronize() != cudaSuccess)
+                    throw std::runtime_error("cudaDeviceSynchronize failed");
+            }
+
+            for (int frame = 0; frame < 180; ++frame)
+            {
+                ceilingSolver.step(1.0f / 60.0f);
+                ceilingSolver.endStep();
+            }
+            ceilingSolver.waitForStep();
+
+            const std::vector<float> ceilingDensity = ceilingSolver.densityVolume().download();
+            check(allFinite(ceilingDensity), "the masked-ceiling run stays finite");
+
+            // The vent still carries mass out, so the box holds less than the same scene with the
+            // toggle off. Run here rather than reusing the sealed box above, because this one has
+            // the mask in it and the comparison has to isolate the vent, not the geometry.
+            lr::eulerian::SmokeSolver::Config shut = ceiling;
+            shut.namePrefix                        = "ceiling_shut";
+            shut.step.openTop                      = false;
+            shut.obstacleMaskName                  = "ceiling_shut_obstacle_mask";
+            resources.registerPersistentVolume(shut.obstacleMaskName, VK_FORMAT_R32_UINT,
+                                               VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, shut.extent,
+                                               true);
+            lr::eulerian::SmokeSolver       shutSolver(resources, context, shut);
+            const lr::eulerian::CudaVolume *shutMask = shutSolver.obstacleVolume();
+            if (shutMask != nullptr)
+            {
+                if (cudaSetDevice(shutMask->device()) != cudaSuccess)
+                    throw std::runtime_error("cudaSetDevice failed");
+                if (lr::eulerian::launchFillObstacleBox(shutMask->surface(), shutMask->extent(), ceilingMin,
+                                                        ceilingMax, nullptr) != cudaSuccess)
+                    throw std::runtime_error("launchFillObstacleBox failed");
+                if (cudaDeviceSynchronize() != cudaSuccess)
+                    throw std::runtime_error("cudaDeviceSynchronize failed");
+            }
+            for (int frame = 0; frame < 180; ++frame)
+            {
+                shutSolver.step(1.0f / 60.0f);
+                shutSolver.endStep();
+            }
+            shutSolver.waitForStep();
+            const std::vector<float> shutDensity = shutSolver.densityVolume().download();
+
+            check(sum(ceilingDensity) < sum(shutDensity),
+                  "a mask on the open face still lets smoke leave");
+
+            // And the shape: a sealed ceiling makes the plume run sideways along its underside, so
+            // the band just below the top fills the outer columns. Measured in the four side
+            // columns of the rows beneath the face, which a venting plume leaves comparatively
+            // empty.
+            const auto edgeBandFraction = [&](const std::vector<float> &field) {
+                double band = 0.0;
+                double edge = 0.0;
+                const int w = static_cast<int>(ceiling.extent.width);
+                const int d = static_cast<int>(ceiling.extent.depth);
+                for (int y = top - 8; y < top - 1; ++y)
+                    for (int z = 0; z < d; ++z)
+                        for (int x = 0; x < w; ++x)
+                        {
+                            const double v = field[(static_cast<std::size_t>(z) * ceiling.extent.height + y) *
+                                                       ceiling.extent.width +
+                                                   x];
+                            band += v;
+                            if (x < w / 4 || x >= 3 * w / 4 || z < d / 4 || z >= 3 * d / 4)
+                                edge += v;
+                        }
+                return band > 1e-6 ? edge / band : 0.0;
+            };
+            check(edgeBandFraction(ceilingDensity) < 0.25,
+                  "the plume vents through the masked face instead of spreading along it");
+        }
+
         std::cout << "a partial obstacle deflects the plume around itself\n";
         {
             // The scenario the full-span lid cannot test: a plate covering the middle of the box
