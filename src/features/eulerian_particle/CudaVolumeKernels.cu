@@ -172,6 +172,69 @@ __device__ inline bool isSolid(cudaSurfaceObject_t obstacle, int x, int y, int z
     return value != 0u;
 }
 
+// sampleScalar for density, with the solid taps left out of the blend instead of contributing the
+// zero that advectDensity writes into obstacle cells.
+//
+// This is about mass, not about where the plume goes. The plain eight-tap blend treats an obstacle
+// cell as a cell that genuinely holds no smoke, so a backtrace landing beside a wall reads a
+// density diluted toward zero by however many of its taps are solid — up to four of eight against
+// a flat face. Every step then loses a fraction of the smoke in the layer touching the obstacle,
+// which is dissipation the solver never asked for and that densityDamp cannot account for.
+//
+// Dropping the solid taps and renormalizing by the surviving weight is a zero-order extrapolation
+// of density out of the obstacle: a wall now reads as "the smoke beside it continues", which is
+// what the one-sided difference on a staggered grid would see. With every tap solid there is no
+// fluid nearby to extrapolate from, so the result is zero.
+//
+// It does not make a deflected plume climb back over an obstacle. In a box whose every boundary is
+// no-flux, the smoke pushed aside has nowhere to go but down — the plume drives a recirculation
+// cell, and the channels beside an obstacle carry a downdraft even with no obstacle in the grid at
+// all. That is the domain, not this blend.
+__device__ inline float sampleDensityFluid(cudaSurfaceObject_t density, cudaSurfaceObject_t obstacle, float3 p,
+                                           GridInfo grid)
+{
+    if (obstacle == 0)
+        return sampleScalar(density, p, grid);
+
+    const float px = p.x - 0.5f;
+    const float py = p.y - 0.5f;
+    const float pz = p.z - 0.5f;
+    const int   x0 = static_cast<int>(floorf(px));
+    const int   y0 = static_cast<int>(floorf(py));
+    const int   z0 = static_cast<int>(floorf(pz));
+    const float tx = px - static_cast<float>(x0);
+    const float ty = py - static_cast<float>(y0);
+    const float tz = pz - static_cast<float>(z0);
+
+    float sum    = 0.0f;
+    float weight = 0.0f;
+    for (int k = 0; k < 2; ++k)
+    {
+        const float wz = k == 0 ? 1.0f - tz : tz;
+        for (int j = 0; j < 2; ++j)
+        {
+            const float wy = j == 0 ? 1.0f - ty : ty;
+            for (int i = 0; i < 2; ++i)
+            {
+                const float wx = i == 0 ? 1.0f - tx : tx;
+                const int   sx = x0 + i;
+                const int   sy = y0 + j;
+                const int   sz = z0 + k;
+                if (isSolid(obstacle, sx, sy, sz, grid))
+                    continue;
+                const float w = wx * wy * wz;
+                sum += w * readScalar(density, sx, sy, sz, grid);
+                weight += w;
+            }
+        }
+    }
+
+    // Guard the weight rather than testing it for zero: a backtrace landing almost exactly on the
+    // one fluid corner of an otherwise solid neighbourhood leaves a legitimate but tiny weight,
+    // and dividing by it would amplify that corner's density enormously.
+    return weight > 1e-4f ? sum / weight : 0.0f;
+}
+
 __global__ void densityTestPattern(cudaSurfaceObject_t surface, cudaExtent extent, float timeSeconds)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -547,7 +610,7 @@ __global__ void advectDensity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t 
                                       (static_cast<float>(y) + 0.5f) - v.y * params.dt,
                                       (static_cast<float>(z) + 0.5f) - v.z * params.dt);
 
-    float value = sampleScalar(density, back, grid);
+    float value = sampleDensityFluid(density, obstacle, back, grid);
     if (params.densityDamp > 0.0f)
         value *= fmaxf(0.0f, 1.0f - params.densityDamp * params.dt);
     writeScalar(densityNext, x, y, z, fmaxf(0.0f, value));

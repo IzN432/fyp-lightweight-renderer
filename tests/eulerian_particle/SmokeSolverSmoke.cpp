@@ -116,6 +116,23 @@ double maxDensityInBox(const std::vector<float> &density, VkExtent3D extent, int
     return largest;
 }
 
+// Total density in a half-open cell box, for comparing how much smoke ends up in one region
+// against another — the column above an obstacle versus the space beside it, say.
+double densityInBox(const std::vector<float> &density, VkExtent3D extent, int3 boxMin, int3 boxMax)
+{
+    double total = 0.0;
+    for (int z = boxMin.z; z < boxMax.z; ++z)
+        for (int y = boxMin.y; y < boxMax.y; ++y)
+            for (int x = boxMin.x; x < boxMax.x; ++x)
+            {
+                const std::size_t index =
+                    (static_cast<std::size_t>(z) * extent.height + static_cast<std::size_t>(y)) * extent.width +
+                    static_cast<std::size_t>(x);
+                total += static_cast<double>(density[index]);
+            }
+    return total;
+}
+
 double densityAbove(const std::vector<float> &density, VkExtent3D extent, uint32_t minY)
 {
     double total = 0.0;
@@ -369,6 +386,114 @@ int main()
                       "with the mask cleared the plume does rise past that height");
             }
         }
+
+        std::cout << "a partial obstacle deflects the plume around itself\n";
+        {
+            // The scenario the full-span lid cannot test: a plate covering the middle of the box
+            // with clear fluid on all four sides, so the deflected smoke has somewhere to go.
+            //
+            // What to expect here is worth stating, because the intuition that smoke should
+            // "mostly go back up" does not hold in a sealed box. Spreading sideways on impact is
+            // the correct response to u.n = 0 — the normal momentum has to become tangential — and
+            // in a box whose every boundary is no-flux, the smoke pushed aside has nowhere to go
+            // but down: the plume drives a recirculation cell, and the side channels carry a
+            // downdraft even with no obstacle present at all. So the checks below pin the
+            // deflection itself (the plate holds, the plume is pushed into the channels beside it,
+            // and the obstructed run reaches the channels far more strongly than the free one),
+            // not a recovery that a closed domain does not produce.
+            lr::eulerian::SmokeSolver::Config partial = config;
+            partial.namePrefix                        = "partial";
+            partial.obstacleMaskName                  = "partial_obstacle_mask";
+            resources.registerPersistentVolume(partial.obstacleMaskName, VK_FORMAT_R32_UINT,
+                                               VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                               partial.extent, true);
+
+            lr::eulerian::SmokeSolver       partialSolver(resources, context, partial);
+            const lr::eulerian::CudaVolume *mask = partialSolver.obstacleVolume();
+            check(mask != nullptr, "naming a partial mask imports it into the solver");
+
+            // Centred on the emitter's x/z so the plume hits it head-on, two cells thick, with
+            // eight clear cells on either side for the smoke to spill through.
+            const int3 plateMin{8, 16, 8};
+            const int3 plateMax{24, 18, 24};
+            if (mask != nullptr)
+            {
+                if (cudaSetDevice(mask->device()) != cudaSuccess)
+                    throw std::runtime_error("cudaSetDevice failed");
+                if (lr::eulerian::launchFillObstacleBox(mask->surface(), mask->extent(), plateMin, plateMax,
+                                                        nullptr) != cudaSuccess)
+                    throw std::runtime_error("launchFillObstacleBox failed");
+                if (cudaDeviceSynchronize() != cudaSuccess)
+                    throw std::runtime_error("cudaDeviceSynchronize failed");
+            }
+
+            for (int frame = 0; frame < 180; ++frame)
+            {
+                partialSolver.step(1.0f / 60.0f);
+                partialSolver.endStep();
+            }
+            partialSolver.waitForStep();
+
+            const std::vector<float> density = partialSolver.densityVolume().download();
+            check(allFinite(density), "the field stays finite around a partial obstacle");
+            check(maxDensityInBox(density, partial.extent, plateMin, plateMax) == 0.0,
+                  "no density is left inside the partial obstacle");
+
+            // The two clear side channels at the plate's own height, where the deflected plume has
+            // to go. This is the region the deflection fills.
+            const int3 leftMin{0, 16, 0};
+            const int3 leftMax{8, 20, static_cast<int>(partial.extent.depth)};
+            const int3 rightMin{24, 16, 0};
+            const int3 rightMax{static_cast<int>(partial.extent.width), 20,
+                                static_cast<int>(partial.extent.depth)};
+            const double sideways = densityInBox(density, partial.extent, leftMin, leftMax) +
+                                    densityInBox(density, partial.extent, rightMin, rightMax);
+
+            // Directly beneath the plate, where the plume stacks up on impact.
+            const int3   beneathMin{8, 12, 8};
+            const int3   beneathMax{24, 16, 24};
+            const double beneath = densityInBox(density, partial.extent, beneathMin, beneathMax);
+
+            check(beneath > 0.0, "the plume stacks up under the plate");
+            check(sideways > 0.0, "and is deflected into the channels beside it");
+
+            // The control: the same solver, same steps, with the mask cleared. The plume then goes
+            // straight up the middle, so the side channels stay comparatively empty. Requiring the
+            // obstructed run to put several times more density there is what distinguishes a real
+            // deflection from smoke merely diffusing outward on its own.
+            if (mask != nullptr)
+            {
+                partialSolver.reset();
+                if (lr::eulerian::launchFillObstacleBox(mask->surface(), mask->extent(), int3{0, 0, 0},
+                                                        int3{0, 0, 0}, nullptr) != cudaSuccess)
+                    throw std::runtime_error("launchFillObstacleBox failed");
+                if (cudaDeviceSynchronize() != cudaSuccess)
+                    throw std::runtime_error("cudaDeviceSynchronize failed");
+
+                for (int frame = 0; frame < 180; ++frame)
+                {
+                    partialSolver.step(1.0f / 60.0f);
+                    partialSolver.endStep();
+                }
+                partialSolver.waitForStep();
+
+                const std::vector<float> freeDensity = partialSolver.densityVolume().download();
+                const double             freeSideways =
+                    densityInBox(freeDensity, partial.extent, leftMin, leftMax) +
+                    densityInBox(freeDensity, partial.extent, rightMin, rightMax);
+                check(sideways > 3.0 * freeSideways,
+                      "the plate pushes far more smoke into the side channels than an open box does");
+
+                // And the converse, so the plate is shown to block rather than merely divert: the
+                // column the plate occupies carries much more smoke when nothing is in the way.
+                const int3   columnMin{8, 18, 8};
+                const int3   columnMax{24, 24, 24};
+                check(densityInBox(freeDensity, partial.extent, columnMin, columnMax) >
+                          10.0 * densityInBox(density, partial.extent, columnMin, columnMax),
+                      "and the column it occupies fills up once it is gone");
+            }
+        }
+
 
         std::cout << "a solver destroyed mid-step tears down cleanly\n";
         {
