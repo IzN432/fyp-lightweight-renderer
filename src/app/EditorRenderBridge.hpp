@@ -3,6 +3,7 @@
 #include "core/editor/EditorPresentation.hpp"
 #include "core/passes/overlaygeometry/OverlayInstance.hpp"
 
+#include <functional>
 #include <vector>
 
 namespace lr
@@ -14,6 +15,7 @@ class GeometryPass;
 class HeatmapPass;
 class ObjectPickingPass;
 class OverlayGeometryPass;
+class OverlayLineBuilder;
 class OverlayLinesPass;
 class OutlinePass;
 class OverlayPointsPass;
@@ -54,6 +56,9 @@ public:
 
     void apply(const EditorPresentation &presentation);
     void setEditableTarget(const EditableMeshContext &target);
+    // Registers lines that do not come from the scene graph, such as simulation bounds. The
+    // bridge remains the sole owner of OverlayLinesPass::setLines().
+    void addOverlayLineProducer(std::function<void(OverlayLineBuilder &)> producer);
     void setOverlayGeometry(std::vector<OverlayInstance> instances);
     void setHoveredOverlay(uint32_t pickingId);
     void updateSceneOverlays(const Scene &scene, const EditorFrameContext &frame);
@@ -61,6 +66,7 @@ public:
 private:
     SceneManager &m_sceneManager;
     Passes        m_passes;
+    std::vector<std::function<void(OverlayLineBuilder &)>> m_lineProducers;
 };
 
 } // namespace lr

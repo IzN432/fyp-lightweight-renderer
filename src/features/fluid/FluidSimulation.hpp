@@ -11,6 +11,8 @@
 namespace lr
 {
 
+class OverlayLineBuilder;
+
 // Application-facing GPU fluid controller. It owns simulation setup, source generation, runtime
 // controls and the solver, while renderers consume the published particle buffer directly.
 class FluidSimulation
@@ -50,6 +52,8 @@ public:
 
         glm::vec3 boundsMin{-15.0f, 0.0f, -15.0f};
         glm::vec3 boundsMax{15.0f, 35.0f, 15.0f};
+        // Presentation-only toggle for the wireframe simulation domain.
+        bool      showBounds       = true;
         float     fixedDeltaTime   = 0.016f;
         int       maxStepsPerFrame = 2;
         bool      startPaused      = false;
@@ -65,6 +69,8 @@ public:
     void update(float frameDeltaTime);
     void reset();
     void onGUI();
+    // Appends the presentation-scaled domain outline when Show Bounds is enabled.
+    void appendOverlayLines(OverlayLineBuilder &builder, float visualScale) const;
 
     uint32_t particleCount() const { return m_solver.particleCount(); }
     uint32_t capacity() const { return m_solver.config().maxParticles; }
@@ -76,6 +82,7 @@ public:
     const glm::vec3   &particleColor() const { return m_config.particleColor; }
     const glm::vec3   &boundsMin() const { return m_config.boundsMin; }
     const glm::vec3   &boundsMax() const { return m_config.boundsMax; }
+    bool               showBounds() const { return m_config.showBounds; }
     const std::string &particleBufferName() const { return m_solver.config().particleBufferResourceName; }
 
 private:

@@ -1,5 +1,8 @@
 #include "features/fluid/FluidSimulation.hpp"
 
+#include "core/passes/overlaylines/OverlayLine.hpp"
+
+#include <glm/ext/matrix_transform.hpp>
 #include <imgui.h>
 
 #include <algorithm>
@@ -15,6 +18,12 @@ namespace lr
 
 namespace
 {
+
+constexpr OverlayLineStyle kBoundsStyle{
+    .color           = {0.45f, 0.70f, 0.95f},
+    .visibleOpacity  = 0.9f,
+    .occludedOpacity = 0.2f,
+};
 
 std::optional<uint64_t> sourceParticleCount(const FluidSimulation::CuboidSource &source)
 {
@@ -285,6 +294,17 @@ void FluidSimulation::update(float frameDeltaTime)
     m_solver.config().particleColor  = m_config.particleColor;
 }
 
+void FluidSimulation::appendOverlayLines(OverlayLineBuilder &builder, float visualScale) const
+{
+    if (!m_config.showBounds) return;
+
+    const float     scale  = std::max(visualScale, 0.0f);
+    const glm::vec3 centre = (m_config.boundsMin + m_config.boundsMax) * (0.5f * scale);
+    const glm::vec3 size   = (m_config.boundsMax - m_config.boundsMin) * scale;
+    const glm::mat4 model  = glm::scale(glm::translate(glm::mat4(1.0f), centre), size);
+    builder.addPrimitive(primitives::cube.outline, model, kBoundsStyle);
+}
+
 void FluidSimulation::onGUI()
 {
     const std::string sourceValidationError = validateSources(m_config);
@@ -452,6 +472,7 @@ void FluidSimulation::onGUI()
         solver.boundsFriction = m_config.boundsFriction;
         m_solver.updateParams();
     }
+    ImGui::Checkbox("Show Bounds", &m_config.showBounds);
 
     ImGui::ColorEdit3("Color", &m_config.particleColor.x);
     if (!m_error.empty())

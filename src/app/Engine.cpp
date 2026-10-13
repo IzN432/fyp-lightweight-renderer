@@ -323,6 +323,9 @@ void Engine::run()
         .outline        = &outlinePass,
     };
     lr::EditorRenderBridge editorRendering(sceneManager, editorPasses);
+    editorRendering.addOverlayLineProducer([&fluidSimulation, &liquidPass](lr::OverlayLineBuilder &builder) {
+        fluidSimulation.appendOverlayLines(builder, liquidPass.renderScale());
+    });
     lr::ErrorReporter      errorReporter;
     lr::EditorSession editor(viewer, sceneManager, *camera, editorRendering, errorReporter);
 
