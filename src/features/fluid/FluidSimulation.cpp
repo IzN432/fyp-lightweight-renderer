@@ -151,16 +151,6 @@ std::optional<FluidSimulation::CuboidSource> findSpaceForCube(const FluidSimulat
 
 } // namespace
 
-float FluidSimulation::Config::smoothingRadius() const
-{
-    return std::max(particleSpacing, 1e-4f) * std::max(smoothingRadiusScale, 1.0f);
-}
-
-float FluidSimulation::Config::particleRadius() const
-{
-    return std::max(particleSpacing, 1e-4f) * std::max(particleRenderScale, 0.0f) * 1.0f;
-}
-
 float FluidSimulation::unitCubeRenderScale() const
 {
     const glm::vec3 extent       = glm::abs(m_config.boundsMax - m_config.boundsMin);
@@ -235,6 +225,34 @@ FluidSimulation::FluidSimulation(Config config, ResourceRegistry &resources)
 
 void FluidSimulation::build(FrameGraph &frameGraph) { m_solver.build(frameGraph); }
 
+void FluidSimulation::setTarget(FluidComponent *component, const glm::vec3 &worldPosition)
+{
+    m_worldPosition = worldPosition;
+    if (component == m_target)
+    {
+        // A paste or undo can replace all settings without going through this panel.
+        if (component && component->revision() != m_targetRevision)
+        {
+            m_config         = component->config();
+            m_targetRevision = component->revision();
+            reset();
+        }
+        return;
+    }
+
+    m_target = component;
+    m_singleStepRequested = false;
+    m_sourcesDirty        = false;
+    m_sourceEditorError.clear();
+    m_error.clear();
+    if (!m_target) return;
+
+    m_config         = m_target->config();
+    m_targetRevision = m_target->revision();
+    reset();
+    m_solver.setPaused(m_config.startPaused);
+}
+
 void FluidSimulation::applyRuntimeConfig()
 {
     auto &solver            = m_solver.config();
@@ -280,6 +298,8 @@ void FluidSimulation::reset()
 
 void FluidSimulation::update(float frameDeltaTime)
 {
+    if (!m_target) return;
+
     if (m_singleStepRequested)
     {
         m_solver.stepOnce();
@@ -296,10 +316,10 @@ void FluidSimulation::update(float frameDeltaTime)
 
 void FluidSimulation::appendOverlayLines(OverlayLineBuilder &builder, float visualScale) const
 {
-    if (!m_config.showBounds) return;
+    if (!m_target || !m_config.showBounds) return;
 
     const float     scale  = std::max(visualScale, 0.0f);
-    const glm::vec3 centre = (m_config.boundsMin + m_config.boundsMax) * (0.5f * scale);
+    const glm::vec3 centre = m_worldPosition + (m_config.boundsMin + m_config.boundsMax) * (0.5f * scale);
     const glm::vec3 size   = (m_config.boundsMax - m_config.boundsMin) * scale;
     const glm::mat4 model  = glm::scale(glm::translate(glm::mat4(1.0f), centre), size);
     builder.addPrimitive(primitives::cube.outline, model, kBoundsStyle);
@@ -307,6 +327,9 @@ void FluidSimulation::appendOverlayLines(OverlayLineBuilder &builder, float visu
 
 void FluidSimulation::onGUI()
 {
+    if (!m_target) return;
+
+    const Config before = m_config;
     const std::string sourceValidationError = validateSources(m_config);
     const bool paused = m_solver.paused();
     if (ImGui::Button(paused ? "Play" : "Pause"))
@@ -335,6 +358,7 @@ void FluidSimulation::onGUI()
         m_sourceEditorError.clear();
     }
     ImGui::DragFloat("Particle Size", &m_config.particleRenderScale, 0.01f, 0.1f, 2.0f, "%.2f");
+    ImGui::DragFloat("Simulation Render Scale", &m_config.renderScale, 0.001f, 0.001f, 10.0f, "%.4f");
 
     if (ImGui::CollapsingHeader("Starting Water", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -478,6 +502,12 @@ void FluidSimulation::onGUI()
     if (!m_error.empty())
     {
         ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", m_error.c_str());
+    }
+
+    if (!(before == m_config))
+    {
+        m_target->setConfig(m_config);
+        m_targetRevision = m_target->revision();
     }
 }
 

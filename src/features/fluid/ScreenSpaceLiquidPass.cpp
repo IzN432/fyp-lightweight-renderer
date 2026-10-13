@@ -32,6 +32,14 @@ struct alignas(16) LiquidParams
 
 static_assert(sizeof(LiquidParams) == 64);
 
+struct alignas(16) FluidDrawParams
+{
+    glm::vec3 renderOffset{0.0f};
+    float     renderScale = 1.0f;
+};
+
+static_assert(sizeof(FluidDrawParams) == 16);
+
 LiquidParams buildParams(const ScreenSpaceLiquidPass::Config &config)
 {
     const glm::vec3 tint = glm::clamp(config.liquidColor, glm::vec3(0.0f), glm::vec3(1.0f));
@@ -150,7 +158,7 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
         .vertShader((paths::shaderDir / "fluid_surface.vert.spv").string())
         .fragShader((paths::shaderDir / "fluid_depth.frag.spv").string())
-        .pushConstantSize(sizeof(float), VK_SHADER_STAGE_VERTEX_BIT)
+        .pushConstantSize(sizeof(FluidDrawParams), VK_SHADER_STAGE_VERTEX_BIT)
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(1, frameGraph.buffer(m_config.particleBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
@@ -163,8 +171,8 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .execute([this](PassContext &context) {
             if (m_particleCount != 0)
             {
-                context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT,
-                                            m_config.renderScale);
+                const FluidDrawParams params{m_config.renderOffset, m_config.renderScale};
+                context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, params);
                 context.cmd().draw(6, m_particleCount);
             }
         });
@@ -208,7 +216,7 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
         .vertShader((paths::shaderDir / "fluid_surface.vert.spv").string())
         .fragShader((paths::shaderDir / "fluid_thickness.frag.spv").string())
-        .pushConstantSize(sizeof(float), VK_SHADER_STAGE_VERTEX_BIT)
+        .pushConstantSize(sizeof(FluidDrawParams), VK_SHADER_STAGE_VERTEX_BIT)
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(1, frameGraph.buffer(m_config.particleBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
@@ -223,8 +231,8 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .execute([this](PassContext &context) {
             if (m_particleCount != 0)
             {
-                context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT,
-                                            m_config.renderScale);
+                const FluidDrawParams params{m_config.renderOffset, m_config.renderScale};
+                context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, params);
                 context.cmd().draw(6, m_particleCount);
             }
         });
@@ -249,7 +257,7 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
         .vertShader((paths::shaderDir / "fluid_surface.vert.spv").string())
         .fragShader((paths::shaderDir / "fluid_occupancy.frag.spv").string())
-        .pushConstantSize(sizeof(float), VK_SHADER_STAGE_VERTEX_BIT)
+        .pushConstantSize(sizeof(FluidDrawParams), VK_SHADER_STAGE_VERTEX_BIT)
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(1, frameGraph.buffer(m_config.particleBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
@@ -261,8 +269,8 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .execute([this](PassContext &context) {
             if (m_particleCount != 0)
             {
-                context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT,
-                                            m_config.renderScale);
+                const FluidDrawParams params{m_config.renderOffset, m_config.renderScale};
+                context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, params);
                 context.cmd().draw(6, m_particleCount);
             }
         });

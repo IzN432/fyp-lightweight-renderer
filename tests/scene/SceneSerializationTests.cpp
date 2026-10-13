@@ -8,6 +8,7 @@
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 #include "features/rigid_body/ColliderComponent.hpp"
 #include "features/rigid_body/RigidBodyComponent.hpp"
+#include "features/fluid/FluidComponent.hpp"
 
 #include <glm/gtc/epsilon.hpp>
 
@@ -186,6 +187,17 @@ int main()
     lr::Collider box;
     box.shape = lr::BoxCollider{{5, 6, 7}};
     skinnedObject.addComponent<lr::ColliderComponent>(std::vector{sphere, plane, box});
+    lr::FluidComponent::Config fluidConfig;
+    fluidConfig.sources = {{{3, 4, 5}, {-2.0f, 1.0f, -1.0f}}, {{2, 2, 2}, {4.0f, 2.0f, 3.0f}}};
+    fluidConfig.particleSpacing = 0.25f;
+    fluidConfig.solverIterations = 6;
+    fluidConfig.boundsMin = {-8.0f, -1.0f, -7.0f};
+    fluidConfig.boundsMax = {9.0f, 12.0f, 11.0f};
+    fluidConfig.showBounds = false;
+    fluidConfig.startPaused = true;
+    fluidConfig.particleColor = {0.1f, 0.3f, 0.8f};
+    fluidConfig.renderScale = 0.125f;
+    skinnedObject.addComponent<lr::FluidComponent>(fluidConfig);
 
     lr::SceneSerializer::save(source, temporary.path);
 
@@ -281,6 +293,9 @@ int main()
     assert(std::get<lr::SphereCollider>(roundTripColliders[0].shape).radius == 1.25f);
     assert(std::get<lr::PlaneCollider>(roundTripColliders[1].shape).halfExtents == glm::vec2(3, 4));
     assert(std::get<lr::BoxCollider>(roundTripColliders[2].shape).halfExtents == glm::vec3(5, 6, 7));
+    const auto &roundTripFluid =
+        loaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::FluidComponent>().config();
+    assert(roundTripFluid == fluidConfig);
 
     // Identities are what the file names objects by, so loading the same file into a scene that
     // already holds those objects is a collision rather than a silent duplicate.

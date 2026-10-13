@@ -27,6 +27,7 @@
 #include "core/scene/Camera.hpp"
 #include "core/scene/Mesh.hpp"
 #include "core/scene/SceneObject.hpp"
+#include "core/scene/TransformComponent.hpp"
 #include "core/editor/camera/SphericalCameraController.hpp"
 #include "core/editor/ErrorReporter.hpp"
 #include "core/scene/EngineConventions.hpp"
@@ -35,6 +36,7 @@
 
 #include "features/rigid_body/PhysicsWorld.hpp"
 #include "features/fluid/FluidSimulation.hpp"
+#include "features/fluid/FluidComponent.hpp"
 #include "features/fluid/ScreenSpaceLiquidPass.hpp"
 
 #include <ImGuiFileDialog.h>
@@ -329,6 +331,52 @@ void Engine::run()
     lr::ErrorReporter      errorReporter;
     lr::EditorSession editor(viewer, sceneManager, *camera, editorRendering, errorReporter);
 
+    // One shared GPU solver displays the most recently selected object carrying a fluid component.
+    // Ordinary selection changes do not hide it; only selecting another fluid object or explicitly
+    // clearing the Fluid panel changes this binding.
+    std::optional<lr::SceneObjectId> activeFluidObject;
+    std::optional<lr::SceneObjectId> lastObservedSelection;
+    std::optional<lr::SceneObjectId> suppressedFluidSelection;
+    const auto syncActiveFluid = [&]() -> lr::FluidComponent * {
+        const std::optional<lr::SceneObjectId> selected = scene.selectedObject();
+        if (selected != lastObservedSelection)
+        {
+            lastObservedSelection = selected;
+            suppressedFluidSelection.reset();
+            if (selected && scene.contains(*selected) &&
+                scene.getSceneObject(*selected).hasComponent<lr::FluidComponent>())
+            {
+                activeFluidObject = selected;
+            }
+        } else if (!activeFluidObject && selected && suppressedFluidSelection != selected &&
+                   scene.contains(*selected) && scene.getSceneObject(*selected).hasComponent<lr::FluidComponent>())
+        {
+            // Also notice a fluid component added to an object that was already selected.
+            activeFluidObject = selected;
+        }
+
+        if (!activeFluidObject || !scene.contains(*activeFluidObject))
+        {
+            activeFluidObject.reset();
+            fluidSimulation.setTarget(nullptr);
+            return nullptr;
+        }
+
+        lr::SceneObject &object = scene.getSceneObject(*activeFluidObject);
+        if (!object.hasComponent<lr::FluidComponent>())
+        {
+            activeFluidObject.reset();
+            fluidSimulation.setTarget(nullptr);
+            return nullptr;
+        }
+
+        glm::vec3 position{0.0f};
+        if (object.hasComponent<lr::TransformComponent>()) position = glm::vec3(object.worldMatrix()[3]);
+        lr::FluidComponent &component = object.getComponent<lr::FluidComponent>();
+        fluidSimulation.setTarget(&component, position);
+        return &component;
+    };
+
     // -------------------------------------------------------------------------
     // Per-frame callbacks
     // -------------------------------------------------------------------------
@@ -508,12 +556,26 @@ void Engine::run()
         ImGui::SetNextWindowPos(ImVec2(topLeft.x, topLeft.y + panelSize.y), ImGuiCond_Once);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_Once);
         ImGui::Begin("Fluid");
-        float fluidRenderScale = liquidPass.renderScale();
-        if (ImGui::DragFloat("Simulation Render Scale", &fluidRenderScale, 0.001f, 0.001f, 10.0f, "%.4f"))
+        if (lr::FluidComponent *activeFluid = syncActiveFluid())
         {
-            liquidPass.setRenderScale(fluidRenderScale);
+            const lr::SceneObject &object = scene.getSceneObject(*activeFluidObject);
+            ImGui::TextDisabled("Active: %s", object.name.empty() ? "Unnamed object" : object.name.c_str());
+            ImGui::SameLine();
+            if (ImGui::Button("Clear"))
+            {
+                suppressedFluidSelection = scene.selectedObject();
+                activeFluidObject.reset();
+                fluidSimulation.setTarget(nullptr);
+            }
+            else
+                fluidSimulation.onGUI();
         }
-        fluidSimulation.onGUI();
+        else if (!scene.selectedObject())
+            ImGui::TextDisabled("Select a scene object to use the fluid simulation.");
+        else if (suppressedFluidSelection == scene.selectedObject())
+            ImGui::TextDisabled("Simulation cleared. Reselect the object to show it again.");
+        else
+            ImGui::TextDisabled("Add a Fluid Simulation component to the selected object.");
         ImGui::End();
 
         ImGui::SetNextWindowPos(bottomLeft, ImGuiCond_FirstUseEver);
@@ -604,8 +666,12 @@ void Engine::run()
     appConnections.push_back(viewer.onUpdate([&](float dt, VkExtent2D) {
         sceneManager.animationSystem().update(dt);
         physicsWorld.update(dt);
+
+        syncActiveFluid();
         fluidSimulation.update(dt);
         liquidPass.setParticleCount(fluidSimulation.particleCount());
+        liquidPass.setRenderScale(fluidSimulation.renderScale());
+        liquidPass.setRenderOffset(fluidSimulation.worldPosition());
         liquidPass.setSmoothingRadius(
             lr::screen_space_liquid::smoothingRadiusFromParticle(fluidSimulation.particleRadius()) *
             liquidPass.renderScale());

@@ -54,6 +54,8 @@ public:
         glm::vec3 liquidColor{0.25f, 0.5f, 0.95f};
         // Presentation-only uniform scale for solver positions and particle radii.
         float renderScale = 1.0f;
+        // Translation of the owning scene object. Rotation and scale are intentionally ignored.
+        glm::vec3 renderOffset{0.0f};
     };
 
     ScreenSpaceLiquidPass(Config config, ResourceRegistry &resources);
@@ -67,6 +69,7 @@ public:
     // simulation's particle size, so it changes whenever spacing or render scale do.
     void setSmoothingRadius(float radius);
     void setRenderScale(float scale) { m_config.renderScale = std::max(scale, 0.0f); }
+    void setRenderOffset(const glm::vec3 &offset) { m_config.renderOffset = offset; }
     float renderScale() const { return m_config.renderScale; }
     void updateParams();
 

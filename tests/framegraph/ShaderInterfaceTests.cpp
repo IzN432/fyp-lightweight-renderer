@@ -234,7 +234,7 @@ void fluidOccupancyShadersMatchTheirPassInterface()
     f.builder.type(lr::PassType::Geometry)
         .vertShader(lr::compileGlslFile(shaderRoot / "fluid_surface.vert"), "fluid_surface.vert")
         .fragShader(lr::compileGlslFile(shaderRoot / "fluid_occupancy.frag"), "fluid_occupancy.frag")
-        .pushConstantSize(sizeof(float), VK_SHADER_STAGE_VERTEX_BIT)
+        .pushConstantSize(4 * sizeof(float), VK_SHADER_STAGE_VERTEX_BIT)
         .uniformBuffer(0, f.definition.buffer("camera"),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(1, f.definition.buffer("particles"), VK_SHADER_STAGE_VERTEX_BIT)

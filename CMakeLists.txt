@@ -325,6 +325,7 @@ target_link_libraries(lr_linear_blend_skinning_feature PUBLIC lr_core glm::glm)
 # Position Based Fluids reference solver. Pure CPU and dependency-free on purpose: it is the
 # ground truth the GPU compute solver gets diffed against.
 add_library(lr_fluid_feature STATIC
+    src/features/fluid/FluidComponent.cpp
     src/features/fluid/FluidSolverCpu.cpp
     src/features/fluid/FluidSolverGpu.cpp
     src/features/fluid/ParticleBillboardPass.cpp
@@ -387,10 +388,11 @@ add_library(lr_scene_serialization STATIC
     src/core/scene/serialization/JsonUtils.cpp
     src/features/linear_blend_skinning/SkinComponentCodec.cpp
     src/features/rigid_body/RigidBodyComponentCodecs.cpp
+    src/features/fluid/FluidComponentCodec.cpp
 )
 target_include_directories(lr_scene_serialization PUBLIC src)
 target_link_libraries(lr_scene_serialization PUBLIC lr_core
-    lr_linear_blend_skinning_feature lr_rigid_body_feature nlohmann_json::nlohmann_json)
+    lr_linear_blend_skinning_feature lr_rigid_body_feature lr_fluid_feature nlohmann_json::nlohmann_json)
 
 # Application-level editor composition. This stays above lr_core because it combines optional
 # feature libraries which themselves depend on lr_core.
