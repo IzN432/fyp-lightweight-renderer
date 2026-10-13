@@ -29,6 +29,12 @@ namespace lr::eulerian
 // and divergence are registered too, which keeps them inspectable for debug views. Register the
 // volumes with registerVolumes() before constructing the solver, or let the constructor do it.
 //
+// Obstacles are optional and come from outside: Config::obstacleMaskName names a volume that
+// SmokeVoxelizePass rasterizes from live scene geometry on the Vulkan side, and stages 2-8 treat
+// its set cells as immovable no-slip walls, exactly as they treat the box's own border. The mask
+// joins the semaphore handshake below as another named image, so each frame's rasterization is
+// ordered before the kernels that read it without any extra synchronization.
+//
 // Simulation and rendering are ordered by imported external semaphores, not by host waits, so
 // step() returns while the kernels are still running. The VulkanContext must therefore enable
 // VK_KHR_external_memory and VK_KHR_external_semaphore plus the platform handle extensions
@@ -49,6 +55,16 @@ public:
 
         // The simulated sub-region, anchored at the origin corner. Zero means "all of extent".
         VkExtent3D        activeExtent      = {0, 0, 0};
+
+        // An already-registered R32_UINT volume holding the obstacle mask: non-zero cells are
+        // treated as immovable no-slip walls, exactly as the box's own border is. The solver does
+        // not own, register or write it — SmokeVoxelizePass rasterizes it on the Vulkan side each
+        // frame, and the solver only imports it and reads it. It must be exportable and allocated
+        // at `extent`, since the kernels index it with the same cell coordinates as the fields.
+        //
+        // Empty means no collisions at all, which is the standalone demo's case: every kernel then
+        // behaves exactly as it did before obstacles existed.
+        std::string       obstacleMaskName;
 
         int               jacobiIterations  = 40;
         SmokeStepParams   step{};
@@ -114,6 +130,11 @@ public:
 
     // The imported volumes, for rendering hookups and for tests that read fields back. Each
     // reference stays valid for the solver's lifetime.
+    // The imported obstacle mask, or null when Config::obstacleMaskName was empty. The solver only
+    // reads it; it is exposed so a test or a debug tool can populate it directly (see
+    // launchFillObstacleBox) instead of standing up the whole Vulkan voxelizer.
+    const CudaVolume *obstacleVolume() const;
+
     const CudaVolume &densityVolume() const;
     const CudaVolume &velocityVolume() const;
     const CudaVolume &pressureVolume() const;

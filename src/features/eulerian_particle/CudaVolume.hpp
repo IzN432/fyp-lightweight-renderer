@@ -2,6 +2,7 @@
 
 #include <cuda_runtime_api.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -52,7 +53,14 @@ public:
 
     // Copies the whole volume back to the host, channels() floats per cell in x-major order.
     // Intended for tests and debugging; it synchronizes and is not cheap.
+    //
+    // Only for the float formats. An R32_UINT volume (the obstacle mask) has the same byte layout
+    // but its values are not floats, so read one back with downloadUint() instead.
     std::vector<float> download() const;
+
+    // download() for an R32_UINT volume: one uint per cell, x-major. The same raw copy, typed
+    // correctly, so a mask cell set to 1 reads back as 1 rather than as a denormal.
+    std::vector<uint32_t> downloadUint() const;
 
     const std::string &resourceName() const { return m_resourceName; }
 

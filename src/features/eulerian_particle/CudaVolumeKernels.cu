@@ -145,6 +145,33 @@ __device__ inline bool onBorder(int x, int y, int z, GridInfo grid)
     return x == 0 || y == 0 || z == 0 || x == grid.width - 1 || y == grid.height - 1 || z == grid.depth - 1;
 }
 
+// -------------------------------------------------------------------------------------------
+// Obstacles
+//
+// The mask is a solid (not shell) occupancy volume rasterized by SmokeVoxelizePass: one uint per
+// cell, non-zero inside scene geometry. The solver treats a solid cell exactly as it treats the
+// outside of the box — an immovable no-slip wall — so the handling mirrors applyBoundaries: fluid
+// cannot flow into it, pressure takes a zero normal derivative across its face, and nothing is
+// advected out of it.
+//
+// A zero surface means "no mask imported", which every helper below reads as fully fluid. That
+// keeps the uncollided behaviour bit-identical for the standalone demo, which has no scene.
+// -------------------------------------------------------------------------------------------
+
+__device__ inline bool isSolid(cudaSurfaceObject_t obstacle, int x, int y, int z, GridInfo grid)
+{
+    if (obstacle == 0)
+        return false;
+    const int cx = clampIndex(x, grid.width);
+    const int cy = clampIndex(y, grid.height);
+    const int cz = clampIndex(z, grid.depth);
+    uint32_t  value;
+    // Read as uint, matching the r32ui the voxelizer's imageAtomicXor writes. Reading it as float
+    // would reinterpret the bits and make 1 a denormal that compares false against zero.
+    surf3Dread(&value, obstacle, cx * static_cast<int>(sizeof(uint32_t)), cy, cz);
+    return value != 0u;
+}
+
 __global__ void densityTestPattern(cudaSurfaceObject_t surface, cudaExtent extent, float timeSeconds)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -166,8 +193,8 @@ __global__ void densityTestPattern(cudaSurfaceObject_t surface, cudaExtent exten
 // 1. Source injection
 // -------------------------------------------------------------------------------------------
 
-__global__ void injectSources(cudaSurfaceObject_t velocity, cudaSurfaceObject_t density, cudaExtent extent,
-                              SmokeSourceParams source, float dt)
+__global__ void injectSources(cudaSurfaceObject_t velocity, cudaSurfaceObject_t density,
+                              cudaSurfaceObject_t obstacle, cudaExtent extent, SmokeSourceParams source, float dt)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -176,6 +203,11 @@ __global__ void injectSources(cudaSurfaceObject_t velocity, cudaSurfaceObject_t 
         return;
 
     const GridInfo grid = gridInfo(extent);
+    // An emitter buried in geometry injects nothing rather than pressurizing the inside of a mesh,
+    // which the projection would then have to fight every step.
+    if (isSolid(obstacle, static_cast<int>(x), static_cast<int>(y), static_cast<int>(z), grid))
+        return;
+
     // Distances are measured in normalized space scaled by the largest axis so a spherical source
     // stays spherical on a non-cube grid.
     const float longest = fmaxf(static_cast<float>(grid.width),
@@ -205,8 +237,8 @@ __global__ void injectSources(cudaSurfaceObject_t velocity, cudaSurfaceObject_t 
 // 2. Velocity advection (semi-Lagrangian backtrace)
 // -------------------------------------------------------------------------------------------
 
-__global__ void advectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t velocityNext, cudaExtent extent,
-                               float dt)
+__global__ void advectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t velocityNext,
+                               cudaSurfaceObject_t obstacle, cudaExtent extent, float dt)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -215,6 +247,15 @@ __global__ void advectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t
         return;
 
     const GridInfo grid = gridInfo(extent);
+    // Solid cells are held at rest. Zeroing rather than leaving them is what makes the field a
+    // genuine no-slip wall: the trilinear taps of neighbouring fluid cells read these cells, so a
+    // stale velocity here would keep leaking momentum out of the obstacle forever.
+    if (isSolid(obstacle, static_cast<int>(x), static_cast<int>(y), static_cast<int>(z), grid))
+    {
+        writeVector(velocityNext, x, y, z, make_float4(0.0f, 0.0f, 0.0f, 0.0f));
+        return;
+    }
+
     const float4   v    = readVector(velocity, x, y, z, grid);
     const float3   back = make_float3((static_cast<float>(x) + 0.5f) - v.x * dt,
                                       (static_cast<float>(y) + 0.5f) - v.y * dt,
@@ -226,8 +267,8 @@ __global__ void advectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t
 // 3. External forces / buoyancy
 // -------------------------------------------------------------------------------------------
 
-__global__ void applyForces(cudaSurfaceObject_t velocity, cudaSurfaceObject_t density, cudaExtent extent,
-                            SmokeStepParams params)
+__global__ void applyForces(cudaSurfaceObject_t velocity, cudaSurfaceObject_t density,
+                            cudaSurfaceObject_t obstacle, cudaExtent extent, SmokeStepParams params)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -236,6 +277,11 @@ __global__ void applyForces(cudaSurfaceObject_t velocity, cudaSurfaceObject_t de
         return;
 
     const GridInfo grid = gridInfo(extent);
+    // Buoyancy inside an obstacle would accelerate a wall. Advection already holds these cells at
+    // zero, so leaving them untouched is enough.
+    if (isSolid(obstacle, static_cast<int>(x), static_cast<int>(y), static_cast<int>(z), grid))
+        return;
+
     const float    d    = readScalar(density, x, y, z, grid);
     float4         v    = readVector(velocity, x, y, z, grid);
 
@@ -312,7 +358,8 @@ __global__ void applyForces(cudaSurfaceObject_t velocity, cudaSurfaceObject_t de
 // 4. Divergence
 // -------------------------------------------------------------------------------------------
 
-__global__ void computeDivergence(cudaSurfaceObject_t velocity, cudaSurfaceObject_t divergence, cudaExtent extent)
+__global__ void computeDivergence(cudaSurfaceObject_t velocity, cudaSurfaceObject_t divergence,
+                                  cudaSurfaceObject_t obstacle, cudaExtent extent)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -325,19 +372,35 @@ __global__ void computeDivergence(cudaSurfaceObject_t velocity, cudaSurfaceObjec
     const int      iy   = static_cast<int>(y);
     const int      iz   = static_cast<int>(z);
 
-    // Solid walls: no flow through the border, so its divergence contribution is zero.
-    if (onBorder(ix, iy, iz, grid))
+    // Solid walls: no flow through the border or through an obstacle, so neither has a divergence
+    // to correct. Writing zero rather than skipping matters: the Jacobi sweep reads this cell as
+    // the right-hand side for its own relaxation.
+    if (onBorder(ix, iy, iz, grid) || isSolid(obstacle, ix, iy, iz, grid))
     {
         writeScalar(divergence, ix, iy, iz, 0.0f);
         return;
     }
 
-    const float4 xp = readVector(velocity, ix + 1, iy, iz, grid);
-    const float4 xm = readVector(velocity, ix - 1, iy, iz, grid);
-    const float4 yp = readVector(velocity, ix, iy + 1, iz, grid);
-    const float4 ym = readVector(velocity, ix, iy - 1, iz, grid);
-    const float4 zp = readVector(velocity, ix, iy, iz + 1, grid);
-    const float4 zm = readVector(velocity, ix, iy, iz - 1, grid);
+    const float4 self = readVector(velocity, ix, iy, iz, grid);
+    float4       xp   = readVector(velocity, ix + 1, iy, iz, grid);
+    float4       xm   = readVector(velocity, ix - 1, iy, iz, grid);
+    float4       yp   = readVector(velocity, ix, iy + 1, iz, grid);
+    float4       ym   = readVector(velocity, ix, iy - 1, iz, grid);
+    float4       zp   = readVector(velocity, ix, iy, iz + 1, grid);
+    float4       zm   = readVector(velocity, ix, iy, iz - 1, grid);
+
+    // Where a neighbour is solid, substitute this cell's own velocity for it on that axis. The
+    // central difference across the pair then contributes nothing on that side, which is the
+    // free-slip no-flux condition (u.n = 0) at the obstacle face: the solve sees no fluid arriving
+    // from the wall and no room to push into it, so it builds exactly the pressure that deflects
+    // the flow along the surface. Substituting zero instead would read as fluid rushing *out* of
+    // the wall and produce a spurious source at every boundary cell.
+    if (isSolid(obstacle, ix + 1, iy, iz, grid)) xp.x = self.x;
+    if (isSolid(obstacle, ix - 1, iy, iz, grid)) xm.x = self.x;
+    if (isSolid(obstacle, ix, iy + 1, iz, grid)) yp.y = self.y;
+    if (isSolid(obstacle, ix, iy - 1, iz, grid)) ym.y = self.y;
+    if (isSolid(obstacle, ix, iy, iz + 1, grid)) zp.z = self.z;
+    if (isSolid(obstacle, ix, iy, iz - 1, grid)) zm.z = self.z;
 
     const float d = 0.5f * ((xp.x - xm.x) + (yp.y - ym.y) + (zp.z - zm.z));
     writeScalar(divergence, ix, iy, iz, d);
@@ -347,8 +410,18 @@ __global__ void computeDivergence(cudaSurfaceObject_t velocity, cudaSurfaceObjec
 // 5. Jacobi pressure solve
 // -------------------------------------------------------------------------------------------
 
+// A neighbour's pressure for the Laplacian, with a solid neighbour reflecting the centre cell's own
+// value. That is the same dp/dn = 0 condition clampIndex already gives the box's border, applied to
+// the interior faces an obstacle introduces, and it keeps the stencil's six-neighbour divisor valid
+// without a per-cell count.
+__device__ inline float neighbourPressure(cudaSurfaceObject_t pressure, cudaSurfaceObject_t obstacle, int x, int y,
+                                          int z, float centre, GridInfo grid)
+{
+    return isSolid(obstacle, x, y, z, grid) ? centre : readScalar(pressure, x, y, z, grid);
+}
+
 __global__ void pressureJacobi(cudaSurfaceObject_t pressure, cudaSurfaceObject_t pressureNext,
-                               cudaSurfaceObject_t divergence, cudaExtent extent)
+                               cudaSurfaceObject_t divergence, cudaSurfaceObject_t obstacle, cudaExtent extent)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -361,11 +434,26 @@ __global__ void pressureJacobi(cudaSurfaceObject_t pressure, cudaSurfaceObject_t
     const int      iy   = static_cast<int>(y);
     const int      iz   = static_cast<int>(z);
 
+    const float centre = readScalar(pressure, ix, iy, iz, grid);
+
+    // Interior of an obstacle: there is no fluid here to solve for, so the cell just carries its
+    // current value forward. Propagating it rather than zeroing keeps the reflected neighbour
+    // values above consistent between sweeps, and this cell is never projected anyway.
+    if (isSolid(obstacle, ix, iy, iz, grid))
+    {
+        writeScalar(pressureNext, ix, iy, iz, centre);
+        return;
+    }
+
     // Solving laplacian(p) = divergence. clampIndex gives each border cell its own value back as
-    // the missing neighbour, which is the pure-Neumann (dp/dn = 0) condition a closed box wants.
-    const float sum = readScalar(pressure, ix + 1, iy, iz, grid) + readScalar(pressure, ix - 1, iy, iz, grid) +
-                      readScalar(pressure, ix, iy + 1, iz, grid) + readScalar(pressure, ix, iy - 1, iz, grid) +
-                      readScalar(pressure, ix, iy, iz + 1, grid) + readScalar(pressure, ix, iy, iz - 1, grid);
+    // the missing neighbour, which is the pure-Neumann (dp/dn = 0) condition a closed box wants;
+    // neighbourPressure extends the same rule to obstacle faces.
+    const float sum = neighbourPressure(pressure, obstacle, ix + 1, iy, iz, centre, grid) +
+                      neighbourPressure(pressure, obstacle, ix - 1, iy, iz, centre, grid) +
+                      neighbourPressure(pressure, obstacle, ix, iy + 1, iz, centre, grid) +
+                      neighbourPressure(pressure, obstacle, ix, iy - 1, iz, centre, grid) +
+                      neighbourPressure(pressure, obstacle, ix, iy, iz + 1, centre, grid) +
+                      neighbourPressure(pressure, obstacle, ix, iy, iz - 1, centre, grid);
     const float d = readScalar(divergence, ix, iy, iz, grid);
     writeScalar(pressureNext, ix, iy, iz, (sum - d) / 6.0f);
 }
@@ -374,7 +462,8 @@ __global__ void pressureJacobi(cudaSurfaceObject_t pressure, cudaSurfaceObject_t
 // 6. Pressure projection
 // -------------------------------------------------------------------------------------------
 
-__global__ void projectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t pressure, cudaExtent extent)
+__global__ void projectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t pressure,
+                                cudaSurfaceObject_t obstacle, cudaExtent extent)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -387,13 +476,41 @@ __global__ void projectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_
     const int      iy   = static_cast<int>(y);
     const int      iz   = static_cast<int>(z);
 
-    float4      v     = readVector(velocity, ix, iy, iz, grid);
-    const float gradX = 0.5f * (readScalar(pressure, ix + 1, iy, iz, grid) - readScalar(pressure, ix - 1, iy, iz, grid));
-    const float gradY = 0.5f * (readScalar(pressure, ix, iy + 1, iz, grid) - readScalar(pressure, ix, iy - 1, iz, grid));
-    const float gradZ = 0.5f * (readScalar(pressure, ix, iy, iz + 1, grid) - readScalar(pressure, ix, iy, iz - 1, grid));
+    // An obstacle cell is a wall, not fluid: hold it at rest instead of projecting it.
+    if (isSolid(obstacle, ix, iy, iz, grid))
+    {
+        writeVector(velocity, ix, iy, iz, make_float4(0.0f, 0.0f, 0.0f, 0.0f));
+        return;
+    }
+
+    const float centre = readScalar(pressure, ix, iy, iz, grid);
+
+    float4 v = readVector(velocity, ix, iy, iz, grid);
+    // The same reflected neighbours the solve used. Using the raw pressure here instead would
+    // subtract a gradient the solve never balanced, and the mismatch shows up as flow seeping into
+    // the obstacle.
+    const float gradX = 0.5f * (neighbourPressure(pressure, obstacle, ix + 1, iy, iz, centre, grid) -
+                                neighbourPressure(pressure, obstacle, ix - 1, iy, iz, centre, grid));
+    const float gradY = 0.5f * (neighbourPressure(pressure, obstacle, ix, iy + 1, iz, centre, grid) -
+                                neighbourPressure(pressure, obstacle, ix, iy - 1, iz, centre, grid));
+    const float gradZ = 0.5f * (neighbourPressure(pressure, obstacle, ix, iy, iz + 1, centre, grid) -
+                                neighbourPressure(pressure, obstacle, ix, iy, iz - 1, centre, grid));
     v.x -= gradX;
     v.y -= gradY;
     v.z -= gradZ;
+
+    // The projection is only approximately divergence-free after a finite number of Jacobi sweeps,
+    // so a little flow into the wall survives it. Clamping the normal component to outward-or-zero
+    // on each solid face removes exactly that residue, and is what stops density creeping through a
+    // thin obstacle over many steps. Only obstacle faces are clamped here; the box's own border is
+    // left to applyBoundaries, which already reflects it.
+    if (isSolid(obstacle, ix + 1, iy, iz, grid)) v.x = fminf(v.x, 0.0f);
+    if (isSolid(obstacle, ix - 1, iy, iz, grid)) v.x = fmaxf(v.x, 0.0f);
+    if (isSolid(obstacle, ix, iy + 1, iz, grid)) v.y = fminf(v.y, 0.0f);
+    if (isSolid(obstacle, ix, iy - 1, iz, grid)) v.y = fmaxf(v.y, 0.0f);
+    if (isSolid(obstacle, ix, iy, iz + 1, grid)) v.z = fminf(v.z, 0.0f);
+    if (isSolid(obstacle, ix, iy, iz - 1, grid)) v.z = fmaxf(v.z, 0.0f);
+
     writeVector(velocity, ix, iy, iz, v);
 }
 
@@ -402,7 +519,8 @@ __global__ void projectVelocity(cudaSurfaceObject_t velocity, cudaSurfaceObject_
 // -------------------------------------------------------------------------------------------
 
 __global__ void advectDensity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t density,
-                              cudaSurfaceObject_t densityNext, cudaExtent extent, SmokeStepParams params)
+                              cudaSurfaceObject_t densityNext, cudaSurfaceObject_t obstacle, cudaExtent extent,
+                              SmokeStepParams params)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -411,6 +529,19 @@ __global__ void advectDensity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t 
         return;
 
     const GridInfo grid = gridInfo(extent);
+    const int      ix   = static_cast<int>(x);
+    const int      iy   = static_cast<int>(y);
+    const int      iz   = static_cast<int>(z);
+
+    // Obstacles hold no smoke. Zeroing them every step also keeps the trilinear taps of the fluid
+    // cells beside them from blending in density that an earlier frame left inside geometry — which
+    // is what would happen if an obstacle moved into an already-smoky region.
+    if (isSolid(obstacle, ix, iy, iz, grid))
+    {
+        writeScalar(densityNext, ix, iy, iz, 0.0f);
+        return;
+    }
+
     const float4   v    = readVector(velocity, x, y, z, grid);
     const float3   back = make_float3((static_cast<float>(x) + 0.5f) - v.x * params.dt,
                                       (static_cast<float>(y) + 0.5f) - v.y * params.dt,
@@ -427,7 +558,7 @@ __global__ void advectDensity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t 
 // -------------------------------------------------------------------------------------------
 
 __global__ void applyBoundaries(cudaSurfaceObject_t velocity, cudaSurfaceObject_t density,
-                                cudaSurfaceObject_t pressure, cudaExtent extent)
+                                cudaSurfaceObject_t pressure, cudaSurfaceObject_t obstacle, cudaExtent extent)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -439,6 +570,18 @@ __global__ void applyBoundaries(cudaSurfaceObject_t velocity, cudaSurfaceObject_
     const int      ix   = static_cast<int>(x);
     const int      iy   = static_cast<int>(y);
     const int      iz   = static_cast<int>(z);
+
+    // Obstacle interiors are settled last, after the step's copy-backs have landed, so what the
+    // renderer samples and what the next step's stencils read agree: at rest and empty. Pressure is
+    // left alone — the Jacobi sweep carries it forward, and overwriting it here would discard the
+    // value the reflected neighbours depend on.
+    if (isSolid(obstacle, ix, iy, iz, grid))
+    {
+        writeVector(velocity, ix, iy, iz, make_float4(0.0f, 0.0f, 0.0f, 0.0f));
+        writeScalar(density, ix, iy, iz, 0.0f);
+        return;
+    }
+
     if (!onBorder(ix, iy, iz, grid))
         return;
 
@@ -479,6 +622,24 @@ __global__ void clearVolume(cudaSurfaceObject_t surface, cudaExtent extent, int 
         writeScalar(surface, x, y, z, 0.0f);
 }
 
+__global__ void fillObstacleBox(cudaSurfaceObject_t obstacle, cudaExtent extent, int3 boxMin, int3 boxMax)
+{
+    const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    const uint32_t z = blockIdx.z * blockDim.z + threadIdx.z;
+    if (outside(x, y, z, extent))
+        return;
+
+    const int      ix     = static_cast<int>(x);
+    const int      iy     = static_cast<int>(y);
+    const int      iz     = static_cast<int>(z);
+    const bool     inside = ix >= boxMin.x && ix < boxMax.x && iy >= boxMin.y && iy < boxMax.y && iz >= boxMin.z &&
+                        iz < boxMax.z;
+    // Written as uint to match the r32ui the voxelizer's atomics use, which is also how isSolid
+    // reads it back.
+    surf3Dwrite(inside ? 1u : 0u, obstacle, ix * static_cast<int>(sizeof(uint32_t)), iy, iz);
+}
+
 __global__ void copyVolume(cudaSurfaceObject_t destination, cudaSurfaceObject_t source, cudaExtent extent,
                            int channels)
 {
@@ -507,59 +668,71 @@ cudaError_t launchDensityTestPattern(cudaSurfaceObject_t surface, cudaExtent ext
 cudaError_t launchInjectSources(const SmokeFields &fields, cudaExtent extent, const SmokeSourceParams &source,
                                float dt, cudaStream_t stream)
 {
-    injectSources<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, extent, source, dt);
+    injectSources<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.obstacle, extent,
+                                                          source, dt);
     return cudaGetLastError();
 }
 
 cudaError_t launchAdvectVelocity(const SmokeFields &fields, cudaExtent extent, float dt, cudaStream_t stream)
 {
-    advectVelocity<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.velocityNext, extent, dt);
+    advectVelocity<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.velocityNext, fields.obstacle,
+                                                           extent, dt);
     return cudaGetLastError();
 }
 
 cudaError_t launchApplyForces(const SmokeFields &fields, cudaExtent extent, const SmokeStepParams &params,
                               cudaStream_t stream)
 {
-    applyForces<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, extent, params);
+    applyForces<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.obstacle, extent,
+                                                        params);
     return cudaGetLastError();
 }
 
 cudaError_t launchComputeDivergence(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream)
 {
-    computeDivergence<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.divergence, extent);
+    computeDivergence<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.divergence, fields.obstacle,
+                                                              extent);
     return cudaGetLastError();
 }
 
 cudaError_t launchPressureJacobi(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream)
 {
     pressureJacobi<<<gridFor(extent), kBlock, 0, stream>>>(fields.pressure, fields.pressureNext, fields.divergence,
-                                                           extent);
+                                                           fields.obstacle, extent);
     return cudaGetLastError();
 }
 
 cudaError_t launchProjectVelocity(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream)
 {
-    projectVelocity<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.pressure, extent);
+    projectVelocity<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.pressure, fields.obstacle, extent);
     return cudaGetLastError();
 }
 
 cudaError_t launchAdvectDensity(const SmokeFields &fields, cudaExtent extent, const SmokeStepParams &params,
                                cudaStream_t stream)
 {
-    advectDensity<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.densityNext, extent,
-                                                          params);
+    advectDensity<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.densityNext,
+                                                          fields.obstacle, extent, params);
     return cudaGetLastError();
 }
 
 cudaError_t launchApplyBoundaries(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream)
 {
-    applyBoundaries<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.pressure, extent);
+    applyBoundaries<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.pressure,
+                                                            fields.obstacle, extent);
     return cudaGetLastError();
 }
 
 cudaError_t launchClearVolume(cudaSurfaceObject_t surface, cudaExtent extent, int channels, cudaStream_t stream)
 {
     clearVolume<<<gridFor(extent), kBlock, 0, stream>>>(surface, extent, channels);
+    return cudaGetLastError();
+}
+
+cudaError_t launchFillObstacleBox(cudaSurfaceObject_t obstacle, cudaExtent extent, int3 min, int3 max,
+                                  cudaStream_t stream)
+{
+    fillObstacleBox<<<gridFor(extent), kBlock, 0, stream>>>(obstacle, extent, min, max);
     return cudaGetLastError();
 }
 

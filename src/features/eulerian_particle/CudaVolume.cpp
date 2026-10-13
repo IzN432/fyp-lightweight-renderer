@@ -57,8 +57,13 @@ cudaChannelFormatDesc channelDescription(VkFormat format)
         return cudaCreateChannelDesc(32, 0, 0, 0, cudaChannelFormatKindFloat);
     if (format == VK_FORMAT_R32G32B32A32_SFLOAT)
         return cudaCreateChannelDesc(32, 32, 32, 32, cudaChannelFormatKindFloat);
-    throw std::invalid_argument(
-        "CudaVolume: only VK_FORMAT_R32_SFLOAT and VK_FORMAT_R32G32B32A32_SFLOAT volumes can be imported");
+    // The obstacle mask: written as r32ui by the voxelizer's atomics, so it imports with an
+    // unsigned channel kind. Surface reads of it must use uint32_t, not float, or the bit pattern
+    // is reinterpreted — see readMask in CudaVolumeKernels.cu.
+    if (format == VK_FORMAT_R32_UINT)
+        return cudaCreateChannelDesc(32, 0, 0, 0, cudaChannelFormatKindUnsigned);
+    throw std::invalid_argument("CudaVolume: only VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT and "
+                               "VK_FORMAT_R32_UINT volumes can be imported");
 }
 
 int channelCount(VkFormat format)
@@ -229,24 +234,44 @@ int CudaVolume::channels() const
     return m_impl->channels;
 }
 
-std::vector<float> CudaVolume::download() const
+namespace
 {
-    requireLive(m_impl.get());
-    checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
+// The download body, shared by the float and uint views. Every supported format is 4 bytes per
+// channel, so the copy itself is the same work either way and only the element type differs.
+// Templated on the impl type as well so it can live here rather than in the header, where naming
+// the private Impl would mean exposing it.
+template <typename T, typename ImplT>
+std::vector<T> downloadAs(const ImplT &impl)
+{
+    static_assert(sizeof(T) == sizeof(float), "the download assumes 4 bytes per channel");
+    checkCuda(cudaSetDevice(impl.device), "cudaSetDevice");
     checkCuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 
-    const std::size_t cells = m_impl->extent.width * m_impl->extent.height * m_impl->extent.depth;
-    std::vector<float> host(cells * static_cast<std::size_t>(m_impl->channels));
+    const std::size_t cells = impl.extent.width * impl.extent.height * impl.extent.depth;
+    std::vector<T>    host(cells * static_cast<std::size_t>(impl.channels));
 
     cudaMemcpy3DParms copy{};
-    copy.srcArray = m_impl->array;
+    copy.srcArray = impl.array;
     copy.dstPtr   = make_cudaPitchedPtr(host.data(),
-                                        m_impl->extent.width * sizeof(float) * static_cast<std::size_t>(m_impl->channels),
-                                        m_impl->extent.width, m_impl->extent.height);
-    copy.extent   = m_impl->extent;
+                                        impl.extent.width * sizeof(T) * static_cast<std::size_t>(impl.channels),
+                                        impl.extent.width, impl.extent.height);
+    copy.extent   = impl.extent;
     copy.kind     = cudaMemcpyDeviceToHost;
     checkCuda(cudaMemcpy3D(&copy), "cudaMemcpy3D");
     return host;
+}
+} // namespace
+
+std::vector<float> CudaVolume::download() const
+{
+    requireLive(m_impl.get());
+    return downloadAs<float>(*m_impl);
+}
+
+std::vector<uint32_t> CudaVolume::downloadUint() const
+{
+    requireLive(m_impl.get());
+    return downloadAs<uint32_t>(*m_impl);
 }
 
 int CudaVolume::device() const

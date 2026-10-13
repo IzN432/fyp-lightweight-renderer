@@ -24,6 +24,12 @@ namespace lr::eulerian
 // Application-facing smoke controller. It owns the CUDA solver, the ray-march pass and every knob
 // the two expose, so the app only has to build it, step it once a frame and draw its window.
 //
+// It also owns the obstacle mask that lets the smoke collide with scene geometry: the voxelizer
+// rasterizes it inside the frame graph and the solver reads it. Because update() queues the
+// solver's handshake before this frame's graph is submitted, the mask the kernels read is the one
+// the previous frame rasterized. That one-frame lag is invisible for static geometry and amounts to
+// a sub-cell lag behind fast-moving geometry, which is cheaper than splitting the frame to avoid.
+//
 // The box is authored in cells rather than in world units: gridSize is the resolution and the
 // box's size at once, and simulationScale converts to world space (worldSize = gridSize *
 // simulationScale). So the box is always exactly a whole number of cells, cells are always cubic,
@@ -101,8 +107,9 @@ public:
         // it has no SceneGpu to draw from.
         GeometryPass::Config obstacleGeometry{};
 
-        // Whether the voxelizer runs. The mask is only consumed by the solver once collisions are
-        // wired into the kernels; until then this populates it for inspection.
+        // Whether the voxelizer runs, and so whether the smoke collides with scene geometry at
+        // all. Turning it off leaves the mask cleared, which the solver reads as empty space: the
+        // plume then passes straight through the scene as it did before collisions existed.
         bool voxelizeObstacles = true;
     };
 
@@ -133,8 +140,8 @@ public:
     void setSceneGeometry(SceneDrawList draws);
     void setSkinningEnabled(bool enabled);
 
-    // The obstacle mask volume: one R32_UINT cell per grid cell, 1 inside scene geometry. Named
-    // for a debug view or for the solver to import once collisions reach the kernels.
+    // The obstacle mask volume: one R32_UINT cell per grid cell, 1 inside scene geometry. The
+    // solver imports this and treats set cells as walls; also named here for a debug view.
     std::string obstacleMaskResourceName() const;
 
     bool enabled() const { return m_renderPass.config().enabled; }
@@ -171,6 +178,10 @@ public:
 private:
     // The authored cell counts, clamped to [3, maxCellsPerAxis] per axis.
     glm::uvec3 clampedGridSize() const;
+
+    // Registers the obstacle mask volume if it is not already there. Called from the member
+    // initializer list, before the solver imports it, so it only reads m_config.
+    void registerObstacleMask(ResourceRegistry &resources) const;
 
     // Publishes the box and the sub-region it maps to into the render pass.
     void applyBounds();

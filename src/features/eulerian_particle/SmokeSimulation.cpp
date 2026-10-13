@@ -49,6 +49,22 @@ VkExtent3D SmokeSimulation::gridExtent() const
     return VkExtent3D{cells.x, cells.y, cells.z};
 }
 
+void SmokeSimulation::registerObstacleMask(ResourceRegistry &resources) const
+{
+    // One mask cell per allocated grid cell, so the solver's kernels can index the mask and the
+    // fields with the same coordinates. Registered unconditionally, so a debug view can bind it
+    // whether or not there is any scene geometry to voxelize this run. STORAGE is what the
+    // voxelizer and its clear write through; SAMPLED lets a debug view read it. Exported like the
+    // solver's own fields, which is what lets CUDA import it and read it as obstacles.
+    const uint32_t    limit = std::max(m_config.maxCellsPerAxis, kMinCellsPerAxis);
+    const std::string name  = obstacleMaskResourceName();
+    if (resources.getImage(name) != nullptr)
+        return;
+    resources.registerPersistentVolume(name, VK_FORMAT_R32_UINT,
+                                       VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                       VkExtent3D{limit, limit, limit}, true);
+}
+
 SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, const VulkanContext &context)
     : m_config(std::move(config)),
       m_solver(resources, context,
@@ -60,6 +76,13 @@ SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, con
                    SmokeSolver::Config solver = m_config.solver;
                    solver.extent              = VkExtent3D{limit, limit, limit};
                    solver.activeExtent        = gridExtent();
+
+                   // The solver imports the mask, so it has to exist before the solver is
+                   // constructed — which is why it is registered here rather than in the body
+                   // below, where it would come too late. registerObstacleMask() is idempotent, so
+                   // the body's call is harmless.
+                   registerObstacleMask(resources);
+                   solver.obstacleMaskName = obstacleMaskResourceName();
                    return solver;
                }()),
       m_renderPass([&] {
@@ -85,18 +108,12 @@ SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, con
     // not simulating.
     m_simulatedExtent = gridExtent();
 
-    // One mask cell per allocated grid cell. Registered unconditionally, so a debug view can bind
-    // it whether or not there is any scene geometry to voxelize this run. STORAGE is what the
-    // voxelizer and its clear write through; SAMPLED lets a debug view read it. Exported like the
-    // solver's own fields so the collision work can import it into CUDA without re-registering.
-    const uint32_t   limit = std::max(m_config.maxCellsPerAxis, kMinCellsPerAxis);
-    const VkExtent3D allocated{limit, limit, limit};
+    // The mask volume itself was registered by the initializer above, since the solver had to be
+    // able to import it; what is left here is handing its name and size to the voxelizer that
+    // writes it.
+    const uint32_t    limit = std::max(m_config.maxCellsPerAxis, kMinCellsPerAxis);
+    const VkExtent3D  allocated{limit, limit, limit};
     const std::string maskName = obstacleMaskResourceName();
-    if (resources.getImage(maskName) == nullptr)
-    {
-        resources.registerPersistentVolume(maskName, VK_FORMAT_R32_UINT,
-                                           VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, allocated, true);
-    }
 
     // No index buffer means no scene to replay — the standalone demo — so there is nothing to
     // voxelize and the mask simply stays cleared.

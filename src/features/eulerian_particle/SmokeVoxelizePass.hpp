@@ -34,7 +34,10 @@ public:
     struct Config
     {
         // The volume the mask is written into, registered by the owner (SmokeSimulation) as a
-        // persistent R32_UINT volume at the allocated grid size.
+        // persistent R32_UINT volume at the allocated grid size. The CUDA solver imports the same
+        // volume and reads set cells as walls, so this pass's output is what the smoke collides
+        // with; the handoff is ordered by the solver's existing semaphore handshake, which the mask
+        // joins as another named image.
         std::string maskResourceName;
 
         // The scene geometry to voxelize, and where it lives on the GPU. Taken from the same

@@ -42,6 +42,11 @@ struct SmokeFields
     cudaSurfaceObject_t pressure     = 0;  // float
     cudaSurfaceObject_t pressureNext = 0;
     cudaSurfaceObject_t divergence   = 0;  // float
+
+    // Obstacle mask: uint32, non-zero where a cell is inside scene geometry. Rasterized by
+    // SmokeVoxelizePass on the Vulkan side, read-only here. Zero disables collisions entirely, so
+    // a solver with no scene to voxelize runs exactly as it did before the mask existed.
+    cudaSurfaceObject_t obstacle     = 0;  // uint32
 };
 
 cudaError_t launchInjectSources(const SmokeFields &fields, cudaExtent extent, const SmokeSourceParams &source,
@@ -67,6 +72,13 @@ cudaError_t launchAdvectDensity(const SmokeFields &fields, cudaExtent extent, co
 cudaError_t launchApplyBoundaries(const SmokeFields &fields, cudaExtent extent, cudaStream_t stream);
 
 cudaError_t launchClearVolume(cudaSurfaceObject_t surface, cudaExtent extent, int channels, cudaStream_t stream);
+
+// Writes an axis-aligned box of solid cells into a uint32 obstacle mask, and clears every cell
+// outside it. For tests and debugging: in the application the mask is rasterized from real scene
+// geometry by SmokeVoxelizePass, and this would overwrite that. `min` is inclusive and `max`
+// exclusive, both in cells, so an empty or inverted range clears the whole volume.
+cudaError_t launchFillObstacleBox(cudaSurfaceObject_t obstacle, cudaExtent extent, int3 min, int3 max,
+                                  cudaStream_t stream);
 
 cudaError_t launchCopyVolume(cudaSurfaceObject_t destination, cudaSurfaceObject_t source, cudaExtent extent,
                              int channels, cudaStream_t stream);

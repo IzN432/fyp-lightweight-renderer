@@ -64,8 +64,13 @@ struct SmokeSolver::Impl
 {
     // Index order matches kVolumes.
     std::vector<std::unique_ptr<CudaVolume>> volumes;
-    // Same order, cached so the handshake can name every volume in one registry call per step.
+    // Every image in the handshake: the volumes above plus the obstacle mask when there is one.
+    // Cached so the handshake can name them all in one registry call per step.
     std::vector<std::string>                 volumeNames;
+
+    // The obstacle mask, imported read-only. Null when no mask was configured; the kernels take a
+    // zero surface to mean "no obstacles", so nothing else has to branch on it.
+    std::unique_ptr<CudaVolume>              obstacle;
     ResourceRegistry                        *resources = nullptr;
     cudaStream_t                             stream    = nullptr;
     // The sub-region the kernels are told to simulate. Smaller than the allocated texture whenever
@@ -95,6 +100,8 @@ struct SmokeSolver::Impl
         f.pressure     = volumes[4]->surface();
         f.pressureNext = volumes[5]->surface();
         f.divergence   = volumes[6]->surface();
+        // Zero when no mask was imported, which every kernel reads as fully fluid.
+        f.obstacle     = obstacle ? obstacle->surface() : 0;
         return f;
     }
 
@@ -190,6 +197,22 @@ SmokeSolver::SmokeSolver(ResourceRegistry &resources, const VulkanContext &conte
         m_impl->volumeNames.push_back(name);
     }
 
+    if (!m_config.obstacleMaskName.empty())
+    {
+        // Imported but never registered or written here: the voxelizer owns the contents. It joins
+        // the handshake name list all the same, which is what orders the Vulkan-side rasterization
+        // before the kernels that read it — and, on the way back, the kernels before the next
+        // frame's rasterization.
+        m_impl->obstacle = std::make_unique<CudaVolume>(resources, context, m_config.obstacleMaskName);
+        const cudaExtent maskExtent = m_impl->obstacle->extent();
+        if (maskExtent.width != m_config.extent.width || maskExtent.height != m_config.extent.height ||
+            maskExtent.depth != m_config.extent.depth)
+            throw std::invalid_argument("SmokeSolver: the obstacle mask '" + m_config.obstacleMaskName +
+                                        "' must be allocated at the same extent as the simulation volumes, because "
+                                        "the kernels index both with the same cell coordinates");
+        m_impl->volumeNames.push_back(m_config.obstacleMaskName);
+    }
+
     m_impl->extent = cudaExtent{m_config.activeExtent.width, m_config.activeExtent.height,
                                 m_config.activeExtent.depth};
     m_impl->device = m_impl->volumes.front()->device();
@@ -221,6 +244,10 @@ void SmokeSolver::reset()
     // Imported Vulkan memory starts undefined, so zero every field before accumulating into it.
     // This clears the whole allocation rather than just the active region: cells outside it are
     // never written again, and the renderer must not sample stale density from a previous size.
+    //
+    // Only the owned fields: the obstacle mask is deliberately absent from this loop, since the
+    // voxelizer rewrites it from the live scene every frame and clearing it here would drop one
+    // frame of collisions on every reset.
     for (std::unique_ptr<CudaVolume> &volume : m_impl->volumes)
         checkCuda(launchClearVolume(volume->surface(), volume->extent(), volume->channels(), m_impl->stream),
                   "launchClearVolume");
@@ -379,6 +406,8 @@ bool SmokeSolver::stepPending() const
 {
     return m_impl && m_impl->pending;
 }
+
+const CudaVolume *SmokeSolver::obstacleVolume() const { return m_impl ? m_impl->obstacle.get() : nullptr; }
 
 const CudaVolume &SmokeSolver::densityVolume() const { return *m_impl->volumes[2]; }
 const CudaVolume &SmokeSolver::velocityVolume() const { return *m_impl->volumes[0]; }

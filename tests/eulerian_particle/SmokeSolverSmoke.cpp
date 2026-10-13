@@ -1,8 +1,11 @@
 #include "core/framegraph/ResourceRegistry.hpp"
 #include "core/vulkan/Allocator.hpp"
 #include "core/vulkan/VulkanContext.hpp"
+#include "features/eulerian_particle/CudaVolume.hpp"
+#include "features/eulerian_particle/CudaVolumeKernels.cuh"
 #include "features/eulerian_particle/SmokeSolver.hpp"
 
+#include <cuda_runtime.h>
 #include <vulkan/vulkan.h>
 
 #include <algorithm>
@@ -93,6 +96,35 @@ double interiorDivergence(const std::vector<float> &velocity, VkExtent3D extent)
                 largest = std::max(largest, std::fabs(d));
             }
     return largest;
+}
+
+// Largest density anywhere in an inclusive-min/exclusive-max cell range, and the total above a
+// given height. Together they say whether an obstacle both stayed empty and actually blocked the
+// plume rather than merely deflecting it around the edges.
+double maxDensityInBox(const std::vector<float> &density, VkExtent3D extent, int3 boxMin, int3 boxMax)
+{
+    double largest = 0.0;
+    for (int z = boxMin.z; z < boxMax.z; ++z)
+        for (int y = boxMin.y; y < boxMax.y; ++y)
+            for (int x = boxMin.x; x < boxMax.x; ++x)
+            {
+                const std::size_t index =
+                    (static_cast<std::size_t>(z) * extent.height + static_cast<std::size_t>(y)) * extent.width +
+                    static_cast<std::size_t>(x);
+                largest = std::max(largest, static_cast<double>(std::fabs(density[index])));
+            }
+    return largest;
+}
+
+double densityAbove(const std::vector<float> &density, VkExtent3D extent, uint32_t minY)
+{
+    double total = 0.0;
+    for (uint32_t z = 0; z < extent.depth; ++z)
+        for (uint32_t y = minY; y < extent.height; ++y)
+            for (uint32_t x = 0; x < extent.width; ++x)
+                total += static_cast<double>(
+                    density[(static_cast<std::size_t>(z) * extent.height + y) * extent.width + x]);
+    return total;
 }
 
 } // namespace
@@ -249,6 +281,93 @@ int main()
                 rejected = true;
             }
             check(rejected, "an active extent larger than the allocation is refused");
+        }
+
+        std::cout << "an obstacle mask blocks the plume\n";
+        {
+            // A lid across the whole box a third of the way up, with the emitter underneath it.
+            // Spanning x and z fully means there is no way around it: smoke found above the lid, or
+            // inside it, can only have leaked through, which is exactly what the no-flux condition
+            // in the divergence and projection stages exists to prevent.
+            lr::eulerian::SmokeSolver::Config blocked = config;
+            blocked.namePrefix                        = "blocked";
+            blocked.obstacleMaskName                  = "blocked_obstacle_mask";
+            // The solver imports the mask but never registers it: that is the voxelizer's job in
+            // the application, and the test's here.
+            resources.registerPersistentVolume(blocked.obstacleMaskName, VK_FORMAT_R32_UINT,
+                                               VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                               blocked.extent, true);
+
+            lr::eulerian::SmokeSolver blockedSolver(resources, context, blocked);
+            const lr::eulerian::CudaVolume *mask = blockedSolver.obstacleVolume();
+            check(mask != nullptr, "naming a mask imports it into the solver");
+
+            const int3 slabMin{0, 16, 0};
+            const int3 slabMax{static_cast<int>(blocked.extent.width), 20,
+                               static_cast<int>(blocked.extent.depth)};
+            if (mask != nullptr)
+            {
+                // Written on the null stream and synchronized, so the mask is in place before the
+                // first step reads it. The solver's own handshake orders the per-frame case.
+                if (cudaSetDevice(mask->device()) != cudaSuccess)
+                    throw std::runtime_error("cudaSetDevice failed");
+                if (lr::eulerian::launchFillObstacleBox(mask->surface(), mask->extent(), slabMin, slabMax,
+                                                        nullptr) != cudaSuccess)
+                    throw std::runtime_error("launchFillObstacleBox failed");
+                if (cudaDeviceSynchronize() != cudaSuccess)
+                    throw std::runtime_error("cudaDeviceSynchronize failed");
+
+                const std::vector<uint32_t> readBack = mask->downloadUint();
+                const std::size_t           lidCell =
+                    (static_cast<std::size_t>(0) * blocked.extent.height + 17) * blocked.extent.width + 5;
+                check(readBack[lidCell] == 1u, "the mask reads back as set inside the slab");
+                check(readBack[0] == 0u, "and clear outside it");
+            }
+
+            // Long enough that an unblocked plume would be well past the lid: the unobstructed run
+            // above raised its centroid within 60 steps at this timestep.
+            for (int frame = 0; frame < 120; ++frame)
+            {
+                blockedSolver.step(1.0f / 60.0f);
+                blockedSolver.endStep();
+            }
+            blockedSolver.waitForStep();
+
+            const std::vector<float> density = blockedSolver.densityVolume().download();
+            check(allFinite(density), "the field stays finite with an obstacle in it");
+            check(sum(density) > 0.0, "the source below the lid still injects density");
+            check(maxDensityInBox(density, blocked.extent, slabMin, slabMax) == 0.0,
+                  "no density is left inside the obstacle");
+
+            // Some leakage through a one-cell-thick region of a collocated grid is expected; what
+            // matters is that the lid holds back the great majority of the plume rather than
+            // letting it stream through.
+            const double above = densityAbove(density, blocked.extent, 20);
+            check(above < 0.02 * sum(density), "almost no density gets past the lid");
+
+            // The control: the same solver with the mask cleared must let the plume straight
+            // through, which is what proves the checks above are measuring the obstacle and not
+            // some other limit on how far the smoke rises.
+            if (mask != nullptr)
+            {
+                blockedSolver.reset();
+                if (lr::eulerian::launchFillObstacleBox(mask->surface(), mask->extent(), int3{0, 0, 0},
+                                                        int3{0, 0, 0}, nullptr) != cudaSuccess)
+                    throw std::runtime_error("launchFillObstacleBox failed");
+                if (cudaDeviceSynchronize() != cudaSuccess)
+                    throw std::runtime_error("cudaDeviceSynchronize failed");
+
+                for (int frame = 0; frame < 120; ++frame)
+                {
+                    blockedSolver.step(1.0f / 60.0f);
+                    blockedSolver.endStep();
+                }
+                blockedSolver.waitForStep();
+
+                const std::vector<float> freeDensity = blockedSolver.densityVolume().download();
+                check(densityAbove(freeDensity, blocked.extent, 20) > 0.1 * sum(freeDensity),
+                      "with the mask cleared the plume does rise past that height");
+            }
         }
 
         std::cout << "a solver destroyed mid-step tears down cleanly\n";
