@@ -77,7 +77,7 @@ int main(int argc, char **argv)
         lr::eulerian::SmokeSolver::Config simulation{};
         simulation.extent             = kGridExtent;
         simulation.jacobiIterations   = 32;
-        simulation.step.buoyancy      = 5.0f;
+        simulation.step.buoyancy      = 0.1f;
         simulation.step.densityDamp   = 0.16f;
         simulation.step.velocityDamp  = 0.04f;
         simulation.step.vorticity     = 1.5f;

@@ -405,8 +405,10 @@ void SmokeSimulation::onGUI()
         ImGui::PushID("simulation");
 
         // Buoyancy is per degree above ambient, so its useful range is far smaller than the
-        // per-unit-density force it replaced.
-        ImGui::SliderFloat("Buoyancy", &step.buoyancy, 0.0f, 0.1f, "%.4f");
+        // per-unit-density force it replaced. The max is several times the default rather than
+        // equal to it, so the slider cannot silently clamp a configured value, but stays inside
+        // the range the default Jacobi iteration count still converges over.
+        ImGui::SliderFloat("Buoyancy", &step.buoyancy, 0.0f, 0.5f, "%.4f");
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Upward force per degree above ambient (beta in Fedkiw eq. 8).");
         ImGui::SliderFloat("Gravity", &step.gravity, 0.0f, 20.0f);

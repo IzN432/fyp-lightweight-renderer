@@ -32,7 +32,14 @@ struct SmokeStepParams
     // stall: it rises while it is hot, cools towards ambientTemperature as it goes, and once
     // beta*(T - T_amb) no longer beats alpha*rho it spreads and falls back instead of climbing
     // forever, which is what buoyancy driven by density alone does.
-    float buoyancy      = 0.15f;  // beta, upward force per degree above ambient
+    //
+    // Scale: with the default emitter the gas enters at `temperature` degrees against
+    // `ambientTemperature`, so beta*(T - T_amb) at the base is a few hundred times beta, while
+    // alpha*rho there is only as large as the injected density. beta therefore belongs around
+    // 0.1, not the order-unity value the old per-density force used: 0.1 against a 380 degree
+    // source gives roughly twice the lift needed to carry the smoke's own weight, and the rest
+    // decays as `cooling` closes the gap to ambient.
+    float buoyancy      = 0.1f;   // beta, upward force per degree above ambient
     float gravity       = 1.0f;   // alpha, downward force per unit density
     float ambientTemperature = 20.0f;  // T_amb, the temperature that produces no buoyant force
 

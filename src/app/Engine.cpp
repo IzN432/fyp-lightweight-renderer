@@ -157,7 +157,7 @@ void Engine::run()
     lr::eulerian::SmokeSimulation smokeSimulation(
         {
             .solver = {.jacobiIterations = 40,
-                       .step             = {.buoyancy    = 8.0f,
+                       .step             = {.buoyancy    = 0.1f,
                                             .densityDamp = 0.15f,
                                             .vorticity   = 2.0f},
                        .source           = {.density = 18.0f, .velocity = {0.0f, 5.0f, 0.0f}}},
