@@ -20,10 +20,11 @@ layout(set = 0, binding = 0) uniform FluidParams
     vec4 gravityAndDeltaTime;     // xyz gravity, w timestep
     vec4 boundsMin;               // xyz min, w smoothing radius
     vec4 boundsMax;               // xyz max, w rest density
-    vec4 massRelaxViscosity;      // x mass, y relaxation, z viscosity, w unused
+    vec4 massRelaxViscosity;      // x mass, y relaxation, z viscosity, w particle radius
     vec4 restitutionFrictionSpeed; // x restitution, y friction, z max displacement / h, w unused
     vec4 pressureAndVorticity;    // x pressure k, y delta-q / h, z exponent n, w vorticity epsilon
     uvec4 counts;                 // x particle count, y bucket count, z bucket mask, w iterations
+    uvec4 obstacleGrid;           // xyz active cells, w non-zero when obstacle collision is enabled
 } params;
 
 // Named accessors. The packing above exists to satisfy std140 alignment; the solve reads through
@@ -33,6 +34,7 @@ float restDensity()     { return params.boundsMax.w; }
 float particleMass()    { return params.massRelaxViscosity.x; }
 float relaxation()      { return params.massRelaxViscosity.y; }
 float viscosity()       { return params.massRelaxViscosity.z; }
+float particleRadius()  { return params.massRelaxViscosity.w; }
 float artificialPressureK()        { return params.pressureAndVorticity.x; }
 float artificialPressureDeltaQ()   { return params.pressureAndVorticity.y; }
 float artificialPressureExponent() { return params.pressureAndVorticity.z; }
@@ -47,6 +49,8 @@ vec3  domainMax()       { return params.boundsMax.xyz; }
 uint  particleCount()   { return params.counts.x; }
 uint  bucketCount()     { return params.counts.y; }
 uint  bucketMask()      { return params.counts.z; }
+ivec3 obstacleGridSize() { return ivec3(params.obstacleGrid.xyz); }
+bool  obstaclesEnabled() { return params.obstacleGrid.w != 0u; }
 
 vec3 clampStepDisplacement(vec3 displacement)
 {
@@ -89,6 +93,9 @@ layout(std430, set = 0, binding = 15) buffer SortedParticleCells { ivec4 sortedP
 layout(std430, set = 0, binding = 16) buffer ParticleIds         { uint particleIds[]; };
 layout(std430, set = 0, binding = 17) buffer SortedParticleIds   { uint sortedParticleIds[]; };
 layout(std430, set = 0, binding = 18) buffer Vorticities         { vec4 vorticities[]; };
+// Face normal of the first obstacle hit during this step. Prediction clears it before particles
+// are reordered; apply/finalise then operate in that same reordered index space.
+layout(std430, set = 0, binding = 20) buffer ContactNormals      { vec4 contactNormals[]; };
 
 // Poly6, density only: its gradient vanishes as r approaches zero, so particles sitting on top of
 // each other would feel no separating force.

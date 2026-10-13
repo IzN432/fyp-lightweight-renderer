@@ -120,7 +120,7 @@ __device__ inline bool onOpenFace(int y, GridInfo grid, bool openTop)
 // -------------------------------------------------------------------------------------------
 // Obstacles
 //
-// The mask is a solid (not shell) occupancy volume rasterized by SmokeVoxelizePass: one uint per
+// The mask is a solid (not shell) occupancy volume rasterized by VoxelizePass: one uint per
 // cell, non-zero inside scene geometry. The solver treats a solid cell exactly as it treats the
 // outside of the box — an immovable free-slip wall — so the handling mirrors applyBoundaries: fluid
 // cannot flow into it, pressure takes a zero normal derivative across its face, and nothing is

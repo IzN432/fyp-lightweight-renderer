@@ -1,6 +1,6 @@
 #version 450
 
-// Zeroes the obstacle mask before the voxelizer rasterizes into it. The voxelizer accumulates with
+// Zeroes an obstacle mask before the voxelizer rasterizes into it. The voxelizer accumulates with
 // XOR, so it cannot clear as it goes: a stale cell from last frame would invert this frame's
 // parity for its whole column. The mask is a storage image rather than an attachment, so there is
 // no load-op clear to use and this pass does it explicitly.

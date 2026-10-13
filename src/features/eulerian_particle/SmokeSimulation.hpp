@@ -3,7 +3,7 @@
 #include "features/eulerian_particle/SmokeComponent.hpp"
 #include "features/eulerian_particle/SmokeRenderPass.hpp"
 #include "features/eulerian_particle/SmokeSolver.hpp"
-#include "features/eulerian_particle/SmokeVoxelizePass.hpp"
+#include "features/voxel/VoxelizePass.hpp"
 
 #include <glm/vec3.hpp>
 #include <vulkan/vulkan.h>
@@ -175,7 +175,7 @@ private:
     SmokeRenderPass m_renderPass;
     // Absent when Config::obstacleGeometry names no index buffer, i.e. there is no scene to
     // voxelize. The mask volume is registered either way, so a debug view can always bind it.
-    std::optional<SmokeVoxelizePass> m_voxelizePass;
+    std::optional<VoxelizePass> m_voxelizePass;
 
     SmokeComponent *m_target         = nullptr;
     uint64_t        m_targetRevision = 0;

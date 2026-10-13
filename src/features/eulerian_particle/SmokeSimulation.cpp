@@ -125,7 +125,7 @@ SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, con
     // voxelize and the mask simply stays cleared.
     if (!m_config.obstacleGeometry.indexBufferResourceName.empty())
     {
-        m_voxelizePass.emplace(SmokeVoxelizePass::Config{
+        m_voxelizePass.emplace(VoxelizePass::Config{
             .maskResourceName = maskName,
             .geometry         = m_config.obstacleGeometry,
             // Overwritten by applyVoxelizeBounds() below, as the render pass's box is.
@@ -201,7 +201,7 @@ void SmokeSimulation::applyVoxelizeBounds()
     // which is also the grid the solver is still stepping — so the two stay consistent through a
     // resize without any special handling here.
     const SmokeRenderPass::Config &render    = m_renderPass.config();
-    SmokeVoxelizePass::Config     &voxelize  = m_voxelizePass->config();
+    VoxelizePass::Config          &voxelize  = m_voxelizePass->config();
     voxelize.boundsMin                       = render.boundsMin;
     voxelize.boundsMax                       = render.boundsMax;
     voxelize.gridSize                        = m_gridDirty && m_simulatedExtent.width != 0 ? m_simulatedExtent

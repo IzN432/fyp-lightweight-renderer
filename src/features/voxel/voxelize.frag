@@ -10,8 +10,8 @@
 // standard point-in-polyhedron parity test evaluated for a whole column at once.
 //
 // Why parity rather than marking the covered cell: a surface-only mask is a hollow shell, and the
-// smoke solver would advect density straight through the empty middle of a closed mesh. The solver
-// needs to know which cells are inside the obstacle, not which ones a triangle touched.
+// a volume solver would advect through the empty middle of a closed mesh, while a particle solver
+// could tunnel into it. Consumers need interior occupancy, not only cells touched by triangles.
 //
 // Two consequences worth knowing when reading the mask in RenderDoc:
 //   - Order does not matter. XOR commutes, so overlapping draws and the undefined order of

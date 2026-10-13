@@ -30,7 +30,7 @@ layout(std430, set = 0, binding = 10) readonly buffer SkinJointMatrices
 #define LR_SKIN_JOINT_MATRICES skinJointMatrices.matrices
 #include "../../core/passes/utility/skinning.glslh"
 
-// Mirrors SmokeVoxelizePC in SmokeVoxelizePass.cpp, and the block in smoke_voxelize.frag. Both
+// Mirrors VoxelizePC in VoxelizePass.cpp, and the block in voxelize.frag. Both
 // stages declare the whole struct so their offsets agree.
 layout(push_constant) uniform PC
 {

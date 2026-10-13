@@ -1,4 +1,4 @@
-#include "SmokeVoxelizePass.hpp"
+#include "features/voxel/VoxelizePass.hpp"
 
 #include "core/Paths.hpp"
 
@@ -8,15 +8,15 @@
 #include <stdexcept>
 #include <utility>
 
-namespace lr::eulerian
+namespace lr
 {
 namespace
 {
 
-// Mirrors the push_constant block in smoke_voxelize.vert/.frag. The vertex shader consumes the
+// Mirrors the push_constant block in voxelize.vert/.frag. The vertex shader consumes the
 // transform and the box; the fragment shader consumes the grid size. Both declare the whole struct
 // so their offsets agree, as the geometry pass's shaders do.
-struct alignas(16) SmokeVoxelizePC
+struct alignas(16) VoxelizePC
 {
     glm::mat4 model;
     glm::vec4 boundsMin;
@@ -31,15 +31,15 @@ struct alignas(16) SmokeVoxelizePC
     uint32_t  padding;
 };
 
-static_assert(sizeof(SmokeVoxelizePC) == 144);
+static_assert(sizeof(VoxelizePC) == 144);
 
-// Mirrors the push_constant block in smoke_voxelize_clear.comp.
-struct alignas(16) SmokeVoxelizeClearPC
+// Mirrors the push_constant block in voxelize_clear.comp.
+struct alignas(16) VoxelizeClearPC
 {
     glm::uvec4 gridSize;
 };
 
-// Matches local_size in smoke_voxelize_clear.comp.
+// Matches local_size in voxelize_clear.comp.
 constexpr uint32_t kClearGroupSize = 4;
 
 uint32_t groupCount(uint32_t extent)
@@ -55,33 +55,33 @@ constexpr uint32_t kMaskBinding = 11;
 
 } // namespace
 
-SmokeVoxelizePass::SmokeVoxelizePass(Config config) : m_config(std::move(config))
+VoxelizePass::VoxelizePass(Config config) : m_config(std::move(config))
 {
     if (m_config.maskResourceName.empty())
     {
-        throw std::invalid_argument("SmokeVoxelizePass: maskResourceName is required");
+        throw std::invalid_argument("VoxelizePass: maskResourceName is required");
     }
     if (m_config.geometry.indexBufferResourceName.empty())
     {
-        throw std::invalid_argument("SmokeVoxelizePass: indexBufferResourceName is required");
+        throw std::invalid_argument("VoxelizePass: indexBufferResourceName is required");
     }
 }
 
-void SmokeVoxelizePass::build(FrameGraph &frameGraph, const GpuMeshLayout &layout) const
+void VoxelizePass::build(FrameGraph &frameGraph, const GpuMeshLayout &layout) const
 {
     const ImageHandle mask = frameGraph.image(m_config.maskResourceName);
 
     // The XOR accumulates, so every cell must start at zero. The clear covers the whole allocation
     // rather than the simulated sub-region: a later resize would otherwise grow the grid into cells
     // still holding an old frame's parity and read them as solid.
-    frameGraph.addPass("smoke_voxelize_clear")
+    frameGraph.addPass(m_config.maskResourceName + "_clear")
         .type(PassType::Compute)
-        .computeShader((paths::shaderDir / "smoke_voxelize_clear.comp.spv").string())
-        .pushConstantSize(sizeof(SmokeVoxelizeClearPC), VK_SHADER_STAGE_COMPUTE_BIT)
+        .computeShader((paths::shaderDir / "voxelize_clear.comp.spv").string())
+        .pushConstantSize(sizeof(VoxelizeClearPC), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageImageWrite(0, mask, VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([this](PassContext &context) {
             const VkExtent3D allocated = m_config.allocatedSize;
-            const SmokeVoxelizeClearPC constants{
+            const VoxelizeClearPC constants{
                 .gridSize = glm::uvec4(allocated.width, allocated.height, allocated.depth, 0u),
             };
             context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, constants);
@@ -89,7 +89,7 @@ void SmokeVoxelizePass::build(FrameGraph &frameGraph, const GpuMeshLayout &layou
                                    groupCount(allocated.depth));
         });
 
-    auto pass = frameGraph.addPass("smoke_voxelize").type(PassType::Geometry).vertexLayout(layout);
+    auto pass = frameGraph.addPass(m_config.maskResourceName + "_voxelize").type(PassType::Geometry).vertexLayout(layout);
 
     for (const auto &[binding, bufferName] : m_config.geometry.vertexBufferResourceNames)
     {
@@ -97,8 +97,8 @@ void SmokeVoxelizePass::build(FrameGraph &frameGraph, const GpuMeshLayout &layou
     }
 
     pass.indexBuffer(frameGraph.buffer(m_config.geometry.indexBufferResourceName))
-        .vertShader((paths::shaderDir / "smoke_voxelize.vert.spv").string())
-        .fragShader((paths::shaderDir / "smoke_voxelize.frag.spv").string())
+        .vertShader((paths::shaderDir / "voxelize.vert.spv").string())
+        .fragShader((paths::shaderDir / "voxelize.frag.spv").string())
         // Every triangle must be rasterized regardless of winding: parity counts surface
         // crossings, and discarding back faces would drop exactly the exit crossing that closes
         // each span, leaving every mesh solid from its front face to the far wall of the box.
@@ -117,7 +117,7 @@ void SmokeVoxelizePass::build(FrameGraph &frameGraph, const GpuMeshLayout &layou
         // only in columns that produce no fragments.
         .renderingExtent(ExtentSpec::absolute(std::max(m_config.allocatedSize.width, 1u),
                                               std::max(m_config.allocatedSize.height, 1u)))
-        .pushConstantSize(sizeof(SmokeVoxelizePC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
+        .pushConstantSize(sizeof(VoxelizePC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(7, frameGraph.buffer(m_config.geometry.skinInfluenceEntriesBufferResourceName),
                            VK_SHADER_STAGE_VERTEX_BIT)
         .storageBufferRead(8, frameGraph.buffer(m_config.geometry.skinInfluenceOffsetsBufferResourceName),
@@ -150,7 +150,7 @@ void SmokeVoxelizePass::build(FrameGraph &frameGraph, const GpuMeshLayout &layou
                     continue;
                 }
                 const SceneDraw       draw = m_config.geometry.draws.at(i, m_skinningEnabled);
-                const SmokeVoxelizePC constants{
+                const VoxelizePC constants{
                     .model             = draw.model,
                     .boundsMin         = glm::vec4(m_config.boundsMin, 0.0f),
                     .boundsInvSize     = glm::vec4(1.0f / size, 0.0f),
@@ -168,4 +168,4 @@ void SmokeVoxelizePass::build(FrameGraph &frameGraph, const GpuMeshLayout &layou
         });
 }
 
-} // namespace lr::eulerian
+} // namespace lr
