@@ -161,6 +161,14 @@ std::vector<VkExtent2D> planRenderingExtents(std::span<const PassDesc> passes, V
     std::vector<VkExtent2D> extents(passes.size(), defaultExtent);
     for (size_t passIndex = 0; passIndex < passes.size(); ++passIndex)
     {
+        // An explicit override wins over the attachments: a pass that rasterizes into a storage
+        // image has no attachment to take its size from (see GraphicsState::renderingExtent).
+        if (passes[passIndex].graphics.renderingExtent.has_value())
+        {
+            extents[passIndex] = passes[passIndex].graphics.renderingExtent->resolve(defaultExtent);
+            continue;
+        }
+
         bool       hasAttachment = false;
         ExtentSpec extentSpec    = ExtentSpec::swapchain();
         for (const ImageUse &use : passes[passIndex].imageUses)

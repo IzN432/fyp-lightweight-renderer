@@ -2,10 +2,12 @@
 
 #include "features/eulerian_particle/SmokeRenderPass.hpp"
 #include "features/eulerian_particle/SmokeSolver.hpp"
+#include "features/eulerian_particle/SmokeVoxelizePass.hpp"
 
 #include <glm/vec3.hpp>
 #include <vulkan/vulkan.h>
 
+#include <optional>
 #include <string>
 
 namespace lr
@@ -92,12 +94,24 @@ public:
         // Draws the box as overlay lines. The simulation only contributes the segments; the caller
         // feeds them to the overlay-lines pass.
         bool showBounds = true;
+
+        // Scene geometry to voxelize into the obstacle mask, so smoke can collide with it. Taken
+        // from the same SceneGpu::geometryPassConfig() the G-buffer pass uses. Leave the index
+        // buffer name empty to build no voxelizer at all, which is what the standalone demo does:
+        // it has no SceneGpu to draw from.
+        GeometryPass::Config obstacleGeometry{};
+
+        // Whether the voxelizer runs. The mask is only consumed by the solver once collisions are
+        // wired into the kernels; until then this populates it for inspection.
+        bool voxelizeObstacles = true;
     };
 
     // Registers and imports the solver's volumes; the registry and context must outlive this.
     SmokeSimulation(Config config, ResourceRegistry &resources, const VulkanContext &context);
 
-    void build(FrameGraph &frameGraph) const;
+    // `layout` is the engine's geometry vertex layout, used by the obstacle voxelizer to replay
+    // scene meshes. Required whenever Config::obstacleGeometry names an index buffer.
+    void build(FrameGraph &frameGraph, const GpuMeshLayout *layout = nullptr) const;
 
     // Steps the solver and closes the Vulkan handshake, so the density volume is safe to sample by
     // the time this returns. A no-op while disabled or paused. Applies a pending grid resize first,
@@ -113,6 +127,15 @@ public:
     // Appends the box outline, if "show bounds" is on. Keeps the overlay-lines pass with a single
     // owner: the caller collects segments from every producer and submits them once.
     void appendOverlayLines(OverlayLineBuilder &builder) const;
+
+    // Keeps the voxelizer's draw list in step with the G-buffer's, for the caller's
+    // SceneGpu::onGeometryRebuilt hook. A no-op when no voxelizer was built.
+    void setSceneGeometry(SceneDrawList draws);
+    void setSkinningEnabled(bool enabled);
+
+    // The obstacle mask volume: one R32_UINT cell per grid cell, 1 inside scene geometry. Named
+    // for a debug view or for the solver to import once collisions reach the kernels.
+    std::string obstacleMaskResourceName() const;
 
     bool enabled() const { return m_renderPass.config().enabled; }
     bool paused() const { return m_paused; }
@@ -155,9 +178,16 @@ private:
     // Converts the world-space emitter into the solver's normalized grid units.
     void applySourceParams();
 
+    // Publishes the box and simulated extent into the voxelizer, so the mask it rasterizes always
+    // covers the same cells the solver is stepping.
+    void applyVoxelizeBounds();
+
     Config          m_config;
     SmokeSolver     m_solver;
     SmokeRenderPass m_renderPass;
+    // Absent when Config::obstacleGeometry names no index buffer, i.e. there is no scene to
+    // voxelize. The mask volume is registered either way, so a debug view can always bind it.
+    std::optional<SmokeVoxelizePass> m_voxelizePass;
 
     // The grid the fields currently in the volumes were simulated on. Compared against the grid
     // the authored box implies to decide whether a restart is owed, so dragging the box away and

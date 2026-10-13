@@ -354,6 +354,7 @@ if(LR_ENABLE_CUDA)
         src/features/eulerian_particle/SmokeRenderPass.cpp
         src/features/eulerian_particle/SmokeSimulation.cpp
         src/features/eulerian_particle/SmokeSolver.cpp
+        src/features/eulerian_particle/SmokeVoxelizePass.cpp
     )
     target_include_directories(lr_eulerian_particle_feature PUBLIC src)
     target_link_libraries(lr_eulerian_particle_feature PUBLIC lr_core CUDA::cudart)
@@ -369,6 +370,9 @@ if(LR_ENABLE_CUDA)
     )
     add_shaders(lr_eulerian_particle_feature
         src/features/eulerian_particle/smoke.frag
+        src/features/eulerian_particle/smoke_voxelize.vert
+        src/features/eulerian_particle/smoke_voxelize.frag
+        src/features/eulerian_particle/smoke_voxelize_clear.comp
     )
 
     # Minimal end-to-end CUDA simulation -> Vulkan volume sampling demo. It deliberately uses a

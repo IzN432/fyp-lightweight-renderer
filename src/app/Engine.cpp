@@ -171,6 +171,10 @@ void Engine::run()
             .outputFormat             = swapchainFormat,
             .sourcePosition           = {0.0f, 0.45f, 0.0f},
             .sourceRadius             = 0.25f,
+            // Voxelizes the same scene geometry the G-buffer draws into an obstacle mask over the
+            // simulation grid, so the smoke has something to collide with. Sharing one config with
+            // GeometryPass is what keeps the two from disagreeing about what the scene contains.
+            .obstacleGeometry         = sceneManager.gpu().geometryPassConfig(),
         },
         viewer.resources(), viewer.context());
 #endif
@@ -320,7 +324,8 @@ void Engine::run()
 #if defined(LR_ENABLE_CUDA)
     // Blends the ray-marched volume over the completed scene but before selection outlines and
     // ImGui. The pass also samples the opaque depth buffer to stop rays at scene geometry.
-    smokeSimulation.build(viewer.frameGraph());
+    const lr::GpuMeshLayout smokeObstacleLayout = lr::conventions::geometryMeshLayout();
+    smokeSimulation.build(viewer.frameGraph(), &smokeObstacleLayout);
 #endif
 
     // Blender's selected-object outline, derived from the picking IDs. Blending into a LOAD
@@ -469,6 +474,11 @@ void Engine::run()
         areaShadowPass.setSceneGeometry(draws);
         areaShadowPass.setLightObjects(gpu.lightObjects());
         setTransparentGeometry(gpu);
+#if defined(LR_ENABLE_CUDA)
+        // The obstacle voxelizer replays the same list, so the smoke collides with the geometry
+        // actually on screen rather than with whatever the scene held at startup.
+        smokeSimulation.setSceneGeometry(draws);
+#endif
     }));
     appConnections.push_back(sceneManager.gpu().onLightsUploaded([&](uint32_t numLights) {
         pbrPass.setNumLights(numLights);

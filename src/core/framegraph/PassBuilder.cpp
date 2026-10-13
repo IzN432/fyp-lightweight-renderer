@@ -189,6 +189,11 @@ PassBuilder &PassBuilder::renderingLayers(uint32_t count)
     desc().graphics.renderingLayers = count;
     return *this;
 }
+PassBuilder &PassBuilder::renderingExtent(ExtentSpec extent)
+{
+    desc().graphics.renderingExtent = extent;
+    return *this;
+}
 
 PassBuilder &PassBuilder::sampledImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages,
                                        SamplerDesc sampler)

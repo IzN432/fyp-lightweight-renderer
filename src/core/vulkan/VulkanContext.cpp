@@ -541,6 +541,9 @@ void VulkanContext::createDevice()
     features2.pNext                      = &features12;
     features2.features.samplerAnisotropy = VK_TRUE;
     features2.features.geometryShader    = VK_TRUE;
+    // Needed by passes whose fragment shader writes a storage image rather than an attachment —
+    // the smoke voxelizer rasterizes meshes straight into its obstacle volume.
+    features2.features.fragmentStoresAndAtomics = VK_TRUE;
 
     // Wireframe (VK_POLYGON_MODE_LINE) passes need fillModeNonSolid; enable it only where supported.
     VkPhysicalDeviceFeatures supported{};

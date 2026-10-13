@@ -146,6 +146,11 @@ struct GraphicsState
     // Number of layers addressed through a layered attachment view. Vertex/geometry shaders select
     // the destination with gl_Layer; 1 preserves ordinary non-layered rendering.
     uint32_t                       renderingLayers  = 1;
+    // Render area, viewport and scissor for a pass whose size is not implied by an attachment.
+    // Attachments normally fix all three, but a pass that rasterizes into a storage image has none
+    // to take them from and would otherwise inherit the swapchain's size. Unset means "use the
+    // attachments", which is every ordinary pass.
+    std::optional<ExtentSpec>      renderingExtent;
 };
 
 inline constexpr uint32_t noDescriptorBinding = std::numeric_limits<uint32_t>::max();

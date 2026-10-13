@@ -1,0 +1,27 @@
+#version 450
+
+// Zeroes the obstacle mask before the voxelizer rasterizes into it. The voxelizer accumulates with
+// XOR, so it cannot clear as it goes: a stale cell from last frame would invert this frame's
+// parity for its whole column. The mask is a storage image rather than an attachment, so there is
+// no load-op clear to use and this pass does it explicitly.
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+
+layout(set = 0, binding = 0, r32ui) uniform writeonly uimage3D obstacleMask;
+
+layout(push_constant) uniform PC
+{
+    uvec4 gridSize;
+} pc;
+
+void main()
+{
+    uvec3 cell = gl_GlobalInvocationID;
+    // The volume is allocated at the per-axis limit and only a sub-region is simulated, so the
+    // dispatch is sized to the allocation and the tail threads of a partial group drop out here.
+    if (any(greaterThanEqual(cell, pc.gridSize.xyz)))
+    {
+        return;
+    }
+    imageStore(obstacleMask, ivec3(cell), uvec4(0u));
+}

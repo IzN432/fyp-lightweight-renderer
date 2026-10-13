@@ -40,6 +40,10 @@ public:
     PassBuilder &depth(bool test, bool write, VkCompareOp compare = VK_COMPARE_OP_LESS);
     PassBuilder &depthBias(float constant, float slope = 0.0f);
     PassBuilder &renderingLayers(uint32_t count);
+    // Sets the render area, viewport and scissor explicitly, for a graphics pass that has no
+    // attachment to imply them — one rasterizing into a storage image. Ordinary passes take all
+    // three from their attachments and must not set this.
+    PassBuilder &renderingExtent(ExtentSpec extent);
 
     PassBuilder &sampledImage(uint32_t binding, ImageHandle image, VkShaderStageFlags stages,
                               SamplerDesc sampler = {});

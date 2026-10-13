@@ -1,5 +1,6 @@
 #include "features/eulerian_particle/SmokeSimulation.hpp"
 
+#include "core/framegraph/ResourceRegistry.hpp"
 #include "core/passes/overlaylines/OverlayLine.hpp"
 
 #include <glm/ext/matrix_transform.hpp>
@@ -7,6 +8,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
+#include <utility>
 
 namespace lr::eulerian
 {
@@ -20,6 +23,9 @@ constexpr float kMaxStepSeconds = 1.0f / 30.0f;
 
 // The solver enforces a one-cell boundary, so a shorter axis would have no interior to simulate.
 constexpr uint32_t kMinCellsPerAxis = 3;
+
+// Suffix on the solver's name prefix, so the mask sits alongside the fields it will constrain.
+constexpr const char *kObstacleMaskSuffix = "_obstacle_mask";
 
 constexpr OverlayLineStyle kBoundsStyle{
     .color           = {0.45f, 0.70f, 0.95f},
@@ -78,12 +84,83 @@ SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, con
     // publish the box it implies. The render pass must never be left mapping a box the solver is
     // not simulating.
     m_simulatedExtent = gridExtent();
+
+    // One mask cell per allocated grid cell. Registered unconditionally, so a debug view can bind
+    // it whether or not there is any scene geometry to voxelize this run. STORAGE is what the
+    // voxelizer and its clear write through; SAMPLED lets a debug view read it. Exported like the
+    // solver's own fields so the collision work can import it into CUDA without re-registering.
+    const uint32_t   limit = std::max(m_config.maxCellsPerAxis, kMinCellsPerAxis);
+    const VkExtent3D allocated{limit, limit, limit};
+    const std::string maskName = obstacleMaskResourceName();
+    if (resources.getImage(maskName) == nullptr)
+    {
+        resources.registerPersistentVolume(maskName, VK_FORMAT_R32_UINT,
+                                           VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, allocated, true);
+    }
+
+    // No index buffer means no scene to replay — the standalone demo — so there is nothing to
+    // voxelize and the mask simply stays cleared.
+    if (!m_config.obstacleGeometry.indexBufferResourceName.empty())
+    {
+        m_voxelizePass.emplace(SmokeVoxelizePass::Config{
+            .maskResourceName = maskName,
+            .geometry         = m_config.obstacleGeometry,
+            // Overwritten by applyVoxelizeBounds() below, as the render pass's box is.
+            .boundsMin        = m_config.boundsCentre,
+            .boundsMax        = m_config.boundsCentre,
+            .gridSize         = m_simulatedExtent,
+            .allocatedSize    = allocated,
+            .enabled          = m_config.voxelizeObstacles,
+        });
+    }
+
     applyBounds();
     applySourceParams();
 }
 
-void SmokeSimulation::build(FrameGraph &frameGraph) const
+std::string SmokeSimulation::obstacleMaskResourceName() const
 {
+    return m_config.solver.namePrefix + kObstacleMaskSuffix;
+}
+
+void SmokeSimulation::setSceneGeometry(SceneDrawList draws)
+{
+    if (m_voxelizePass) m_voxelizePass->setSceneGeometry(std::move(draws));
+}
+
+void SmokeSimulation::setSkinningEnabled(bool enabled)
+{
+    if (m_voxelizePass) m_voxelizePass->setSkinningEnabled(enabled);
+}
+
+void SmokeSimulation::applyVoxelizeBounds()
+{
+    if (!m_voxelizePass) return;
+
+    // The same box the renderer maps the volume onto, so the mask's cells line up with the density
+    // cells exactly. While a resize is pending that is the box the live fields were simulated in,
+    // which is also the grid the solver is still stepping — so the two stay consistent through a
+    // resize without any special handling here.
+    const SmokeRenderPass::Config &render    = m_renderPass.config();
+    SmokeVoxelizePass::Config     &voxelize  = m_voxelizePass->config();
+    voxelize.boundsMin                       = render.boundsMin;
+    voxelize.boundsMax                       = render.boundsMax;
+    voxelize.gridSize                        = m_gridDirty && m_simulatedExtent.width != 0 ? m_simulatedExtent
+                                                                                           : gridExtent();
+    voxelize.enabled                         = m_config.voxelizeObstacles;
+}
+
+void SmokeSimulation::build(FrameGraph &frameGraph, const GpuMeshLayout *layout) const
+{
+    if (m_voxelizePass)
+    {
+        if (layout == nullptr)
+        {
+            throw std::invalid_argument(
+                "SmokeSimulation::build: obstacle geometry was configured, so the geometry vertex layout is required");
+        }
+        m_voxelizePass->build(frameGraph, *layout);
+    }
     m_renderPass.build(frameGraph);
 }
 
@@ -151,6 +228,9 @@ void SmokeSimulation::applyBounds()
     render.uvScale        = glm::vec3(static_cast<float>(cells.width), static_cast<float>(cells.height),
                                       static_cast<float>(cells.depth)) /
                      allocated;
+
+    // The voxelizer rasterizes into the same box, so it follows every change to it.
+    applyVoxelizeBounds();
 }
 
 void SmokeSimulation::applySourceParams()
