@@ -18,8 +18,13 @@ layout(set = 0, binding = 0) uniform CameraUbo
 
 layout(location = 0) out vec3 outColor;
 
+layout(push_constant) uniform PC
+{
+    float visualScale;
+} pc;
+
 void main()
 {
     outColor = inColor;
-    gl_Position = cameraUbo.viewProj * vec4(inPosition, 1.0);
+    gl_Position = cameraUbo.viewProj * vec4(inPosition * pc.visualScale, 1.0);
 }

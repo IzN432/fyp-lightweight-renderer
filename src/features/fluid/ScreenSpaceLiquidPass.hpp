@@ -51,6 +51,8 @@ public:
         float     indexOfRefraction  = 1.333f;
         float     absorptionScale    = 1.35f;
         glm::vec3 liquidColor{0.25f, 0.5f, 0.95f};
+        // Presentation-only uniform scale for solver positions and particle radii.
+        float renderScale = 1.0f;
     };
 
     ScreenSpaceLiquidPass(Config config, ResourceRegistry &resources);
@@ -63,6 +65,8 @@ public:
     // Kernel width in world units; the shader projects it per pixel. Kept in sync with the
     // simulation's particle size, so it changes whenever spacing or render scale do.
     void setSmoothingRadius(float radius);
+    void setRenderScale(float scale) { m_config.renderScale = std::max(scale, 0.0f); }
+    float renderScale() const { return m_config.renderScale; }
     void updateParams();
 
     uint32_t      particleCount() const { return m_particleCount; }

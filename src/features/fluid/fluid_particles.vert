@@ -21,9 +21,15 @@ layout(set = 0, binding = 0) uniform CameraUbo
 
 layout(location = 0) out vec3 outNormal;
 
+layout(push_constant) uniform PC
+{
+    vec4 albedo;
+    float visualScale;
+} pc;
+
 void main()
 {
-    const vec3 worldPos = inCenterAndRadius.xyz + inPosition * inCenterAndRadius.w;
+    const vec3 worldPos = (inCenterAndRadius.xyz + inPosition * inCenterAndRadius.w) * pc.visualScale;
     outNormal = normalize(inNormal);
     gl_Position = cameraUbo.viewProj * vec4(worldPos, 1.0);
 }

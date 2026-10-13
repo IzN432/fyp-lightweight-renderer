@@ -61,8 +61,8 @@ public:
         float     viscosity                = 1e-5f;
         float     maxSpeedInRadiiPerSecond = 20.0f;
 
-        // Buffer capacity. Unlike the CPU solver this is fixed at construction: every buffer below
-        // is allocated for it, and setParticles() rejects more than this many.
+        // Initial buffer capacity. reserve() grows every dependent GPU buffer when a later source
+        // layout requires more particles.
         uint32_t maxParticles = 65536;
 
         // Fixed simulation timestep, independent of frame rate, and the ceiling on steps per frame
@@ -75,8 +75,7 @@ public:
 
         // Buckets in the neighbour hash. Rounded up to a power of two so the shader wraps with a
         // mask. Zero derives it from maxParticles at the same two-buckets-per-particle load factor
-        // the CPU solver uses; unlike there it cannot be resized per step, because the buffer is
-        // allocated once.
+        // the CPU solver uses. An automatically derived table grows along with particle capacity.
         uint32_t hashBuckets = 0;
 
         // Name the solved particles are published under, in ParticleGpuData layout, for the
@@ -97,6 +96,9 @@ public:
 
     // Uploads initial positions and zeroes their velocities. Safe to call again to reset.
     void setParticles(std::span<const glm::vec3> positions);
+    // Grows every particle-dependent GPU buffer. Existing frame-graph bindings are refreshed via
+    // ResourceRegistry generations; capacity never shrinks during a run.
+    void reserve(uint32_t particleCapacity);
 
     // Advances by whole fixed steps covering frameDeltaTime, matching FluidDemo's fixed-step
     // accumulator. The work is recorded when the graph executes, not here.

@@ -40,10 +40,12 @@ void FluidEngine::run()
     CameraUploader cameraUploader(viewer.resources());
 
     // -------------------------------------------------------------------------
-    // GPU simulation with an exact 50 x 56 x 50 lattice: 140,000 particles, matching the
-    // large real-time examples used to evaluate PBF-scale behaviour.
+    // Two independently positioned 25 x 56 x 50 cuboids, still totalling exactly 140,000
+    // particles. Repartitioning this array changes the starting layout without touching the
+    // solver; buffers grow automatically if the UI later configures more particles.
     // -------------------------------------------------------------------------
-    FluidSimulation simulation({.sourceDimensions = {50, 56, 50},
+    FluidSimulation simulation({.sources          = {{{25, 56, 50}, {-14.5f, 0.5f, -14.5f}},
+                                                     {{25, 56, 50}, {2.0f, 0.5f, -14.5f}}},
                                 .maxParticles     = 140000,
                                 .startPaused      = false},
                                viewer.resources());
@@ -53,7 +55,8 @@ void FluidEngine::run()
                             .swapchainFormat            = viewer.swapchainFormat(),
                             .maxParticleCount           = simulation.capacity(),
                             .instanceBufferResourceName = simulation.particleBufferName(),
-                            .instanceStride             = sizeof(ParticleGpuData)},
+                            .instanceStride             = sizeof(ParticleGpuData),
+                            .visualScale                = simulation.unitCubeRenderScale()},
                            viewer.resources());
 
     simulation.build(viewer.frameGraph());
@@ -61,10 +64,11 @@ void FluidEngine::run()
 
     // Frame the simulation domain so the fluid is on screen without the user having to orbit to
     // find it.
-    const glm::vec3 center = (simulation.boundsMin() + simulation.boundsMax()) * 0.5f;
+    const float     renderScale = renderer.visualScale();
+    const glm::vec3 center      = (simulation.boundsMin() + simulation.boundsMax()) * 0.5f * renderScale;
     cameraController.setOrbitState({
         .target    = center,
-        .radius    = glm::length(simulation.boundsMax() - simulation.boundsMin()) * 1.8f,
+        .radius    = glm::length(simulation.boundsMax() - simulation.boundsMin()) * renderScale * 1.8f,
         .azimuth   = 0.6f,
         .elevation = 0.35f,
     });
@@ -98,8 +102,13 @@ void FluidEngine::run()
         // Placed explicitly so the panel starts on screen rather than wherever a stale imgui.ini
         // left it.
         ImGui::SetNextWindowPos(ImVec2(16.0f, 16.0f), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(340.0f, 300.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(400.0f, 620.0f), ImGuiCond_FirstUseEver);
         ImGui::Begin("Fluid");
+        float visualScale = renderer.visualScale();
+        if (ImGui::DragFloat("Simulation Render Scale", &visualScale, 0.001f, 0.001f, 10.0f, "%.4f"))
+        {
+            renderer.setVisualScale(visualScale);
+        }
         simulation.onGUI();
         ImGui::End();
     }));

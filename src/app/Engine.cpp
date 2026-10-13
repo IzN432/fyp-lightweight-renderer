@@ -276,8 +276,10 @@ void Engine::run()
         .particleBufferResourceName = fluidSimulation.particleBufferName(),
         .maxParticles               = fluidSimulation.capacity(),
         .ownsParticleBuffer         = false,
-        .smoothingRadius = lr::screen_space_liquid::smoothingRadiusFromParticle(fluidSimulation.particleRadius()),
+        .smoothingRadius = lr::screen_space_liquid::smoothingRadiusFromParticle(fluidSimulation.particleRadius()) *
+                           fluidSimulation.unitCubeRenderScale(),
         .liquidColor     = fluidSimulation.particleColor(),
+        .renderScale     = fluidSimulation.unitCubeRenderScale(),
     }, viewer.resources());
     liquidPass.setParticleCount(fluidSimulation.particleCount());
     fluidSimulation.build(viewer.frameGraph());
@@ -503,6 +505,11 @@ void Engine::run()
         ImGui::SetNextWindowPos(ImVec2(topLeft.x, topLeft.y + panelSize.y), ImGuiCond_Once);
         ImGui::SetNextWindowSize(panelSize, ImGuiCond_Once);
         ImGui::Begin("Fluid");
+        float fluidRenderScale = liquidPass.renderScale();
+        if (ImGui::DragFloat("Simulation Render Scale", &fluidRenderScale, 0.001f, 0.001f, 10.0f, "%.4f"))
+        {
+            liquidPass.setRenderScale(fluidRenderScale);
+        }
         fluidSimulation.onGUI();
         ImGui::End();
 
@@ -597,7 +604,8 @@ void Engine::run()
         fluidSimulation.update(dt);
         liquidPass.setParticleCount(fluidSimulation.particleCount());
         liquidPass.setSmoothingRadius(
-            lr::screen_space_liquid::smoothingRadiusFromParticle(fluidSimulation.particleRadius()));
+            lr::screen_space_liquid::smoothingRadiusFromParticle(fluidSimulation.particleRadius()) *
+            liquidPass.renderScale());
         liquidPass.setLiquidColor(fluidSimulation.particleColor());
     }));
 

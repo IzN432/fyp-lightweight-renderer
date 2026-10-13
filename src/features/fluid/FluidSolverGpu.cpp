@@ -231,6 +231,54 @@ void FluidSolverGpu::setParticles(std::span<const glm::vec3> positions)
     updateParams();
 }
 
+void FluidSolverGpu::reserve(uint32_t particleCapacity)
+{
+    if (particleCapacity <= m_config.maxParticles)
+    {
+        return;
+    }
+
+    Config resizedConfig       = m_config;
+    resizedConfig.maxParticles = particleCapacity;
+    const uint32_t oldBuckets  = resolvedHashBuckets(m_config);
+    const uint32_t newBuckets  = resolvedHashBuckets(resizedConfig);
+
+    const VkBufferUsageFlags storage  = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    const VkBufferUsageFlags uploaded = storage | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    const VkDeviceSize vectorBytes = VkDeviceSize(particleCapacity) * sizeof(glm::vec4);
+    const VkDeviceSize scalarBytes = VkDeviceSize(particleCapacity) * sizeof(float);
+
+    m_resources->replaceStaticBuffer(m_positions, vectorBytes, uploaded);
+    m_resources->replaceStaticBuffer(m_velocities, vectorBytes, uploaded);
+    m_resources->replaceStaticBuffer(m_predicted, vectorBytes, storage);
+    m_resources->replaceStaticBuffer(m_corrections, vectorBytes, storage);
+    m_resources->replaceStaticBuffer(m_densities, scalarBytes, storage);
+    m_resources->replaceStaticBuffer(m_lambdas, scalarBytes, storage);
+    m_resources->replaceStaticBuffer(m_vorticities, vectorBytes, storage);
+    m_resources->replaceStaticBuffer(m_cellParticles, VkDeviceSize(particleCapacity) * sizeof(uint32_t), storage);
+    m_resources->replaceStaticBuffer(m_particleCells, VkDeviceSize(particleCapacity) * sizeof(glm::ivec4), storage);
+    m_resources->replaceStaticBuffer(m_sortedPositions, vectorBytes, storage);
+    m_resources->replaceStaticBuffer(m_sortedVelocities, vectorBytes, storage);
+    m_resources->replaceStaticBuffer(m_sortedPredicted, vectorBytes, storage);
+    m_resources->replaceStaticBuffer(m_sortedParticleCells,
+                                     VkDeviceSize(particleCapacity) * sizeof(glm::ivec4), storage);
+    m_resources->replaceStaticBuffer(m_particleIds, VkDeviceSize(particleCapacity) * sizeof(uint32_t), uploaded);
+    m_resources->replaceStaticBuffer(m_sortedParticleIds,
+                                     VkDeviceSize(particleCapacity) * sizeof(uint32_t), storage);
+    m_resources->replaceStaticBuffer(m_config.particleBufferResourceName,
+                                     VkDeviceSize(particleCapacity) * sizeof(ParticleGpuData),
+                                     storage | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+
+    if (newBuckets != oldBuckets)
+    {
+        m_resources->replaceStaticBuffer(m_cellStarts, VkDeviceSize(newBuckets + 1) * sizeof(uint32_t), storage);
+        m_resources->replaceStaticBuffer(m_cellCounts, VkDeviceSize(newBuckets) * sizeof(uint32_t), storage);
+    }
+
+    m_config.maxParticles = particleCapacity;
+    updateParams();
+}
+
 void FluidSolverGpu::setFixedDeltaTime(float seconds)
 {
     m_fixedDeltaTime = std::max(seconds, 1e-5f);

@@ -15,10 +15,15 @@ namespace lr
 
 namespace
 {
+struct ParticlePushConstants
+{
+    glm::vec4 color;
+    float     visualScale;
+};
 } // namespace
 
 FluidRenderer::FluidRenderer(Config config, ResourceRegistry &registry)
-    : m_config(std::move(config)), m_registry(&registry)
+    : m_config(std::move(config)), m_registry(&registry), m_visualScale(std::max(m_config.visualScale, 0.0f))
 {
     if (m_config.maxParticleCount == 0)
     {
@@ -56,6 +61,8 @@ FluidRenderer::FluidRenderer(Config config, ResourceRegistry &registry)
                                       static_cast<VkDeviceSize>(m_config.maxLineCount) * 2 * sizeof(LineVertex),
                                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 }
+
+void FluidRenderer::setVisualScale(float scale) { m_visualScale = std::max(scale, 0.0f); }
 
 void FluidRenderer::uploadSphereMesh()
 {
@@ -103,7 +110,9 @@ void FluidRenderer::uploadSphereMesh()
 void FluidRenderer::setParticleCount(uint32_t count, const glm::vec3 &color)
 {
     m_particleColor = color;
-    m_instanceCount = std::min(count, m_config.maxParticleCount);
+    // External buffers are owned (and resized) by their producer. The configured maximum only
+    // describes storage allocated by this renderer for the CPU-fed path.
+    m_instanceCount = m_ownsInstanceBuffer ? std::min(count, m_config.maxParticleCount) : count;
 }
 
 void FluidRenderer::setParticles(const std::vector<glm::vec3> &centers, float radius, const glm::vec3 &color)
@@ -204,7 +213,8 @@ void FluidRenderer::build(FrameGraph &frameGraph)
         .vertexLayout(particleBindings, particleAttributes)
         .vertShader((paths::shaderDir / "fluid_particles.vert.spv").string())
         .fragShader((paths::shaderDir / "fluid_particles.frag.spv").string())
-        .pushConstantSize(sizeof(glm::vec4), VK_SHADER_STAGE_FRAGMENT_BIT)
+        .pushConstantSize(sizeof(ParticlePushConstants),
+                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
         .vertexBuffer(0, frameGraph.buffer(m_fluidSphereVertices))
         .vertexBuffer(1, frameGraph.buffer(m_config.instanceBufferResourceName))
@@ -218,8 +228,9 @@ void FluidRenderer::build(FrameGraph &frameGraph)
             {
                 return;
             }
-            context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_FRAGMENT_BIT,
-                                        glm::vec4(m_particleColor, 0.0f));
+            const ParticlePushConstants constants{glm::vec4(m_particleColor, 0.0f), m_visualScale};
+            context.cmd().pushConstants(context.pipelineLayout(),
+                                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, constants);
             context.cmd().drawIndexed(m_sphereIndexCount, m_instanceCount);
         });
 
@@ -241,6 +252,7 @@ void FluidRenderer::build(FrameGraph &frameGraph)
         .vertexLayout(lineBindings, lineAttributes)
         .vertShader((paths::shaderDir / "fluid_lines.vert.spv").string())
         .fragShader((paths::shaderDir / "fluid_lines.frag.spv").string())
+        .pushConstantSize(sizeof(float), VK_SHADER_STAGE_VERTEX_BIT)
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
         .vertexBuffer(0, frameGraph.buffer(m_fluidLineVertices))
         .depth(true, true)
@@ -250,6 +262,7 @@ void FluidRenderer::build(FrameGraph &frameGraph)
         .execute([this](PassContext &context) {
             if (m_lineVertexCount > 0)
             {
+                context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT, m_visualScale);
                 context.cmd().draw(m_lineVertexCount, 1);
             }
         });

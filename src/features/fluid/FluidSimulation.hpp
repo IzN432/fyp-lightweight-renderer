@@ -16,17 +16,28 @@ namespace lr
 class FluidSimulation
 {
 public:
+    struct CuboidSource
+    {
+        // Number of particles along each axis. The total simulation particle count is the sum of
+        // the products of these dimensions across all configured sources.
+        glm::uvec3 dimensions{1, 1, 1};
+        // World-space centre of the first (minimum-corner) particle in this source lattice.
+        glm::vec3 origin{0.0f};
+    };
+
     struct Config
     {
-        // 50 * 56 * 50 = exactly 140,000 particles.
-        glm::uvec3 sourceDimensions{50, 56, 50};
-        uint32_t   maxParticles = 140000;
+        // Sources can be split into independently positioned cuboids without changing the solver.
+        // The default remains the original 50 * 56 * 50 = 140,000-particle block.
+        std::vector<CuboidSource> sources{{{50, 56, 50}, {-14.5f, 0.5f, -14.5f}}};
+        // Initial GPU allocation only. It grows automatically if an edited layout needs more.
+        uint32_t                  maxParticles = 140000;
 
         // Normalized paper units: h = 2 * spacing = 1. This lets the paper's numerical
         // coefficients be used literally instead of inventing a world-scale conversion.
         float particleSpacing      = 0.5f;
         float smoothingRadiusScale = 2.0f;
-        float particleRenderScale  = 0.9f;
+        float particleRenderScale  = 1.25f;
         int   solverIterations     = 8;
         // Equations (13) and (17), used literally in normalized h=1 units.
         float artificialPressureK  = 0.1f;
@@ -53,9 +64,11 @@ public:
     void onGUI();
 
     uint32_t particleCount() const { return m_solver.particleCount(); }
-    uint32_t capacity() const { return m_config.maxParticles; }
+    uint32_t capacity() const { return m_solver.config().maxParticles; }
     uint32_t pendingSteps() const { return m_solver.pendingSteps(); }
     float    particleRadius() const { return m_config.particleRadius(); }
+    // Uniform presentation scale whose largest domain dimension is exactly one world unit.
+    float unitCubeRenderScale() const;
 
     const glm::vec3   &particleColor() const { return m_config.particleColor; }
     const glm::vec3   &boundsMin() const { return m_config.boundsMin; }
@@ -70,6 +83,8 @@ private:
     Config         m_config;
     FluidSolverGpu m_solver;
     bool           m_singleStepRequested = false;
+    bool           m_sourcesDirty        = false;
+    std::string    m_sourceEditorError;
     std::string    m_error;
 };
 

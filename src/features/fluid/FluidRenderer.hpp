@@ -49,6 +49,9 @@ public:
         // external one. Defaults to sizeof(ParticleGpuData), the layout the GPU solver publishes;
         // when this class owns the buffer it sets the stride to its own narrower record.
         uint32_t instanceStride = 32;
+        // Presentation-only scale applied in the vertex shaders. Solver positions, velocities and
+        // neighbourhood radii remain in their original units.
+        float visualScale = 1.0f;
     };
 
     FluidRenderer(Config config, ResourceRegistry &registry);
@@ -61,6 +64,9 @@ public:
 
     // How many instances of an externally written buffer to draw, and the colour to shade them.
     void setParticleCount(uint32_t count, const glm::vec3 &color);
+
+    void  setVisualScale(float scale);
+    float visualScale() const { return m_visualScale; }
 
     struct Line
     {
@@ -109,6 +115,7 @@ private:
     std::string m_fluidLineVertices;
     uint32_t    m_lineVertexCount = 0;
     glm::vec3   m_particleColor{1.0f};
+    float       m_visualScale = 1.0f;
 };
 
 } // namespace lr

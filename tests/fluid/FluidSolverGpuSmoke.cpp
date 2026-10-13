@@ -197,19 +197,20 @@ try
     }
 
     const std::vector<glm::vec3> initial = makeBlock(makeConfig(1));
-    const FluidSolverGpu::Config config  = makeConfig(static_cast<uint32_t>(initial.size()));
+    const FluidSolverGpu::Config config  = makeConfig(1);
 
     std::printf("fluid GPU solver smoke: %zu particles, h = %.4f, rest density = %.1f\n", initial.size(),
                 static_cast<double>(config.smoothingRadius), static_cast<double>(config.restDensity));
 
     FluidSolverGpu gpu(config, registry);
+    gpu.reserve(static_cast<uint32_t>(initial.size()));
     gpu.setParticles(initial);
 
     FrameGraph graph(context, registry);
     gpu.build(graph);
 
     // The reference, configured from the same values so the two cannot drift apart.
-    FluidSolverCpu cpu(FluidSolverGpu::toCpuConfig(config));
+    FluidSolverCpu cpu(FluidSolverGpu::toCpuConfig(gpu.config()));
     cpu.setParticles(initial);
 
     check(gpu.particleCount() == initial.size(), "GPU particle count matches the upload");
@@ -304,11 +305,12 @@ try
         FluidSolverGpu::Config singleConfig     = config;
         singleConfig.particleBufferResourceName = "fluid_particles_single_step";
         FluidSolverGpu single(singleConfig, registry);
+        single.reserve(static_cast<uint32_t>(initial.size()));
         single.setParticles(initial);
         FrameGraph singleGraph(context, registry);
         single.build(singleGraph);
 
-        FluidSolverCpu reference(FluidSolverGpu::toCpuConfig(singleConfig));
+        FluidSolverCpu reference(FluidSolverGpu::toCpuConfig(single.config()));
         reference.setParticles(initial);
 
         single.stepOnce();

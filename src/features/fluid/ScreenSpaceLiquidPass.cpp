@@ -84,7 +84,10 @@ ScreenSpaceLiquidPass::ScreenSpaceLiquidPass(Config config, ResourceRegistry &re
 
 void ScreenSpaceLiquidPass::setParticleCount(uint32_t count)
 {
-    m_particleCount = particle_billboard::checkedParticleCount(count, m_config.maxParticles);
+    // An external producer owns and may grow its buffer after this pass is constructed.
+    m_particleCount = m_config.ownsParticleBuffer
+                          ? particle_billboard::checkedParticleCount(count, m_config.maxParticles)
+                          : count;
 }
 
 void ScreenSpaceLiquidPass::setParticles(std::span<const ParticleGpuData> particles)
@@ -142,6 +145,7 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
         .vertShader((paths::shaderDir / "fluid_surface.vert.spv").string())
         .fragShader((paths::shaderDir / "fluid_depth.frag.spv").string())
+        .pushConstantSize(sizeof(float), VK_SHADER_STAGE_VERTEX_BIT)
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(1, frameGraph.buffer(m_config.particleBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
@@ -154,6 +158,8 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .execute([this](PassContext &context) {
             if (m_particleCount != 0)
             {
+                context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT,
+                                            m_config.renderScale);
                 context.cmd().draw(6, m_particleCount);
             }
         });
@@ -196,6 +202,7 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
         .vertShader((paths::shaderDir / "fluid_surface.vert.spv").string())
         .fragShader((paths::shaderDir / "fluid_thickness.frag.spv").string())
+        .pushConstantSize(sizeof(float), VK_SHADER_STAGE_VERTEX_BIT)
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .storageBufferRead(1, frameGraph.buffer(m_config.particleBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
@@ -208,6 +215,8 @@ void ScreenSpaceLiquidPass::build(FrameGraph &frameGraph)
         .execute([this](PassContext &context) {
             if (m_particleCount != 0)
             {
+                context.cmd().pushConstants(context.pipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT,
+                                            m_config.renderScale);
                 context.cmd().draw(6, m_particleCount);
             }
         });

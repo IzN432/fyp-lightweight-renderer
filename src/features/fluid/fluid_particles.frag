@@ -12,8 +12,8 @@ layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform PC
 {
-    vec3 albedo; // sRGB, straight from the colour picker
-    float padding;
+    vec4 albedo; // RGB is sRGB, straight from the colour picker
+    float visualScale;
 } pc;
 
 vec3 srgbToLinear(vec3 c)
@@ -30,5 +30,5 @@ void main()
     const float diffuse  = max(dot(normalize(inNormal), lightDir), 0.0);
     // Floor the shading at an ambient term so particles facing away stay visible.
     const float shade = mix(0.45, 1.0, diffuse);
-    outColor = vec4(srgbToLinear(pc.albedo) * shade, 1.0);
+    outColor = vec4(srgbToLinear(pc.albedo.rgb) * shade, 1.0);
 }
