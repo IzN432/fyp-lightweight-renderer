@@ -15,6 +15,16 @@ namespace lr
 namespace
 {
 
+// Blender is Z-up and right-handed; this engine is Y-up (see SphericalCameraController and the
+// shadow passes, which all take +Y as world up). Rotating -90 degrees about X carries Blender's
+// +Z to +Y and its +Y to -Z, which preserves handedness -- negating a single axis instead would
+// mirror the clip. Applies to any direction in Blender's space, so positions and velocities take
+// the same transform.
+glm::vec3 blenderToEngine(const glm::vec3 &v)
+{
+    return {v.x, v.z, -v.y};
+}
+
 std::map<int32_t, std::filesystem::path> numberedFiles(const std::filesystem::path &directory,
                                                        const std::regex            &pattern)
 {
@@ -94,6 +104,8 @@ OfflineFluidSimulation BlenderFluidCacheImporter::importDirectory(const std::fil
         {
             result.setDefaultParticleRadius(0.5f * std::min({frame.voxelSize.x, frame.voxelSize.y, frame.voxelSize.z}));
         }
+        // Centring happens in Blender's own axes, since the domain metadata it uses is authored
+        // there; the up-axis conversion below then applies to the centred result.
         if (options.centerDomain)
         {
             const glm::vec3 domainExtent = glm::vec3(domain.baseResolution) * frame.voxelSize;
@@ -110,6 +122,17 @@ OfflineFluidSimulation BlenderFluidCacheImporter::importDirectory(const std::fil
             for (glm::vec3 &velocity : frame.velocities)
             {
                 velocity *= frame.voxelSize;
+            }
+        }
+        if (options.convertUpAxis)
+        {
+            for (glm::vec3 &position : frame.positions)
+            {
+                position = blenderToEngine(position);
+            }
+            for (glm::vec3 &velocity : frame.velocities)
+            {
+                velocity = blenderToEngine(velocity);
             }
         }
         if (!firstImported)

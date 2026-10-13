@@ -36,6 +36,10 @@ class BlenderUniImporter
 {
 public:
     // Reads Blender's 204-byte gzip-compressed per-frame Mantaflow configuration record.
+    //
+    // Every field is reported exactly as the file stores it, in Blender's own Z-up axes -- this is
+    // a file reader, not a conversion. Callers that place this data in the scene convert it
+    // themselves; BlenderFluidCacheImporter uses only baseResolution, which is axis-agnostic.
     static BlenderFluidDomainConfig importFile(const std::filesystem::path &path);
 };
 

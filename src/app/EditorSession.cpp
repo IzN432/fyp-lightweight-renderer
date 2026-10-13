@@ -825,6 +825,19 @@ private:
         }
         ImGui::SameLine();
 
+        // Baked fluid caches are a separate button rather than extra extensions on Import, since
+        // the cache is a directory and the dialog has to run in directory-selection mode.
+        if (ImGui::Button("Import Fluid..."))
+        {
+            document.openImportFluidCacheDialog();
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Import a baked Blender fluid cache directory (data/*.vdb + config/*.uni).\n"
+                              "A sample DNA helix ships in assets/samples/fluid/dna_helix.");
+        }
+        ImGui::SameLine();
+
         if (ImGui::Button("Add Primitive"))
         {
             ImGui::OpenPopup("add_primitive_list");

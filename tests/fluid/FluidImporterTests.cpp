@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <span>
 #include <vector>
 
 namespace
@@ -88,6 +89,75 @@ void importsUniConfiguration()
     assert(glm::vec3(config.objectTransform * glm::vec4(0, 0, 0, 1)) == glm::vec3(1, 2, 3));
 }
 
+// The DNA helix cache committed under assets/samples/fluid. Unlike the reference Blender bake
+// below, this one ships with the repo, so it exercises the whole directory import path -- numbered
+// file pairing, the UNI configuration, the VDB point grid and the domain re-centring -- on every
+// machine rather than only on the one that produced the bake.
+void importsShippedDnaHelixSample()
+{
+    const std::filesystem::path cache = std::filesystem::path(LR_SAMPLE_ASSET_DIR) / "fluid" / "dna_helix";
+    // Git LFS stores pointer files until fetched, so a shallow checkout has the paths but not the
+    // contents. Skipping keeps that case from reading as an importer failure.
+    if (!std::filesystem::exists(cache / "data" / "fluid_data_0001.vdb"))
+    {
+        return;
+    }
+
+    const lr::OfflineFluidSimulation clip = lr::BlenderFluidCacheImporter::importDirectory(cache);
+    assert(clip.frames().size() == 24);
+    assert(clip.frames().front().sourceFrame == 1);
+    assert(clip.frames().back().sourceFrame == 24);
+    // Velocities are off by default: nothing renders them yet, so a default import must not pay
+    // for the channel.
+    assert(!clip.hasVelocities());
+
+    // Every frame of this clip holds the same rigidly rotating structure.
+    const uint32_t particles = clip.frames().front().particleCount;
+    assert(particles == 1808);
+    for (const auto &frame : clip.frames())
+    {
+        assert(frame.particleCount == particles);
+    }
+
+    // Frame times come from the source frame numbers at the clip's frame rate: 24 frames at 24fps
+    // is one second, with the last sample one frame short of it.
+    assert(std::abs(clip.durationSeconds() - 1.0f) < 1e-5f);
+    assert(std::abs(clip.frames().back().seconds - 23.0f / 24.0f) < 1e-5f);
+
+    // centerDomain puts the domain centre on the object origin, so the helix straddles it.
+    const auto &bounds = clip.frames().front();
+    assert(bounds.boundsMin.x < 0.0f && bounds.boundsMax.x > 0.0f);
+    assert(bounds.boundsMin.y < 0.0f && bounds.boundsMax.y > 0.0f);
+    assert(bounds.boundsMin.z < 0.0f && bounds.boundsMax.z > 0.0f);
+
+    // Derived from the cache's voxel size (1/64), which is what a Blender cache supplies.
+    assert(std::abs(clip.defaultParticleRadius() - 0.5f / 64.0f) < 1e-6f);
+
+    // Up-axis conversion. The cache is authored in Blender's Z-up axes with the helix running
+    // along +Z, so a correct import puts its long axis on the engine's up axis, +Y. Getting this
+    // wrong renders the clip lying on its side, which no other assertion here would catch.
+    const glm::vec3 extent = bounds.boundsMax - bounds.boundsMin;
+    assert(extent.y > extent.x * 1.5f && extent.y > extent.z * 1.5f);
+    // The helix is round about its own axis, so the two cross-axes stay equal under the rotation.
+    assert(std::abs(extent.x - extent.z) < 1e-5f);
+
+    // The conversion must be a rotation, not a mirror or a scale: lengths are preserved and the
+    // mapping is exactly (x, y, z)_blender -> (x, z, -y)_engine. Re-importing with the conversion
+    // off gives the Blender-space reference to compare against.
+    lr::BlenderFluidCacheImporter::Options unconverted;
+    unconverted.convertUpAxis                 = false;
+    const lr::OfflineFluidSimulation blenderSpace =
+        lr::BlenderFluidCacheImporter::importDirectory(cache, unconverted);
+    const std::span<const glm::vec3> converted = clip.framePositions(0);
+    const std::span<const glm::vec3> original  = blenderSpace.framePositions(0);
+    assert(converted.size() == original.size());
+    for (std::size_t i = 0; i < converted.size(); ++i)
+    {
+        assert(converted[i] == glm::vec3(original[i].x, original[i].z, -original[i].y));
+        assert(std::abs(glm::length(converted[i]) - glm::length(original[i])) < 1e-5f);
+    }
+}
+
 void importsReferenceBlenderCacheWhenAvailable()
 {
     const std::filesystem::path cache(R"(C:\Users\seani\AppData\Local\Temp\blender_a37396\cache_fluid_ab1c5968)");
@@ -97,10 +167,15 @@ void importsReferenceBlenderCacheWhenAvailable()
         return;
     }
 
-    const lr::OfflineFluidSimulation vdb = lr::VdbFluidImporter::importFile(singleFrame);
+    lr::VdbFluidImporter::Options vdbOptions;
+    // This cache does carry a velocity attribute; asking for it explicitly is what the default no
+    // longer does, so the channel stays covered.
+    vdbOptions.importVelocities          = true;
+    const lr::OfflineFluidSimulation vdb = lr::VdbFluidImporter::importFile(singleFrame, vdbOptions);
     assert(vdb.frames().size() == 1);
     assert(vdb.framePositions(0).size() == 6776);
     assert(vdb.hasVelocities());
+    assert(!lr::VdbFluidImporter::importFile(singleFrame).hasVelocities());
 
     lr::BlenderFluidCacheImporter::Options options;
     options.firstFrame                    = 1;
@@ -111,6 +186,15 @@ void importsReferenceBlenderCacheWhenAvailable()
     assert(clip.framePositions(0).size() == 6776);
     assert(std::abs(clip.frames()[1].seconds - 1.0f / 24.0f) < 1e-6f);
     assert(clip.frames()[0].boundsMin.x < 0.0f && clip.frames()[0].boundsMax.x > 0.0f);
+
+    // This bake is liquid settling under gravity in a cube domain. After the up-axis conversion
+    // that fall has to show on the engine's up axis: the top of the fluid drops frame over frame
+    // while the horizontal extents stay pinned to the domain walls. Before the conversion existed
+    // this signal appeared on Z, i.e. the fluid drained sideways on screen.
+    assert(clip.frames()[1].boundsMax.y < clip.frames()[0].boundsMax.y);
+    assert(clip.frames()[2].boundsMax.y < clip.frames()[1].boundsMax.y);
+    assert(std::abs(clip.frames()[2].boundsMax.x - clip.frames()[0].boundsMax.x) < 1e-5f);
+    assert(std::abs(clip.frames()[2].boundsMax.z - clip.frames()[0].boundsMax.z) < 1e-5f);
 }
 
 } // namespace
@@ -118,6 +202,7 @@ void importsReferenceBlenderCacheWhenAvailable()
 int main()
 {
     importsUniConfiguration();
+    importsShippedDnaHelixSample();
     importsReferenceBlenderCacheWhenAvailable();
     return 0;
 }

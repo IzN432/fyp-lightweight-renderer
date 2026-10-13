@@ -52,6 +52,12 @@ public:
     void openSaveAsDialog();
     void openImportDialog();
 
+    // Opens a directory picker over baked fluid caches. A Blender cache is a directory of
+    // per-frame files rather than one file (data/fluid_data_####.vdb beside
+    // config/config_####.uni), so this dialog selects a folder where the others select a file. It
+    // starts in assets/samples/fluid so the shipped DNA helix sample is one click away.
+    void openImportFluidCacheDialog();
+
     // Exports every renderable object in the scene as a single Wavefront OBJ: the registered mesh
     // objects the renderer is drawing, each as its own `o` group with its positions baked through
     // its world transform, so the file reproduces the scene as composed rather than stacking every
@@ -74,11 +80,17 @@ public:
     // calls this is disabled otherwise.
     void save();
 
-    // Runs the three file dialogs this class opened, applying whichever one the user confirmed.
+    // Runs the file dialogs this class opened, applying whichever one the user confirmed.
     // Call once per frame, outside any ImGui window — a modal cannot open from inside one.
     void drawDialogs();
 
 private:
+    // Imports a baked fluid cache directory as an immutable clip in the scene's own clip store, on
+    // a new object carrying a Baked FluidComponent. The external path is an import format only: it
+    // is not retained, so the resulting object saves into an .lrscene with no reference back to the
+    // cache. Failures land in importError() like any other import.
+    void importFluidCache(const std::filesystem::path &cacheDirectory);
+
     // Shared tail of load/import: both replace geometry the GPU may still be reading, so both idle
     // the device first (done by the caller, before mutating the scene) and rebuild everything bound
     // against the old contents afterward.

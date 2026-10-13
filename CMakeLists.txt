@@ -395,6 +395,12 @@ add_library(lr_fluid_importers STATIC
 target_include_directories(lr_fluid_importers PUBLIC src)
 target_link_libraries(lr_fluid_importers PUBLIC lr_core glm::glm PRIVATE OpenVDB::openvdb ZLIB::ZLIB)
 
+# Authoring tool for the committed assets/samples/fluid/dna_helix cache. Not part of the renderer
+# and not built by default -- the sample it writes is checked in, so this only runs when that
+# sample needs regenerating.
+add_executable(generate_dna_helix_cache EXCLUDE_FROM_ALL tools/fluid/GenerateDnaHelixCache.cpp)
+target_link_libraries(generate_dna_helix_cache PRIVATE OpenVDB::openvdb ZLIB::ZLIB)
+
 # Scene-authored smoke settings stay available even when the optional CUDA runtime is disabled, so
 # smoke-bearing scene files can still be loaded, inspected and round-tripped on every build.
 add_library(lr_smoke_component_feature STATIC
@@ -483,7 +489,7 @@ add_library(lr_editor_app STATIC
 target_include_directories(lr_editor_app PUBLIC src)
 target_link_libraries(lr_editor_app PUBLIC lr_core lr_arap_feature lr_laplace_beltrami_feature
     lr_rigid_body_feature lr_linear_blend_skinning_feature lr_fluid_simulation
-    lr_scene_serialization imguiFileDialog)
+    lr_fluid_importers lr_scene_serialization imguiFileDialog)
 if(LR_ENABLE_CUDA)
     target_link_libraries(lr_editor_app PUBLIC lr_eulerian_particle_feature)
 endif()
@@ -773,7 +779,8 @@ if(BUILD_TESTING)
     )
     target_link_libraries(fluid_importer_tests PRIVATE lr_fluid_importers ZLIB::ZLIB)
     target_compile_definitions(fluid_importer_tests PRIVATE
-        LR_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/")
+        LR_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/"
+        LR_SAMPLE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/samples/")
     add_test(NAME fluid.importers COMMAND fluid_importer_tests)
 
     add_executable(particle_billboard_tests

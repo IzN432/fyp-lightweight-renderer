@@ -8,6 +8,9 @@
 #include "core/scene/MeshComponent.hpp"
 #include "core/scene/SceneManager.hpp"
 #include "core/scene/SceneObject.hpp"
+#include "core/scene/TransformComponent.hpp"
+#include "features/fluid/FluidComponent.hpp"
+#include "features/fluid/import/BlenderFluidCacheImporter.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 #include "features/rigid_body/PhysicsWorld.hpp"
 
@@ -35,6 +38,7 @@ constexpr const char *kLoadDialog   = "LoadNativeScene";
 constexpr const char *kSaveDialog   = "SaveNativeScene";
 constexpr const char *kImportDialog = "ImportScene";
 constexpr const char *kExportDialog = "ExportGeometry";
+constexpr const char *kFluidCacheDialog = "ImportFluidCache";
 
 constexpr const char *kSceneExtension = ".lrscene";
 constexpr const char *kObjExtension   = ".obj";
@@ -77,6 +81,17 @@ void SceneDocument::openImportDialog()
     dialogConfig.path  = ".";
     dialogConfig.flags = commonDialogFlags() | ImGuiFileDialogFlags_ReadOnlyFileNameField;
     ImGuiFileDialog::Instance()->OpenDialog(kImportDialog, "Import Mesh or Animated Mesh", ".obj,.gltf,.glb",
+                                            dialogConfig);
+}
+
+void SceneDocument::openImportFluidCacheDialog()
+{
+    IGFD::FileDialogConfig dialogConfig;
+    dialogConfig.path  = (paths::assetDir / "samples" / "fluid").string();
+    dialogConfig.flags = commonDialogFlags();
+    // A null filter is ImGuiFileDialog's directory-selection mode: a baked cache is a directory of
+    // per-frame files, so there is no single file to pick.
+    ImGuiFileDialog::Instance()->OpenDialog(kFluidCacheDialog, "Import Baked Fluid Cache (select folder)", nullptr,
                                             dialogConfig);
 }
 
@@ -154,6 +169,44 @@ void SceneDocument::importPrimitive(const std::string &fileName, const std::stri
         m_importError = e.what();
         m_errors.report("Could not add primitive", e.what());
         spdlog::error("Failed to add primitive '{}': {}", objectName, e.what());
+    }
+}
+
+void SceneDocument::importFluidCache(const fs::path &cacheDirectory)
+{
+    try
+    {
+        OfflineFluidSimulation clip = BlenderFluidCacheImporter::importDirectory(cacheDirectory);
+        const std::string      name = clip.name();
+        const uint32_t         particles = clip.maximumParticleCount();
+        const std::size_t      frames    = clip.frames().size();
+
+        // No GPU resource is bound against the clip store, so unlike a geometry import this does
+        // not need a device idle or a geometry rebuild -- the fluid runtime picks the clip up when
+        // the new object is selected.
+        const OfflineFluidSimulationHandle handle = m_sceneManager.offlineFluids().add(std::move(clip));
+
+        SceneObject &object = m_sceneManager.scene().createSceneObject();
+        object.name         = name.empty() ? "Baked Fluid" : name;
+        object.addComponent<TransformComponent>();
+
+        FluidComponent::BakedConfig baked;
+        baked.simulation = handle;
+        object.addComponent<FluidComponent>(baked);
+
+        // The fluid runtime follows the selected object carrying a FluidComponent, so selecting the
+        // import is what starts it playing rather than leaving the user to find it in the hierarchy.
+        m_sceneManager.scene().selectObject(object.id());
+
+        m_editor.onSceneContentChanged();
+        m_importError.clear();
+        spdlog::info("Imported baked fluid cache '{}': {} frames, {} particles per frame", object.name, frames,
+                     particles);
+    } catch (const std::exception &e)
+    {
+        m_importError = e.what();
+        m_errors.report("Could not import fluid cache", e.what());
+        spdlog::error("Failed to import fluid cache '{}': {}", cacheDirectory.string(), e.what());
     }
 }
 
@@ -287,6 +340,16 @@ void SceneDocument::drawDialogs()
                 m_errors.report("Could not import asset", e.what());
                 spdlog::error("Failed to import scene: {}", e.what());
             }
+        }
+        ImGuiFileDialog::Instance()->Close();
+    }
+
+    if (ImGuiFileDialog::Instance()->Display(kFluidCacheDialog, ImGuiWindowFlags_NoCollapse, kDialogSize))
+    {
+        if (ImGuiFileDialog::Instance()->IsOk())
+        {
+            // Directory mode reports the chosen folder through GetCurrentPath; there is no file name.
+            importFluidCache(fs::path(ImGuiFileDialog::Instance()->GetCurrentPath()));
         }
         ImGuiFileDialog::Instance()->Close();
     }
