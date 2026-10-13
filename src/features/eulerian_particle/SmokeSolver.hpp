@@ -23,21 +23,21 @@ namespace lr::eulerian
 // Each step runs the standard incompressible-flow pipeline:
 //   1. inject sources        2. advect velocity      3. apply forces / buoyancy
 //   4. compute divergence    5. Jacobi pressure solve 6. project velocity
-//   7. advect density        8. enforce boundaries
+//   7. advect density and temperature                 8. enforce boundaries
 //
 // The discretization follows Harris, "Fast Fluid Dynamics Simulation on the GPU" (GPU Gems 38):
 // a collocated, cell-centred grid, semi-Lagrangian advection, and a Jacobi-relaxed Poisson
 // pressure solve. Buoyancy and vorticity confinement follow Fedkiw, Stam and Jensen, "Visual
-// Simulation of Smoke" (SIGGRAPH 2001), equations 8 to 11. Three deliberate departures:
+// Simulation of Smoke" (SIGGRAPH 2001), equations 8 to 11: temperature is advected as its own
+// field and drives the plume upward while density weighs it down, so a parcel climbs while it is
+// hot and spreads once it has cooled. Two deliberate departures:
 //
 //   - Collocated, not staggered. The smoke paper uses a MAC grid and says so for a reason — less
 //     artificial dissipation — but the collocated layout is what GPU Gems 38 describes, and it is
 //     what lets every field be one texel per cell in a volume the renderer can sample directly.
 //   - No viscous diffusion stage, since smoke is modelled as inviscid. SmokeStepParams::
 //     velocityDamp is ad-hoc drag, not a solve of the diffusion equation.
-//   - No temperature field. Buoyancy is driven by density alone, so equation 8's T - T_amb term
-//     is read against SmokeStepParams::ambient instead.
-//
+
 // A fourth departure is forced by the finite iteration count: 40 Jacobi sweeps leave a residual,
 // so projectVelocity additionally clamps the normal velocity component on obstacle faces to
 // outward-or-zero. That clamp is in neither paper; it removes the seepage the unconverged solve
@@ -157,12 +157,14 @@ public:
     const CudaVolume &velocityVolume() const;
     const CudaVolume &pressureVolume() const;
     const CudaVolume &divergenceVolume() const;
+    const CudaVolume &temperatureVolume() const;
 
     // Resource names of the volumes a renderer samples.
     std::string densityResourceName() const;
     std::string velocityResourceName() const;
     std::string pressureResourceName() const;
     std::string divergenceResourceName() const;
+    std::string temperatureResourceName() const;
 
 private:
     struct Impl;

@@ -250,6 +250,51 @@ __device__ inline float sampleDensityFluid(cudaSurfaceObject_t density, cudaSurf
     return weight > 1e-4f ? sum / weight : 0.0f;
 }
 
+// sampleDensityFluid for temperature, returning the value *relative to ambient*.
+//
+// Temperature's "nothing here" is ambient rather than zero, so the solid-tap exclusion has to
+// extrapolate towards ambient too. Differencing each tap against ambient first turns that back
+// into the same problem sampleDensityFluid solves — a field whose empty state is zero — and the
+// caller adds ambient back. With every tap solid the result is zero, i.e. exactly ambient.
+__device__ inline float sampleTemperatureFluid(cudaSurfaceObject_t temperature, cudaSurfaceObject_t obstacle,
+                                               float3 p, GridInfo grid, float ambient)
+{
+    const float px = p.x - 0.5f;
+    const float py = p.y - 0.5f;
+    const float pz = p.z - 0.5f;
+    const int   x0 = static_cast<int>(floorf(px));
+    const int   y0 = static_cast<int>(floorf(py));
+    const int   z0 = static_cast<int>(floorf(pz));
+    const float tx = px - static_cast<float>(x0);
+    const float ty = py - static_cast<float>(y0);
+    const float tz = pz - static_cast<float>(z0);
+
+    float sum    = 0.0f;
+    float weight = 0.0f;
+    for (int k = 0; k < 2; ++k)
+    {
+        const float wz = k == 0 ? 1.0f - tz : tz;
+        for (int j = 0; j < 2; ++j)
+        {
+            const float wy = j == 0 ? 1.0f - ty : ty;
+            for (int i = 0; i < 2; ++i)
+            {
+                const float wx = i == 0 ? 1.0f - tx : tx;
+                const int   sx = x0 + i;
+                const int   sy = y0 + j;
+                const int   sz = z0 + k;
+                if (obstacle != 0 && isSolid(obstacle, sx, sy, sz, grid))
+                    continue;
+                const float w = wx * wy * wz;
+                sum += w * (readScalar(temperature, sx, sy, sz, grid) - ambient);
+                weight += w;
+            }
+        }
+    }
+
+    return weight > 1e-4f ? sum / weight : 0.0f;
+}
+
 __global__ void densityTestPattern(cudaSurfaceObject_t surface, cudaExtent extent, float timeSeconds)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -272,7 +317,8 @@ __global__ void densityTestPattern(cudaSurfaceObject_t surface, cudaExtent exten
 // -------------------------------------------------------------------------------------------
 
 __global__ void injectSources(cudaSurfaceObject_t velocity, cudaSurfaceObject_t density,
-                              cudaSurfaceObject_t obstacle, cudaExtent extent, SmokeSourceParams source, float dt)
+                              cudaSurfaceObject_t temperature, cudaSurfaceObject_t obstacle, cudaExtent extent,
+                              SmokeSourceParams source, float dt)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -303,6 +349,14 @@ __global__ void injectSources(cudaSurfaceObject_t velocity, cudaSurfaceObject_t 
 
     const float amount = falloff * dt;
     writeScalar(density, x, y, z, readScalar(density, x, y, z, grid) + source.density * amount);
+
+    // Temperature blends towards the emitter's value rather than accumulating like density does.
+    // Heat is a state the emitter holds its cells at, not a quantity it pours in: an accumulating
+    // rate would let a cell sitting in the source climb without bound, and the buoyancy term would
+    // turn that into an ever-accelerating jet.
+    const float heatBlend = fminf(1.0f, fmaxf(0.0f, source.heating * amount));
+    const float current   = readScalar(temperature, x, y, z, grid);
+    writeScalar(temperature, x, y, z, current + (source.temperature - current) * heatBlend);
 
     float4 v = readVector(velocity, x, y, z, grid);
     v.x += source.velocity[0] * amount;
@@ -374,7 +428,8 @@ __device__ inline float curlMagnitude(cudaSurfaceObject_t velocity, int x, int y
 }
 
 __global__ void applyForces(cudaSurfaceObject_t velocity, cudaSurfaceObject_t density,
-                            cudaSurfaceObject_t obstacle, cudaExtent extent, SmokeStepParams params)
+                            cudaSurfaceObject_t temperature, cudaSurfaceObject_t obstacle, cudaExtent extent,
+                            SmokeStepParams params)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -389,10 +444,13 @@ __global__ void applyForces(cudaSurfaceObject_t velocity, cudaSurfaceObject_t de
         return;
 
     const float    d    = readScalar(density, x, y, z, grid);
+    const float    t    = readScalar(temperature, x, y, z, grid);
     float4         v    = readVector(velocity, x, y, z, grid);
 
-    // Smoke rises where it is denser than the ambient medium and sinks under its own weight.
-    v.y += (params.buoyancy * (d - params.ambient) - params.gravity * d) * params.dt;
+    // Fedkiw et al. equation 8: hot gas rises, smoke falls under its own weight. The two terms
+    // oppose each other, so a parcel climbs only while its heat beats its mass and settles once
+    // advectTemperature has cooled it back towards ambient.
+    v.y += (params.buoyancy * (t - params.ambientTemperature) - params.gravity * d) * params.dt;
 
     if (params.vorticity > 0.0f)
     {
@@ -674,12 +732,62 @@ __global__ void advectDensity(cudaSurfaceObject_t velocity, cudaSurfaceObject_t 
 }
 
 // -------------------------------------------------------------------------------------------
+// 7b. Temperature advection
+// -------------------------------------------------------------------------------------------
+
+__global__ void advectTemperature(cudaSurfaceObject_t velocity, cudaSurfaceObject_t temperature,
+                                  cudaSurfaceObject_t temperatureNext, cudaSurfaceObject_t obstacle,
+                                  cudaExtent extent, SmokeStepParams params)
+{
+    const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    const uint32_t z = blockIdx.z * blockDim.z + threadIdx.z;
+    if (outside(x, y, z, extent))
+        return;
+
+    const GridInfo grid = gridInfo(extent);
+    const int      ix   = static_cast<int>(x);
+    const int      iy   = static_cast<int>(y);
+    const int      iz   = static_cast<int>(z);
+
+    // An obstacle is a wall at room temperature, not a cold void. Holding it at ambient is what
+    // keeps it neutral in the buoyancy term: zeroing it instead would make every wall a heat sink
+    // that reads as (0 - T_amb) < 0, i.e. a downward force on the smoke touching it.
+    if (isSolid(obstacle, ix, iy, iz, grid))
+    {
+        writeScalar(temperatureNext, ix, iy, iz, params.ambientTemperature);
+        return;
+    }
+
+    const float4 v    = readVector(velocity, ix, iy, iz, grid);
+    const float3 back = make_float3((static_cast<float>(x) + 0.5f) - v.x * params.dt,
+                                    (static_cast<float>(y) + 0.5f) - v.y * params.dt,
+                                    (static_cast<float>(z) + 0.5f) - v.z * params.dt);
+
+    // Backtrace about the ambient offset rather than the raw value, so the solid taps this drops
+    // extrapolate to "ambient air continues" instead of to zero. Same argument as
+    // sampleDensityFluid, with a non-zero base: a wall must not cool the gas beside it.
+    const float relative = sampleTemperatureFluid(temperature, obstacle, back, grid, params.ambientTemperature);
+
+    // Newton cooling towards ambient. Applied as a fraction of the remaining gap per second, so it
+    // approaches ambient without crossing it however large dt is.
+    float value = params.ambientTemperature + relative;
+    if (params.cooling > 0.0f)
+    {
+        const float keep = fmaxf(0.0f, 1.0f - params.cooling * params.dt);
+        value            = params.ambientTemperature + relative * keep;
+    }
+    writeScalar(temperatureNext, x, y, z, value);
+}
+
+// -------------------------------------------------------------------------------------------
 // 8. Boundary conditions
 // -------------------------------------------------------------------------------------------
 
 __global__ void applyBoundaries(cudaSurfaceObject_t velocity, cudaSurfaceObject_t density,
-                                cudaSurfaceObject_t pressure, cudaSurfaceObject_t obstacle, cudaExtent extent,
-                                bool openTop)
+                                cudaSurfaceObject_t temperature, cudaSurfaceObject_t pressure,
+                                cudaSurfaceObject_t obstacle, cudaExtent extent, bool openTop,
+                                float ambientTemperature)
 {
     const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -700,6 +808,7 @@ __global__ void applyBoundaries(cudaSurfaceObject_t velocity, cudaSurfaceObject_
     {
         writeVector(velocity, ix, iy, iz, make_float4(0.0f, 0.0f, 0.0f, 0.0f));
         writeScalar(density, ix, iy, iz, 0.0f);
+        writeScalar(temperature, ix, iy, iz, ambientTemperature);
         return;
     }
 
@@ -743,6 +852,9 @@ __global__ void applyBoundaries(cudaSurfaceObject_t velocity, cudaSurfaceObject_
 
     writeScalar(pressure, ix, iy, iz, readScalar(pressure, nx, ny, nz, grid));
     writeScalar(density, ix, iy, iz, readScalar(density, nx, ny, nz, grid));
+    // Temperature mirrors inward like density, which is the adiabatic wall: no heat flows through
+    // the box's sides, so the border carries whatever the interior beside it holds.
+    writeScalar(temperature, ix, iy, iz, readScalar(temperature, nx, ny, nz, grid));
 }
 
 __global__ void clearVolume(cudaSurfaceObject_t surface, cudaExtent extent, int channels)
@@ -793,6 +905,17 @@ __global__ void copyVolume(cudaSurfaceObject_t destination, cudaSurfaceObject_t 
         writeScalar(destination, x, y, z, readScalar(source, x, y, z, grid));
 }
 
+__global__ void fillScalar(cudaSurfaceObject_t surface, cudaExtent extent, float value)
+{
+    const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    const uint32_t z = blockIdx.z * blockDim.z + threadIdx.z;
+    if (outside(x, y, z, extent))
+        return;
+
+    writeScalar(surface, x, y, z, value);
+}
+
 // u = (0, exp(-(x - centre)^2 / falloff), 0). See launchFillShearField for why.
 __global__ void fillShearField(cudaSurfaceObject_t velocity, cudaExtent extent, float centre, float falloff)
 {
@@ -818,8 +941,8 @@ cudaError_t launchDensityTestPattern(cudaSurfaceObject_t surface, cudaExtent ext
 cudaError_t launchInjectSources(const SmokeFields &fields, cudaExtent extent, const SmokeSourceParams &source,
                                float dt, cudaStream_t stream)
 {
-    injectSources<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.obstacle, extent,
-                                                          source, dt);
+    injectSources<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.temperature,
+                                                          fields.obstacle, extent, source, dt);
     return cudaGetLastError();
 }
 
@@ -833,8 +956,8 @@ cudaError_t launchAdvectVelocity(const SmokeFields &fields, cudaExtent extent, f
 cudaError_t launchApplyForces(const SmokeFields &fields, cudaExtent extent, const SmokeStepParams &params,
                               cudaStream_t stream)
 {
-    applyForces<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.obstacle, extent,
-                                                        params);
+    applyForces<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.temperature,
+                                                        fields.obstacle, extent, params);
     return cudaGetLastError();
 }
 
@@ -867,10 +990,27 @@ cudaError_t launchAdvectDensity(const SmokeFields &fields, cudaExtent extent, co
     return cudaGetLastError();
 }
 
-cudaError_t launchApplyBoundaries(const SmokeFields &fields, cudaExtent extent, bool openTop, cudaStream_t stream)
+cudaError_t launchApplyBoundaries(const SmokeFields &fields, cudaExtent extent, bool openTop,
+                                  float ambientTemperature, cudaStream_t stream)
 {
-    applyBoundaries<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.pressure,
-                                                            fields.obstacle, extent, openTop);
+    applyBoundaries<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.density, fields.temperature,
+                                                            fields.pressure, fields.obstacle, extent, openTop,
+                                                            ambientTemperature);
+    return cudaGetLastError();
+}
+
+cudaError_t launchAdvectTemperature(const SmokeFields &fields, cudaExtent extent, const SmokeStepParams &params,
+                                    cudaStream_t stream)
+{
+    advectTemperature<<<gridFor(extent), kBlock, 0, stream>>>(fields.velocity, fields.temperature,
+                                                              fields.temperatureNext, fields.obstacle, extent,
+                                                              params);
+    return cudaGetLastError();
+}
+
+cudaError_t launchFillScalar(cudaSurfaceObject_t surface, cudaExtent extent, float value, cudaStream_t stream)
+{
+    fillScalar<<<gridFor(extent), kBlock, 0, stream>>>(surface, extent, value);
     return cudaGetLastError();
 }
 

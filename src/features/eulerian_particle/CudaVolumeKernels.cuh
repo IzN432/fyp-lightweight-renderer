@@ -24,9 +24,30 @@ cudaError_t launchDensityTestPattern(cudaSurfaceObject_t surface, cudaExtent ext
 struct SmokeStepParams
 {
     float dt            = 1.0f / 60.0f;
-    float buoyancy      = 1.0f;  // upward force per unit density (per cell, see above)
-    float ambient       = 0.0f;  // density that produces no buoyant force
-    float gravity       = 0.0f;  // downward force per unit density, applied with buoyancy
+
+    // Buoyancy, Fedkiw et al. equation 8: f = -alpha*rho*z_hat + beta*(T - T_amb)*z_hat.
+    //
+    // Temperature is what lifts the plume and density is what weighs it down, so the two terms
+    // pull against each other rather than both scaling with the smoke. That is what makes a plume
+    // stall: it rises while it is hot, cools towards ambientTemperature as it goes, and once
+    // beta*(T - T_amb) no longer beats alpha*rho it spreads and falls back instead of climbing
+    // forever, which is what buoyancy driven by density alone does.
+    float buoyancy      = 0.15f;  // beta, upward force per degree above ambient
+    float gravity       = 1.0f;   // alpha, downward force per unit density
+    float ambientTemperature = 20.0f;  // T_amb, the temperature that produces no buoyant force
+
+    // Fraction of the gap to ambientTemperature closed per second, so the plume loses its lift as
+    // it rises. Zero holds the injected heat forever, which reverts to a plume that never stalls.
+    //
+    // The default is tuned against the default emitter and buoyancy: 380 degrees above ambient,
+    // losing about two thirds of that per second, which carries a plume up a 48-cell box in a
+    // couple of seconds and leaves it spreading rather than still accelerating. Raising it stalls
+    // the plume lower, and the buoyancy coefficient has to come up with it to keep the same reach.
+    //
+    // Both are bounded above by the pressure solve, not by taste: a faster plume needs more Jacobi
+    // iterations to stay divergence-free, and past roughly twice these values the default 40 sweeps
+    // visibly stop converging.
+    float cooling       = 1.0f;
     // Ad-hoc drag, not viscosity: the solver has no diffusion stage, because smoke is modelled
     // with the inviscid Euler equations. This is a plain per-second decay on the velocity field.
     float velocityDamp  = 0.0f;  // fraction of velocity removed per second
@@ -48,13 +69,20 @@ struct SmokeStepParams
     bool  openTop       = false;
 };
 
-// A spherical source splatted into the density and velocity fields each step.
+// A spherical source splatted into the density, temperature and velocity fields each step.
 struct SmokeSourceParams
 {
     float centre[3] = {0.5f, 0.15f, 0.5f};  // normalized grid position
     float radius    = 0.08f;                // normalized against the grid's largest axis
     float density   = 1.0f;                 // density injected per second
     float velocity[3] = {0.0f, 1.0f, 0.0f}; // velocity injected per second
+
+    // The temperature the emitter drives its cells towards, as an absolute value rather than a
+    // rate: injection blends towards it so a cell cannot be heated past the emitter however long
+    // it sits there, which an accumulating rate would allow.
+    float temperature = 400.0f;
+    // Fraction of the gap to `temperature` closed per second inside the emitter.
+    float heating     = 8.0f;
 };
 
 // Fields the solver reads and writes. Velocity and density are double-buffered because advection
@@ -66,6 +94,10 @@ struct SmokeFields
     cudaSurfaceObject_t velocityNext = 0;
     cudaSurfaceObject_t density      = 0;  // float
     cudaSurfaceObject_t densityNext  = 0;
+    // Temperature, advected alongside density and read by the buoyancy term. Double-buffered for
+    // the same reason density is: its advection reads the whole field while writing it.
+    cudaSurfaceObject_t temperature     = 0;  // float
+    cudaSurfaceObject_t temperatureNext = 0;
     cudaSurfaceObject_t pressure     = 0;  // float
     cudaSurfaceObject_t pressureNext = 0;
     cudaSurfaceObject_t divergence   = 0;  // float
@@ -104,11 +136,27 @@ cudaError_t launchProjectVelocity(const SmokeFields &fields, cudaExtent extent, 
 cudaError_t launchAdvectDensity(const SmokeFields &fields, cudaExtent extent, const SmokeStepParams &params,
                                cudaStream_t stream);
 
+// Advects temperature along the projected velocity field and relaxes it towards
+// SmokeStepParams::ambientTemperature at the cooling rate. Reads `temperature`, writes
+// `temperatureNext`, so the caller swaps afterwards exactly as it does for density.
+//
+// Obstacle cells are held at ambient rather than at zero: they are walls at room temperature, and
+// zeroing them would make every obstacle a cold sink that the buoyancy term reads as downward
+// force on the smoke beside it.
+cudaError_t launchAdvectTemperature(const SmokeFields &fields, cudaExtent extent, const SmokeStepParams &params,
+                                    cudaStream_t stream);
+
 // Clamps the one-cell border: velocity reflects to no-slip and pressure/density mirror inward.
 // With `openTop` the top face instead copies the interior outward, so flow and smoke leave there.
-cudaError_t launchApplyBoundaries(const SmokeFields &fields, cudaExtent extent, bool openTop, cudaStream_t stream);
+cudaError_t launchApplyBoundaries(const SmokeFields &fields, cudaExtent extent, bool openTop,
+                                  float ambientTemperature, cudaStream_t stream);
 
 cudaError_t launchClearVolume(cudaSurfaceObject_t surface, cudaExtent extent, int channels, cudaStream_t stream);
+
+// launchClearVolume for a single-channel field that resets to something other than zero, which is
+// what the temperature field needs: an empty simulation is at ambient, not at absolute zero, and
+// clearing it to zero would make the whole box read as ice-cold air on the first step.
+cudaError_t launchFillScalar(cudaSurfaceObject_t surface, cudaExtent extent, float value, cudaStream_t stream);
 
 // Writes an axis-aligned box of solid cells into a uint32 obstacle mask, and clears every cell
 // outside it. For tests and debugging: in the application the mask is rasterized from real scene

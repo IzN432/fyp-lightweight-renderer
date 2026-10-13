@@ -400,9 +400,19 @@ void SmokeSimulation::onGUI()
     {
         ImGui::PushID("simulation");
 
-        ImGui::SliderFloat("Buoyancy", &step.buoyancy, 0.0f, 20.0f);
+        // Buoyancy is per degree above ambient, so its useful range is far smaller than the
+        // per-unit-density force it replaced.
+        ImGui::SliderFloat("Buoyancy", &step.buoyancy, 0.0f, 0.1f, "%.4f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Upward force per degree above ambient (beta in Fedkiw eq. 8).");
         ImGui::SliderFloat("Gravity", &step.gravity, 0.0f, 20.0f);
-        ImGui::SliderFloat("Ambient", &step.ambient, 0.0f, 5.0f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Downward force per unit density (alpha in Fedkiw eq. 8).");
+        ImGui::SliderFloat("Ambient Temp", &step.ambientTemperature, -50.0f, 200.0f, "%.0f");
+        ImGui::SliderFloat("Cooling", &step.cooling, 0.0f, 20.0f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Fraction of the gap to ambient the gas loses per second.\n"
+                              "Zero keeps the plume hot, so it never stalls.");
         ImGui::SliderFloat("Dissipation", &step.densityDamp, 0.0f, 5.0f);
         ImGui::SliderFloat("Velocity Damp", &step.velocityDamp, 0.0f, 5.0f);
         ImGui::SliderFloat("Vorticity", &step.vorticity, 0.0f, 10.0f);
@@ -426,6 +436,10 @@ void SmokeSimulation::onGUI()
         SmokeSourceParams &source = m_solver.sourceParams();
         ImGui::SliderFloat("Density", &source.density, 0.0f, 50.0f);
         ImGui::SliderFloat3("Velocity", source.velocity, -100.0f, 100.0f);
+        ImGui::SliderFloat("Temperature", &source.temperature, -50.0f, 1000.0f, "%.0f");
+        ImGui::SliderFloat("Heating", &source.heating, 0.0f, 40.0f);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("How fast emitter cells reach the temperature above.");
 
         // World-space, so these survive moving and resizing the box; the normalized values the
         // kernel wants are derived from them every step.

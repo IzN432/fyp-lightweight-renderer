@@ -79,8 +79,8 @@ public:
         glm::vec3 boundsCentre{0.0f, 1.5f, 0.0f};
 
         // Per-axis cell limit. Also the allocated volume size, so raising it costs memory on every
-        // field whether or not the grid is ever grown into it: the seven volumes total 13 floats
-        // per cell, i.e. ~50 MiB at 100 cells per axis and ~104 MiB at 128.
+        // field whether or not the grid is ever grown into it: the nine volumes total 15 floats
+        // per cell, i.e. ~57 MiB at 100 cells per axis and ~120 MiB at 128.
         uint32_t maxCellsPerAxis = 100;
 
         // Render-pass hookups. The defaults match the editor's frame graph.

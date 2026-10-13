@@ -34,9 +34,9 @@ struct VolumeSpec
     VkFormat    format;
 };
 
-// The seven volumes the pipeline needs. Velocity and density are double-buffered because
-// semi-Lagrangian advection reads the whole field while writing it; pressure is double-buffered
-// for the Jacobi sweeps. Divergence is written once per step and only read afterwards.
+// The nine volumes the pipeline needs. Velocity, density and temperature are double-buffered
+// because semi-Lagrangian advection reads the whole field while writing it; pressure is
+// double-buffered for the Jacobi sweeps. Divergence is written once per step and only read after.
 constexpr VolumeSpec kVolumes[] = {
     {"_velocity", VK_FORMAT_R32G32B32A32_SFLOAT},
     {"_velocity_next", VK_FORMAT_R32G32B32A32_SFLOAT},
@@ -45,6 +45,22 @@ constexpr VolumeSpec kVolumes[] = {
     {"_pressure", VK_FORMAT_R32_SFLOAT},
     {"_pressure_next", VK_FORMAT_R32_SFLOAT},
     {"_divergence", VK_FORMAT_R32_SFLOAT},
+    {"_temperature", VK_FORMAT_R32_SFLOAT},
+    {"_temperature_next", VK_FORMAT_R32_SFLOAT},
+};
+
+// Indices into kVolumes, so the surface wiring and the copy-backs cannot drift apart.
+enum VolumeIndex : std::size_t
+{
+    kVelocity = 0,
+    kVelocityNext,
+    kDensity,
+    kDensityNext,
+    kPressure,
+    kPressureNext,
+    kDivergence,
+    kTemperature,
+    kTemperatureNext,
 };
 
 // The one-cell boundary the solver enforces has to leave an interior to simulate.
@@ -93,13 +109,15 @@ struct SmokeSolver::Impl
     SmokeFields fields() const
     {
         SmokeFields f{};
-        f.velocity     = volumes[0]->surface();
-        f.velocityNext = volumes[1]->surface();
-        f.density      = volumes[2]->surface();
-        f.densityNext  = volumes[3]->surface();
-        f.pressure     = volumes[4]->surface();
-        f.pressureNext = volumes[5]->surface();
-        f.divergence   = volumes[6]->surface();
+        f.velocity        = volumes[kVelocity]->surface();
+        f.velocityNext    = volumes[kVelocityNext]->surface();
+        f.density         = volumes[kDensity]->surface();
+        f.densityNext     = volumes[kDensityNext]->surface();
+        f.pressure        = volumes[kPressure]->surface();
+        f.pressureNext    = volumes[kPressureNext]->surface();
+        f.divergence      = volumes[kDivergence]->surface();
+        f.temperature     = volumes[kTemperature]->surface();
+        f.temperatureNext = volumes[kTemperatureNext]->surface();
         // Zero when no mask was imported, which every kernel reads as fully fluid.
         f.obstacle     = obstacle ? obstacle->surface() : 0;
         return f;
@@ -248,9 +266,22 @@ void SmokeSolver::reset()
     // Only the owned fields: the obstacle mask is deliberately absent from this loop, since the
     // voxelizer rewrites it from the live scene every frame and clearing it here would drop one
     // frame of collisions on every reset.
-    for (std::unique_ptr<CudaVolume> &volume : m_impl->volumes)
-        checkCuda(launchClearVolume(volume->surface(), volume->extent(), volume->channels(), m_impl->stream),
+    for (std::size_t index = 0; index < m_impl->volumes.size(); ++index)
+    {
+        CudaVolume &volume = *m_impl->volumes[index];
+        // Temperature's empty state is ambient, not zero: an idle box holds room-temperature air.
+        // Clearing it to zero would make the whole grid read as far below ambient, and the
+        // buoyancy term would turn that into a box-wide downdraft on the first step.
+        if (index == kTemperature || index == kTemperatureNext)
+        {
+            checkCuda(launchFillScalar(volume.surface(), volume.extent(), m_config.step.ambientTemperature,
+                                       m_impl->stream),
+                      "launchFillScalar(temperature)");
+            continue;
+        }
+        checkCuda(launchClearVolume(volume.surface(), volume.extent(), volume.channels(), m_impl->stream),
                   "launchClearVolume");
+    }
 
     // reset() is a setup call rather than a per-frame one, so it is allowed to block: callers
     // expect the fields to read as zero the moment it returns.
@@ -322,26 +353,36 @@ void SmokeSolver::step()
     // 6. Pressure projection — subtract the pressure gradient to make the velocity divergence-free.
     checkCuda(launchProjectVelocity(fields, extent, m_config.step.openTop, stream), "launchProjectVelocity");
 
-    // 7. Density advection along the now-incompressible velocity field.
+    // 7. Density advection along the now-incompressible velocity field, then temperature along the
+    //    same field. Temperature carries the cooling that makes the plume stall, so it has to be
+    //    transported by the projected velocity rather than the pre-projection one.
     checkCuda(launchAdvectDensity(fields, extent, m_config.step, stream), "launchAdvectDensity");
     std::swap(fields.density, fields.densityNext);
 
+    checkCuda(launchAdvectTemperature(fields, extent, m_config.step, stream), "launchAdvectTemperature");
+    std::swap(fields.temperature, fields.temperatureNext);
+
     // 8. Boundary conditions, applied last so the border is consistent with what the renderer
     //    samples and with what the next step's stencils read.
-    checkCuda(launchApplyBoundaries(fields, extent, m_config.step.openTop, stream), "launchApplyBoundaries");
+    checkCuda(launchApplyBoundaries(fields, extent, m_config.step.openTop, m_config.step.ambientTemperature,
+                                    stream),
+              "launchApplyBoundaries");
 
     // The swaps above are local aliases, so copy whatever ended up current back into the volume
     // the renderer samples. A real pipeline would instead publish the resource name that holds the
     // live field; copying keeps the registry's "smoke_density"/"smoke_velocity" names authoritative.
-    if (fields.density != m_impl->volumes[2]->surface())
-        checkCuda(launchCopyVolume(m_impl->volumes[2]->surface(), fields.density, extent, 1, stream),
+    if (fields.density != m_impl->volumes[kDensity]->surface())
+        checkCuda(launchCopyVolume(m_impl->volumes[kDensity]->surface(), fields.density, extent, 1, stream),
                   "launchCopyVolume(density)");
-    if (fields.velocity != m_impl->volumes[0]->surface())
-        checkCuda(launchCopyVolume(m_impl->volumes[0]->surface(), fields.velocity, extent, 4, stream),
+    if (fields.velocity != m_impl->volumes[kVelocity]->surface())
+        checkCuda(launchCopyVolume(m_impl->volumes[kVelocity]->surface(), fields.velocity, extent, 4, stream),
                   "launchCopyVolume(velocity)");
-    if (fields.pressure != m_impl->volumes[4]->surface())
-        checkCuda(launchCopyVolume(m_impl->volumes[4]->surface(), fields.pressure, extent, 1, stream),
+    if (fields.pressure != m_impl->volumes[kPressure]->surface())
+        checkCuda(launchCopyVolume(m_impl->volumes[kPressure]->surface(), fields.pressure, extent, 1, stream),
                   "launchCopyVolume(pressure)");
+    if (fields.temperature != m_impl->volumes[kTemperature]->surface())
+        checkCuda(launchCopyVolume(m_impl->volumes[kTemperature]->surface(), fields.temperature, extent, 1, stream),
+                  "launchCopyVolume(temperature)");
 
     // No host wait: the stream signals `toVulkan` when the kernels above retire, and endStep()
     // submits the Vulkan wait that orders them before anything that samples the volumes.
@@ -409,14 +450,16 @@ bool SmokeSolver::stepPending() const
 
 const CudaVolume *SmokeSolver::obstacleVolume() const { return m_impl ? m_impl->obstacle.get() : nullptr; }
 
-const CudaVolume &SmokeSolver::densityVolume() const { return *m_impl->volumes[2]; }
-const CudaVolume &SmokeSolver::velocityVolume() const { return *m_impl->volumes[0]; }
-const CudaVolume &SmokeSolver::pressureVolume() const { return *m_impl->volumes[4]; }
-const CudaVolume &SmokeSolver::divergenceVolume() const { return *m_impl->volumes[6]; }
+const CudaVolume &SmokeSolver::densityVolume() const { return *m_impl->volumes[kDensity]; }
+const CudaVolume &SmokeSolver::velocityVolume() const { return *m_impl->volumes[kVelocity]; }
+const CudaVolume &SmokeSolver::pressureVolume() const { return *m_impl->volumes[kPressure]; }
+const CudaVolume &SmokeSolver::divergenceVolume() const { return *m_impl->volumes[kDivergence]; }
+const CudaVolume &SmokeSolver::temperatureVolume() const { return *m_impl->volumes[kTemperature]; }
 
 std::string SmokeSolver::densityResourceName() const { return m_config.namePrefix + "_density"; }
 std::string SmokeSolver::velocityResourceName() const { return m_config.namePrefix + "_velocity"; }
 std::string SmokeSolver::pressureResourceName() const { return m_config.namePrefix + "_pressure"; }
 std::string SmokeSolver::divergenceResourceName() const { return m_config.namePrefix + "_divergence"; }
+std::string SmokeSolver::temperatureResourceName() const { return m_config.namePrefix + "_temperature"; }
 
 } // namespace lr::eulerian

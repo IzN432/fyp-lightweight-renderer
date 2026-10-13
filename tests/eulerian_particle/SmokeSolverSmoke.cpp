@@ -170,7 +170,14 @@ int main()
         lr::eulerian::SmokeSolver::Config config{};
         config.extent           = VkExtent3D{32, 48, 32};
         config.jacobiIterations = 40;
-        config.step.buoyancy    = 8.0f;
+        // Buoyancy is now per degree above ambient rather than per unit density, so the coefficient
+        // is much smaller: the default emitter sits 380 degrees above ambient. 0.15 is what carries
+        // the plume to the top of this 48-cell box while it is still hot enough to vent, which the
+        // open-top checks below need, without driving velocities past what 40 Jacobi sweeps can
+        // keep divergence-free. Cooling is left at its default, so the plume still stalls rather
+        // than climbing forever -- the behaviour those checks distinguish from a lid turning it
+        // back.
+        config.step.buoyancy    = 0.15f;
         config.step.vorticity   = 2.0f;
         config.step.densityDamp = 0.1f;
         config.source.density   = 20.0f;
@@ -693,6 +700,70 @@ int main()
         }
 
 
+        std::cout << "temperature cools towards ambient and the plume stalls with it\n";
+        {
+            // The point of carrying temperature as its own field (Fedkiw equation 8) rather than
+            // driving buoyancy off density: a parcel rises while it is hot and stops when it is
+            // not. With buoyancy proportional to density the force never decays, so the plume
+            // climbs until it hits the lid no matter how long it runs.
+            lr::eulerian::SmokeSolver::Config hot{};
+            hot.extent           = VkExtent3D{24, 64, 24};
+            hot.jacobiIterations = 40;
+            hot.step.buoyancy    = 0.15f;
+            hot.source.density   = 20.0f;
+            hot.source.radius    = 0.08f;
+            hot.namePrefix       = "smokeHot";
+
+            // The same emitter with cooling switched off. Nothing else differs, so any difference
+            // in how far the smoke gets is the cooling term alone.
+            lr::eulerian::SmokeSolver::Config warm = hot;
+            warm.step.cooling                      = 0.0f;
+            warm.namePrefix                        = "smokeWarm";
+
+            lr::eulerian::SmokeSolver hotSolver(resources, context, hot);
+            lr::eulerian::SmokeSolver warmSolver(resources, context, warm);
+
+            const std::vector<float> initialTemp = hotSolver.temperatureVolume().download();
+            check(!initialTemp.empty() &&
+                      std::fabs(initialTemp.front() - hot.step.ambientTemperature) < 1e-3f,
+                  "reset() fills the temperature field with ambient rather than zero");
+
+            for (int frame = 0; frame < 240; ++frame)
+            {
+                hotSolver.step(1.0f / 60.0f);
+                hotSolver.endStep();
+                warmSolver.step(1.0f / 60.0f);
+                warmSolver.endStep();
+            }
+            hotSolver.waitForStep();
+            warmSolver.waitForStep();
+
+            const std::vector<float> cooledTemp = hotSolver.temperatureVolume().download();
+            const std::vector<float> hotDensity = hotSolver.densityVolume().download();
+            const std::vector<float> warmDensity = warmSolver.densityVolume().download();
+            check(allFinite(cooledTemp) && allFinite(hotDensity) && allFinite(warmDensity),
+                  "temperature and density both stay finite");
+
+            // The emitter is the only heat source, so nothing may exceed what it injects and the
+            // gas away from it must have fallen back towards ambient.
+            double hottest = -1e30, coldest = 1e30;
+            for (float value : cooledTemp)
+            {
+                hottest = std::max(hottest, static_cast<double>(value));
+                coldest = std::min(coldest, static_cast<double>(value));
+            }
+            check(hottest <= static_cast<double>(hot.source.temperature) + 1.0,
+                  "no cell is hotter than the emitter");
+            check(coldest >= static_cast<double>(hot.step.ambientTemperature) - 1.0,
+                  "and cooling never undershoots ambient");
+
+            // The stall itself: cooled smoke does not reach as high as smoke that kept its heat.
+            const double hotHigh  = densityAbove(hotDensity, hot.extent, 48);
+            const double warmHigh = densityAbove(warmDensity, warm.extent, 48);
+            check(warmHigh > 1.5 * hotHigh,
+                  "smoke that never cools climbs higher than smoke that does");
+        }
+
         std::cout << "vorticity confinement pushes along N x omega\n";
         {
             // Fedkiw equations 9-11 on a field whose vorticity is known analytically, so the force
@@ -717,8 +788,11 @@ int main()
             // force it adds clears the noise floor.
             vort.step.dt          = 0.01f;
             vort.step.buoyancy    = 0.0f;   // no buoyancy, no source: only confinement acts
+            vort.step.gravity     = 0.0f;
+            vort.step.cooling     = 0.0f;   // nothing to cool, and it must not perturb the field
             vort.step.vorticity   = 50.0f;  // scaled up to compensate for the small dt
             vort.source.density   = 0.0f;
+            vort.source.heating   = 0.0f;   // leave the temperature field flat at ambient
             vort.source.velocity[0] = 0.0f;
             vort.source.velocity[1] = 0.0f;
             vort.source.velocity[2] = 0.0f;
