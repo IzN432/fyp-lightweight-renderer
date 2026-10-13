@@ -381,6 +381,14 @@ add_library(lr_fluid_simulation STATIC
 target_include_directories(lr_fluid_simulation PUBLIC src)
 target_link_libraries(lr_fluid_simulation PUBLIC lr_fluid_feature lr_core imgui)
 
+# Scene-authored smoke settings stay available even when the optional CUDA runtime is disabled, so
+# smoke-bearing scene files can still be loaded, inspected and round-tripped on every build.
+add_library(lr_smoke_component_feature STATIC
+    src/features/eulerian_particle/SmokeComponent.cpp
+)
+target_include_directories(lr_smoke_component_feature PUBLIC src)
+target_link_libraries(lr_smoke_component_feature PUBLIC lr_core glm::glm)
+
 add_library(lr_rigid_body_feature STATIC
     src/features/rigid_body/ColliderComponent.cpp
     src/features/rigid_body/ColliderVisual.cpp
@@ -407,7 +415,7 @@ if(LR_ENABLE_CUDA)
         src/features/eulerian_particle/SmokeVoxelizePass.cpp
     )
     target_include_directories(lr_eulerian_particle_feature PUBLIC src)
-    target_link_libraries(lr_eulerian_particle_feature PUBLIC lr_core CUDA::cudart)
+    target_link_libraries(lr_eulerian_particle_feature PUBLIC lr_core lr_smoke_component_feature CUDA::cudart)
     target_compile_definitions(lr_eulerian_particle_feature PUBLIC LR_ENABLE_CUDA=1)
     if(WIN32)
         target_compile_definitions(lr_eulerian_particle_feature PRIVATE
@@ -442,10 +450,12 @@ add_library(lr_scene_serialization STATIC
     src/features/linear_blend_skinning/SkinComponentCodec.cpp
     src/features/rigid_body/RigidBodyComponentCodecs.cpp
     src/features/fluid/FluidComponentCodec.cpp
+    src/features/eulerian_particle/SmokeComponentCodec.cpp
 )
 target_include_directories(lr_scene_serialization PUBLIC src)
 target_link_libraries(lr_scene_serialization PUBLIC lr_core
-    lr_linear_blend_skinning_feature lr_rigid_body_feature lr_fluid_feature nlohmann_json::nlohmann_json)
+    lr_linear_blend_skinning_feature lr_rigid_body_feature lr_fluid_feature
+    lr_smoke_component_feature nlohmann_json::nlohmann_json)
 
 # Application-level editor composition. This stays above lr_core because it combines optional
 # feature libraries which themselves depend on lr_core.

@@ -38,9 +38,9 @@ constexpr OverlayLineStyle kBoundsStyle{
 glm::uvec3 SmokeSimulation::clampedGridSize() const
 {
     const uint32_t limit = std::max(m_config.maxCellsPerAxis, kMinCellsPerAxis);
-    return glm::uvec3(std::clamp(m_config.gridSize.x, kMinCellsPerAxis, limit),
-                      std::clamp(m_config.gridSize.y, kMinCellsPerAxis, limit),
-                      std::clamp(m_config.gridSize.z, kMinCellsPerAxis, limit));
+    return glm::uvec3(std::clamp(m_config.authored.gridSize.x, kMinCellsPerAxis, limit),
+                      std::clamp(m_config.authored.gridSize.y, kMinCellsPerAxis, limit),
+                      std::clamp(m_config.authored.gridSize.z, kMinCellsPerAxis, limit));
 }
 
 VkExtent3D SmokeSimulation::gridExtent() const
@@ -73,9 +73,11 @@ SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, con
                    // implies. The allocation is what fixes the memory cost; the active extent is
                    // then free to change without touching CUDA's imports or the semaphores.
                    const uint32_t      limit = std::max(m_config.maxCellsPerAxis, kMinCellsPerAxis);
-                   SmokeSolver::Config solver = m_config.solver;
+                   SmokeSolver::Config solver;
+                   solver.namePrefix          = m_config.namePrefix;
                    solver.extent              = VkExtent3D{limit, limit, limit};
                    solver.activeExtent        = gridExtent();
+                   solver.jacobiIterations    = m_config.authored.jacobiIterations;
 
                    // The solver imports the mask, so it has to exist before the solver is
                    // constructed — which is why it is registered here rather than in the body
@@ -95,15 +97,15 @@ SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, con
               .outputFormat             = m_config.outputFormat,
               // Overwritten by applyBounds() below; set here only because the field has no default
               // that would be right for this box.
-              .boundsMin                = m_config.boundsCentre,
-              .boundsMax                = m_config.boundsCentre,
-              .coolColor                = m_config.coolColor,
-              .warmColor                = m_config.warmColor,
-              .coolTemperature          = m_config.coolTemperature,
-              .warmTemperature          = m_config.warmTemperature,
-              .densityScale             = m_config.densityScale,
-              .sampleCount              = m_config.sampleCount,
-              .enabled                  = m_config.enabled,
+              .boundsMin                = m_config.authored.boundsCentre,
+              .boundsMax                = m_config.authored.boundsCentre,
+              .coolColor                = m_config.authored.coolColor,
+              .warmColor                = m_config.authored.warmColor,
+              .coolTemperature          = m_config.authored.coolTemperature,
+              .warmTemperature          = m_config.authored.warmTemperature,
+              .densityScale             = m_config.authored.densityScale,
+              .sampleCount              = m_config.authored.sampleCount,
+              .enabled                  = false,
           };
       }())
 {
@@ -127,21 +129,57 @@ SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, con
             .maskResourceName = maskName,
             .geometry         = m_config.obstacleGeometry,
             // Overwritten by applyVoxelizeBounds() below, as the render pass's box is.
-            .boundsMin        = m_config.boundsCentre,
-            .boundsMax        = m_config.boundsCentre,
+            .boundsMin        = m_config.authored.boundsCentre,
+            .boundsMax        = m_config.authored.boundsCentre,
             .gridSize         = m_simulatedExtent,
             .allocatedSize    = allocated,
-            .enabled          = m_config.voxelizeObstacles,
+            .enabled          = false,
         });
     }
 
-    applyBounds();
-    applySourceParams();
+    applyRuntimeConfig();
+    reset();
 }
 
 std::string SmokeSimulation::obstacleMaskResourceName() const
 {
-    return m_config.solver.namePrefix + kObstacleMaskSuffix;
+    return m_config.namePrefix + kObstacleMaskSuffix;
+}
+
+void SmokeSimulation::setTarget(SmokeComponent *component, const glm::vec3 &worldPosition)
+{
+    m_worldPosition = worldPosition;
+    if (component == m_target)
+    {
+        if (component && component->revision() != m_targetRevision)
+        {
+            m_config.authored = component->config();
+            m_targetRevision  = component->revision();
+            applyRuntimeConfig();
+            reset();
+        }
+        else if (component)
+        {
+            applyBounds();
+            applySourceParams();
+        }
+        return;
+    }
+
+    m_target = component;
+    m_singleStepRequested = false;
+    if (!m_target)
+    {
+        m_renderPass.config().enabled = false;
+        if (m_voxelizePass) m_voxelizePass->config().enabled = false;
+        return;
+    }
+
+    m_config.authored = m_target->config();
+    m_targetRevision  = m_target->revision();
+    m_paused          = m_config.authored.startPaused;
+    applyRuntimeConfig();
+    reset();
 }
 
 void SmokeSimulation::setSceneGeometry(SceneDrawList draws)
@@ -168,7 +206,40 @@ void SmokeSimulation::applyVoxelizeBounds()
     voxelize.boundsMax                       = render.boundsMax;
     voxelize.gridSize                        = m_gridDirty && m_simulatedExtent.width != 0 ? m_simulatedExtent
                                                                                            : gridExtent();
-    voxelize.enabled                         = m_config.voxelizeObstacles;
+    voxelize.enabled                         = m_target && m_config.authored.voxelizeObstacles;
+}
+
+void SmokeSimulation::applyRuntimeConfig()
+{
+    const SmokeComponent::Config &config  = m_config.authored;
+    m_solver.config().jacobiIterations = std::max(config.jacobiIterations, 1);
+    SmokeStepParams &step = m_solver.stepParams();
+    step.buoyancy           = config.step.buoyancy;
+    step.gravity            = config.step.gravity;
+    step.ambientTemperature = config.step.ambientTemperature;
+    step.cooling            = config.step.cooling;
+    step.velocityDamp       = config.step.velocityDamp;
+    step.densityDamp        = config.step.densityDamp;
+    step.vorticity          = config.step.vorticity;
+    step.openTop            = config.step.openTop;
+    m_solver.sourceParams().density     = config.source.density;
+    m_solver.sourceParams().velocity[0] = config.source.velocity.x;
+    m_solver.sourceParams().velocity[1] = config.source.velocity.y;
+    m_solver.sourceParams().velocity[2] = config.source.velocity.z;
+    m_solver.sourceParams().temperature = config.source.temperature;
+    m_solver.sourceParams().heating     = config.source.heating;
+
+    SmokeRenderPass::Config &render = m_renderPass.config();
+    render.coolColor       = config.coolColor;
+    render.warmColor       = config.warmColor;
+    render.coolTemperature = config.coolTemperature;
+    render.warmTemperature = config.warmTemperature;
+    render.densityScale    = config.densityScale;
+    render.sampleCount     = config.sampleCount;
+    render.enabled         = m_target && config.enabled;
+    if (m_voxelizePass) m_voxelizePass->config().enabled = m_target && config.voxelizeObstacles;
+    applyBounds();
+    applySourceParams();
 }
 
 void SmokeSimulation::build(FrameGraph &frameGraph, const GpuMeshLayout *layout) const
@@ -187,7 +258,7 @@ void SmokeSimulation::build(FrameGraph &frameGraph, const GpuMeshLayout *layout)
 
 void SmokeSimulation::setGridSize(const glm::uvec3 &cells)
 {
-    m_config.gridSize = cells;
+    m_config.authored.gridSize = cells;
 
     if (m_simulatedExtent.width != 0)
     {
@@ -209,7 +280,7 @@ void SmokeSimulation::setGridSize(const glm::uvec3 &cells)
 void SmokeSimulation::setBoundsCentre(const glm::vec3 &boundsCentre)
 {
     // Pure placement: the grid is unchanged, so this never dirties the simulation.
-    m_config.boundsCentre = boundsCentre;
+    m_config.authored.boundsCentre = boundsCentre;
     applyBounds();
     applySourceParams();
 }
@@ -218,7 +289,7 @@ void SmokeSimulation::setSimulationScale(float scale)
 {
     // Rescales the box about its centre and, with it, the plume. The grid is untouched, so
     // like a move this costs nothing: the ray-march pass simply maps the volume onto a bigger box.
-    m_config.simulationScale = std::max(scale, 1e-4f);
+    m_config.authored.simulationScale = std::max(scale, 1e-4f);
     applyBounds();
     applySourceParams();
 }
@@ -232,7 +303,7 @@ void SmokeSimulation::applyBounds()
     // outline still draws the authored box, so the edit stays visible.
     const bool       pending = m_gridDirty && m_simulatedExtent.width != 0;
     const VkExtent3D cells   = pending ? m_simulatedExtent : gridExtent();
-    const float      scale   = std::max(m_config.simulationScale, 1e-4f);
+    const float      scale   = std::max(m_config.authored.simulationScale, 1e-4f);
 
     // Centred on the authored position, so growing the grid or the scale expands the box evenly
     // either side rather than pushing one face outwards.
@@ -240,8 +311,9 @@ void SmokeSimulation::applyBounds()
                                              static_cast<float>(cells.depth));
 
     SmokeRenderPass::Config &render = m_renderPass.config();
-    render.boundsMin                = m_config.boundsCentre - 0.5f * size;
-    render.boundsMax                = m_config.boundsCentre + 0.5f * size;
+    const glm::vec3 centre          = m_worldPosition + m_config.authored.boundsCentre;
+    render.boundsMin                = centre - 0.5f * size;
+    render.boundsMax                = centre + 0.5f * size;
 
     // The simulated region sits in the origin corner of the allocation, so the box maps to this
     // fraction of the texture on each axis.
@@ -262,13 +334,13 @@ void SmokeSimulation::applySourceParams()
     const SmokeRenderPass::Config &render = m_renderPass.config();
     const glm::vec3 size = glm::max(render.boundsMax - render.boundsMin, glm::vec3(1e-6f));
 
-    glm::vec3 position = m_config.sourcePosition;
-    if (m_config.sourceDrift > 0.0f)
+    glm::vec3 position = m_worldPosition + m_config.authored.source.position;
+    if (m_config.authored.source.drift > 0.0f)
     {
         // Two incommensurate frequencies, so the emitter never retraces the same path. Applied to
         // the authored position rather than stored into it, so turning drift off restores it.
-        position.x += m_config.sourceDrift * std::sin(m_elapsed * 1.4f);
-        position.z += 0.6f * m_config.sourceDrift * std::sin(m_elapsed * 0.9f);
+        position.x += m_config.authored.source.drift * std::sin(m_elapsed * 1.4f);
+        position.z += 0.6f * m_config.authored.source.drift * std::sin(m_elapsed * 0.9f);
     }
 
     const glm::vec3    normalized = (position - render.boundsMin) / size;
@@ -281,12 +353,12 @@ void SmokeSimulation::applySourceParams()
     // spherical on a non-cube grid, so convert against the world length of that same axis. Cells
     // are cubic, so that length is simply the cell count times the scale.
     const float longest = std::max({size.x, size.y, size.z});
-    source.radius       = m_config.sourceRadius / longest;
+    source.radius       = m_config.authored.source.radius / longest;
 }
 
 void SmokeSimulation::update(float frameDeltaTime)
 {
-    if (!m_renderPass.config().enabled) return;
+    if (!m_target || !m_renderPass.config().enabled) return;
     if (m_paused && !m_singleStepRequested) return;
 
     if (m_gridDirty)
@@ -321,25 +393,30 @@ void SmokeSimulation::reset()
 
 void SmokeSimulation::appendOverlayLines(OverlayLineBuilder &builder) const
 {
-    if (!m_config.showBounds) return;
+    if (!m_target || !m_config.authored.showBounds) return;
 
     // The authored box, not the one being rendered: while a resize is pending the two differ, and
     // the outline is what shows the edit that the deferred restart has yet to apply.
     const glm::uvec3 cells = clampedGridSize();
-    const float      scale = std::max(m_config.simulationScale, 1e-4f);
+    const float      scale = std::max(m_config.authored.simulationScale, 1e-4f);
     const glm::vec3  size =
         scale * glm::vec3(static_cast<float>(cells.x), static_cast<float>(cells.y), static_cast<float>(cells.z));
 
     // The primitive is a unit cube centred on the origin, so translate-then-scale lands its
     // corners exactly on the box's.
-    const glm::mat4 model = glm::scale(glm::translate(glm::mat4(1.0f), m_config.boundsCentre), size);
+    const glm::mat4 model = glm::scale(
+        glm::translate(glm::mat4(1.0f), m_worldPosition + m_config.authored.boundsCentre), size);
     builder.addPrimitive(primitives::cube.outline, model, kBoundsStyle);
 }
 
 void SmokeSimulation::onGUI()
 {
-    SmokeRenderPass::Config &render = m_renderPass.config();
-    SmokeStepParams         &step   = m_solver.stepParams();
+    if (!m_target) return;
+
+    const SmokeComponent::Config  before = m_config.authored;
+    SmokeComponent::Config       &config = m_config.authored;
+    SmokeComponent::StepConfig   &step   = config.step;
+    SmokeComponent::SourceConfig &source = config.source;
 
     if (ImGui::Button(m_paused ? "Play" : "Pause")) m_paused = !m_paused;
     ImGui::SameLine();
@@ -347,14 +424,14 @@ void SmokeSimulation::onGUI()
     ImGui::SameLine();
     if (ImGui::Button("Reset")) reset();
 
-    ImGui::Checkbox("Enabled", &render.enabled);
+    ImGui::Checkbox("Enabled", &config.enabled);
 
     const VkExtent3D cells = gridExtent();
-    const float      scale = std::max(m_config.simulationScale, 1e-4f);
+    const float      scale = std::max(config.simulationScale, 1e-4f);
     ImGui::TextDisabled("Grid: %u x %u x %u cells", cells.width, cells.height, cells.depth);
     ImGui::TextDisabled("Box: %.2f x %.2f x %.2f", static_cast<float>(cells.width) * scale,
                         static_cast<float>(cells.height) * scale, static_cast<float>(cells.depth) * scale);
-    ImGui::TextDisabled("Jacobi iterations: %d", m_config.solver.jacobiIterations);
+    ImGui::TextDisabled("Jacobi iterations: %d", config.jacobiIterations);
     if (m_gridDirty)
     {
         // The live fields are still the old grid's, which is why the plume keeps playing unchanged
@@ -369,7 +446,7 @@ void SmokeSimulation::onGUI()
         // here and under Source -- would collide on one ImGui ID. One scope per section fixes that.
         ImGui::PushID("bounds");
 
-        ImGui::Checkbox("Show Bounds", &m_config.showBounds);
+        ImGui::Checkbox("Show Bounds", &config.showBounds);
 
         // The grid resolution is the box size, in cells, so this is an integer edit with no
         // rounding anywhere: one step of the slider is exactly one cell. It is the only control
@@ -386,16 +463,16 @@ void SmokeSimulation::onGUI()
 
         // World units per cell: scales the box and the plume together without touching the grid,
         // so it is safe to drag mid-simulation.
-        float scaleEdit = m_config.simulationScale;
+        float scaleEdit = config.simulationScale;
         if (ImGui::DragFloat("Scale", &scaleEdit, 0.001f, 0.001f, 1.0f, "%.4f"))
             setSimulationScale(scaleEdit);
 
         // The box's centre, so dragging it moves the plume without the box also appearing to
         // change size as the grid or scale is edited.
-        glm::vec3 centre = m_config.boundsCentre;
-        if (ImGui::DragFloat3("Position", &centre.x, 0.01f)) setBoundsCentre(centre);
+        glm::vec3 centre = config.boundsCentre;
+        if (ImGui::DragFloat3("Local Offset", &centre.x, 0.01f)) setBoundsCentre(centre);
 
-        ImGui::TextDisabled("Grid costs a restart; scale and position are free.");
+        ImGui::TextDisabled("Grid costs a restart; scale and local offset are free.");
 
         ImGui::PopID();
     }
@@ -403,6 +480,8 @@ void SmokeSimulation::onGUI()
     if (ImGui::CollapsingHeader("Simulation", ImGuiTreeNodeFlags_DefaultOpen))
     {
         ImGui::PushID("simulation");
+
+        ImGui::SliderInt("Jacobi Iterations", &config.jacobiIterations, 1, 200);
 
         // Buoyancy is per degree above ambient, so its useful range is far smaller than the
         // per-unit-density force it replaced. The max is several times the default rather than
@@ -439,24 +518,22 @@ void SmokeSimulation::onGUI()
     {
         ImGui::PushID("source");
 
-        SmokeSourceParams &source = m_solver.sourceParams();
         ImGui::SliderFloat("Density", &source.density, 0.0f, 50.0f);
-        ImGui::SliderFloat3("Velocity", source.velocity, -100.0f, 100.0f);
+        ImGui::SliderFloat3("Velocity", &source.velocity.x, -100.0f, 100.0f);
         ImGui::SliderFloat("Temperature", &source.temperature, -50.0f, 1000.0f, "%.0f");
         ImGui::SliderFloat("Heating", &source.heating, 0.0f, 40.0f);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("How fast emitter cells reach the temperature above.");
 
-        // World-space, so these survive moving and resizing the box; the normalized values the
-        // kernel wants are derived from them every step.
-        ImGui::DragFloat3("Position", &m_config.sourcePosition.x, 0.01f);
-        ImGui::DragFloat("Radius", &m_config.sourceRadius, 0.005f, 0.01f, 2.0f, "%.3f");
-        ImGui::SliderFloat("Drift", &m_config.sourceDrift, 0.0f, 0.5f, "%.3f");
+        ImGui::DragFloat3("Local Position", &source.position.x, 0.01f);
+        ImGui::DragFloat("Radius", &source.radius, 0.005f, 0.01f, 2.0f, "%.3f");
+        ImGui::SliderFloat("Drift", &source.drift, 0.0f, 0.5f, "%.3f");
         if (ImGui::Button("Centre On Box"))
         {
             // Low in the box rather than at its centre, so the plume has room to rise.
-            const glm::vec3 size    = render.boundsMax - render.boundsMin;
-            m_config.sourcePosition = render.boundsMin + glm::vec3(0.5f * size.x, 0.15f * size.y, 0.5f * size.z);
+            const glm::vec3 size = scale * glm::vec3(clampedGridSize());
+            source.position = config.boundsCentre - 0.5f * size +
+                              glm::vec3(0.5f * size.x, 0.15f * size.y, 0.5f * size.z);
         }
 
         ImGui::PopID();
@@ -464,16 +541,23 @@ void SmokeSimulation::onGUI()
 
     if (ImGui::CollapsingHeader("Rendering", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        ImGui::SliderFloat("Render Density", &render.densityScale, 0.1f, 20.0f, "%.3f",
+        ImGui::SliderFloat("Render Density", &config.densityScale, 0.1f, 20.0f, "%.3f",
                            ImGuiSliderFlags_Logarithmic);
-        ImGui::SliderInt("Ray-march Samples", &render.sampleCount, 16, 256);
-        ImGui::ColorEdit3("Cool Color", &render.coolColor.x);
-        ImGui::ColorEdit3("Warm Color", &render.warmColor.x);
+        ImGui::SliderInt("Ray-march Samples", &config.sampleCount, 16, 256);
+        ImGui::ColorEdit3("Cool Color", &config.coolColor.x);
+        ImGui::ColorEdit3("Warm Color", &config.warmColor.x);
         // The ramp's ends are in the solver's temperature units, so the useful range runs from
         // ambient up towards the emitter's temperature. Dragging the cool end past the warm one is
         // allowed here and resolved by the render pass, which keeps the span non-degenerate.
-        ImGui::DragFloat("Cool Temperature", &render.coolTemperature, 1.0f);
-        ImGui::DragFloat("Warm Temperature", &render.warmTemperature, 1.0f);
+        ImGui::DragFloat("Cool Temperature", &config.coolTemperature, 1.0f);
+        ImGui::DragFloat("Warm Temperature", &config.warmTemperature, 1.0f);
+    }
+
+    if (before != config)
+    {
+        m_target->setConfig(config);
+        m_targetRevision = m_target->revision();
+        applyRuntimeConfig();
     }
 }
 

@@ -38,6 +38,9 @@
 #include "features/rigid_body/ColliderComponent.hpp"
 #include "features/rigid_body/RigidBodyComponent.hpp"
 #include "features/fluid/FluidComponent.hpp"
+#if defined(LR_ENABLE_CUDA)
+#include "features/eulerian_particle/SmokeComponent.hpp"
+#endif
 #include "features/arap/ArapTool.hpp"
 #include "features/laplace_beltrami/LaplaceBeltramiTool.hpp"
 #include "features/animation/AnimationTrack.hpp"
@@ -107,6 +110,9 @@ ComponentCatalog makeComponentCatalog()
     catalog.add<ColliderComponent>("Collider");
     catalog.add<RigidBodyComponent>("Rigid Body");
     catalog.add<FluidComponent>("Fluid Simulation");
+#if defined(LR_ENABLE_CUDA)
+    catalog.add<eulerian::SmokeComponent>("Smoke Simulation");
+#endif
     return catalog;
 }
 } // namespace

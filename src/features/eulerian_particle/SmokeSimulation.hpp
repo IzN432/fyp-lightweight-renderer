@@ -1,5 +1,6 @@
 #pragma once
 
+#include "features/eulerian_particle/SmokeComponent.hpp"
 #include "features/eulerian_particle/SmokeRenderPass.hpp"
 #include "features/eulerian_particle/SmokeSolver.hpp"
 #include "features/eulerian_particle/SmokeVoxelizePass.hpp"
@@ -53,30 +54,10 @@ class SmokeSimulation
 public:
     struct Config
     {
-        SmokeSolver::Config solver{};
+        SmokeComponent::Config authored{};
 
-        // World-space size of one grid cell, and so the overall scale of the simulation: the box's
-        // world size is its cell counts times this. Scaling it zooms the whole plume, box and all,
-        // without changing the resolution or costing a restart.
-        //
-        // It is a rendering scale, not a physical one. The solver works in cells per second and is
-        // handed `dt` unconverted, so the plume rises at a fixed rate in *cells*: doubling this
-        // leaves the motion identical in grid terms while the box it is drawn into is twice as
-        // big, which reads as a plume moving twice as fast in world units. Dividing `dt` by this
-        // on the way into the solver would make the motion scale-invariant instead, at the cost of
-        // changing what every existing tuned value means.
-        float simulationScale = 2.0f / 64.0f;
-
-        // The authored box, in cells. This is the grid resolution and the box size both: world
-        // size is gridSize * simulationScale, so the box can only ever be a whole number of cells
-        // and the two can never disagree.
-        glm::uvec3 gridSize{64, 96, 64};
-
-        // Where the box sits in the world: its centre, so that resizing the grid or the scale
-        // grows it evenly about this point instead of away from one corner. The box extends half
-        // of gridSize * simulationScale either side; moving it never touches the grid, so it never
-        // costs a restart. The default is half the default box's height, so it rests on y = 0.
-        glm::vec3 boundsCentre{0.0f, 1.5f, 0.0f};
+        // Shared runtime resource namespace. This is application wiring, not scene-authored data.
+        std::string namePrefix = "smoke";
 
         // Per-axis cell limit. Also the allocated volume size, so raising it costs memory on every
         // field whether or not the grid is ever grown into it: the nine volumes total 15 floats
@@ -89,31 +70,6 @@ public:
         std::string outputImage       = "swapchain";
         VkFormat    outputFormat      = VK_FORMAT_UNDEFINED;
 
-        // Endpoints of the temperature ramp the smoke is shaded with; see
-        // SmokeRenderPass::Config, which these feed directly.
-        glm::vec3 coolColor{0.74f, 0.79f, 0.90f};
-        glm::vec3 warmColor{1.00f, 0.58f, 0.26f};
-        float     coolTemperature = 20.0f;
-        float     warmTemperature = 180.0f;
-
-        float     densityScale = 5.0f;
-        int       sampleCount  = 128;
-        bool      enabled      = true;
-
-        // Emitter position and radius in world space. Stored in world units and converted to the
-        // solver's normalized grid units each step, so moving or resizing the box leaves the
-        // emitter where the user put it instead of dragging it along with the grid.
-        glm::vec3 sourcePosition{0.0f, 0.3f, 0.0f};
-        float     sourceRadius = 0.25f;
-
-        // Horizontal wander applied to the emitter, in world units. Keeps the plume from settling
-        // into a perfectly straight column. Zero holds the source still.
-        float sourceDrift = 0.0f;
-
-        // Draws the box as overlay lines. The simulation only contributes the segments; the caller
-        // feeds them to the overlay-lines pass.
-        bool showBounds = true;
-
         // Scene geometry to voxelize into the obstacle mask, so smoke can collide with it. Taken
         // from the same SceneGpu::geometryPassConfig() the G-buffer pass uses. Leave the index
         // buffer name empty to build no voxelizer at all, which is what the standalone demo does:
@@ -123,7 +79,6 @@ public:
         // Whether the voxelizer runs, and so whether the smoke collides with scene geometry at
         // all. Turning it off leaves the mask cleared, which the solver reads as empty space: the
         // plume then passes straight through the scene as it did before collisions existed.
-        bool voxelizeObstacles = true;
     };
 
     // Registers and imports the solver's volumes; the registry and context must outlive this.
@@ -132,6 +87,10 @@ public:
     // `layout` is the engine's geometry vertex layout, used by the obstacle voxelizer to replay
     // scene meshes. Required whenever Config::obstacleGeometry names an index buffer.
     void build(FrameGraph &frameGraph, const GpuMeshLayout *layout = nullptr) const;
+
+    // Binds the one shared CUDA runtime to a scene component. Passing null hides and stops smoke;
+    // selecting another component replaces the fields with that component's authored setup.
+    void setTarget(SmokeComponent *component, const glm::vec3 &worldPosition = glm::vec3(0.0f));
 
     // Steps the solver and closes the Vulkan handshake, so the density volume is safe to sample by
     // the time this returns. A no-op while disabled or paused. Applies a pending grid resize first,
@@ -157,7 +116,7 @@ public:
     // solver imports this and treats set cells as walls; also named here for a debug view.
     std::string obstacleMaskResourceName() const;
 
-    bool enabled() const { return m_renderPass.config().enabled; }
+    bool enabled() const { return m_target && m_renderPass.config().enabled; }
     bool paused() const { return m_paused; }
     void setPaused(bool paused) { m_paused = paused; }
 
@@ -177,9 +136,9 @@ public:
     // World units per cell, so the overall size of the simulation. Safe to change at any time: it
     // rescales the box and the plume without altering the grid or costing a restart. Unlike the
     // position it is not physically neutral — the plume's speed in cells is unchanged, so it reads
-    // as faster in world units at a larger scale. See Config::simulationScale.
+    // as faster in world units at a larger scale. See SmokeComponent::Config::simulationScale.
     void  setSimulationScale(float scale);
-    float simulationScale() const { return m_config.simulationScale; }
+    float simulationScale() const { return m_config.authored.simulationScale; }
 
     // Whether the grid has been resized away from the one the current fields were simulated on.
     // Cleared by the restart that update() performs on the next play.
@@ -208,12 +167,19 @@ private:
     // covers the same cells the solver is stepping.
     void applyVoxelizeBounds();
 
+    // Copies scene-owned settings into the transient solver and renderer.
+    void applyRuntimeConfig();
+
     Config          m_config;
     SmokeSolver     m_solver;
     SmokeRenderPass m_renderPass;
     // Absent when Config::obstacleGeometry names no index buffer, i.e. there is no scene to
     // voxelize. The mask volume is registered either way, so a debug view can always bind it.
     std::optional<SmokeVoxelizePass> m_voxelizePass;
+
+    SmokeComponent *m_target         = nullptr;
+    uint64_t        m_targetRevision = 0;
+    glm::vec3       m_worldPosition{0.0f};
 
     // The grid the fields currently in the volumes were simulated on. Compared against the grid
     // the authored box implies to decide whether a restart is owed, so dragging the box away and

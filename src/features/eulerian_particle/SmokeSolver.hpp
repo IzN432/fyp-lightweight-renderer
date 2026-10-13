@@ -137,6 +137,7 @@ public:
 
     SmokeStepParams   &stepParams() { return m_config.step; }
     SmokeSourceParams &sourceParams() { return m_config.source; }
+    Config            &config() { return m_config; }
     const Config      &config() const { return m_config; }
 
     // The imported volumes, for rendering hookups and for tests that read fields back. Each

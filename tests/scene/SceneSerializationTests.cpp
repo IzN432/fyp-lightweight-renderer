@@ -9,6 +9,7 @@
 #include "features/rigid_body/ColliderComponent.hpp"
 #include "features/rigid_body/RigidBodyComponent.hpp"
 #include "features/fluid/FluidComponent.hpp"
+#include "features/eulerian_particle/SmokeComponent.hpp"
 
 #include <glm/gtc/epsilon.hpp>
 
@@ -198,6 +199,15 @@ int main()
     fluidConfig.particleColor = {0.1f, 0.3f, 0.8f};
     fluidConfig.renderScale = 0.125f;
     skinnedObject.addComponent<lr::FluidComponent>(fluidConfig);
+    lr::eulerian::SmokeComponent::Config smokeConfig;
+    smokeConfig.gridSize = {32, 48, 40};
+    smokeConfig.boundsCentre = {1.0f, 2.0f, 3.0f};
+    smokeConfig.step.buoyancy = 0.23f;
+    smokeConfig.source.position = {-1.0f, 0.5f, 2.0f};
+    smokeConfig.source.velocity = {3.0f, 4.0f, 5.0f};
+    smokeConfig.coolColor = {0.2f, 0.3f, 0.4f};
+    smokeConfig.sampleCount = 96;
+    skinnedObject.addComponent<lr::eulerian::SmokeComponent>(smokeConfig);
 
     lr::SceneSerializer::save(source, temporary.path);
 
@@ -296,6 +306,9 @@ int main()
     const auto &roundTripFluid =
         loaded->scene.getSceneObject(meshObjectIds[0]).getComponent<lr::FluidComponent>().config();
     assert(roundTripFluid == fluidConfig);
+    const auto &roundTripSmoke = loaded->scene.getSceneObject(meshObjectIds[0])
+                                     .getComponent<lr::eulerian::SmokeComponent>().config();
+    assert(roundTripSmoke == smokeConfig);
 
     // Identities are what the file names objects by, so loading the same file into a scene that
     // already holds those objects is a collision rather than a silent duplicate.

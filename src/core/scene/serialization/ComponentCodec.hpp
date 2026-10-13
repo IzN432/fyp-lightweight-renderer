@@ -65,5 +65,6 @@ void addCoreComponentCodecs(ComponentCodecRegistry &registry);
 void addSkinComponentCodecs(ComponentCodecRegistry &registry);
 void addRigidBodyComponentCodecs(ComponentCodecRegistry &registry);
 void addFluidComponentCodecs(ComponentCodecRegistry &registry);
+void addSmokeComponentCodecs(ComponentCodecRegistry &registry);
 
 } // namespace lr

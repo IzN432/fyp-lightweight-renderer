@@ -51,6 +51,7 @@
 #include <cmath>
 #include <exception>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,66 @@ namespace
 // HBAO world-space sampling radius the app starts with, before anything is loaded. Previously this
 // was derived from the bootstrap asset's bounding box; the HBAO panel's slider owns it from here.
 constexpr float kDefaultAoSphereRadius = 0.02f;
+
+// Fluid and smoke each have one expensive shared GPU runtime. This binding gives both the same
+// editor rule: the runtime follows the most recently selected object carrying its component, and
+// ordinary selections do not make the last simulation disappear.
+template <typename Component> class SelectedSimulationBinding
+{
+public:
+    template <typename SetTarget> Component *sync(Scene &scene, SetTarget &&setTarget)
+    {
+        const std::optional<SceneObjectId> selected = scene.selectedObject();
+        if (selected != m_lastObservedSelection)
+        {
+            m_lastObservedSelection = selected;
+            m_suppressedSelection.reset();
+            if (selected && scene.contains(*selected) && scene.getSceneObject(*selected).hasComponent<Component>())
+                m_activeObject = selected;
+        }
+        else if (!m_activeObject && selected && m_suppressedSelection != selected && scene.contains(*selected) &&
+                 scene.getSceneObject(*selected).hasComponent<Component>())
+        {
+            m_activeObject = selected;
+        }
+
+        if (!m_activeObject || !scene.contains(*m_activeObject))
+        {
+            m_activeObject.reset();
+            setTarget(nullptr, glm::vec3(0.0f));
+            return nullptr;
+        }
+
+        SceneObject &object = scene.getSceneObject(*m_activeObject);
+        if (!object.hasComponent<Component>())
+        {
+            m_activeObject.reset();
+            setTarget(nullptr, glm::vec3(0.0f));
+            return nullptr;
+        }
+
+        glm::vec3 position{0.0f};
+        if (object.hasComponent<TransformComponent>()) position = glm::vec3(object.worldMatrix()[3]);
+        Component &component = object.getComponent<Component>();
+        setTarget(&component, position);
+        return &component;
+    }
+
+    template <typename SetTarget> void clear(Scene &scene, SetTarget &&setTarget)
+    {
+        m_suppressedSelection = scene.selectedObject();
+        m_activeObject.reset();
+        setTarget(nullptr, glm::vec3(0.0f));
+    }
+
+    const std::optional<SceneObjectId> &activeObject() const { return m_activeObject; }
+    bool selectionIsSuppressed(const Scene &scene) const { return m_suppressedSelection == scene.selectedObject(); }
+
+private:
+    std::optional<SceneObjectId> m_activeObject;
+    std::optional<SceneObjectId> m_lastObservedSelection;
+    std::optional<SceneObjectId> m_suppressedSelection;
+};
 } // namespace
 
 void Engine::run()
@@ -160,21 +221,9 @@ void Engine::run()
     // space by simulationScale, so scale and position are free to change mid-simulation.
     lr::eulerian::SmokeSimulation smokeSimulation(
         {
-            .solver = {.jacobiIterations = 40,
-                       .step             = {.buoyancy    = 0.1f,
-                                            .densityDamp = 0.15f,
-                                            .vorticity   = 2.0f},
-                       .source           = {.density = 18.0f, .velocity = {0.0f, 5.0f, 0.0f}}},
-            .simulationScale          = 2.0f / 64.0f,
-            .gridSize                 = {64, 96, 64},
-            // The box is centred here, so at 64 x 96 x 64 cells of 2/64 units it spans
-            // 2 x 3 x 2 world units and sits on the ground plane.
-            .boundsCentre             = {0.0f, 1.5f, 0.0f},
             .maxCellsPerAxis          = 100,
             .cameraBufferResourceName = sceneManager.cameraBufferName(),
             .outputFormat             = swapchainFormat,
-            .sourcePosition           = {0.0f, 0.45f, 0.0f},
-            .sourceRadius             = 0.25f,
             // Voxelizes the same scene geometry the G-buffer draws into an obstacle mask over the
             // simulation grid, so the smoke has something to collide with. Sharing one config with
             // GeometryPass is what keeps the two from disagreeing about what the scene contains.
@@ -384,51 +433,23 @@ void Engine::run()
     lr::ErrorReporter      errorReporter;
     lr::EditorSession editor(viewer, sceneManager, *camera, editorRendering, errorReporter);
 
-    // One shared GPU solver displays the most recently selected object carrying a fluid component.
-    // Ordinary selection changes do not hide it; only selecting another fluid object or explicitly
-    // clearing the Fluid panel changes this binding.
-    std::optional<lr::SceneObjectId> activeFluidObject;
-    std::optional<lr::SceneObjectId> lastObservedSelection;
-    std::optional<lr::SceneObjectId> suppressedFluidSelection;
-    const auto syncActiveFluid = [&]() -> lr::FluidComponent * {
-        const std::optional<lr::SceneObjectId> selected = scene.selectedObject();
-        if (selected != lastObservedSelection)
-        {
-            lastObservedSelection = selected;
-            suppressedFluidSelection.reset();
-            if (selected && scene.contains(*selected) &&
-                scene.getSceneObject(*selected).hasComponent<lr::FluidComponent>())
-            {
-                activeFluidObject = selected;
-            }
-        } else if (!activeFluidObject && selected && suppressedFluidSelection != selected &&
-                   scene.contains(*selected) && scene.getSceneObject(*selected).hasComponent<lr::FluidComponent>())
-        {
-            // Also notice a fluid component added to an object that was already selected.
-            activeFluidObject = selected;
-        }
-
-        if (!activeFluidObject || !scene.contains(*activeFluidObject))
-        {
-            activeFluidObject.reset();
-            fluidSimulation.setTarget(nullptr);
-            return nullptr;
-        }
-
-        lr::SceneObject &object = scene.getSceneObject(*activeFluidObject);
-        if (!object.hasComponent<lr::FluidComponent>())
-        {
-            activeFluidObject.reset();
-            fluidSimulation.setTarget(nullptr);
-            return nullptr;
-        }
-
-        glm::vec3 position{0.0f};
-        if (object.hasComponent<lr::TransformComponent>()) position = glm::vec3(object.worldMatrix()[3]);
-        lr::FluidComponent &component = object.getComponent<lr::FluidComponent>();
-        fluidSimulation.setTarget(&component, position);
-        return &component;
+    SelectedSimulationBinding<lr::FluidComponent> fluidBinding;
+    const auto setFluidTarget = [&](lr::FluidComponent *component, const glm::vec3 &position) {
+        fluidSimulation.setTarget(component, position);
     };
+    const auto syncActiveFluid = [&]() -> lr::FluidComponent * {
+        return fluidBinding.sync(scene, setFluidTarget);
+    };
+
+#if defined(LR_ENABLE_CUDA)
+    SelectedSimulationBinding<lr::eulerian::SmokeComponent> smokeBinding;
+    const auto setSmokeTarget = [&](lr::eulerian::SmokeComponent *component, const glm::vec3 &position) {
+        smokeSimulation.setTarget(component, position);
+    };
+    const auto syncActiveSmoke = [&]() -> lr::eulerian::SmokeComponent * {
+        return smokeBinding.sync(scene, setSmokeTarget);
+    };
+#endif
 
     // -------------------------------------------------------------------------
     // Per-frame callbacks
@@ -616,7 +637,20 @@ void Engine::run()
         ImGui::SetNextWindowPos(ImVec2(topLeft.x + panelSize.x + 16.0f, topLeft.y), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(panelSize.x, viewport->WorkSize.y * 0.6f), ImGuiCond_FirstUseEver);
         ImGui::Begin("Smoke");
-        smokeSimulation.onGUI();
+        if (lr::eulerian::SmokeComponent *activeSmoke = syncActiveSmoke())
+        {
+            const lr::SceneObject &object = scene.getSceneObject(*smokeBinding.activeObject());
+            ImGui::TextDisabled("Active: %s", object.name.empty() ? "Unnamed object" : object.name.c_str());
+            ImGui::SameLine();
+            if (ImGui::Button("Clear")) smokeBinding.clear(scene, setSmokeTarget);
+            else smokeSimulation.onGUI();
+        }
+        else if (!scene.selectedObject())
+            ImGui::TextDisabled("Select a scene object to use the smoke simulation.");
+        else if (smokeBinding.selectionIsSuppressed(scene))
+            ImGui::TextDisabled("Simulation cleared. Reselect the object to show it again.");
+        else
+            ImGui::TextDisabled("Add a Smoke Simulation component to the selected object.");
         ImGui::End();
 #endif
 
@@ -626,21 +660,19 @@ void Engine::run()
         ImGui::Begin("Fluid");
         if (lr::FluidComponent *activeFluid = syncActiveFluid())
         {
-            const lr::SceneObject &object = scene.getSceneObject(*activeFluidObject);
+            const lr::SceneObject &object = scene.getSceneObject(*fluidBinding.activeObject());
             ImGui::TextDisabled("Active: %s", object.name.empty() ? "Unnamed object" : object.name.c_str());
             ImGui::SameLine();
             if (ImGui::Button("Clear"))
             {
-                suppressedFluidSelection = scene.selectedObject();
-                activeFluidObject.reset();
-                fluidSimulation.setTarget(nullptr);
+                fluidBinding.clear(scene, setFluidTarget);
             }
             else
                 fluidSimulation.onGUI();
         }
         else if (!scene.selectedObject())
             ImGui::TextDisabled("Select a scene object to use the fluid simulation.");
-        else if (suppressedFluidSelection == scene.selectedObject())
+        else if (fluidBinding.selectionIsSuppressed(scene))
             ImGui::TextDisabled("Simulation cleared. Reselect the object to show it again.");
         else
             ImGui::TextDisabled("Add a Fluid Simulation component to the selected object.");
@@ -761,6 +793,7 @@ void Engine::run()
     // Queues the external-memory handshake before this frame's frame-graph submission. The calls do
     // not wait on the host: queue order is Vulkan release -> CUDA step -> Vulkan acquire -> render.
     appConnections.push_back(viewer.onLateUpdate([&](float dt, VkExtent2D) {
+        syncActiveSmoke();
         smokeSimulation.update(dt);
     }));
 #endif
