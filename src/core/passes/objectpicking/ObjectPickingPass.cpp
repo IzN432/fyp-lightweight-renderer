@@ -34,8 +34,8 @@ void ObjectPickingPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
     }
 
     pass.indexBuffer(fg.buffer(m_config.indexBufferResourceName))
-        .vertShader((paths::shaderDir / "object_picking.vert.spv").string())
-        .fragShader((paths::shaderDir / "object_picking.frag.spv").string())
+        .vertShader((paths::shaderDirectory() / "object_picking.vert.spv").string())
+        .fragShader((paths::shaderDirectory() / "object_picking.frag.spv").string())
         .cull(VK_CULL_MODE_NONE)
         .pushConstantSize(sizeof(ObjectPickingPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, fg.buffer(m_config.cameraBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)

@@ -21,8 +21,8 @@ void FinalPass::build(FrameGraph &fg) const
 {
     fg.addPass("final")
         .type(PassType::Fullscreen)
-        .vertShader((paths::shaderDir / "fullscreen.vert.spv").string())
-        .fragShader((paths::shaderDir / "final.frag.spv").string())
+        .vertShader((paths::shaderDirectory() / "fullscreen.vert.spv").string())
+        .fragShader((paths::shaderDirectory() / "final.frag.spv").string())
         .pushConstantSize(sizeof(FinalPC), VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(1, fg.image("ibl_env"), VK_SHADER_STAGE_FRAGMENT_BIT)

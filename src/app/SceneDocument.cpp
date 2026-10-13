@@ -90,7 +90,7 @@ void SceneDocument::openImportDialog()
 void SceneDocument::openImportFluidCacheDialog()
 {
     IGFD::FileDialogConfig dialogConfig;
-    dialogConfig.path  = (paths::assetDir / "samples" / "fluid").string();
+    dialogConfig.path  = (paths::assetDirectory() / "samples" / "fluid").string();
     dialogConfig.flags = commonDialogFlags();
     // A null filter is ImGuiFileDialog's directory-selection mode: a baked cache is a directory of
     // per-frame files, so there is no single file to pick.
@@ -168,7 +168,7 @@ void SceneDocument::importPrimitive(const std::string &fileName, const std::stri
 {
     try
     {
-        const fs::path primitivePath = paths::assetDir / "runtime" / "primitives" / fileName;
+        const fs::path primitivePath = paths::assetDirectory() / "runtime" / "primitives" / fileName;
         m_viewer.context().waitIdle();
         SceneObject &root = m_sceneManager.load(primitivePath, m_importConfig);
         // The loader names the root after the file; the menu offered a shape, so the hierarchy says

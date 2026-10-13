@@ -32,8 +32,8 @@ void GeometryPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
     }
 
     pass.indexBuffer(fg.buffer(m_cfg.indexBufferResourceName))
-        .vertShader((paths::shaderDir / "geometry.vert.spv").string())
-        .fragShader((paths::shaderDir / "geometry.frag.spv").string())
+        .vertShader((paths::shaderDirectory() / "geometry.vert.spv").string())
+        .fragShader((paths::shaderDirectory() / "geometry.frag.spv").string())
         .cull(VK_CULL_MODE_NONE)
         .pushConstantSize(sizeof(GeometryPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName),

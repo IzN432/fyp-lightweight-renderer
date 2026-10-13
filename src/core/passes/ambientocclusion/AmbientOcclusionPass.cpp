@@ -75,7 +75,7 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
     // kept in the tree); they will be reintroduced incrementally.
     fg.addPass("hbao_ao")
         .type(PassType::Compute)
-        .computeShader((paths::shaderDir / "hbao.comp.spv").string())
+        .computeShader((paths::shaderDirectory() / "hbao.comp.spv").string())
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_COMPUTE_BIT)
         .sampledDepth(1, fg.image("gbufferDepth"), VK_SHADER_STAGE_COMPUTE_BIT)
         .uniformBuffer(3, fg.buffer("hbao_params"), VK_SHADER_STAGE_COMPUTE_BIT)
@@ -91,7 +91,7 @@ void AmbientOcclusionPass::build(FrameGraph &fg) const
     // the exact 2D version.)
     fg.addPass("hbao_blur")
         .type(PassType::Compute)
-        .computeShader((paths::shaderDir / "hbao_blur.comp.spv").string())
+        .computeShader((paths::shaderDirectory() / "hbao_blur.comp.spv").string())
         .sampledImage(0, raw, VK_SHADER_STAGE_COMPUTE_BIT)
         .sampledDepth(1, fg.image("gbufferDepth"), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageImageWrite(2, ao, VK_SHADER_STAGE_COMPUTE_BIT)

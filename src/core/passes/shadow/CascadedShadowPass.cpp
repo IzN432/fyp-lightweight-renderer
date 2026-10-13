@@ -162,8 +162,8 @@ void CascadedShadowPass::build(FrameGraph &fg, const GpuMeshLayout &layout) cons
     for (const auto &[binding, name] : m_cfg.geometry.vertexBufferResourceNames)
         pass.vertexBuffer(binding, fg.buffer(name));
     pass.indexBuffer(fg.buffer(m_cfg.geometry.indexBufferResourceName))
-        .vertShader((paths::shaderDir / "cascaded_shadow.vert.spv").string())
-        .fragShader((paths::shaderDir / "cascaded_shadow.frag.spv").string())
+        .vertShader((paths::shaderDirectory() / "cascaded_shadow.vert.spv").string())
+        .fragShader((paths::shaderDirectory() / "cascaded_shadow.frag.spv").string())
         .cull(VK_CULL_MODE_BACK_BIT).depthBias(1.25f, 1.75f)
         .renderingLayers(CascadedShadowGpuData::maxLayers)
         .pushConstantSize(sizeof(ShadowPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)

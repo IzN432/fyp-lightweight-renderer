@@ -341,7 +341,7 @@ PassBuilder FluidSolverGpu::addComputePass(FrameGraph &frameGraph, const std::st
     // shader-interface check as a harmless note, not an error, so one declaration serves them all.
     return frameGraph.addPass(name)
         .type(PassType::Compute)
-        .computeShader((paths::shaderDir / (shader + ".spv")).string())
+        .computeShader((paths::shaderDirectory() / (shader + ".spv")).string())
         .uniformBuffer(0, frameGraph.buffer(m_params), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageBufferReadWrite(1, frameGraph.buffer(m_positions), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageBufferReadWrite(2, frameGraph.buffer(m_velocities), VK_SHADER_STAGE_COMPUTE_BIT)

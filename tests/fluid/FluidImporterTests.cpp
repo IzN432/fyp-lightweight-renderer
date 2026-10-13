@@ -10,6 +10,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -24,6 +25,20 @@ template <typename T> void append(std::vector<std::byte> &bytes, const T &value)
 {
     const auto *first = reinterpret_cast<const std::byte *>(&value);
     bytes.insert(bytes.end(), first, first + sizeof(T));
+}
+
+// The reference Blender bakes are too large to commit, so they live wherever the person running
+// the tests keeps them. LR_BLENDER_CACHE_DIR points at the directory holding the cache_fluid_*
+// folders; without it the bake-backed checks below skip, exactly as they do on a machine that has
+// the variable set but not that particular bake.
+std::filesystem::path blenderCacheRoot()
+{
+    const char *root = std::getenv("LR_BLENDER_CACHE_DIR");
+    if (root == nullptr || *root == '\0')
+    {
+        return {};
+    }
+    return std::filesystem::path(root);
 }
 
 std::filesystem::path writeUniFixture()
@@ -164,7 +179,12 @@ void importsShippedDnaHelixSample()
 
 void importsReferenceBlenderCacheWhenAvailable()
 {
-    const std::filesystem::path cache(R"(C:\Users\seani\AppData\Local\Temp\blender_a37396\cache_fluid_ab1c5968)");
+    const std::filesystem::path root = blenderCacheRoot();
+    if (root.empty())
+    {
+        return;
+    }
+    const std::filesystem::path cache       = root / "cache_fluid_ab1c5968";
     const auto                  singleFrame = cache / "data" / "fluid_data_0001.vdb";
     if (!std::filesystem::exists(singleFrame))
     {
@@ -203,8 +223,9 @@ void importsReferenceBlenderCacheWhenAvailable()
 
 void importsReferenceBlenderSmokeCacheWhenAvailable()
 {
-    const std::filesystem::path cache(
-        R"(C:\Users\seani\AppData\Local\Temp\blender_a37396\cache_fluid_c306d54c)");
+    const std::filesystem::path root = blenderCacheRoot();
+    if (root.empty()) return;
+    const std::filesystem::path cache = root / "cache_fluid_c306d54c";
     if (!std::filesystem::exists(cache / "data" / "fluid_data_0001.vdb")) return;
 
     const auto clip = lr::eulerian::BlenderSmokeCacheImporter::importDirectory(cache);

@@ -1,6 +1,7 @@
 build
 docs/doxygen
 imgui.ini
+.vscode/
 
 # Python
 __pycache__/

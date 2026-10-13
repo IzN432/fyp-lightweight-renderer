@@ -69,6 +69,8 @@ add_subdirectory(external)
 
 # Core library
 add_library(lr_core STATIC
+    src/core/Paths.cpp
+
     src/core/vulkan/VulkanContext.cpp
     src/core/vulkan/ShaderLoader.cpp
     src/core/vulkan/ShaderCompiler.cpp

@@ -11,8 +11,8 @@ void CompositePass::build(FrameGraph &fg) const
 {
     fg.addPass(m_cfg.passName)
         .type(PassType::Fullscreen)
-        .vertShader((paths::shaderDir / "fullscreen.vert.spv").string())
-        .fragShader((paths::shaderDir / "composite.frag.spv").string())
+        .vertShader((paths::shaderDirectory() / "fullscreen.vert.spv").string())
+        .fragShader((paths::shaderDirectory() / "composite.frag.spv").string())
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(1, fg.image("ibl_env"), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledDepth(2, fg.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)

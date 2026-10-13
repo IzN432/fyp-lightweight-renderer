@@ -80,8 +80,8 @@ void TransparentPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
     }
 
     pass.indexBuffer(fg.buffer(geometry.indexBufferResourceName))
-        .vertShader((paths::shaderDir / "geometry.vert.spv").string())
-        .fragShader((paths::shaderDir / "transparent.frag.spv").string())
+        .vertShader((paths::shaderDirectory() / "geometry.vert.spv").string())
+        .fragShader((paths::shaderDirectory() / "transparent.frag.spv").string())
         .cull(VK_CULL_MODE_NONE) // back faces of single-sided materials are discarded in the shader
         // Blending each surface over what is behind it needs the draws in back-to-front order (see execute).
         .blend(BlendMode::PremultipliedAlpha)

@@ -117,7 +117,7 @@ void IBLPass::build(FrameGraph &fg) const
 
     fg.addPass("ibl_brdf_lut")
         .type(PassType::Compute)
-        .computeShader((paths::shaderDir / "brdflut.comp.spv").string())
+        .computeShader((paths::shaderDirectory() / "brdflut.comp.spv").string())
         .pushConstantSize(sizeof(BrdfLutPC))
         .storageImageWrite(0, fg.image("ibl_brdf_lut"), VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([lutPC, lutRes](PassContext &ctx) {
@@ -127,7 +127,7 @@ void IBLPass::build(FrameGraph &fg) const
 
     fg.addPass("ibl_hdri_to_cube")
         .type(PassType::Compute)
-        .computeShader((paths::shaderDir / "hdritocubemap.comp.spv").string())
+        .computeShader((paths::shaderDirectory() / "hdritocubemap.comp.spv").string())
         .sampledImage(0, fg.image("hdri"), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageImageWrite(1, fg.image("ibl_env"), VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([envRes](PassContext &ctx) {
@@ -141,7 +141,7 @@ void IBLPass::build(FrameGraph &fg) const
 
     fg.addPass("ibl_irradiance")
         .type(PassType::Compute)
-        .computeShader((paths::shaderDir / "irradiance.comp.spv").string())
+        .computeShader((paths::shaderDirectory() / "irradiance.comp.spv").string())
         .pushConstantSize(sizeof(IrradiancePC))
         .sampledImage(0, fg.image("ibl_env"), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageImageWrite(1, fg.image("ibl_irradiance"), VK_SHADER_STAGE_COMPUTE_BIT)
@@ -162,7 +162,7 @@ void IBLPass::build(FrameGraph &fg) const
 
         fg.addPass("ibl_prefilter_mip" + std::to_string(mip))
             .type(PassType::Compute)
-            .computeShader((paths::shaderDir / "prefilter.comp.spv").string())
+            .computeShader((paths::shaderDirectory() / "prefilter.comp.spv").string())
             .pushConstantSize(sizeof(PrefilterPC))
             .sampledImage(0, fg.image("ibl_env"), VK_SHADER_STAGE_COMPUTE_BIT)
             .storageImageWrite(1, ImageView::mip(fg.image("ibl_prefiltered"), mip), VK_SHADER_STAGE_COMPUTE_BIT)

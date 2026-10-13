@@ -70,8 +70,8 @@ void OverlayGeometryPass::build(FrameGraph &fg)
     pass.vertexBuffer(0, fg.buffer(m_cfg.vertexBufferName));
 
     pass.indexBuffer(fg.buffer(m_cfg.indexBufferName))
-        .vertShader((paths::shaderDir / "overlay_geometry.vert.spv").string())
-        .fragShader((paths::shaderDir / "overlay_geometry.frag.spv").string())
+        .vertShader((paths::shaderDirectory() / "overlay_geometry.vert.spv").string())
+        .fragShader((paths::shaderDirectory() / "overlay_geometry.frag.spv").string())
         .pushConstantSize(sizeof(OverlayGeometryPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)

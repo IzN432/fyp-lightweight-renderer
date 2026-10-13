@@ -25,8 +25,8 @@ void OverlayPointsPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
 
     pass.vertexBuffer(0, fg.buffer(m_cfg.pointsBufferResourceName));
 
-    pass.vertShader((paths::shaderDir / "overlay_points.vert.spv").string())
-        .fragShader((paths::shaderDir / "overlay_points.frag.spv").string())
+    pass.vertShader((paths::shaderDirectory() / "overlay_points.vert.spv").string())
+        .fragShader((paths::shaderDirectory() / "overlay_points.frag.spv").string())
         .pushConstantSize(sizeof(OverlayPointsPC), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_VERTEX_BIT)
         .sampledDepth(1, fg.image("gbufferDepth"), VK_SHADER_STAGE_FRAGMENT_BIT)

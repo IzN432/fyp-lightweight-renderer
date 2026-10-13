@@ -117,10 +117,10 @@ void AreaShadowPass::build(FrameGraph &fg, const GpuMeshLayout &layout) const
         pass.vertexBuffer(binding, fg.buffer(name));
 
     pass.indexBuffer(fg.buffer(m_cfg.geometry.indexBufferResourceName))
-        .vertShader((paths::shaderDir / "area_shadow.vert.spv").string())
+        .vertShader((paths::shaderDirectory() / "area_shadow.vert.spv").string())
         // The fragment stage is the same alpha-and-facing test as the spot pass; only the projection
         // differs, and that lives in the vertex stage's params buffer.
-        .fragShader((paths::shaderDir / "spot_shadow.frag.spv").string())
+        .fragShader((paths::shaderDirectory() / "spot_shadow.frag.spv").string())
         .cull(VK_CULL_MODE_BACK_BIT)
         .depthBias(1.25f, 1.75f)
         .renderingLayers(AreaShadowGpuData::maxLayers)

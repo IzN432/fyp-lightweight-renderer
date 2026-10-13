@@ -93,8 +93,8 @@ void PbrPass::build(FrameGraph &fg) const
 {
     fg.addPass("pbr")
         .type(PassType::Fullscreen)
-        .vertShader((paths::shaderDir / "fullscreen.vert.spv").string())
-        .fragShader((paths::shaderDir / "pbr.frag.spv").string())
+        .vertShader((paths::shaderDirectory() / "fullscreen.vert.spv").string())
+        .fragShader((paths::shaderDirectory() / "pbr.frag.spv").string())
         .pushConstantSize(sizeof(PbrPC), VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, fg.buffer(m_cfg.cameraBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)
         .sampledImage(1, fg.image("ibl_irradiance"), VK_SHADER_STAGE_FRAGMENT_BIT)

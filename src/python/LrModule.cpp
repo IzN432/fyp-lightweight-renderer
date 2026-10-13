@@ -2887,8 +2887,8 @@ NB_MODULE(_lr, m)
         "Compile GLSL source text to SPIR-V bytes.");
 
     m.attr("SWAPCHAIN")  = Viewer::kBackbufferName;
-    m.attr("SHADER_DIR") = lr::paths::shaderDir;
-    m.attr("ASSET_DIR")  = lr::paths::assetDir;
+    m.attr("SHADER_DIR") = lr::paths::shaderDirectory();
+    m.attr("ASSET_DIR")  = lr::paths::assetDirectory();
 
     // Covers scripts that never reach run() (or exit mid-way): drop the callbacks while the
     // interpreter can still destroy the Viewers they keep alive.

@@ -56,8 +56,8 @@ void SmokeRenderPass::build(FrameGraph &frameGraph) const
 {
     frameGraph.addPass("smoke_volume")
         .type(PassType::Fullscreen)
-        .vertShader((paths::shaderDir / "fullscreen.vert.spv").string())
-        .fragShader((paths::shaderDir / "smoke.frag.spv").string())
+        .vertShader((paths::shaderDirectory() / "fullscreen.vert.spv").string())
+        .fragShader((paths::shaderDirectory() / "smoke.frag.spv").string())
         .blend(BlendMode::Alpha)
         .pushConstantSize(sizeof(SmokeRenderPC), VK_SHADER_STAGE_FRAGMENT_BIT)
         .uniformBuffer(0, frameGraph.buffer(m_config.cameraBufferResourceName), VK_SHADER_STAGE_FRAGMENT_BIT)

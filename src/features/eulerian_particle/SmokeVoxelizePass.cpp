@@ -76,7 +76,7 @@ void SmokeVoxelizePass::build(FrameGraph &frameGraph, const GpuMeshLayout &layou
     // still holding an old frame's parity and read them as solid.
     frameGraph.addPass("smoke_voxelize_clear")
         .type(PassType::Compute)
-        .computeShader((paths::shaderDir / "smoke_voxelize_clear.comp.spv").string())
+        .computeShader((paths::shaderDirectory() / "smoke_voxelize_clear.comp.spv").string())
         .pushConstantSize(sizeof(SmokeVoxelizeClearPC), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageImageWrite(0, mask, VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([this](PassContext &context) {
@@ -97,8 +97,8 @@ void SmokeVoxelizePass::build(FrameGraph &frameGraph, const GpuMeshLayout &layou
     }
 
     pass.indexBuffer(frameGraph.buffer(m_config.geometry.indexBufferResourceName))
-        .vertShader((paths::shaderDir / "smoke_voxelize.vert.spv").string())
-        .fragShader((paths::shaderDir / "smoke_voxelize.frag.spv").string())
+        .vertShader((paths::shaderDirectory() / "smoke_voxelize.vert.spv").string())
+        .fragShader((paths::shaderDirectory() / "smoke_voxelize.frag.spv").string())
         // Every triangle must be rasterized regardless of winding: parity counts surface
         // crossings, and discarding back faces would drop exactly the exit crossing that closes
         // each span, leaving every mesh solid from its front face to the far wall of the box.

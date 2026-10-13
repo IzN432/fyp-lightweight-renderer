@@ -92,8 +92,8 @@ int main(int argc, char **argv)
         lr::FrameGraph &graph = viewer.frameGraph();
         graph.addPass("smoke_demo_scene")
             .type(lr::PassType::Fullscreen)
-            .vertShader((lr::paths::shaderDir / "fullscreen.vert.spv").string())
-            .fragShader((lr::paths::shaderDir / "smoke_demo_scene.frag.spv").string())
+            .vertShader((lr::paths::shaderDirectory() / "fullscreen.vert.spv").string())
+            .fragShader((lr::paths::shaderDirectory() / "smoke_demo_scene.frag.spv").string())
             .uniformBuffer(0, graph.buffer(kCameraBuffer), VK_SHADER_STAGE_FRAGMENT_BIT)
             .depth(false, true)
             .colorAttachment(graph.image(lr::Viewer::kBackbufferName), viewer.swapchainFormat(),
