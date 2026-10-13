@@ -15,6 +15,7 @@ class MeshStore;
 class MaterialStore;
 class SkinStore;
 class AnimationLibrary;
+class OfflineFluidSimulationStore;
 
 // Versioned, CPU-only scene persistence. A single .lrscene file contains its JSON manifest followed
 // by the bulk mesh/texture payload. Objects, meshes and materials are named by the UUIDs they
@@ -42,6 +43,7 @@ public:
     static void                         save(const Scene &scene, const MeshStore &meshes,
                                              const MaterialStore &materials, const SkinStore &skins,
                                              const AnimationLibrary &animations,
+                                             const OfflineFluidSimulationStore &offlineFluids,
                                              const std::filesystem::path &path);
     static std::unique_ptr<SceneAssets> load(const std::filesystem::path &path);
     // Appends a saved scene to caller-owned stores, preserving existing objects and assets, and
@@ -51,6 +53,7 @@ public:
                                            MeshStore &meshes, MaterialStore &materials,
                                            SkinStore &skins,
                                            AnimationLibrary &animations,
+                                           OfflineFluidSimulationStore &offlineFluids,
                                            bool remapCameraObject = false);
 };
 

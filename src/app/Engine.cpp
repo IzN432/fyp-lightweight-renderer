@@ -360,7 +360,7 @@ void Engine::run()
 
     // The solver publishes renderer-ready records into a device-local buffer. The liquid pass
     // reads that same buffer, so solved positions never make a per-frame round trip through the CPU.
-    lr::FluidSimulation fluidSimulation({}, viewer.resources());
+    lr::FluidSimulation fluidSimulation({}, viewer.resources(), sceneAssets.offlineFluids);
 
     lr::ScreenSpaceLiquidPass liquidPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),

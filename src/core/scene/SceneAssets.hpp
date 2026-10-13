@@ -8,6 +8,7 @@
 #include "core/loaders/SceneLoader.hpp"
 #include "features/animation/AnimationLibrary.hpp"
 #include "features/linear_blend_skinning/SkinStore.hpp"
+#include "features/fluid/OfflineFluidSimulationStore.hpp"
 
 #include <filesystem>
 
@@ -42,6 +43,7 @@ public:
     MaterialStore materials;
     SkinStore     skins;
     AnimationLibrary animations;
+    OfflineFluidSimulationStore offlineFluids;
 };
 
 } // namespace lr

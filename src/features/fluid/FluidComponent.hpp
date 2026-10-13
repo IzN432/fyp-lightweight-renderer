@@ -1,11 +1,13 @@
 #pragma once
 
 #include "core/scene/Component.hpp"
+#include "features/fluid/OfflineFluidSimulationStore.hpp"
 
 #include <glm/glm.hpp>
 
 #include <cstdint>
 #include <memory>
+#include <variant>
 #include <vector>
 
 namespace lr
@@ -56,11 +58,36 @@ public:
         bool operator==(const Config &) const = default;
     };
 
-    explicit FluidComponent(Config config = {});
+    struct BakedConfig
+    {
+        OfflineFluidSimulationHandle simulation    = 0;
+        float                        playbackSpeed = 1.0f;
+        bool                         loop          = true;
+        bool                         startPaused   = false;
+        // Zero uses the imported clip's suggested radius; positive values override it per instance.
+        float     particleRadius       = 0.0f;
+        float     smoothingRadiusScale = 2.0f;
+        glm::vec3 particleColor{0.25f, 0.5f, 0.95f};
+        float     renderScale = 1.0f;
 
-    const Config &config() const { return m_config; }
-    uint64_t      revision() const { return m_revision; }
-    void          setConfig(Config config);
+        bool operator==(const BakedConfig &) const = default;
+    };
+
+    using Data = std::variant<Config, BakedConfig>;
+
+    explicit FluidComponent(Config config = {});
+    explicit FluidComponent(BakedConfig config);
+    explicit FluidComponent(Data data);
+
+    bool               isLive() const { return std::holds_alternative<Config>(m_data); }
+    bool               isBaked() const { return std::holds_alternative<BakedConfig>(m_data); }
+    const Config      &config() const { return std::get<Config>(m_data); }
+    const BakedConfig &bakedConfig() const { return std::get<BakedConfig>(m_data); }
+    const Data        &data() const { return m_data; }
+    uint64_t           revision() const { return m_revision; }
+    void               setConfig(Config config);
+    void               setBakedConfig(BakedConfig config);
+    void               setData(Data data);
 
     std::unique_ptr<ComponentValues> copyValues() const override;
     void                             pasteValues(const ComponentValues &values) override;
@@ -69,7 +96,7 @@ public:
     void                             onGUIImpl() override;
 
 private:
-    Config   m_config;
+    Data     m_data;
     uint64_t m_revision = 0;
 };
 

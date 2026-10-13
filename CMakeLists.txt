@@ -56,6 +56,8 @@ find_package(MKL CONFIG REQUIRED)
 find_package(ReactPhysics3D REQUIRED)
 find_package(glslang CONFIG REQUIRED)
 find_package(unofficial-spirv-reflect CONFIG REQUIRED)
+find_package(OpenVDB CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # MSVC flags
 add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/EHsc>)
@@ -131,6 +133,8 @@ add_library(lr_core STATIC
     src/features/animation/AnimationClip.cpp
     src/features/animation/AnimationSystem.cpp
     src/features/animation/AnimationTrackCommands.cpp
+    src/features/fluid/OfflineFluidSimulation.cpp
+    src/features/fluid/OfflineFluidSimulationStore.cpp
     src/core/scene/SceneManager.cpp
     src/core/scene/SceneDrawList.cpp
     src/core/scene/SceneGpu.cpp
@@ -380,6 +384,16 @@ add_library(lr_fluid_simulation STATIC
 )
 target_include_directories(lr_fluid_simulation PUBLIC src)
 target_link_libraries(lr_fluid_simulation PUBLIC lr_fluid_feature lr_core imgui)
+
+# External baked-fluid ingestion. OpenVDB and Blender's gzip configuration format stop at this
+# boundary; the rest of the engine only sees OfflineFluidSimulation.
+add_library(lr_fluid_importers STATIC
+    src/features/fluid/import/BlenderFluidCacheImporter.cpp
+    src/features/fluid/import/BlenderUniImporter.cpp
+    src/features/fluid/import/VdbFluidImporter.cpp
+)
+target_include_directories(lr_fluid_importers PUBLIC src)
+target_link_libraries(lr_fluid_importers PUBLIC lr_core glm::glm PRIVATE OpenVDB::openvdb ZLIB::ZLIB)
 
 # Scene-authored smoke settings stay available even when the optional CUDA runtime is disabled, so
 # smoke-bearing scene files can still be loaded, inspected and round-tripped on every build.
@@ -747,6 +761,20 @@ if(BUILD_TESTING)
     )
     target_link_libraries(fluid_solver_cpu_tests PRIVATE lr_fluid_feature)
     add_test(NAME fluid.solver_cpu COMMAND fluid_solver_cpu_tests)
+
+    add_executable(offline_fluid_simulation_tests
+        tests/fluid/OfflineFluidSimulationTests.cpp
+    )
+    target_link_libraries(offline_fluid_simulation_tests PRIVATE lr_core)
+    add_test(NAME fluid.offline_simulation COMMAND offline_fluid_simulation_tests)
+
+    add_executable(fluid_importer_tests
+        tests/fluid/FluidImporterTests.cpp
+    )
+    target_link_libraries(fluid_importer_tests PRIVATE lr_fluid_importers ZLIB::ZLIB)
+    target_compile_definitions(fluid_importer_tests PRIVATE
+        LR_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/assets/")
+    add_test(NAME fluid.importers COMMAND fluid_importer_tests)
 
     add_executable(particle_billboard_tests
         tests/fluid/ParticleBillboardTests.cpp

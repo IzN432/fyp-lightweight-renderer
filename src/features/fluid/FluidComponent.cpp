@@ -20,36 +20,45 @@ float FluidComponent::Config::particleRadius() const
     return std::max(particleSpacing, 1e-4f) * std::max(particleRenderScale, 0.0f);
 }
 
-FluidComponent::FluidComponent(Config config) : Component("Fluid Simulation"), m_config(std::move(config)) {}
+FluidComponent::FluidComponent(Config config) : FluidComponent(Data(std::move(config))) {}
 
-void FluidComponent::setConfig(Config config)
+FluidComponent::FluidComponent(BakedConfig config) : FluidComponent(Data(std::move(config))) {}
+
+FluidComponent::FluidComponent(Data data) : Component("Fluid Simulation"), m_data(std::move(data)) {}
+
+void FluidComponent::setConfig(Config config) { setData(std::move(config)); }
+
+void FluidComponent::setBakedConfig(BakedConfig config) { setData(std::move(config)); }
+
+void FluidComponent::setData(Data data)
 {
-    if (m_config == config) return;
-    m_config = std::move(config);
+    if (m_data == data)
+    {
+        return;
+    }
+    m_data = std::move(data);
     ++m_revision;
     markDirty();
 }
 
 std::unique_ptr<ComponentValues> FluidComponent::copyValues() const
 {
-    return std::make_unique<ComponentValueSnapshot<Config>>(m_config);
+    return std::make_unique<ComponentValueSnapshot<Data>>(m_data);
 }
 
-void FluidComponent::pasteValues(const ComponentValues &values)
-{
-    setConfig(componentValuesAs<Config>(values));
-}
+void FluidComponent::pasteValues(const ComponentValues &values) { setData(componentValuesAs<Data>(values)); }
 
 ComponentValuesAdder FluidComponent::valuesAdder() const
 {
     return [](SceneObject &object, const ComponentValues &values) {
-        object.addComponent<FluidComponent>(componentValuesAs<Config>(values));
+        object.addComponent<FluidComponent>(componentValuesAs<Data>(values));
     };
 }
 
 void FluidComponent::onGUIImpl()
 {
-    ImGui::TextDisabled("Select this object to edit and run it in the Fluid panel.");
+    ImGui::TextDisabled(isLive() ? "Live fluid. Select this object to edit and run it in the Fluid panel."
+                                 : "Baked fluid. Select this object to control playback in the Fluid panel.");
 }
 
 } // namespace lr

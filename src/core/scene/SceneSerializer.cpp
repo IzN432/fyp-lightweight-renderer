@@ -23,9 +23,9 @@ namespace
 {
 using json = nlohmann::json;
 
-// 4 — animations are scene-level resources. Animator components contain handles into the global
-// table instead of embedding clip payloads.
-constexpr int kFormatVersion = 4;
+// 5 — baked fluid simulations are scene-level binary resources. Components refer to their stable
+// UUIDs in the file and resolve those to dense handles during load.
+constexpr int kFormatVersion = 5;
 constexpr std::array<char, 8> kFileMagic{'L', 'R', 'S', 'C', 'E', 'N', 'E', '\0'};
 const json &required(const json &object, const char *key, const std::string &where);
 
@@ -352,12 +352,14 @@ Material deserializeMaterial(const json &value, const std::string &where, const 
 
 void SceneSerializer::save(const SceneAssets &assets, const std::filesystem::path &path)
 {
-    save(assets.scene, assets.meshes, assets.materials, assets.skins, assets.animations, path);
+    save(assets.scene, assets.meshes, assets.materials, assets.skins, assets.animations,
+         assets.offlineFluids, path);
 }
 
 void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
                            const MaterialStore &materialStore, const SkinStore &skinStore,
                            const AnimationLibrary &animationLibrary,
+                           const OfflineFluidSimulationStore &offlineFluidStore,
                            const std::filesystem::path &path)
 {
     if constexpr (std::endian::native != std::endian::little)
@@ -422,8 +424,35 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
     for (const AnimationClip &clip : animationLibrary.clips())
         animations.push_back(serializeAnimationClip(clip));
 
+    // Like animations, imported clips remain authored assets even while no object references them.
+    json offlineFluids = json::array();
+    for (OfflineFluidSimulationHandle handle = 0; handle < offlineFluidStore.size(); ++handle)
+    {
+        const OfflineFluidSimulation &simulation = offlineFluidStore.get(handle);
+        json frames = json::array();
+        for (const OfflineFluidSimulation::Frame &frame : simulation.frames())
+        {
+            frames.push_back({{"seconds", frame.seconds},
+                              {"source_frame", frame.sourceFrame},
+                              {"particle_offset", frame.particleOffset},
+                              {"particle_count", frame.particleCount},
+                              {"bounds_min", vec3(frame.boundsMin)},
+                              {"bounds_max", vec3(frame.boundsMax)}});
+        }
+        json item{{"id", writeId(offlineFluidStore.idOf(handle))},
+                  {"name", simulation.name()},
+                  {"frames_per_second", simulation.framesPerSecond()},
+                  {"default_particle_radius", simulation.defaultParticleRadius()},
+                  {"frames", std::move(frames)},
+                  {"positions", binary.append(std::span(simulation.positions()))},
+                  {"velocities", nullptr}};
+        if (simulation.hasVelocities())
+            item["velocities"] = binary.append(std::span(simulation.velocities()));
+        offlineFluids.push_back(std::move(item));
+    }
+
     const ComponentCodecRegistry codecs = makeSceneComponentCodecs();
-    const ComponentSaveContext componentContext{meshStore, materialStore, skinStore};
+    const ComponentSaveContext componentContext{meshStore, materialStore, skinStore, offlineFluidStore};
     json objects = json::array();
     for (const auto &objectPointer : scene.sceneObjects())
     {
@@ -462,7 +491,8 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
     const json document{{"format", "lr.scene"}, {"version", kFormatVersion},
                         {"environment", std::move(environment)}, {"objects", std::move(objects)},
                         {"meshes", std::move(meshes)}, {"materials", std::move(materials)},
-                        {"animations", std::move(animations)}};
+                        {"animations", std::move(animations)},
+                        {"offline_fluids", std::move(offlineFluids)}};
     const std::string manifest = document.dump();
     const uint64_t manifestBytes = static_cast<uint64_t>(manifest.size());
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
@@ -479,7 +509,8 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
 std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &path)
 {
     auto result = std::make_unique<SceneAssets>();
-    load(path, result->scene, result->meshes, result->materials, result->skins, result->animations);
+    load(path, result->scene, result->meshes, result->materials, result->skins, result->animations,
+         result->offlineFluids);
     return result;
 }
 
@@ -487,6 +518,7 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
                                                  MeshStore &meshStore, MaterialStore &materialStore,
                                                  SkinStore &skinStore,
                                                  AnimationLibrary &animationLibrary,
+                                                 OfflineFluidSimulationStore &offlineFluidStore,
                                                  bool remapCameraObject)
 {
     if constexpr (std::endian::native != std::endian::little)
@@ -522,9 +554,53 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
     // that library wholesale; retaining clips from the previous document would both leak assets
     // into the new scene and let playback resolve stale handles.
     animationLibrary.clear();
+    offlineFluidStore.clear();
 
     const std::streamoff payloadOffset = static_cast<std::streamoff>(kFileMagic.size() + sizeof(manifestBytes) + manifestBytes);
     const BinaryReader binary(path, payloadOffset);
+
+    if (version >= 5)
+    {
+        const json &offlineFluids = required(document, "offline_fluids", "root");
+        if (!offlineFluids.is_array())
+            throw std::runtime_error("SceneSerializer: root.offline_fluids must be an array");
+        for (size_t index = 0; index < offlineFluids.size(); ++index)
+        {
+            const json &value = offlineFluids[index];
+            const std::string where = "offline_fluids[" + std::to_string(index) + "]";
+            const OfflineFluidSimulationId id = readId(required(value, "id", where), where + ".id");
+            std::vector<OfflineFluidSimulation::Frame> frames;
+            const json &serializedFrames = required(value, "frames", where);
+            if (!serializedFrames.is_array())
+                throw std::runtime_error("SceneSerializer: " + where + ".frames must be an array");
+            frames.reserve(serializedFrames.size());
+            for (size_t frameIndex = 0; frameIndex < serializedFrames.size(); ++frameIndex)
+            {
+                const json &frame = serializedFrames[frameIndex];
+                const std::string frameWhere = where + ".frames[" + std::to_string(frameIndex) + "]";
+                frames.push_back({required(frame, "seconds", frameWhere).get<float>(),
+                                  required(frame, "source_frame", frameWhere).get<int32_t>(),
+                                  required(frame, "particle_offset", frameWhere).get<uint64_t>(),
+                                  required(frame, "particle_count", frameWhere).get<uint32_t>(),
+                                  readVector<3, float, glm::defaultp>(required(frame, "bounds_min", frameWhere),
+                                                                      frameWhere + ".bounds_min"),
+                                  readVector<3, float, glm::defaultp>(required(frame, "bounds_max", frameWhere),
+                                                                      frameWhere + ".bounds_max")});
+            }
+            std::vector<glm::vec3> positions =
+                binary.readArray<glm::vec3>(required(value, "positions", where), where + ".positions");
+            std::vector<glm::vec3> velocities;
+            const json &serializedVelocities = required(value, "velocities", where);
+            if (!serializedVelocities.is_null())
+                velocities = binary.readArray<glm::vec3>(serializedVelocities, where + ".velocities");
+            offlineFluidStore.add(
+                OfflineFluidSimulation::fromRaw(required(value, "name", where).get<std::string>(),
+                                                 required(value, "frames_per_second", where).get<float>(),
+                                                 std::move(frames), std::move(positions), std::move(velocities),
+                                                 required(value, "default_particle_radius", where).get<float>()),
+                id);
+        }
+    }
 
     if (document.contains("environment"))
     {
@@ -651,7 +727,7 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
     std::optional<SceneObjectId> serializedCameraId;
     std::optional<SceneObjectId> loadedCameraId;
     const ComponentCodecRegistry codecs = makeSceneComponentCodecs();
-    ComponentLoadContext componentContext{scene, meshStore, materialStore, skinStore};
+    ComponentLoadContext componentContext{scene, meshStore, materialStore, skinStore, offlineFluidStore};
     for (size_t index = 0; index < objects.size(); ++index)
     {
         const json &value = objects[index];

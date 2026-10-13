@@ -4,6 +4,7 @@
 #include "core/framegraph/PassBuilder.hpp"
 #include "core/framegraph/ResourceRegistry.hpp"
 #include "features/fluid/FluidSolverCpu.hpp"
+#include "features/fluid/ParticleBillboardPass.hpp"
 
 #include <glm/glm.hpp>
 
@@ -47,12 +48,12 @@ public:
         float     restDensity     = 1000.0f;
         float     particleMass    = 1.0f;
         glm::vec3 gravity{0.0f, -9.81f, 0.0f};
-        float     relaxation       = 1000.0f;
+        float     relaxation                 = 1000.0f;
         float     artificialPressureK        = 1e-5f;
         float     artificialPressureDeltaQ   = 0.3f;
         float     artificialPressureExponent = 4.0f;
         float     vorticityEpsilon           = 0.0f;
-        int       solverIterations = 4;
+        int       solverIterations           = 4;
         // Ceiling on solverIterations. The solve is unrolled into declared passes, so this fixes
         // how many are built; solverIterations can then be tuned at runtime up to this without
         // rebuilding the graph. Raising it past what is used costs the skipped passes' descriptor
@@ -60,12 +61,12 @@ public:
         int       maxSolverIterations = 8;
         glm::vec3 boundsMin{-0.5f, 0.0f, -0.5f};
         glm::vec3 boundsMax{0.5f, 1.0f, 0.5f};
-        float     boundsRestitution        = 0.0f;
-        float     boundsFriction           = 0.98f;
-        float     viscosity                = 1e-5f;
+        float     boundsRestitution = 0.0f;
+        float     boundsFriction    = 0.98f;
+        float     viscosity         = 1e-5f;
         // CFL-style travel limit per timestep. Controllers derive this from particle spacing;
         // zero disables it. See FluidSolverCpu::Config for details.
-        float     maxDisplacementInRadiiPerStep = 0.5f;
+        float maxDisplacementInRadiiPerStep = 0.5f;
 
         // Initial buffer capacity. reserve() grows every dependent GPU buffer when a later source
         // layout requires more particles.
@@ -105,6 +106,10 @@ public:
     // Grows every particle-dependent GPU buffer. Existing frame-graph bindings are refreshed via
     // ResourceRegistry generations; capacity never shrinks during a run.
     void reserve(uint32_t particleCapacity);
+    // Replaces the renderer-facing records from the CPU and suppresses the live solver's publish
+    // pass. Used by baked playback while retaining the same buffer contract and render passes.
+    void setPresentationParticles(std::span<const ParticleGpuData> particles);
+    void setPublishEnabled(bool enabled) { m_publishEnabled = enabled; }
 
     // Advances by whole fixed steps covering frameDeltaTime, matching the application's fixed-step
     // accumulator. The work is recorded when the graph executes, not here.
@@ -182,6 +187,7 @@ private:
     uint32_t          m_particleCount   = 0;
     uint32_t          m_pendingSteps    = 0;
     bool              m_paused          = false;
+    bool              m_publishEnabled  = true;
     float             m_fixedDeltaTime  = 1.0f / 60.0f;
     float             m_stepAccumulator = 0.0f;
     // Step chains build() declared, which caps how many a frame can run.

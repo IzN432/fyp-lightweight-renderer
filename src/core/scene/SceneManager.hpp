@@ -49,6 +49,7 @@ public:
     MeshStore     &meshStore() { return m_assets.meshes; }
     SkinStore     &skinStore() { return m_assets.skins; }
     AnimationLibrary &animations() { return m_assets.animations; }
+    OfflineFluidSimulationStore &offlineFluids() { return m_assets.offlineFluids; }
     AnimationSystem &animationSystem() { return m_animationSystem; }
 
     // Loads OBJ, glTF, or GLB content into this manager's Scene and asset

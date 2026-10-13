@@ -62,21 +62,21 @@ uint32_t FluidSolverGpu::resolvedHashBuckets(const Config &config)
 FluidSolverCpu::Config FluidSolverGpu::toCpuConfig(const Config &config)
 {
     FluidSolverCpu::Config cpu;
-    cpu.smoothingRadius          = config.smoothingRadius;
-    cpu.restDensity              = config.restDensity;
-    cpu.particleMass             = config.particleMass;
-    cpu.gravity                  = config.gravity;
-    cpu.relaxation               = config.relaxation;
-    cpu.artificialPressureK        = config.artificialPressureK;
-    cpu.artificialPressureDeltaQ   = config.artificialPressureDeltaQ;
-    cpu.artificialPressureExponent = config.artificialPressureExponent;
-    cpu.vorticityEpsilon           = config.vorticityEpsilon;
-    cpu.solverIterations         = config.solverIterations;
-    cpu.boundsMin                = config.boundsMin;
-    cpu.boundsMax                = config.boundsMax;
-    cpu.boundsRestitution        = config.boundsRestitution;
-    cpu.boundsFriction           = config.boundsFriction;
-    cpu.viscosity                = config.viscosity;
+    cpu.smoothingRadius               = config.smoothingRadius;
+    cpu.restDensity                   = config.restDensity;
+    cpu.particleMass                  = config.particleMass;
+    cpu.gravity                       = config.gravity;
+    cpu.relaxation                    = config.relaxation;
+    cpu.artificialPressureK           = config.artificialPressureK;
+    cpu.artificialPressureDeltaQ      = config.artificialPressureDeltaQ;
+    cpu.artificialPressureExponent    = config.artificialPressureExponent;
+    cpu.vorticityEpsilon              = config.vorticityEpsilon;
+    cpu.solverIterations              = config.solverIterations;
+    cpu.boundsMin                     = config.boundsMin;
+    cpu.boundsMax                     = config.boundsMax;
+    cpu.boundsRestitution             = config.boundsRestitution;
+    cpu.boundsFriction                = config.boundsFriction;
+    cpu.viscosity                     = config.viscosity;
     cpu.maxDisplacementInRadiiPerStep = config.maxDisplacementInRadiiPerStep;
     // The GPU table is fixed, so pin the CPU one to the same size. Bucket counts change which
     // cells collide, and a collision changes nothing about the neighbour sets -- the distance test
@@ -177,7 +177,7 @@ FluidSolverGpu::FluidSolverGpu(Config config, ResourceRegistry &resources)
     // reading the leading vec4 of centre and radius in place.
     resources.registerStaticBuffer(m_config.particleBufferResourceName,
                                    VkDeviceSize(capacity) * sizeof(ParticleGpuData),
-                                   storage | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+                                   storage | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
     resources.registerDynamicBuffer(m_params, sizeof(GpuFluidParams), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     updateParams();
@@ -188,15 +188,14 @@ void FluidSolverGpu::updateParams()
     const float h = std::max(m_config.smoothingRadius, 1e-6f);
 
     const GpuFluidParams params{
-        .gravityAndDeltaTime = glm::vec4(m_config.gravity, std::max(m_fixedDeltaTime, 1e-5f)),
-        .boundsMin           = glm::vec4(m_config.boundsMin, h),
-        .boundsMax           = glm::vec4(m_config.boundsMax, std::max(m_config.restDensity, 1e-6f)),
-        .massRelaxViscosity = glm::vec4(m_config.particleMass, m_config.relaxation, m_config.viscosity, 0.0f),
+        .gravityAndDeltaTime      = glm::vec4(m_config.gravity, std::max(m_fixedDeltaTime, 1e-5f)),
+        .boundsMin                = glm::vec4(m_config.boundsMin, h),
+        .boundsMax                = glm::vec4(m_config.boundsMax, std::max(m_config.restDensity, 1e-6f)),
+        .massRelaxViscosity       = glm::vec4(m_config.particleMass, m_config.relaxation, m_config.viscosity, 0.0f),
         .restitutionFrictionSpeed = glm::vec4(m_config.boundsRestitution, m_config.boundsFriction,
                                               m_config.maxDisplacementInRadiiPerStep, 0.0f),
-        .pressureAndVorticity =
-            glm::vec4(m_config.artificialPressureK, m_config.artificialPressureDeltaQ,
-                      m_config.artificialPressureExponent, m_config.vorticityEpsilon),
+        .pressureAndVorticity     = glm::vec4(m_config.artificialPressureK, m_config.artificialPressureDeltaQ,
+                                              m_config.artificialPressureExponent, m_config.vorticityEpsilon),
         .counts = glm::uvec4(m_particleCount, resolvedHashBuckets(m_config), resolvedHashBuckets(m_config) - 1u,
                              static_cast<uint32_t>(std::max(m_config.solverIterations, 0))),
     };
@@ -251,10 +250,10 @@ void FluidSolverGpu::reserve(uint32_t particleCapacity)
     const uint32_t oldBuckets  = resolvedHashBuckets(m_config);
     const uint32_t newBuckets  = resolvedHashBuckets(resizedConfig);
 
-    const VkBufferUsageFlags storage  = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    const VkBufferUsageFlags uploaded = storage | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    const VkDeviceSize vectorBytes = VkDeviceSize(particleCapacity) * sizeof(glm::vec4);
-    const VkDeviceSize scalarBytes = VkDeviceSize(particleCapacity) * sizeof(float);
+    const VkBufferUsageFlags storage     = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    const VkBufferUsageFlags uploaded    = storage | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    const VkDeviceSize       vectorBytes = VkDeviceSize(particleCapacity) * sizeof(glm::vec4);
+    const VkDeviceSize       scalarBytes = VkDeviceSize(particleCapacity) * sizeof(float);
 
     m_resources->replaceStaticBuffer(m_positions, vectorBytes, uploaded);
     m_resources->replaceStaticBuffer(m_velocities, vectorBytes, uploaded);
@@ -268,14 +267,13 @@ void FluidSolverGpu::reserve(uint32_t particleCapacity)
     m_resources->replaceStaticBuffer(m_sortedPositions, vectorBytes, storage);
     m_resources->replaceStaticBuffer(m_sortedVelocities, vectorBytes, storage);
     m_resources->replaceStaticBuffer(m_sortedPredicted, vectorBytes, storage);
-    m_resources->replaceStaticBuffer(m_sortedParticleCells,
-                                     VkDeviceSize(particleCapacity) * sizeof(glm::ivec4), storage);
+    m_resources->replaceStaticBuffer(m_sortedParticleCells, VkDeviceSize(particleCapacity) * sizeof(glm::ivec4),
+                                     storage);
     m_resources->replaceStaticBuffer(m_particleIds, VkDeviceSize(particleCapacity) * sizeof(uint32_t), uploaded);
-    m_resources->replaceStaticBuffer(m_sortedParticleIds,
-                                     VkDeviceSize(particleCapacity) * sizeof(uint32_t), storage);
+    m_resources->replaceStaticBuffer(m_sortedParticleIds, VkDeviceSize(particleCapacity) * sizeof(uint32_t), storage);
     m_resources->replaceStaticBuffer(m_config.particleBufferResourceName,
                                      VkDeviceSize(particleCapacity) * sizeof(ParticleGpuData),
-                                     storage | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+                                     storage | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
     if (newBuckets != oldBuckets)
     {
@@ -285,6 +283,17 @@ void FluidSolverGpu::reserve(uint32_t particleCapacity)
 
     m_config.maxParticles = particleCapacity;
     updateParams();
+}
+
+void FluidSolverGpu::setPresentationParticles(std::span<const ParticleGpuData> particles)
+{
+    reserve(static_cast<uint32_t>(particles.size()));
+    m_publishEnabled = false;
+    if (!particles.empty())
+    {
+        m_resources->reuploadBuffer(m_config.particleBufferResourceName, particles.data(),
+                                    VkDeviceSize(particles.size()) * sizeof(ParticleGpuData));
+    }
 }
 
 void FluidSolverGpu::setFixedDeltaTime(float seconds)
@@ -504,7 +513,7 @@ void FluidSolverGpu::build(FrameGraph &frameGraph)
         .storageBufferRead(16, frameGraph.buffer(m_particleIds), VK_SHADER_STAGE_COMPUTE_BIT)
         .storageBufferWrite(10, frameGraph.buffer(m_config.particleBufferResourceName), VK_SHADER_STAGE_COMPUTE_BIT)
         .execute([this](PassContext &context) {
-            if (m_particleCount == 0)
+            if (!m_publishEnabled || m_particleCount == 0)
             {
                 return;
             }
@@ -518,10 +527,10 @@ void FluidSolverGpu::build(FrameGraph &frameGraph)
 
 std::vector<glm::vec3> FluidSolverGpu::readPositions()
 {
-    const std::vector<std::byte> bytes = m_resources->readBuffer(m_positions);
+    const std::vector<std::byte> bytes   = m_resources->readBuffer(m_positions);
     const std::vector<std::byte> idBytes = m_resources->readBuffer(m_particleIds);
-    const auto                  *data  = reinterpret_cast<const glm::vec4 *>(bytes.data());
-    const auto                  *ids   = reinterpret_cast<const uint32_t *>(idBytes.data());
+    const auto                  *data    = reinterpret_cast<const glm::vec4 *>(bytes.data());
+    const auto                  *ids     = reinterpret_cast<const uint32_t *>(idBytes.data());
 
     std::vector<glm::vec3> positions(m_particleCount);
     for (uint32_t i = 0; i < m_particleCount; ++i)
@@ -533,10 +542,10 @@ std::vector<glm::vec3> FluidSolverGpu::readPositions()
 
 std::vector<glm::vec3> FluidSolverGpu::readVelocities()
 {
-    const std::vector<std::byte> bytes = m_resources->readBuffer(m_velocities);
+    const std::vector<std::byte> bytes   = m_resources->readBuffer(m_velocities);
     const std::vector<std::byte> idBytes = m_resources->readBuffer(m_particleIds);
-    const auto                  *data  = reinterpret_cast<const glm::vec4 *>(bytes.data());
-    const auto                  *ids   = reinterpret_cast<const uint32_t *>(idBytes.data());
+    const auto                  *data    = reinterpret_cast<const glm::vec4 *>(bytes.data());
+    const auto                  *ids     = reinterpret_cast<const uint32_t *>(idBytes.data());
 
     std::vector<glm::vec3> velocities(m_particleCount);
     for (uint32_t i = 0; i < m_particleCount; ++i)
@@ -548,10 +557,10 @@ std::vector<glm::vec3> FluidSolverGpu::readVelocities()
 
 std::vector<float> FluidSolverGpu::readDensities()
 {
-    const std::vector<std::byte> bytes = m_resources->readBuffer(m_densities);
+    const std::vector<std::byte> bytes   = m_resources->readBuffer(m_densities);
     const std::vector<std::byte> idBytes = m_resources->readBuffer(m_particleIds);
-    const auto                  *data  = reinterpret_cast<const float *>(bytes.data());
-    const auto                  *ids   = reinterpret_cast<const uint32_t *>(idBytes.data());
+    const auto                  *data    = reinterpret_cast<const float *>(bytes.data());
+    const auto                  *ids     = reinterpret_cast<const uint32_t *>(idBytes.data());
 
     std::vector<float> densities(m_particleCount);
     for (uint32_t i = 0; i < m_particleCount; ++i)

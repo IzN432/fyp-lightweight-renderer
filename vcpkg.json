@@ -10,11 +10,13 @@
         "vulkan-memory-allocator",
         "mikktspace",
         "nlohmann-json",
+        "openvdb",
         "stduuid",
         "libigl",
         "intel-mkl",
         "reactphysics3d",
         "glslang",
-        "spirv-reflect"
+        "spirv-reflect",
+        "zlib"
     ]
 }

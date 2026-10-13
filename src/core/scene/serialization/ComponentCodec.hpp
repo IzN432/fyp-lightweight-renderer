@@ -16,12 +16,14 @@ class MeshStore;
 class Scene;
 class SceneObject;
 class SkinStore;
+class OfflineFluidSimulationStore;
 
 struct ComponentSaveContext
 {
     const MeshStore &meshes;
     const MaterialStore &materials;
     const SkinStore &skins;
+    const OfflineFluidSimulationStore &offlineFluids;
 };
 
 struct ComponentLoadContext
@@ -30,6 +32,7 @@ struct ComponentLoadContext
     MeshStore &meshes;
     MaterialStore &materials;
     SkinStore &skins;
+    OfflineFluidSimulationStore &offlineFluids;
 };
 
 class ComponentCodec

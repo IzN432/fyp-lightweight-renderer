@@ -229,7 +229,7 @@ int main()
     editorTarget.animations.add(lr::AnimationClip("Stale clip", {}));
     const auto editorLoaded = lr::SceneSerializer::load(
         temporary.path, editorTarget.scene, editorTarget.meshes, editorTarget.materials,
-        editorTarget.skins, editorTarget.animations, true);
+        editorTarget.skins, editorTarget.animations, editorTarget.offlineFluids, true);
     assert(editorTarget.animations.size() == 2);
     assert(editorTarget.animations.get(0).name() == "Edited");
     assert(editorTarget.animations.get(1).name() == "Unreferenced");
@@ -314,7 +314,7 @@ int main()
     // already holds those objects is a collision rather than a silent duplicate.
     bool collisionRejected = false;
     try { (void)lr::SceneSerializer::load(temporary.path, loaded->scene, loaded->meshes, loaded->materials,
-                                         loaded->skins, loaded->animations); }
+                                         loaded->skins, loaded->animations, loaded->offlineFluids); }
     catch (const std::exception &) { collisionRejected = true; }
     assert(collisionRejected);
 
