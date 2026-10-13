@@ -461,6 +461,17 @@ const CudaVolume &SmokeSolver::pressureVolume() const { return *m_impl->volumes[
 const CudaVolume &SmokeSolver::divergenceVolume() const { return *m_impl->volumes[kDivergence]; }
 const CudaVolume &SmokeSolver::temperatureVolume() const { return *m_impl->volumes[kTemperature]; }
 
+void SmokeSolver::uploadBakedFields(std::span<const float> density, std::span<const float> temperature,
+                                    VkExtent3D activeExtent)
+{
+    if (!m_impl) throw std::logic_error("SmokeSolver: cannot use a moved-from solver");
+    if (stepPending()) waitForStep();
+    setActiveExtent(activeExtent);
+    const cudaExtent extent{activeExtent.width, activeExtent.height, activeExtent.depth};
+    m_impl->volumes[kDensity]->upload(density, extent);
+    m_impl->volumes[kTemperature]->upload(temperature, extent);
+}
+
 std::string SmokeSolver::densityResourceName() const { return m_config.namePrefix + "_density"; }
 std::string SmokeSolver::velocityResourceName() const { return m_config.namePrefix + "_velocity"; }
 std::string SmokeSolver::pressureResourceName() const { return m_config.namePrefix + "_pressure"; }

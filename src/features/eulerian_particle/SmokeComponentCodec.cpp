@@ -20,10 +20,24 @@ public:
     std::string_view key() const override { return "smoke"; }
     std::type_index  componentType() const override { return typeid(SmokeComponent); }
 
-    json encode(const SceneObject &object, const ComponentSaveContext &) const override
+    json encode(const SceneObject &object, const ComponentSaveContext &context) const override
     {
-        const auto &c = object.getComponent<SmokeComponent>().config();
+        const SmokeComponent &component = object.getComponent<SmokeComponent>();
+        if (component.isBaked())
+        {
+            const auto &c = component.bakedConfig();
+            return {{"mode", "baked"},
+                    {"simulation", toString(context.offlineSmokes.idOf(c.simulation))},
+                    {"playback_speed", c.playbackSpeed}, {"loop", c.loop},
+                    {"start_paused", c.startPaused}, {"show_bounds", c.showBounds},
+                    {"enabled", c.enabled}, {"bounds_centre", vec3(c.boundsCentre)},
+                    {"cool_color", vec3(c.coolColor)}, {"warm_color", vec3(c.warmColor)},
+                    {"cool_temperature", c.coolTemperature}, {"warm_temperature", c.warmTemperature},
+                    {"density_scale", c.densityScale}, {"sample_count", c.sampleCount}};
+        }
+        const auto &c = component.config();
         return {
+            {"mode", "live"},
             {"grid_size", {c.gridSize.x, c.gridSize.y, c.gridSize.z}},
             {"simulation_scale", c.simulationScale}, {"bounds_centre", vec3(c.boundsCentre)},
             {"show_bounds", c.showBounds}, {"enabled", c.enabled}, {"start_paused", c.startPaused},
@@ -42,8 +56,37 @@ public:
         };
     }
 
-    void decode(const json &value, SceneObject &object, ComponentLoadContext &, const std::string &where) const override
+    void decode(const json &value, SceneObject &object, ComponentLoadContext &context,
+                const std::string &where) const override
     {
+        const std::string mode = value.contains("mode") ? required(value, "mode", where).get<std::string>() : "live";
+        if (mode == "baked")
+        {
+            const auto id = parseUuid(required(value, "simulation", where).get<std::string>());
+            const auto handle = context.offlineSmokes.find(id);
+            if (!handle)
+                throw std::runtime_error("SceneSerializer: missing offline smoke simulation " + toString(id) +
+                                         " at " + where + ".simulation");
+            SmokeComponent::BakedConfig c;
+            c.simulation = *handle;
+            c.playbackSpeed = required(value, "playback_speed", where).get<float>();
+            c.loop = required(value, "loop", where).get<bool>();
+            c.startPaused = required(value, "start_paused", where).get<bool>();
+            c.showBounds = required(value, "show_bounds", where).get<bool>();
+            c.enabled = required(value, "enabled", where).get<bool>();
+            c.boundsCentre = readVector<3, float>(required(value, "bounds_centre", where), where + ".bounds_centre");
+            c.coolColor = readVector<3, float>(required(value, "cool_color", where), where + ".cool_color");
+            c.warmColor = readVector<3, float>(required(value, "warm_color", where), where + ".warm_color");
+            c.coolTemperature = required(value, "cool_temperature", where).get<float>();
+            c.warmTemperature = required(value, "warm_temperature", where).get<float>();
+            c.densityScale = required(value, "density_scale", where).get<float>();
+            c.sampleCount = required(value, "sample_count", where).get<int>();
+            object.addComponent<SmokeComponent>(std::move(c));
+            return;
+        }
+        if (mode != "live")
+            throw std::runtime_error("SceneSerializer: invalid smoke mode '" + mode + "' at " + where);
+
         SmokeComponent::Config c;
         c.gridSize = readVector<3, uint32_t>(required(value, "grid_size", where), where + ".grid_size");
         c.simulationScale = required(value, "simulation_scale", where).get<float>();

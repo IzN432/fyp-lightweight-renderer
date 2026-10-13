@@ -135,6 +135,8 @@ add_library(lr_core STATIC
     src/features/animation/AnimationTrackCommands.cpp
     src/features/fluid/OfflineFluidSimulation.cpp
     src/features/fluid/OfflineFluidSimulationStore.cpp
+    src/features/eulerian_particle/OfflineSmokeSimulation.cpp
+    src/features/eulerian_particle/OfflineSmokeSimulationStore.cpp
     src/core/scene/SceneManager.cpp
     src/core/scene/SceneDrawList.cpp
     src/core/scene/SceneGpu.cpp
@@ -391,6 +393,7 @@ add_library(lr_fluid_importers STATIC
     src/features/fluid/import/BlenderFluidCacheImporter.cpp
     src/features/fluid/import/BlenderUniImporter.cpp
     src/features/fluid/import/VdbFluidImporter.cpp
+    src/features/eulerian_particle/import/BlenderSmokeCacheImporter.cpp
 )
 target_include_directories(lr_fluid_importers PUBLIC src)
 target_link_libraries(lr_fluid_importers PUBLIC lr_core glm::glm PRIVATE OpenVDB::openvdb ZLIB::ZLIB)

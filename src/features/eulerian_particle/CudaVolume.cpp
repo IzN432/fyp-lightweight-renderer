@@ -203,6 +203,30 @@ void CudaVolume::clear()
     checkCuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
 }
 
+void CudaVolume::upload(std::span<const float> values, cudaExtent activeExtent)
+{
+    requireLive(m_impl.get());
+    if (m_impl->channels != 1)
+        throw std::invalid_argument("CudaVolume: upload currently supports one-channel float volumes only");
+    if (activeExtent.width > m_impl->extent.width || activeExtent.height > m_impl->extent.height ||
+        activeExtent.depth > m_impl->extent.depth)
+        throw std::invalid_argument("CudaVolume: upload extent exceeds the allocated volume");
+    const std::size_t expected = activeExtent.width * activeExtent.height * activeExtent.depth;
+    if (values.size() != expected)
+        throw std::invalid_argument("CudaVolume: upload data size does not match the active extent");
+
+    clear();
+    checkCuda(cudaSetDevice(m_impl->device), "cudaSetDevice");
+    cudaMemcpy3DParms copy{};
+    copy.srcPtr = make_cudaPitchedPtr(const_cast<float *>(values.data()), activeExtent.width * sizeof(float),
+                                     activeExtent.width, activeExtent.height);
+    copy.dstArray = m_impl->array;
+    copy.extent   = activeExtent;
+    copy.kind     = cudaMemcpyHostToDevice;
+    checkCuda(cudaMemcpy3D(&copy), "cudaMemcpy3D");
+    checkCuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+}
+
 void CudaVolume::synchronize() const
 {
     requireLive(m_impl.get());

@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,10 @@ public:
     // Fills the volume with zeroes. Imported Vulkan memory starts undefined, so a solver must
     // clear every field it accumulates into before the first step.
     void clear();
+
+    // Replaces an origin-corner sub-volume from tightly packed x-major host floats. Cells outside
+    // activeExtent are cleared so shrinking a baked clip cannot leave stale density visible.
+    void upload(std::span<const float> values, cudaExtent activeExtent);
 
     // Blocks until queued CUDA work on this volume's device has finished. A host wait, so it is
     // for setup and debugging; per-frame code uses the semaphore handshake described above.

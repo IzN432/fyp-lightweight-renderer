@@ -1,11 +1,13 @@
 #pragma once
 
 #include "core/scene/Component.hpp"
+#include "features/eulerian_particle/OfflineSmokeSimulationStore.hpp"
 
 #include <glm/glm.hpp>
 
 #include <cstdint>
 #include <memory>
+#include <variant>
 
 namespace lr::eulerian
 {
@@ -68,11 +70,42 @@ public:
         bool operator==(const Config &) const = default;
     };
 
+    struct BakedConfig
+    {
+        OfflineSmokeSimulationHandle simulation    = 0;
+        float                        playbackSpeed = 1.0f;
+        bool                         loop          = true;
+        bool                         startPaused   = false;
+        bool                         showBounds    = true;
+        bool                         enabled       = true;
+        glm::vec3                    boundsCentre{0.0f};
+
+        glm::vec3 coolColor{0.34f, 0.38f, 0.43f};
+        glm::vec3 warmColor{1.00f, 0.32f, 0.06f};
+        float     coolTemperature = 0.0f;
+        float     warmTemperature = 1.0f;
+        float     densityScale    = 2.0f;
+        int       sampleCount     = 128;
+
+        bool operator==(const BakedConfig &) const = default;
+    };
+
+    using Data = std::variant<Config, BakedConfig>;
+
     explicit SmokeComponent(Config config = {});
 
-    const Config &config() const { return m_config; }
+    explicit SmokeComponent(BakedConfig config);
+    explicit SmokeComponent(Data data);
+
+    bool               isLive() const { return std::holds_alternative<Config>(m_data); }
+    bool               isBaked() const { return std::holds_alternative<BakedConfig>(m_data); }
+    const Config      &config() const { return std::get<Config>(m_data); }
+    const BakedConfig &bakedConfig() const { return std::get<BakedConfig>(m_data); }
+    const Data        &data() const { return m_data; }
     uint64_t      revision() const { return m_revision; }
     void          setConfig(Config config);
+    void          setBakedConfig(BakedConfig config);
+    void          setData(Data data);
 
     std::unique_ptr<ComponentValues> copyValues() const override;
     void                             pasteValues(const ComponentValues &values) override;
@@ -81,7 +114,7 @@ public:
     void                             onGUIImpl() override;
 
 private:
-    Config   m_config;
+    Data     m_data;
     uint64_t m_revision = 0;
 };
 

@@ -17,6 +17,7 @@ class Scene;
 class SceneObject;
 class SkinStore;
 class OfflineFluidSimulationStore;
+namespace eulerian { class OfflineSmokeSimulationStore; }
 
 struct ComponentSaveContext
 {
@@ -24,6 +25,7 @@ struct ComponentSaveContext
     const MaterialStore &materials;
     const SkinStore &skins;
     const OfflineFluidSimulationStore &offlineFluids;
+    const eulerian::OfflineSmokeSimulationStore &offlineSmokes;
 };
 
 struct ComponentLoadContext
@@ -33,6 +35,7 @@ struct ComponentLoadContext
     MaterialStore &materials;
     SkinStore &skins;
     OfflineFluidSimulationStore &offlineFluids;
+    eulerian::OfflineSmokeSimulationStore &offlineSmokes;
 };
 
 class ComponentCodec

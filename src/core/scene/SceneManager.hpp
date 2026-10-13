@@ -50,6 +50,7 @@ public:
     SkinStore     &skinStore() { return m_assets.skins; }
     AnimationLibrary &animations() { return m_assets.animations; }
     OfflineFluidSimulationStore &offlineFluids() { return m_assets.offlineFluids; }
+    eulerian::OfflineSmokeSimulationStore &offlineSmokes() { return m_assets.offlineSmokes; }
     AnimationSystem &animationSystem() { return m_animationSystem; }
 
     // Loads OBJ, glTF, or GLB content into this manager's Scene and asset

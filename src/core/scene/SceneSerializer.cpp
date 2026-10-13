@@ -23,9 +23,8 @@ namespace
 {
 using json = nlohmann::json;
 
-// 5 — baked fluid simulations are scene-level binary resources. Components refer to their stable
-// UUIDs in the file and resolve those to dense handles during load.
-constexpr int kFormatVersion = 5;
+// 6 — baked smoke simulations join baked fluids as scene-level binary resources.
+constexpr int kFormatVersion = 6;
 constexpr std::array<char, 8> kFileMagic{'L', 'R', 'S', 'C', 'E', 'N', 'E', '\0'};
 const json &required(const json &object, const char *key, const std::string &where);
 
@@ -353,13 +352,14 @@ Material deserializeMaterial(const json &value, const std::string &where, const 
 void SceneSerializer::save(const SceneAssets &assets, const std::filesystem::path &path)
 {
     save(assets.scene, assets.meshes, assets.materials, assets.skins, assets.animations,
-         assets.offlineFluids, path);
+         assets.offlineFluids, assets.offlineSmokes, path);
 }
 
 void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
                            const MaterialStore &materialStore, const SkinStore &skinStore,
                            const AnimationLibrary &animationLibrary,
                            const OfflineFluidSimulationStore &offlineFluidStore,
+                           const eulerian::OfflineSmokeSimulationStore &offlineSmokeStore,
                            const std::filesystem::path &path)
 {
     if constexpr (std::endian::native != std::endian::little)
@@ -451,8 +451,28 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
         offlineFluids.push_back(std::move(item));
     }
 
+    json offlineSmokes = json::array();
+    for (eulerian::OfflineSmokeSimulationHandle handle = 0; handle < offlineSmokeStore.size(); ++handle)
+    {
+        const eulerian::OfflineSmokeSimulation &simulation = offlineSmokeStore.get(handle);
+        json frames = json::array();
+        for (const eulerian::OfflineSmokeSimulation::Frame &frame : simulation.frames())
+            frames.push_back({{"seconds", frame.seconds}, {"source_frame", frame.sourceFrame},
+                              {"voxel_offset", frame.voxelOffset}});
+        offlineSmokes.push_back({{"id", writeId(offlineSmokeStore.idOf(handle))},
+                                 {"name", simulation.name()},
+                                 {"grid_size", {simulation.gridSize().x, simulation.gridSize().y,
+                                                simulation.gridSize().z}},
+                                 {"voxel_size", vec3(simulation.voxelSize())},
+                                 {"frames_per_second", simulation.framesPerSecond()},
+                                 {"frames", std::move(frames)},
+                                 {"densities", binary.append(std::span(simulation.densities()))},
+                                 {"temperatures", binary.append(std::span(simulation.temperatures()))}});
+    }
+
     const ComponentCodecRegistry codecs = makeSceneComponentCodecs();
-    const ComponentSaveContext componentContext{meshStore, materialStore, skinStore, offlineFluidStore};
+    const ComponentSaveContext componentContext{meshStore, materialStore, skinStore, offlineFluidStore,
+                                                offlineSmokeStore};
     json objects = json::array();
     for (const auto &objectPointer : scene.sceneObjects())
     {
@@ -492,7 +512,8 @@ void SceneSerializer::save(const Scene &scene, const MeshStore &meshStore,
                         {"environment", std::move(environment)}, {"objects", std::move(objects)},
                         {"meshes", std::move(meshes)}, {"materials", std::move(materials)},
                         {"animations", std::move(animations)},
-                        {"offline_fluids", std::move(offlineFluids)}};
+                        {"offline_fluids", std::move(offlineFluids)},
+                        {"offline_smokes", std::move(offlineSmokes)}};
     const std::string manifest = document.dump();
     const uint64_t manifestBytes = static_cast<uint64_t>(manifest.size());
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
@@ -510,7 +531,7 @@ std::unique_ptr<SceneAssets> SceneSerializer::load(const std::filesystem::path &
 {
     auto result = std::make_unique<SceneAssets>();
     load(path, result->scene, result->meshes, result->materials, result->skins, result->animations,
-         result->offlineFluids);
+         result->offlineFluids, result->offlineSmokes);
     return result;
 }
 
@@ -519,6 +540,7 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
                                                  SkinStore &skinStore,
                                                  AnimationLibrary &animationLibrary,
                                                  OfflineFluidSimulationStore &offlineFluidStore,
+                                                 eulerian::OfflineSmokeSimulationStore &offlineSmokeStore,
                                                  bool remapCameraObject)
 {
     if constexpr (std::endian::native != std::endian::little)
@@ -555,6 +577,7 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
     // into the new scene and let playback resolve stale handles.
     animationLibrary.clear();
     offlineFluidStore.clear();
+    offlineSmokeStore.clear();
 
     const std::streamoff payloadOffset = static_cast<std::streamoff>(kFileMagic.size() + sizeof(manifestBytes) + manifestBytes);
     const BinaryReader binary(path, payloadOffset);
@@ -598,6 +621,42 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
                                                  required(value, "frames_per_second", where).get<float>(),
                                                  std::move(frames), std::move(positions), std::move(velocities),
                                                  required(value, "default_particle_radius", where).get<float>()),
+                id);
+        }
+    }
+
+    if (version >= 6)
+    {
+        const json &offlineSmokes = required(document, "offline_smokes", "root");
+        if (!offlineSmokes.is_array())
+            throw std::runtime_error("SceneSerializer: root.offline_smokes must be an array");
+        for (size_t index = 0; index < offlineSmokes.size(); ++index)
+        {
+            const json &value = offlineSmokes[index];
+            const std::string where = "offline_smokes[" + std::to_string(index) + "]";
+            const eulerian::OfflineSmokeSimulationId id = readId(required(value, "id", where), where + ".id");
+            std::vector<eulerian::OfflineSmokeSimulation::Frame> frames;
+            const json &serializedFrames = required(value, "frames", where);
+            if (!serializedFrames.is_array())
+                throw std::runtime_error("SceneSerializer: " + where + ".frames must be an array");
+            for (size_t frameIndex = 0; frameIndex < serializedFrames.size(); ++frameIndex)
+            {
+                const json &frame = serializedFrames[frameIndex];
+                const std::string frameWhere = where + ".frames[" + std::to_string(frameIndex) + "]";
+                frames.push_back({required(frame, "seconds", frameWhere).get<float>(),
+                                  required(frame, "source_frame", frameWhere).get<int32_t>(),
+                                  required(frame, "voxel_offset", frameWhere).get<uint64_t>()});
+            }
+            offlineSmokeStore.add(
+                eulerian::OfflineSmokeSimulation::fromRaw(
+                    required(value, "name", where).get<std::string>(),
+                    readVector<3, uint32_t, glm::defaultp>(required(value, "grid_size", where),
+                                                           where + ".grid_size"),
+                    readVector<3, float, glm::defaultp>(required(value, "voxel_size", where),
+                                                        where + ".voxel_size"),
+                    required(value, "frames_per_second", where).get<float>(), std::move(frames),
+                    binary.readArray<float>(required(value, "densities", where), where + ".densities"),
+                    binary.readArray<float>(required(value, "temperatures", where), where + ".temperatures")),
                 id);
         }
     }
@@ -727,7 +786,8 @@ std::vector<SceneObjectId> SceneSerializer::load(const std::filesystem::path &pa
     std::optional<SceneObjectId> serializedCameraId;
     std::optional<SceneObjectId> loadedCameraId;
     const ComponentCodecRegistry codecs = makeSceneComponentCodecs();
-    ComponentLoadContext componentContext{scene, meshStore, materialStore, skinStore, offlineFluidStore};
+    ComponentLoadContext componentContext{scene, meshStore, materialStore, skinStore, offlineFluidStore,
+                                          offlineSmokeStore};
     for (size_t index = 0; index < objects.size(); ++index)
     {
         const json &value = objects[index];

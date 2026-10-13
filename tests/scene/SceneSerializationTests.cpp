@@ -53,12 +53,36 @@ int main()
         genericChild.addComponent<lr::TransformComponent>(glm::vec3(4, 5, 6));
         genericSource.scene.setParent(genericChild.id(), genericRoot.id());
 
+        lr::eulerian::OfflineSmokeSimulation smokeClip("Embedded smoke", {2, 3, 4}, {0.25f, 0.25f, 0.25f}, 12.0f);
+        std::vector<float> density(24, 0.0f);
+        std::vector<float> temperature(24, 0.0f);
+        density[5] = 0.75f;
+        temperature[5] = 1.25f;
+        smokeClip.addFrame(0.0f, density, temperature, 7);
+        density[5] = 1.0f;
+        smokeClip.addFrame(1.0f / 12.0f, density, temperature, 8);
+        const auto smokeHandle = genericSource.offlineSmokes.add(std::move(smokeClip));
+        auto &smokeObject = genericSource.scene.createSceneObject();
+        smokeObject.name = "Baked smoke";
+        smokeObject.addComponent<lr::TransformComponent>();
+        lr::eulerian::SmokeComponent::BakedConfig bakedSmoke;
+        bakedSmoke.simulation = smokeHandle;
+        bakedSmoke.playbackSpeed = 1.5f;
+        smokeObject.addComponent<lr::eulerian::SmokeComponent>(bakedSmoke);
+
         lr::SceneSerializer::save(genericSource, genericTemporary.path);
         auto genericLoaded = lr::SceneSerializer::load(genericTemporary.path);
 
         assert(genericLoaded->scene.contains(genericRoot.id()));
         assert(genericLoaded->scene.contains(genericChild.id()));
         assert(genericLoaded->scene.getSceneObject(genericChild.id()).parent() == genericRoot.id());
+        assert(genericLoaded->offlineSmokes.size() == 1);
+        const auto &loadedSmoke = genericLoaded->offlineSmokes.get(0);
+        assert(loadedSmoke.gridSize() == glm::uvec3(2, 3, 4));
+        assert(loadedSmoke.frames().size() == 2 && loadedSmoke.frameDensity(1)[5] == 1.0f);
+        const auto &loadedBaked = genericLoaded->scene.getSceneObject(smokeObject.id())
+                                      .getComponent<lr::eulerian::SmokeComponent>();
+        assert(loadedBaked.isBaked() && loadedBaked.bakedConfig().playbackSpeed == 1.5f);
         assert(near(genericLoaded->scene.getSceneObject(genericRoot.id())
                         .getComponent<lr::TransformComponent>()
                         .transform()
@@ -229,7 +253,7 @@ int main()
     editorTarget.animations.add(lr::AnimationClip("Stale clip", {}));
     const auto editorLoaded = lr::SceneSerializer::load(
         temporary.path, editorTarget.scene, editorTarget.meshes, editorTarget.materials,
-        editorTarget.skins, editorTarget.animations, editorTarget.offlineFluids, true);
+        editorTarget.skins, editorTarget.animations, editorTarget.offlineFluids, editorTarget.offlineSmokes, true);
     assert(editorTarget.animations.size() == 2);
     assert(editorTarget.animations.get(0).name() == "Edited");
     assert(editorTarget.animations.get(1).name() == "Unreferenced");
@@ -314,7 +338,8 @@ int main()
     // already holds those objects is a collision rather than a silent duplicate.
     bool collisionRejected = false;
     try { (void)lr::SceneSerializer::load(temporary.path, loaded->scene, loaded->meshes, loaded->materials,
-                                         loaded->skins, loaded->animations, loaded->offlineFluids); }
+                                         loaded->skins, loaded->animations, loaded->offlineFluids,
+                                         loaded->offlineSmokes); }
     catch (const std::exception &) { collisionRejected = true; }
     assert(collisionRejected);
 

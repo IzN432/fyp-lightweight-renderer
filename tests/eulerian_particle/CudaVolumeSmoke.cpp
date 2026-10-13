@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 
 #include <exception>
+#include <cassert>
 #include <iostream>
 #include <utility>
 #include <vector>
@@ -33,7 +34,21 @@ int main()
 
         lr::eulerian::CudaVolume density(resources, context, "density");
         density.writeTestPattern(0.25f);
-        std::cout << "CUDA wrote the exportable Vulkan density volume\n";
+        const cudaExtent active{4, 3, 2};
+        std::vector<float> baked(active.width * active.height * active.depth);
+        for (std::size_t i = 0; i < baked.size(); ++i) baked[i] = static_cast<float>(i + 1);
+        density.upload(baked, active);
+        const std::vector<float> downloaded = density.download();
+        for (std::size_t z = 0; z < 16; ++z)
+            for (std::size_t y = 0; y < 24; ++y)
+                for (std::size_t x = 0; x < 32; ++x)
+                {
+                    const std::size_t destination = (z * 24 + y) * 32 + x;
+                    if (x < active.width && y < active.height && z < active.depth)
+                        assert(downloaded[destination] == baked[(z * active.height + y) * active.width + x]);
+                    else assert(downloaded[destination] == 0.0f);
+                }
+        std::cout << "CUDA uploaded a baked field into the exportable Vulkan density volume\n";
         return 0;
     } catch (const std::exception &error)
     {

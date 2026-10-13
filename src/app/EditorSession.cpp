@@ -819,22 +819,17 @@ private:
     // refusing.
     void drawSceneCreationButtons(SceneDocument &document)
     {
-        if (ImGui::Button("Import..."))
+        if (ImGui::Button("Import")) ImGui::OpenPopup("import_list");
+        if (ImGui::BeginPopup("import_list"))
         {
-            document.openImportDialog();
-        }
-        ImGui::SameLine();
-
-        // Baked fluid caches are a separate button rather than extra extensions on Import, since
-        // the cache is a directory and the dialog has to run in directory-selection mode.
-        if (ImGui::Button("Import Fluid..."))
-        {
-            document.openImportFluidCacheDialog();
-        }
-        if (ImGui::IsItemHovered())
-        {
-            ImGui::SetTooltip("Import a baked Blender fluid cache directory (data/*.vdb + config/*.uni).\n"
-                              "A sample DNA helix ships in assets/samples/fluid/dna_helix.");
+            if (ImGui::MenuItem("Import Mesh...")) document.openImportDialog();
+            if (ImGui::MenuItem("Import Fluid Simulation...")) document.openImportFluidCacheDialog();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Import a baked Blender liquid cache directory.");
+            if (ImGui::MenuItem("Import Smoke Simulation...")) document.openImportSmokeCacheDialog();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Import a baked Blender gas cache directory (density, temperature and flame).");
+            ImGui::EndPopup();
         }
         ImGui::SameLine();
 

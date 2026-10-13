@@ -11,6 +11,8 @@
 #include "core/scene/TransformComponent.hpp"
 #include "features/fluid/FluidComponent.hpp"
 #include "features/fluid/import/BlenderFluidCacheImporter.hpp"
+#include "features/eulerian_particle/SmokeComponent.hpp"
+#include "features/eulerian_particle/import/BlenderSmokeCacheImporter.hpp"
 #include "features/linear_blend_skinning/SkinComponent.hpp"
 #include "features/rigid_body/PhysicsWorld.hpp"
 
@@ -39,6 +41,7 @@ constexpr const char *kSaveDialog   = "SaveNativeScene";
 constexpr const char *kImportDialog = "ImportScene";
 constexpr const char *kExportDialog = "ExportGeometry";
 constexpr const char *kFluidCacheDialog = "ImportFluidCache";
+constexpr const char *kSmokeCacheDialog = "ImportSmokeCache";
 
 constexpr const char *kSceneExtension = ".lrscene";
 constexpr const char *kObjExtension   = ".obj";
@@ -92,6 +95,15 @@ void SceneDocument::openImportFluidCacheDialog()
     // A null filter is ImGuiFileDialog's directory-selection mode: a baked cache is a directory of
     // per-frame files, so there is no single file to pick.
     ImGuiFileDialog::Instance()->OpenDialog(kFluidCacheDialog, "Import Baked Fluid Cache (select folder)", nullptr,
+                                            dialogConfig);
+}
+
+void SceneDocument::openImportSmokeCacheDialog()
+{
+    IGFD::FileDialogConfig dialogConfig;
+    dialogConfig.path  = ".";
+    dialogConfig.flags = commonDialogFlags();
+    ImGuiFileDialog::Instance()->OpenDialog(kSmokeCacheDialog, "Import Baked Smoke Cache (select folder)", nullptr,
                                             dialogConfig);
 }
 
@@ -207,6 +219,37 @@ void SceneDocument::importFluidCache(const fs::path &cacheDirectory)
         m_importError = e.what();
         m_errors.report("Could not import fluid cache", e.what());
         spdlog::error("Failed to import fluid cache '{}': {}", cacheDirectory.string(), e.what());
+    }
+}
+
+void SceneDocument::importSmokeCache(const fs::path &cacheDirectory)
+{
+    try
+    {
+        eulerian::OfflineSmokeSimulation clip = eulerian::BlenderSmokeCacheImporter::importDirectory(cacheDirectory);
+        const std::string name   = clip.name();
+        const std::size_t frames = clip.frames().size();
+        const glm::uvec3 grid    = clip.gridSize();
+        const auto handle = m_sceneManager.offlineSmokes().add(std::move(clip));
+
+        SceneObject &object = m_sceneManager.scene().createSceneObject();
+        object.name         = name.empty() ? "Baked Smoke" : name;
+        object.addComponent<TransformComponent>();
+        eulerian::SmokeComponent::BakedConfig baked;
+        baked.simulation = handle;
+        object.addComponent<eulerian::SmokeComponent>(baked);
+        m_sceneManager.scene().selectObject(object.id());
+
+        m_editor.onSceneContentChanged();
+        m_importError.clear();
+        spdlog::info("Imported baked smoke cache '{}': {} frames, {}x{}x{} voxels", object.name, frames,
+                     grid.x, grid.y, grid.z);
+    }
+    catch (const std::exception &e)
+    {
+        m_importError = e.what();
+        m_errors.report("Could not import smoke cache", e.what());
+        spdlog::error("Failed to import smoke cache '{}': {}", cacheDirectory.string(), e.what());
     }
 }
 
@@ -351,6 +394,13 @@ void SceneDocument::drawDialogs()
             // Directory mode reports the chosen folder through GetCurrentPath; there is no file name.
             importFluidCache(fs::path(ImGuiFileDialog::Instance()->GetCurrentPath()));
         }
+        ImGuiFileDialog::Instance()->Close();
+    }
+
+    if (ImGuiFileDialog::Instance()->Display(kSmokeCacheDialog, ImGuiWindowFlags_NoCollapse, kDialogSize))
+    {
+        if (ImGuiFileDialog::Instance()->IsOk())
+            importSmokeCache(fs::path(ImGuiFileDialog::Instance()->GetCurrentPath()));
         ImGuiFileDialog::Instance()->Close();
     }
 }

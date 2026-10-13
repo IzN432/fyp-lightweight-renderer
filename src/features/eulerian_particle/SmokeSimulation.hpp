@@ -4,6 +4,7 @@
 #include "features/eulerian_particle/SmokeRenderPass.hpp"
 #include "features/eulerian_particle/SmokeSolver.hpp"
 #include "features/eulerian_particle/SmokeVoxelizePass.hpp"
+#include "features/eulerian_particle/OfflineSmokeSimulationStore.hpp"
 
 #include <glm/vec3.hpp>
 #include <vulkan/vulkan.h>
@@ -82,7 +83,8 @@ public:
     };
 
     // Registers and imports the solver's volumes; the registry and context must outlive this.
-    SmokeSimulation(Config config, ResourceRegistry &resources, const VulkanContext &context);
+    SmokeSimulation(Config config, ResourceRegistry &resources, const VulkanContext &context,
+                    OfflineSmokeSimulationStore &offlineStore);
 
     // `layout` is the engine's geometry vertex layout, used by the obstacle voxelizer to replay
     // scene meshes. Required whenever Config::obstacleGeometry names an index buffer.
@@ -170,6 +172,9 @@ private:
     // Copies scene-owned settings into the transient solver and renderer.
     void applyRuntimeConfig();
 
+    void configureBakedTarget();
+    void uploadBakedFrame(std::size_t frame);
+
     Config          m_config;
     SmokeSolver     m_solver;
     SmokeRenderPass m_renderPass;
@@ -178,6 +183,7 @@ private:
     std::optional<SmokeVoxelizePass> m_voxelizePass;
 
     SmokeComponent *m_target         = nullptr;
+    OfflineSmokeSimulationStore *m_offlineStore = nullptr;
     uint64_t        m_targetRevision = 0;
     glm::vec3       m_worldPosition{0.0f};
 
@@ -190,6 +196,8 @@ private:
     bool            m_singleStepRequested = false;
     bool            m_gridDirty           = false;
     float           m_elapsed             = 0.0f;
+    float           m_bakedTime           = 0.0f;
+    std::size_t     m_bakedFrame          = static_cast<std::size_t>(-1);
 };
 
 } // namespace lr::eulerian

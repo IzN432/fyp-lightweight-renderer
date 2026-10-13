@@ -16,6 +16,7 @@ class MaterialStore;
 class SkinStore;
 class AnimationLibrary;
 class OfflineFluidSimulationStore;
+namespace eulerian { class OfflineSmokeSimulationStore; }
 
 // Versioned, CPU-only scene persistence. A single .lrscene file contains its JSON manifest followed
 // by the bulk mesh/texture payload. Objects, meshes and materials are named by the UUIDs they
@@ -44,6 +45,7 @@ public:
                                              const MaterialStore &materials, const SkinStore &skins,
                                              const AnimationLibrary &animations,
                                              const OfflineFluidSimulationStore &offlineFluids,
+                                             const eulerian::OfflineSmokeSimulationStore &offlineSmokes,
                                              const std::filesystem::path &path);
     static std::unique_ptr<SceneAssets> load(const std::filesystem::path &path);
     // Appends a saved scene to caller-owned stores, preserving existing objects and assets, and
@@ -54,7 +56,9 @@ public:
                                            SkinStore &skins,
                                            AnimationLibrary &animations,
                                            OfflineFluidSimulationStore &offlineFluids,
+                                           eulerian::OfflineSmokeSimulationStore &offlineSmokes,
                                            bool remapCameraObject = false);
+
 };
 
 } // namespace lr

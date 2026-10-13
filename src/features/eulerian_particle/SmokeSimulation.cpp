@@ -65,7 +65,8 @@ void SmokeSimulation::registerObstacleMask(ResourceRegistry &resources) const
                                        VkExtent3D{limit, limit, limit}, true);
 }
 
-SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, const VulkanContext &context)
+SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, const VulkanContext &context,
+                                 OfflineSmokeSimulationStore &offlineStore)
     : m_config(std::move(config)),
       m_solver(resources, context,
                [&] {
@@ -107,7 +108,7 @@ SmokeSimulation::SmokeSimulation(Config config, ResourceRegistry &resources, con
               .sampleCount              = m_config.authored.sampleCount,
               .enabled                  = false,
           };
-      }())
+      }()), m_offlineStore(&offlineStore)
 {
     // The solver was built against the clamped grid above, so record that as what is simulated and
     // publish the box it implies. The render pass must never be left mapping a box the solver is
@@ -153,9 +154,13 @@ void SmokeSimulation::setTarget(SmokeComponent *component, const glm::vec3 &worl
     {
         if (component && component->revision() != m_targetRevision)
         {
-            m_config.authored = component->config();
             m_targetRevision  = component->revision();
-            applyRuntimeConfig();
+            if (component->isBaked()) configureBakedTarget();
+            else
+            {
+                m_config.authored = component->config();
+                applyRuntimeConfig();
+            }
             reset();
         }
         else if (component)
@@ -175,11 +180,38 @@ void SmokeSimulation::setTarget(SmokeComponent *component, const glm::vec3 &worl
         return;
     }
 
-    m_config.authored = m_target->config();
     m_targetRevision  = m_target->revision();
-    m_paused          = m_config.authored.startPaused;
-    applyRuntimeConfig();
+    if (m_target->isBaked())
+    {
+        configureBakedTarget();
+        m_paused = m_target->bakedConfig().startPaused;
+    }
+    else
+    {
+        m_config.authored = m_target->config();
+        m_paused          = m_config.authored.startPaused;
+        applyRuntimeConfig();
+    }
     reset();
+}
+
+void SmokeSimulation::configureBakedTarget()
+{
+    const SmokeComponent::BakedConfig &baked = m_target->bakedConfig();
+    const OfflineSmokeSimulation &clip = m_offlineStore->get(baked.simulation);
+    m_config.authored.gridSize         = clip.gridSize();
+    m_config.authored.simulationScale  = clip.voxelSize().x;
+    m_config.authored.boundsCentre     = baked.boundsCentre;
+    m_config.authored.showBounds       = baked.showBounds;
+    m_config.authored.enabled          = baked.enabled;
+    m_config.authored.voxelizeObstacles = false;
+    m_config.authored.coolColor        = baked.coolColor;
+    m_config.authored.warmColor        = baked.warmColor;
+    m_config.authored.coolTemperature  = baked.coolTemperature;
+    m_config.authored.warmTemperature  = baked.warmTemperature;
+    m_config.authored.densityScale     = baked.densityScale;
+    m_config.authored.sampleCount      = baked.sampleCount;
+    applyRuntimeConfig();
 }
 
 void SmokeSimulation::setSceneGeometry(SceneDrawList draws)
@@ -206,7 +238,7 @@ void SmokeSimulation::applyVoxelizeBounds()
     voxelize.boundsMax                       = render.boundsMax;
     voxelize.gridSize                        = m_gridDirty && m_simulatedExtent.width != 0 ? m_simulatedExtent
                                                                                            : gridExtent();
-    voxelize.enabled                         = m_target && m_config.authored.voxelizeObstacles;
+    voxelize.enabled = m_target && m_target->isLive() && m_config.authored.voxelizeObstacles;
 }
 
 void SmokeSimulation::applyRuntimeConfig()
@@ -237,7 +269,8 @@ void SmokeSimulation::applyRuntimeConfig()
     render.densityScale    = config.densityScale;
     render.sampleCount     = config.sampleCount;
     render.enabled         = m_target && config.enabled;
-    if (m_voxelizePass) m_voxelizePass->config().enabled = m_target && config.voxelizeObstacles;
+    if (m_voxelizePass)
+        m_voxelizePass->config().enabled = m_target && m_target->isLive() && config.voxelizeObstacles;
     applyBounds();
     applySourceParams();
 }
@@ -361,6 +394,25 @@ void SmokeSimulation::update(float frameDeltaTime)
     if (!m_target || !m_renderPass.config().enabled) return;
     if (m_paused && !m_singleStepRequested) return;
 
+    if (m_target->isBaked())
+    {
+        const OfflineSmokeSimulation &clip = m_offlineStore->get(m_target->bakedConfig().simulation);
+        if (clip.frames().empty()) return;
+        m_bakedTime += frameDeltaTime * std::max(m_target->bakedConfig().playbackSpeed, 0.0f);
+        const float duration = clip.durationSeconds();
+        if (m_target->bakedConfig().loop && duration > 0.0f) m_bakedTime = std::fmod(m_bakedTime, duration);
+        else m_bakedTime = std::min(m_bakedTime, std::max(duration - 1.0f / clip.framesPerSecond(), 0.0f));
+        const auto found = std::upper_bound(clip.frames().begin(), clip.frames().end(), m_bakedTime,
+                                            [](float time, const OfflineSmokeSimulation::Frame &frame) {
+                                                return time < frame.seconds;
+                                            });
+        const std::size_t frame = found == clip.frames().begin() ? 0 :
+                                  static_cast<std::size_t>(std::distance(clip.frames().begin(), found) - 1);
+        uploadBakedFrame(frame);
+        m_singleStepRequested = false;
+        return;
+    }
+
     if (m_gridDirty)
     {
         // Retarget the kernels and clear the leftover fields. Deferred to here so a drag across
@@ -386,9 +438,24 @@ void SmokeSimulation::reset()
     applyBounds();
 
     m_solver.setActiveExtent(m_simulatedExtent);
-    m_solver.reset();
+    if (m_target && m_target->isBaked())
+    {
+        m_bakedTime  = 0.0f;
+        m_bakedFrame = static_cast<std::size_t>(-1);
+        uploadBakedFrame(0);
+    }
+    else m_solver.reset();
     m_elapsed = 0.0f;
     applySourceParams();
+}
+
+void SmokeSimulation::uploadBakedFrame(std::size_t frame)
+{
+    if (!m_target || !m_target->isBaked() || frame == m_bakedFrame) return;
+    const OfflineSmokeSimulation &clip = m_offlineStore->get(m_target->bakedConfig().simulation);
+    if (frame >= clip.frames().size()) return;
+    m_solver.uploadBakedFields(clip.frameDensity(frame), clip.frameTemperature(frame), gridExtent());
+    m_bakedFrame = frame;
 }
 
 void SmokeSimulation::appendOverlayLines(OverlayLineBuilder &builder) const
@@ -412,6 +479,43 @@ void SmokeSimulation::appendOverlayLines(OverlayLineBuilder &builder) const
 void SmokeSimulation::onGUI()
 {
     if (!m_target) return;
+
+    if (m_target->isBaked())
+    {
+        SmokeComponent::BakedConfig config = m_target->bakedConfig();
+        const OfflineSmokeSimulation &clip = m_offlineStore->get(config.simulation);
+        if (ImGui::Button(m_paused ? "Play" : "Pause")) m_paused = !m_paused;
+        ImGui::SameLine();
+        if (ImGui::Button("Restart")) reset();
+        ImGui::Checkbox("Enabled", &config.enabled);
+        ImGui::Checkbox("Loop", &config.loop);
+        ImGui::DragFloat("Playback Speed", &config.playbackSpeed, 0.05f, 0.0f, 8.0f);
+        const std::size_t displayedFrame =
+            m_bakedFrame < clip.frames().size() ? m_bakedFrame + 1 : clip.frames().size();
+        ImGui::TextDisabled("Frame %zu / %zu", displayedFrame, clip.frames().size());
+        ImGui::TextDisabled("Grid: %u x %u x %u cells", clip.gridSize().x, clip.gridSize().y, clip.gridSize().z);
+        const glm::vec3 world = clip.worldSize();
+        ImGui::TextDisabled("Box: %.3f x %.3f x %.3f", world.x, world.y, world.z);
+        ImGui::Checkbox("Show Bounds", &config.showBounds);
+        ImGui::DragFloat3("Local Offset", &config.boundsCentre.x, 0.01f);
+        if (ImGui::CollapsingHeader("Rendering", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::SliderFloat("Render Density", &config.densityScale, 0.1f, 20.0f, "%.3f",
+                               ImGuiSliderFlags_Logarithmic);
+            ImGui::SliderInt("Ray-march Samples", &config.sampleCount, 16, 256);
+            ImGui::ColorEdit3("Cool Color", &config.coolColor.x);
+            ImGui::ColorEdit3("Warm Color", &config.warmColor.x);
+            ImGui::DragFloat("Cool Temperature", &config.coolTemperature, 0.01f);
+            ImGui::DragFloat("Warm Temperature", &config.warmTemperature, 0.01f);
+        }
+        if (config != m_target->bakedConfig())
+        {
+            m_target->setBakedConfig(config);
+            m_targetRevision = m_target->revision();
+            configureBakedTarget();
+        }
+        return;
+    }
 
     const SmokeComponent::Config  before = m_config.authored;
     SmokeComponent::Config       &config = m_config.authored;

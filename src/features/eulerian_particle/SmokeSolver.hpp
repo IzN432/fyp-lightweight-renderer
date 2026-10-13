@@ -7,6 +7,7 @@
 #include <vulkan/vulkan.h>
 
 #include <memory>
+#include <span>
 #include <string>
 
 namespace lr
@@ -152,6 +153,10 @@ public:
     const CudaVolume &pressureVolume() const;
     const CudaVolume &divergenceVolume() const;
     const CudaVolume &temperatureVolume() const;
+
+    // Installs renderer-ready scalar fields for baked-cache playback without advancing the solver.
+    void uploadBakedFields(std::span<const float> density, std::span<const float> temperature,
+                           VkExtent3D activeExtent);
 
     // Resource names of the volumes a renderer samples.
     std::string densityResourceName() const;

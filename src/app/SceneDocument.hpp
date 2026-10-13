@@ -58,6 +58,9 @@ public:
     // starts in assets/samples/fluid so the shipped DNA helix sample is one click away.
     void openImportFluidCacheDialog();
 
+    // Opens the equivalent directory picker for a baked Blender gas/smoke cache.
+    void openImportSmokeCacheDialog();
+
     // Exports every renderable object in the scene as a single Wavefront OBJ: the registered mesh
     // objects the renderer is drawing, each as its own `o` group with its positions baked through
     // its world transform, so the file reproduces the scene as composed rather than stacking every
@@ -90,6 +93,7 @@ private:
     // is not retained, so the resulting object saves into an .lrscene with no reference back to the
     // cache. Failures land in importError() like any other import.
     void importFluidCache(const std::filesystem::path &cacheDirectory);
+    void importSmokeCache(const std::filesystem::path &cacheDirectory);
 
     // Shared tail of load/import: both replace geometry the GPU may still be reading, so both idle
     // the device first (done by the caller, before mutating the scene) and rebuild everything bound

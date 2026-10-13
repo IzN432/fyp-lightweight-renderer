@@ -229,7 +229,7 @@ void Engine::run()
             // GeometryPass is what keeps the two from disagreeing about what the scene contains.
             .obstacleGeometry         = sceneManager.gpu().geometryPassConfig(),
         },
-        viewer.resources(), viewer.context());
+        viewer.resources(), viewer.context(), sceneAssets.offlineSmokes);
 #endif
 
     // Draws everything SceneGpu uploaded (see SceneGpu::geometryPassConfig) with the engine's vertex

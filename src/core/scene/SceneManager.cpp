@@ -117,11 +117,12 @@ std::vector<SceneObjectId> SceneManager::loadScene(const std::filesystem::path &
     materialStore().clear();
     skinStore().clear();
     offlineFluids().clear();
+    offlineSmokes().clear();
 
     m_animationSystem.stopAll();
     const std::vector<SceneObjectId> loadedObjects =
         SceneSerializer::load(path, target, meshStore(), materialStore(), skinStore(), animations(),
-                              offlineFluids(), true);
+                              offlineFluids(), offlineSmokes(), true);
 
     std::vector<SceneObjectId> added;
     std::vector<MaterialHandle> loadedMaterials;

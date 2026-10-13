@@ -1,16 +1,20 @@
 #include "features/fluid/import/BlenderFluidCacheImporter.hpp"
 #include "features/fluid/import/BlenderUniImporter.hpp"
 #include "features/fluid/import/VdbFluidImporter.hpp"
+#include "features/eulerian_particle/import/BlenderSmokeCacheImporter.hpp"
 
 #include <zlib.h>
 
 #include <array>
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace
@@ -197,6 +201,46 @@ void importsReferenceBlenderCacheWhenAvailable()
     assert(std::abs(clip.frames()[2].boundsMax.z - clip.frames()[0].boundsMax.z) < 1e-5f);
 }
 
+void importsReferenceBlenderSmokeCacheWhenAvailable()
+{
+    const std::filesystem::path cache(
+        R"(C:\Users\seani\AppData\Local\Temp\blender_a37396\cache_fluid_c306d54c)");
+    if (!std::filesystem::exists(cache / "data" / "fluid_data_0001.vdb")) return;
+
+    const auto clip = lr::eulerian::BlenderSmokeCacheImporter::importDirectory(cache);
+    assert(clip.frames().size() == 100);
+    assert(clip.gridSize() == glm::uvec3(32));
+    assert(std::abs(clip.voxelSize().x - 0.23825003f) < 1e-5f);
+    assert(std::abs(clip.worldSize().x - 7.624001f) < 1e-4f);
+    assert(clip.frames().front().sourceFrame == 1 && clip.frames().back().sourceFrame == 100);
+    assert(std::ranges::any_of(clip.frameDensity(49), [](float value) { return value > 0.0f; }));
+    assert(std::ranges::any_of(clip.frameTemperature(49), [](float value) { return value > 0.0f; }));
+}
+
+void reportsOutOfRangeSmokeFrameNumbers()
+{
+    const std::filesystem::path cache =
+        std::filesystem::temp_directory_path() / "lr_blender_smoke_frame_number_test";
+    std::filesystem::remove_all(cache);
+    std::filesystem::create_directories(cache / "data");
+    const std::filesystem::path malformed = cache / "data" / "fluid_data_99999999999.vdb";
+    std::ofstream(malformed).put('\0');
+
+    std::string message;
+    try
+    {
+        (void)lr::eulerian::BlenderSmokeCacheImporter::importDirectory(cache);
+    }
+    catch (const std::runtime_error &error)
+    {
+        message = error.what();
+    }
+    std::filesystem::remove_all(cache);
+
+    assert(message.find("BlenderSmokeCacheImporter:") != std::string::npos);
+    assert(message.find("99999999999") != std::string::npos);
+}
+
 } // namespace
 
 int main()
@@ -204,5 +248,7 @@ int main()
     importsUniConfiguration();
     importsShippedDnaHelixSample();
     importsReferenceBlenderCacheWhenAvailable();
+    importsReferenceBlenderSmokeCacheWhenAvailable();
+    reportsOutOfRangeSmokeFrameNumbers();
     return 0;
 }

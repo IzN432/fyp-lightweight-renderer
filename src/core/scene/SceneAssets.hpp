@@ -9,6 +9,7 @@
 #include "features/animation/AnimationLibrary.hpp"
 #include "features/linear_blend_skinning/SkinStore.hpp"
 #include "features/fluid/OfflineFluidSimulationStore.hpp"
+#include "features/eulerian_particle/OfflineSmokeSimulationStore.hpp"
 
 #include <filesystem>
 
@@ -44,6 +45,7 @@ public:
     SkinStore     skins;
     AnimationLibrary animations;
     OfflineFluidSimulationStore offlineFluids;
+    eulerian::OfflineSmokeSimulationStore offlineSmokes;
 };
 
 } // namespace lr
