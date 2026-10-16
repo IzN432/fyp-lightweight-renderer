@@ -146,14 +146,32 @@ std::optional<FluidSimulation::CuboidSource> findSpaceForCube(const FluidSimulat
     return std::nullopt;
 }
 
-} // namespace
-
-float FluidSimulation::unitCubeRenderScale() const
+// Pulls every water cube back inside the inset domain. The bounds are freely editable at runtime,
+// so shrinking the box would otherwise leave sources hanging outside it -- a state validateSources
+// rejects, which disables Reset and strands the editor. Cubes larger than the new domain cannot be
+// made to fit by moving them; those are left to the validation message. Returns true only when a
+// cube actually moved, so a bounds nudge that disturbs nothing does not ask for a respawn.
+bool clampSourcesToBounds(FluidSimulation::Config &config)
 {
-    const glm::vec3 extent      = glm::abs(m_config.boundsMax - m_config.boundsMin);
-    const float     longestSide = std::max({extent.x, extent.y, extent.z});
-    return longestSide > 1e-6f ? 1.0f / longestSide : 1.0f;
+    const float     spacing  = std::max(config.particleSpacing, 1e-4f);
+    const glm::vec3 insetMin = config.boundsMin + glm::vec3(spacing);
+    const glm::vec3 insetMax = config.boundsMax - glm::vec3(spacing);
+    bool            moved    = false;
+    for (FluidSimulation::CuboidSource &source : config.sources)
+    {
+        const glm::vec3 extent    = glm::vec3(source.dimensions - glm::uvec3(1)) * spacing;
+        const glm::vec3 maxOrigin = glm::max(insetMax - extent, insetMin);
+        const glm::vec3 clamped   = glm::clamp(source.origin, insetMin, maxOrigin);
+        if (clamped != source.origin)
+        {
+            source.origin = clamped;
+            moved         = true;
+        }
+    }
+    return moved;
 }
+
+} // namespace
 
 FluidSolverGpu::Config FluidSimulation::solverConfig(const Config &config)
 {
@@ -671,6 +689,38 @@ void FluidSimulation::onGUI()
     {
         solver.boundsFriction = m_config.boundsFriction;
         m_solver.updateParams();
+    }
+    if (ImGui::CollapsingHeader("Domain"))
+    {
+        // Nothing in the solver is sized by the domain: the neighbour grid hashes world cells into
+        // a fixed bucket table, so the box only clamps positions and seeds the spawn validation.
+        // That makes it safe to resize while the sim is running -- no reset, no reallocation. On
+        // screen the domain is pure presentation too: apparent size comes from Simulation Render
+        // Scale alone, so resizing the walls moves them without rescaling the fluid.
+        glm::vec3  centre       = (m_config.boundsMin + m_config.boundsMax) * 0.5f;
+        glm::vec3  size         = m_config.boundsMax - m_config.boundsMin;
+        const bool centreEdited = ImGui::DragFloat3("Domain Centre", &centre.x, 0.1f, 0.0f, 0.0f, "%.2f");
+        const bool sizeEdited   = ImGui::DragFloat3("Domain Size", &size.x, 0.1f, 0.0f, 0.0f, "%.2f");
+        if (centreEdited || sizeEdited)
+        {
+            // A degenerate or inverted axis would make insetMin exceed insetMax and leave the
+            // clamp in fluid_apply.comp undefined, so each extent keeps a floor of one spacing.
+            const float minimumExtent = 2.0f * std::max(m_config.particleSpacing, 1e-4f);
+            size                      = glm::max(size, glm::vec3(minimumExtent));
+            m_config.boundsMin        = centre - size * 0.5f;
+            m_config.boundsMax        = centre + size * 0.5f;
+            solver.boundsMin          = m_config.boundsMin;
+            solver.boundsMax          = m_config.boundsMax;
+            m_solver.updateParams();
+            if (clampSourcesToBounds(m_config))
+            {
+                m_sourcesDirty = true;
+                m_sourceEditorError.clear();
+            }
+        }
+        ImGui::TextDisabled("Min %.2f, %.2f, %.2f", m_config.boundsMin.x, m_config.boundsMin.y, m_config.boundsMin.z);
+        ImGui::TextDisabled("Max %.2f, %.2f, %.2f", m_config.boundsMax.x, m_config.boundsMax.y, m_config.boundsMax.z);
+        ImGui::TextDisabled("Walls move live; Reset only to respawn the water.");
     }
     ImGui::Checkbox("Show Bounds", &m_config.showBounds);
 

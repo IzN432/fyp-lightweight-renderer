@@ -35,13 +35,10 @@ public:
     // Appends the presentation-scaled domain outline when Show Bounds is enabled.
     void appendOverlayLines(OverlayLineBuilder &builder, float visualScale) const;
 
-    uint32_t particleCount() const;
-    uint32_t capacity() const { return m_solver.config().maxParticles; }
-    uint32_t pendingSteps() const;
-    float    particleRadius() const;
-    // Uniform presentation scale whose largest domain dimension is exactly one world unit.
-    float unitCubeRenderScale() const;
-
+    uint32_t           particleCount() const;
+    uint32_t           capacity() const { return m_solver.config().maxParticles; }
+    uint32_t           pendingSteps() const;
+    float              particleRadius() const;
     const glm::vec3   &particleColor() const;
     const glm::vec3   &boundsMin() const { return m_config.boundsMin; }
     const glm::vec3   &boundsMax() const { return m_config.boundsMax; }

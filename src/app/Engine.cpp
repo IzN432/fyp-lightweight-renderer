@@ -368,9 +368,9 @@ void Engine::run()
         .maxParticles               = fluidSimulation.capacity(),
         .ownsParticleBuffer         = false,
         .smoothingRadius = lr::screen_space_liquid::smoothingRadiusFromParticle(fluidSimulation.particleRadius()) *
-                           fluidSimulation.unitCubeRenderScale(),
+                           fluidSimulation.renderScale(),
         .liquidColor     = fluidSimulation.particleColor(),
-        .renderScale     = fluidSimulation.unitCubeRenderScale(),
+        .renderScale     = fluidSimulation.renderScale(),
     }, viewer.resources());
     liquidPass.setParticleCount(fluidSimulation.particleCount());
     fluidSimulation.build(viewer.frameGraph());
