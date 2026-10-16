@@ -9,11 +9,11 @@
 #include <cstdint>
 #include <string>
 
-namespace lr::eulerian
+namespace lr
 {
 
-// Rasterizes scene meshes into a solid obstacle mask over the smoke simulation grid, so the solver
-// can treat occupied cells as boundaries and the smoke can collide with scene geometry.
+// Rasterizes scene meshes into a solid obstacle mask over a simulation grid, so grid- and
+// particle-based solvers can share the same scene-to-voxel conversion.
 //
 // It replays the same SceneDrawList as GeometryPass — same vertex and index buffers, same model
 // matrices, same skinning path — but with the simulation box as an orthographic viewport and a
@@ -21,23 +21,20 @@ namespace lr::eulerian
 // re-rasterizes live geometry every frame, animated and skinned meshes are handled with no extra
 // work, and nothing has to be voxelized on the CPU or cached.
 //
-// The mask is *solid*, not a surface shell: see smoke_voxelize.frag for how depth parity fills the
+// The mask is *solid*, not a surface shell: see voxelize.frag for how depth parity fills the
 // interior, and why a shell would let the solver advect density through the middle of a closed
 // mesh. The cost of parity is that open meshes smear solid cells to the far wall of the box.
 //
 // Two passes are built: a compute clear (the XOR accumulates, so the mask must start at zero) and
 // the rasterization itself. Both are declared against the full allocated volume, so resizing the
 // simulated grid needs no rebuild.
-class SmokeVoxelizePass
+class VoxelizePass
 {
 public:
     struct Config
     {
-        // The volume the mask is written into, registered by the owner (SmokeSimulation) as a
-        // persistent R32_UINT volume at the allocated grid size. The CUDA solver imports the same
-        // volume and reads set cells as walls, so this pass's output is what the smoke collides
-        // with; the handoff is ordered by the solver's existing semaphore handshake, which the mask
-        // joins as another named image.
+        // The owner registers this as a persistent R32_UINT volume at allocatedSize. A set cell is
+        // solid; consumers decide how that occupancy affects their own state.
         std::string maskResourceName;
 
         // The scene geometry to voxelize, and where it lives on the GPU. Taken from the same
@@ -47,7 +44,7 @@ public:
 
         // The simulation box in world space. The voxelizer's whole projection: world positions are
         // normalized against this box and scaled to cells, so the box's mapping onto the grid is
-        // identical to the one SmokeRenderPass ray-marches.
+        // identical to the one the consuming simulation uses.
         glm::vec3 boundsMin{-1.0f, 0.0f, -1.0f};
         glm::vec3 boundsMax{1.0f, 2.0f, 1.0f};
 
@@ -63,7 +60,7 @@ public:
         bool enabled = true;
     };
 
-    explicit SmokeVoxelizePass(Config config);
+    explicit VoxelizePass(Config config);
 
     void build(FrameGraph &frameGraph, const GpuMeshLayout &layout) const;
 
@@ -71,7 +68,7 @@ public:
     void setSceneGeometry(SceneDrawList draws) { m_config.geometry.draws = std::move(draws); }
 
     // Mirrors GeometryPass::setSkinningEnabled, so the pose this pass voxelizes is the one the
-    // G-buffer draws. Smoke colliding with a pose the user cannot see would be baffling.
+    // G-buffer draws. Colliding with a pose the user cannot see would be baffling.
     void setSkinningEnabled(bool enabled) { m_skinningEnabled = enabled; }
 
     Config       &config() { return m_config; }
@@ -82,4 +79,4 @@ private:
     bool   m_skinningEnabled = true;
 };
 
-} // namespace lr::eulerian
+} // namespace lr

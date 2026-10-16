@@ -93,6 +93,14 @@ public:
         // particle buffer so the renderer has everything it needs from the one binding.
         float     particleRadius = 0.045f;
         glm::vec3 particleColor{0.25f, 0.5f, 0.95f};
+
+        // Optional solid occupancy volume produced by VoxelizePass. The allocation is fixed while
+        // obstacleGridSize is the active origin-corner sub-region. A disabled grid remains bound
+        // but is never sampled, which keeps standalone solver tests independent of scene geometry.
+        std::string obstacleMaskResourceName;
+        VkExtent3D  obstacleAllocatedSize{1, 1, 1};
+        VkExtent3D  obstacleGridSize{1, 1, 1};
+        bool        obstacleEnabled = false;
     };
 
     FluidSolverGpu(Config config, ResourceRegistry &resources);
@@ -170,6 +178,7 @@ private:
     std::string m_densities;
     std::string m_lambdas;
     std::string m_vorticities;
+    std::string m_contactNormals;
     std::string m_cellStarts;
     std::string m_cellCounts;
     std::string m_cellParticles;
@@ -181,6 +190,7 @@ private:
     std::string m_particleIds;
     std::string m_sortedParticleIds;
     std::string m_params;
+    std::string m_obstacleMask;
 
     Config            m_config;
     ResourceRegistry *m_resources       = nullptr;

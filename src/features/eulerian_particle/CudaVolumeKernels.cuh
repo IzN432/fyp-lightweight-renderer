@@ -110,7 +110,7 @@ struct SmokeFields
     cudaSurfaceObject_t divergence   = 0;  // float
 
     // Obstacle mask: uint32, non-zero where a cell is inside scene geometry. Rasterized by
-    // SmokeVoxelizePass on the Vulkan side, read-only here. Zero disables collisions entirely, so
+    // VoxelizePass on the Vulkan side, read-only here. Zero disables collisions entirely, so
     // a solver with no scene to voxelize runs exactly as it did before the mask existed.
     cudaSurfaceObject_t obstacle     = 0;  // uint32
 };
@@ -168,7 +168,7 @@ cudaError_t launchFillScalar(cudaSurfaceObject_t surface, cudaExtent extent, flo
 
 // Writes an axis-aligned box of solid cells into a uint32 obstacle mask, and clears every cell
 // outside it. For tests and debugging: in the application the mask is rasterized from real scene
-// geometry by SmokeVoxelizePass, and this would overwrite that. `min` is inclusive and `max`
+// geometry by VoxelizePass, and this would overwrite that. `min` is inclusive and `max`
 // exclusive, both in cells, so an empty or inverted range clears the whole volume.
 cudaError_t launchFillObstacleBox(cudaSurfaceObject_t obstacle, cudaExtent extent, int3 min, int3 max,
                                   cudaStream_t stream);

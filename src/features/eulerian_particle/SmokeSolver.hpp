@@ -42,7 +42,7 @@ namespace lr::eulerian
 // volumes with registerVolumes() before constructing the solver, or let the constructor do it.
 //
 // Obstacles are optional and come from outside: Config::obstacleMaskName names a volume that
-// SmokeVoxelizePass rasterizes from live scene geometry on the Vulkan side, and stages 2-8 treat
+// VoxelizePass rasterizes from live scene geometry on the Vulkan side, and stages 2-8 treat
 // its set cells as immovable free-slip walls, exactly as they treat the box's own border. The mask
 // joins the semaphore handshake below as another named image, so each frame's rasterization is
 // ordered before the kernels that read it without any extra synchronization.
@@ -70,7 +70,7 @@ public:
 
         // An already-registered R32_UINT volume holding the obstacle mask: non-zero cells are
         // treated as immovable free-slip walls, exactly as the box's own border is. The solver does
-        // not own, register or write it — SmokeVoxelizePass rasterizes it on the Vulkan side each
+        // not own, register or write it — VoxelizePass rasterizes it on the Vulkan side each
         // frame, and the solver only imports it and reads it. It must be exportable and allocated
         // at `extent`, since the kernels index it with the same cell coordinates as the fields.
         //

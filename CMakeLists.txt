@@ -382,12 +382,25 @@ add_shaders(lr_fluid_feature
     src/features/fluid/fluid_composite.frag
 )
 
+# Scene geometry to solid R32_UINT occupancy volumes. Kept independent of either simulation so
+# Eulerian smoke and Lagrangian liquid can each own a grid with its own bounds and resolution.
+add_library(lr_voxel_feature STATIC
+    src/features/voxel/VoxelizePass.cpp
+)
+target_include_directories(lr_voxel_feature PUBLIC src)
+target_link_libraries(lr_voxel_feature PUBLIC lr_core glm::glm)
+add_shaders(lr_voxel_feature
+    src/features/voxel/voxelize.vert
+    src/features/voxel/voxelize.frag
+    src/features/voxel/voxelize_clear.comp
+)
+
 # Application-facing GPU fluid controller and its ImGui controls.
 add_library(lr_fluid_simulation STATIC
     src/features/fluid/FluidSimulation.cpp
 )
 target_include_directories(lr_fluid_simulation PUBLIC src)
-target_link_libraries(lr_fluid_simulation PUBLIC lr_fluid_feature lr_core imgui)
+target_link_libraries(lr_fluid_simulation PUBLIC lr_fluid_feature lr_voxel_feature lr_core imgui)
 
 # External baked-fluid ingestion. OpenVDB and Blender's gzip configuration format stop at this
 # boundary; the rest of the engine only sees OfflineFluidSimulation.
@@ -437,10 +450,10 @@ if(LR_ENABLE_CUDA)
         src/features/eulerian_particle/SmokeRenderPass.cpp
         src/features/eulerian_particle/SmokeSimulation.cpp
         src/features/eulerian_particle/SmokeSolver.cpp
-        src/features/eulerian_particle/SmokeVoxelizePass.cpp
     )
     target_include_directories(lr_eulerian_particle_feature PUBLIC src)
-    target_link_libraries(lr_eulerian_particle_feature PUBLIC lr_core lr_smoke_component_feature CUDA::cudart)
+    target_link_libraries(lr_eulerian_particle_feature PUBLIC lr_core lr_smoke_component_feature lr_voxel_feature
+        CUDA::cudart)
     target_compile_definitions(lr_eulerian_particle_feature PUBLIC LR_ENABLE_CUDA=1)
     if(WIN32)
         target_compile_definitions(lr_eulerian_particle_feature PRIVATE
@@ -453,9 +466,6 @@ if(LR_ENABLE_CUDA)
     )
     add_shaders(lr_eulerian_particle_feature
         src/features/eulerian_particle/smoke.frag
-        src/features/eulerian_particle/smoke_voxelize.vert
-        src/features/eulerian_particle/smoke_voxelize.frag
-        src/features/eulerian_particle/smoke_voxelize_clear.comp
     )
 
     # Minimal end-to-end CUDA simulation -> Vulkan volume sampling demo. It deliberately uses a

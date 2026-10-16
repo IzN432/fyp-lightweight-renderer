@@ -3,11 +3,13 @@
 #include "features/fluid/FluidComponent.hpp"
 #include "features/fluid/FluidSolverGpu.hpp"
 #include "features/fluid/OfflineFluidSimulationStore.hpp"
+#include "features/voxel/VoxelizePass.hpp"
 
 #include <glm/glm.hpp>
 
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -24,9 +26,17 @@ public:
     using CuboidSource = FluidComponent::CuboidSource;
     using Config       = FluidComponent::Config;
 
-    FluidSimulation(Config config, ResourceRegistry &resources, OfflineFluidSimulationStore &offlineStore);
+    struct ObstacleConfig
+    {
+        GeometryPass::Config geometry{};
+        uint32_t             maxCellsPerAxis = 100;
+        std::string          maskResourceName = "fluid_obstacle_mask";
+    };
 
-    void build(FrameGraph &frameGraph);
+    FluidSimulation(Config config, ResourceRegistry &resources, OfflineFluidSimulationStore &offlineStore,
+                    ObstacleConfig obstacleConfig = {});
+
+    void build(FrameGraph &frameGraph, const GpuMeshLayout *obstacleLayout = nullptr);
     // Binds the one simulation the shared GPU runtime displays. Passing null hides it and stops it.
     void setTarget(FluidComponent *component, const glm::vec3 &worldPosition = glm::vec3(0.0f));
     void update(float frameDeltaTime);
@@ -34,6 +44,8 @@ public:
     void onGUI();
     // Appends the presentation-scaled domain outline when Show Bounds is enabled.
     void appendOverlayLines(OverlayLineBuilder &builder, float visualScale) const;
+    void setSceneGeometry(SceneDrawList draws);
+    void setSkinningEnabled(bool enabled);
 
     uint32_t           particleCount() const;
     uint32_t           capacity() const { return m_solver.config().maxParticles; }
@@ -48,15 +60,19 @@ public:
     const std::string &particleBufferName() const { return m_solver.config().particleBufferResourceName; }
 
 private:
-    static FluidSolverGpu::Config solverConfig(const Config &config);
+    static FluidSolverGpu::Config solverConfig(const Config &config, const ObstacleConfig &obstacles);
+    static VkExtent3D              obstacleGridSize(const Config &config, uint32_t maxCellsPerAxis);
     static std::vector<glm::vec3> makeSource(const Config &config);
     void                          applyRuntimeConfig();
+    void                          applyObstacleConfig();
     void                          resetBaked();
     void                          uploadBakedFrame(std::size_t frameIndex);
     float                         resolvedBakedParticleRadius() const;
 
     Config                       m_config;
+    ObstacleConfig               m_obstacleConfig;
     FluidSolverGpu               m_solver;
+    std::optional<VoxelizePass>  m_voxelizePass;
     OfflineFluidSimulationStore *m_offlineStore   = nullptr;
     FluidComponent              *m_target         = nullptr;
     uint64_t                     m_targetRevision = 0;

@@ -173,7 +173,16 @@ bool clampSourcesToBounds(FluidSimulation::Config &config)
 
 } // namespace
 
-FluidSolverGpu::Config FluidSimulation::solverConfig(const Config &config)
+VkExtent3D FluidSimulation::obstacleGridSize(const Config &config, uint32_t maxCellsPerAxis)
+{
+    const glm::vec3 extent = glm::max(glm::abs(config.boundsMax - config.boundsMin), glm::vec3(1e-6f));
+    const float     longest = std::max({extent.x, extent.y, extent.z});
+    const float     limit   = static_cast<float>(std::max(maxCellsPerAxis, 1u));
+    const glm::uvec3 cells  = glm::max(glm::uvec3(1), glm::uvec3(glm::round(extent * (limit / longest))));
+    return VkExtent3D{cells.x, cells.y, cells.z};
+}
+
+FluidSolverGpu::Config FluidSimulation::solverConfig(const Config &config, const ObstacleConfig &obstacles)
 {
     FluidSolverGpu::Config result;
     result.smoothingRadius = config.smoothingRadius();
@@ -199,6 +208,11 @@ FluidSolverGpu::Config FluidSimulation::solverConfig(const Config &config)
     result.startPaused      = config.startPaused;
     result.particleRadius   = config.particleRadius();
     result.particleColor    = config.particleColor;
+    const uint32_t obstacleLimit = std::max(obstacles.maxCellsPerAxis, 1u);
+    result.obstacleMaskResourceName = obstacles.maskResourceName;
+    result.obstacleAllocatedSize = VkExtent3D{obstacleLimit, obstacleLimit, obstacleLimit};
+    result.obstacleGridSize = obstacleGridSize(config, obstacleLimit);
+    result.obstacleEnabled = !obstacles.geometry.indexBufferResourceName.empty();
     return result;
 }
 
@@ -231,17 +245,55 @@ std::vector<glm::vec3> FluidSimulation::makeSource(const Config &config)
     return positions;
 }
 
-FluidSimulation::FluidSimulation(Config config, ResourceRegistry &resources, OfflineFluidSimulationStore &offlineStore)
-    : m_config(std::move(config)), m_solver(solverConfig(m_config), resources), m_offlineStore(&offlineStore)
+FluidSimulation::FluidSimulation(Config config, ResourceRegistry &resources, OfflineFluidSimulationStore &offlineStore,
+                                 ObstacleConfig obstacleConfig)
+    : m_config(std::move(config)), m_obstacleConfig(std::move(obstacleConfig)),
+      m_solver(solverConfig(m_config, m_obstacleConfig), resources), m_offlineStore(&offlineStore)
 {
+    if (!m_obstacleConfig.geometry.indexBufferResourceName.empty())
+    {
+        const uint32_t limit = std::max(m_obstacleConfig.maxCellsPerAxis, 1u);
+        m_voxelizePass.emplace(VoxelizePass::Config{
+            .maskResourceName = m_solver.config().obstacleMaskResourceName,
+            .geometry = m_obstacleConfig.geometry,
+            .boundsMin = m_config.boundsMin,
+            .boundsMax = m_config.boundsMax,
+            .gridSize = obstacleGridSize(m_config, limit),
+            .allocatedSize = VkExtent3D{limit, limit, limit},
+            .enabled = false,
+        });
+    }
     reset();
 }
 
-void FluidSimulation::build(FrameGraph &frameGraph) { m_solver.build(frameGraph); }
+void FluidSimulation::build(FrameGraph &frameGraph, const GpuMeshLayout *obstacleLayout)
+{
+    if (m_voxelizePass)
+    {
+        if (obstacleLayout == nullptr)
+        {
+            throw std::invalid_argument(
+                "FluidSimulation::build: obstacle geometry was configured, so its vertex layout is required");
+        }
+        m_voxelizePass->build(frameGraph, *obstacleLayout);
+    }
+    m_solver.build(frameGraph);
+}
+
+void FluidSimulation::setSceneGeometry(SceneDrawList draws)
+{
+    if (m_voxelizePass) m_voxelizePass->setSceneGeometry(std::move(draws));
+}
+
+void FluidSimulation::setSkinningEnabled(bool enabled)
+{
+    if (m_voxelizePass) m_voxelizePass->setSkinningEnabled(enabled);
+}
 
 void FluidSimulation::setTarget(FluidComponent *component, const glm::vec3 &worldPosition)
 {
     m_worldPosition = worldPosition;
+    applyObstacleConfig();
     if (component == m_target)
     {
         // A paste or undo can replace all settings without going through this panel.
@@ -272,6 +324,7 @@ void FluidSimulation::setTarget(FluidComponent *component, const glm::vec3 &worl
     {
         m_bakedParticleCount = 0;
         m_solver.setPublishEnabled(false);
+        applyObstacleConfig();
         return;
     }
 
@@ -286,6 +339,28 @@ void FluidSimulation::setTarget(FluidComponent *component, const glm::vec3 &worl
     {
         m_bakedConfig = m_target->bakedConfig();
         resetBaked();
+    }
+    applyObstacleConfig();
+}
+
+void FluidSimulation::applyObstacleConfig()
+{
+    const uint32_t limit = std::max(m_obstacleConfig.maxCellsPerAxis, 1u);
+    const VkExtent3D grid = obstacleGridSize(m_config, limit);
+    const bool enabled = m_target && m_target->isLive() && m_voxelizePass.has_value();
+
+    auto &solver = m_solver.config();
+    solver.obstacleGridSize = grid;
+    solver.obstacleEnabled = enabled;
+
+    if (m_voxelizePass)
+    {
+        const float scale = std::max(m_config.renderScale, 0.0f);
+        auto &voxelize = m_voxelizePass->config();
+        voxelize.boundsMin = m_worldPosition + m_config.boundsMin * scale;
+        voxelize.boundsMax = m_worldPosition + m_config.boundsMax * scale;
+        voxelize.gridSize = grid;
+        voxelize.enabled = enabled;
     }
 }
 
@@ -307,6 +382,7 @@ void FluidSimulation::applyRuntimeConfig()
                                            std::max(m_config.particleSpacing, 1e-4f) / solver.smoothingRadius;
     solver.particleRadius                = m_config.particleRadius();
     solver.particleColor                 = m_config.particleColor;
+    applyObstacleConfig();
     m_solver.setFixedDeltaTime(m_config.fixedDeltaTime);
     m_solver.updateParams();
 }
@@ -692,11 +768,11 @@ void FluidSimulation::onGUI()
     }
     if (ImGui::CollapsingHeader("Domain"))
     {
-        // Nothing in the solver is sized by the domain: the neighbour grid hashes world cells into
-        // a fixed bucket table, so the box only clamps positions and seeds the spawn validation.
-        // That makes it safe to resize while the sim is running -- no reset, no reallocation. On
-        // screen the domain is pure presentation too: apparent size comes from Simulation Render
-        // Scale alone, so resizing the walls moves them without rescaling the fluid.
+        // The neighbour grid hashes world cells into a fixed bucket table, while the obstacle mask
+        // keeps a fixed allocation and only changes its active grid dimensions. That makes it safe
+        // to resize while the sim is running -- no reset or reallocation. On screen the domain is
+        // pure presentation too: apparent size comes from Simulation Render Scale alone, so
+        // resizing the walls moves them without rescaling the fluid.
         glm::vec3  centre       = (m_config.boundsMin + m_config.boundsMax) * 0.5f;
         glm::vec3  size         = m_config.boundsMax - m_config.boundsMin;
         const bool centreEdited = ImGui::DragFloat3("Domain Centre", &centre.x, 0.1f, 0.0f, 0.0f, "%.2f");
@@ -711,6 +787,9 @@ void FluidSimulation::onGUI()
             m_config.boundsMax        = centre + size * 0.5f;
             solver.boundsMin          = m_config.boundsMin;
             solver.boundsMax          = m_config.boundsMax;
+            // Keep collision voxelization aligned with the edited domain. This updates both the
+            // active mask resolution and its world-space box inside the existing allocation.
+            applyObstacleConfig();
             m_solver.updateParams();
             if (clampSourcesToBounds(m_config))
             {

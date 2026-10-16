@@ -210,6 +210,7 @@ void Engine::run()
     // -------------------------------------------------------------------------
 
     const VkFormat swapchainFormat = viewer.frameGraph().resources().getImage("swapchain")->format;
+    const lr::GpuMeshLayout obstacleLayout = lr::conventions::geometryMeshLayout();
 
 #if defined(LR_ENABLE_CUDA)
     // Grid-based smoke on CUDA. The simulation volumes are persistent registry images that CUDA
@@ -360,7 +361,12 @@ void Engine::run()
 
     // The solver publishes renderer-ready records into a device-local buffer. The liquid pass
     // reads that same buffer, so solved positions never make a per-frame round trip through the CPU.
-    lr::FluidSimulation fluidSimulation({}, viewer.resources(), sceneAssets.offlineFluids);
+    lr::FluidSimulation fluidSimulation(
+        {}, viewer.resources(), sceneAssets.offlineFluids,
+        {
+            .geometry = sceneManager.gpu().geometryPassConfig(),
+            .maxCellsPerAxis = 100,
+        });
 
     lr::ScreenSpaceLiquidPass liquidPass({
         .cameraBufferResourceName = sceneManager.cameraBufferName(),
@@ -373,7 +379,7 @@ void Engine::run()
         .renderScale     = fluidSimulation.renderScale(),
     }, viewer.resources());
     liquidPass.setParticleCount(fluidSimulation.particleCount());
-    fluidSimulation.build(viewer.frameGraph());
+    fluidSimulation.build(viewer.frameGraph(), &obstacleLayout);
     liquidPass.build(viewer.frameGraph());
 
     // As with the heatmap pass: one empty draw entry until EditorRenderBridge points it at a mesh.
@@ -395,8 +401,7 @@ void Engine::run()
 #if defined(LR_ENABLE_CUDA)
     // Blends the ray-marched volume over the completed scene but before selection outlines and
     // ImGui. The pass also samples the opaque depth buffer to stop rays at scene geometry.
-    const lr::GpuMeshLayout smokeObstacleLayout = lr::conventions::geometryMeshLayout();
-    smokeSimulation.build(viewer.frameGraph(), &smokeObstacleLayout);
+    smokeSimulation.build(viewer.frameGraph(), &obstacleLayout);
 #endif
 
     // Blender's selected-object outline, derived from the picking IDs. Blending into a LOAD
@@ -566,6 +571,9 @@ void Engine::run()
         areaShadowPass.setSceneGeometry(draws);
         areaShadowPass.setLightObjects(gpu.lightObjects());
         setTransparentGeometry(gpu);
+        // Liquid owns a voxel grid aligned to its own domain, separate from smoke's grid, but both
+        // replay this same live scene draw list through the shared VoxelizePass implementation.
+        fluidSimulation.setSceneGeometry(draws);
 #if defined(LR_ENABLE_CUDA)
         // The obstacle voxelizer replays the same list, so the smoke collides with the geometry
         // actually on screen rather than with whatever the scene held at startup.

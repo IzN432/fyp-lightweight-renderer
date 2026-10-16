@@ -9,6 +9,7 @@
 // with that update, in fluid_finalise.comp.
 
 #include "fluid_sim.glslh"
+#include "fluid_obstacle.glslh"
 
 layout(local_size_x = FLUID_WORKGROUP_SIZE) in;
 
@@ -18,6 +19,10 @@ void main()
     if (i >= particleCount())
         return;
 
-    vec3 position = predicted[i].xyz + corrections[i].xyz;
-    predicted[i] = vec4(clamp(position, domainMin(), domainMax()), 0.0);
+    vec3 previous = predicted[i].xyz;
+    vec3 position = clamp(previous + corrections[i].xyz, domainMin(), domainMax());
+    vec3 obstacleNormal;
+    if (sweepObstacle(previous, position, obstacleNormal))
+        contactNormals[i] = vec4(obstacleNormal, 0.0);
+    predicted[i] = vec4(position, 0.0);
 }

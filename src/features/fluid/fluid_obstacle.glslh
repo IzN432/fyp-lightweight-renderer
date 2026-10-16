@@ -1,0 +1,107 @@
+#ifndef FLUID_OBSTACLE_GLSLH
+#define FLUID_OBSTACLE_GLSLH
+
+// Solid occupancy produced by VoxelizePass. The active grid occupies the origin corner of the
+// fixed allocation, exactly as it does for the smoke solver.
+layout(set = 0, binding = 19, r32ui) uniform readonly uimage3D obstacleMask;
+
+bool obstacleCellInside(ivec3 cell)
+{
+    return all(greaterThanEqual(cell, ivec3(0))) && all(lessThan(cell, obstacleGridSize()));
+}
+
+bool obstacleCellOccupied(ivec3 cell)
+{
+    return obstacleCellInside(cell) && imageLoad(obstacleMask, cell).r != 0u;
+}
+
+// Inflate solid cells by the particle radius before tracing the centre. This is a conservative
+// grid-space Minkowski sum: it may hold a centre up to one voxel farther away than an analytic
+// sphere/triangle test, but it cannot let part of the rendered particle enter a solid voxel.
+bool obstacleCellSolidForParticle(ivec3 centre)
+{
+    if (!obstaclesEnabled())
+        return false;
+
+    vec3 extent = max(domainMax() - domainMin(), vec3(1e-6));
+    vec3 cellSize = extent / vec3(obstacleGridSize());
+    ivec3 radiusCells = ivec3(ceil(vec3(particleRadius()) / cellSize));
+    radiusCells = clamp(radiusCells, ivec3(0), obstacleGridSize() - 1);
+
+    for (int z = -radiusCells.z; z <= radiusCells.z; ++z)
+    for (int y = -radiusCells.y; y <= radiusCells.y; ++y)
+    for (int x = -radiusCells.x; x <= radiusCells.x; ++x)
+    {
+        if (obstacleCellOccupied(centre + ivec3(x, y, z)))
+            return true;
+    }
+    return false;
+}
+
+vec3 obstacleGridPosition(vec3 position)
+{
+    vec3 unit = (position - domainMin()) / max(domainMax() - domainMin(), vec3(1e-6));
+    vec3 grid = vec3(obstacleGridSize());
+    return clamp(unit * grid, vec3(0.0), grid - vec3(1e-5));
+}
+
+// Amanatides-Woo traversal of every voxel crossed by [start, target]. On contact target is moved
+// to the empty side of the first crossed face and normal points away from the obstacle.
+bool sweepObstacle(vec3 start, inout vec3 target, out vec3 normal)
+{
+    normal = vec3(0.0);
+    if (!obstaclesEnabled())
+        return false;
+
+    vec3 gridStart = obstacleGridPosition(start);
+    vec3 gridEnd = obstacleGridPosition(target);
+    vec3 ray = gridEnd - gridStart;
+    if (dot(ray, ray) <= 1e-12)
+        return false;
+
+    ivec3 cell = ivec3(floor(gridStart));
+    // A map can change around a particle between frames. Do not trap a centre that is already in
+    // newly occupied space; allowing this move lets pressure or velocity carry it back out.
+    if (obstacleCellSolidForParticle(cell))
+        return false;
+
+    ivec3 stepDirection = ivec3(sign(ray));
+    vec3 inverseRay = vec3(
+        abs(ray.x) > 1e-12 ? 1.0 / abs(ray.x) : 1e30,
+        abs(ray.y) > 1e-12 ? 1.0 / abs(ray.y) : 1e30,
+        abs(ray.z) > 1e-12 ? 1.0 / abs(ray.z) : 1e30);
+    vec3 nextBoundary = vec3(
+        stepDirection.x > 0 ? float(cell.x + 1) : float(cell.x),
+        stepDirection.y > 0 ? float(cell.y + 1) : float(cell.y),
+        stepDirection.z > 0 ? float(cell.z + 1) : float(cell.z));
+    vec3 tMax = vec3(
+        stepDirection.x != 0 ? abs(nextBoundary.x - gridStart.x) * inverseRay.x : 1e30,
+        stepDirection.y != 0 ? abs(nextBoundary.y - gridStart.y) * inverseRay.y : 1e30,
+        stepDirection.z != 0 ? abs(nextBoundary.z - gridStart.z) * inverseRay.z : 1e30);
+
+    // A segment inside the active grid crosses at most x+y+z cells. Deriving the bound from the
+    // live grid keeps custom resolutions correct without sampling beyond the segment.
+    int traversalLimit = obstacleGridSize().x + obstacleGridSize().y + obstacleGridSize().z;
+    for (int visit = 0; visit < traversalLimit; ++visit)
+    {
+        int axis = tMax.x <= tMax.y && tMax.x <= tMax.z ? 0 : (tMax.y <= tMax.z ? 1 : 2);
+        float entry = tMax[axis];
+        if (entry > 1.0)
+            break;
+
+        cell[axis] += stepDirection[axis];
+        if (!obstacleCellInside(cell))
+            break;
+
+        if (obstacleCellSolidForParticle(cell))
+        {
+            normal[axis] = -float(stepDirection[axis]);
+            target = mix(start, target, max(entry - 1e-4, 0.0));
+            return true;
+        }
+        tMax[axis] += inverseRay[axis];
+    }
+    return false;
+}
+
+#endif // FLUID_OBSTACLE_GLSLH
