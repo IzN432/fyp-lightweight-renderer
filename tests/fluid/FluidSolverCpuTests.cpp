@@ -190,6 +190,67 @@ void testVorticityConfinement()
     assert(totalDifference > 1e-6f);
 }
 
+// Equations (15)-(16) with a known answer: a counter-clockwise rigid rotation about +z has curl
+// 2*Omega*z_hat, so the estimate must point along +z, and confinement must speed up the rotation
+// at the rim rather than brake it. Catches the operand order of the curl cross product, which the
+// test above cannot, since it only asks for a non-zero change.
+void testVorticityMatchesRigidRotation()
+{
+    constexpr float omegaRate = 2.0f;
+    constexpr float spacing   = 0.5f;
+
+    lr::FluidSolverCpu::Config config;
+    config.smoothingRadius               = 1.0f;
+    config.gravity                       = glm::vec3(0.0f);
+    config.solverIterations              = 0;
+    config.artificialPressureK           = 0.0f;
+    config.viscosity                     = 0.0f;
+    config.maxDisplacementInRadiiPerStep = 0.0f;
+    config.boundsMin                     = glm::vec3(-10.0f);
+    config.boundsMax                     = glm::vec3(10.0f);
+
+    // A 5x5 sheet in the xy plane, so the curl is purely along z.
+    std::vector<glm::vec3> particles;
+    std::vector<glm::vec3> velocities;
+    std::size_t            centre = 0;
+    std::size_t            rim    = 0;
+    for (int y = -2; y <= 2; ++y)
+    {
+        for (int x = -2; x <= 2; ++x)
+        {
+            const glm::vec3 position(static_cast<float>(x) * spacing, static_cast<float>(y) * spacing, 0.0f);
+            if (x == 0 && y == 0) centre = particles.size();
+            if (x == 2 && y == 0) rim = particles.size();
+            particles.push_back(position);
+            velocities.push_back(omegaRate * glm::vec3(-position.y, position.x, 0.0f));
+        }
+    }
+
+    // A tiny step keeps positions, and so the derived velocities, essentially unchanged before the
+    // post-process runs.
+    constexpr float dt = 1e-4f;
+
+    lr::FluidSolverCpu disabled(config);
+    disabled.setParticles(particles);
+    disabled.setVelocities(velocities);
+    disabled.step(dt);
+
+    config.vorticityEpsilon = 1.0f;
+    lr::FluidSolverCpu enabled(config);
+    enabled.setParticles(particles);
+    enabled.setVelocities(velocities);
+    enabled.step(dt);
+
+    const glm::vec3 omega = enabled.vorticities()[centre];
+    assert(omega.z > 0.0f);
+    assert(std::fabs(omega.x) < 1e-4f * omega.z && std::fabs(omega.y) < 1e-4f * omega.z);
+
+    // The rim particle at (+x, 0) moves along +y. |omega| falls off towards the sheet's edge, so N
+    // points inward and N x omega must add to that motion.
+    const float boost = enabled.velocities()[rim].y - disabled.velocities()[rim].y;
+    assert(boost > 0.0f);
+}
+
 // Retaining particle mass in equations (2), (7) and the PBD inverse-mass denominator must not
 // change an equal-mass fluid when both particle mass and rest density are scaled together.
 void testMassConsistentConstraintGradient()
@@ -510,6 +571,7 @@ int main()
     testArtificialPressureCorrection();
     testPaperXsphEquation();
     testVorticityConfinement();
+    testVorticityMatchesRigidRotation();
     testMassConsistentConstraintGradient();
     testPaperTermsStayBoundedAtDemoScale();
     testPerStepDisplacementCap();

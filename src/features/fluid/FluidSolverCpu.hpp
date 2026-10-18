@@ -89,6 +89,9 @@ public:
     // interior particles near restDensity, so this is what tests and the GPU diff assert on.
     // Surface particles read legitimately low (they have no neighbours outside the fluid).
     const std::vector<float> &densities() const { return m_densities; }
+    // Equation (15) curl estimate of particle i from the last step. Diagnostic, and only written
+    // while vorticity confinement is enabled; tests use it to pin the sign convention.
+    const std::vector<glm::vec3> &vorticities() const { return m_vorticities; }
 
     // Fills a lattice spanning [min, max] with the spacing the other helpers assume.
     static std::vector<glm::vec3> makeParticleBlock(const glm::vec3 &min, const glm::vec3 &max,

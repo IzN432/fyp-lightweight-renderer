@@ -308,8 +308,11 @@ void FluidSolverCpu::applyVorticityConfinement(float deltaTime)
         {
             const std::size_t j      = m_neighbours[n];
             const glm::vec3   offset = m_positions[i] - m_positions[j];
+            // The paper's v_ij x grad_pj W. spikyGradient(p_i - p_j) is grad_pi W = -grad_pj W, so
+            // the operands are swapped to absorb that sign; with them the other way round omega is
+            // the negated curl and equation (16) damps swirl instead of confining it.
             m_vorticities[i] +=
-                glm::cross(m_velocities[j] - m_velocities[i], spikyGradient(offset, h));
+                glm::cross(spikyGradient(offset, h), m_velocities[j] - m_velocities[i]);
         }
     }
 

@@ -27,7 +27,8 @@ void main()
     FLUID_FOR_EACH_NEIGHBOUR(i, j, {
         vec3 offset = self - positions[j].xyz;
         if (dot(offset, offset) < h * h)
-            omega += cross(velocities[j].xyz - velocity, spikyGradient(offset, h));
+            // v_ij x grad_pj W, written as grad_pi W x v_ij; see FluidSolverCpu for the sign.
+            omega += cross(spikyGradient(offset, h), velocities[j].xyz - velocity);
     })
 
     vorticities[i] = vec4(omega, 0.0);
