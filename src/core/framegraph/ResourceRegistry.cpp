@@ -282,14 +282,6 @@ void ResourceRegistry::queueImageUpload(const std::string &name, const void *dat
         throw std::runtime_error("ResourceRegistry: image '" + name + "' is not a replaceable uploaded image");
     }
 
-    for (const auto &upload : m_pendingUploads)
-    {
-        if (upload.type == PendingUpload::Type::Image && upload.resourceName == name)
-        {
-            throw std::runtime_error("ResourceRegistry: image '" + name + "' already has a pending upload");
-        }
-    }
-
     VkDeviceSize bpp = 4; // default RGBA8
     if (format == VK_FORMAT_R16G16B16A16_SFLOAT)
     {
@@ -351,6 +343,19 @@ void ResourceRegistry::queueImageUpload(const std::string &name, const void *dat
             existing->second        = std::move(prepared);
             retire(std::move(oldImage));
             ++m_generations[name];
+
+            // An upload still queued for the old image (its creation, or a replace earlier this frame)
+            // is superseded, as with replaceBuffer: it targets the name, so it would otherwise be
+            // copied into this replacement, whose size may differ. Only the newest data matters.
+            // E.g. a material slot created at initialisation and rewritten before the first flush.
+            std::erase_if(m_pendingUploads, [&](PendingUpload &queued) {
+                if (queued.type != PendingUpload::Type::Image || queued.resourceName != name)
+                {
+                    return false;
+                }
+                m_allocator.destroy(queued.staging);
+                return true;
+            });
         }
 
         // Capacity was reserved before committing the image, so this move cannot reallocate.
