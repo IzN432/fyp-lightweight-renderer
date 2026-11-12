@@ -130,8 +130,12 @@ struct Camera : public Component
             changed |= ImGui::SliderFloat("Orthographic Height", &orthoHeight, 0.1f, 100.0f);
         }
 
-        changed |= ImGui::SliderFloat("Near Plane", &nearPlane, 0.01f, farPlane - 0.01f);
-        changed |= ImGui::SliderFloat("Far Plane", &farPlane, nearPlane + 0.01f, 10000.0f);
+        // Drag to scrub; double-click (or Ctrl+click) to type an exact value. AlwaysClamp keeps
+        // typed values inside the valid range so near always stays below far.
+        changed |= ImGui::DragFloat("Near Plane", &nearPlane, std::max(nearPlane * 0.01f, 0.001f), 0.001f,
+                                    farPlane - 0.01f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+        changed |= ImGui::DragFloat("Far Plane", &farPlane, std::max(farPlane * 0.005f, 0.01f), nearPlane + 0.01f,
+                                    100000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 
         if (changed)
         {
