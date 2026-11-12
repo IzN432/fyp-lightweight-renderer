@@ -121,6 +121,11 @@ SceneGpu::LightVisual SceneGpu::makeLightVisual(SceneObject &light)
                        .mesh     = std::make_unique<Mesh>(),
                        .material = m_materialStore.acquire(buildAreaLightMaterial(lightData, m_areaLightVisualConfig))};
     buildAreaLightQuadMesh(*visual.mesh, transform, lightData, visual.material, m_areaLightVisualConfig);
+    // The handle may be a recycled slot (e.g. after a scene load/clear) whose texture-array entries
+    // still hold the previous material's images. The visual has no textures of its own, so this
+    // rewrites them to the white fallback — without it the emissive slot can stay black and the
+    // quad's emissive = factor * 0.
+    m_pendingTextureUpdates.push_back(visual.material);
     return visual;
 }
 
