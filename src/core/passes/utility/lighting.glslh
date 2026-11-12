@@ -239,10 +239,13 @@ vec3 CalcAreaLight(LightData light, vec3 position, vec3 normal, vec3 albedo, flo
 
     vec3 diffuse = LTC_Evaluate(N, V, position, mat3(1.0), points, twoSided);
 
-    // intensity is the emitter's radiance. LTC_Evaluate already returns the (LTC-transformed) form
-    // factor: the fitted IntegrateEdgeVec folds in the 1/(2*pi) of the polygon integral, so no
-    // further normalisation is applied here.
-    return light.color * light.intensity * (albedo * (1.0 - metallic) * diffuse + specular);
+    // intensity is on-axis radiant intensity, like the other light types; the emitter's radiance is
+    // that spread over the quad's area, so resizing the light does not change its total output. Keep
+    // in step with areaLightRadiance in Light.hpp, which the visible quad's emissive uses.
+    // LTC_Evaluate already returns the (LTC-transformed) form factor: the fitted IntegrateEdgeVec
+    // folds in the 1/(2*pi) of the polygon integral, so no further normalisation is applied here.
+    float radiance = light.intensity / max(light.areaSize.x * light.areaSize.y, 1e-4);
+    return light.color * radiance * (albedo * (1.0 - metallic) * diffuse + specular);
 }
 
 vec3 CalcImageLight(LightData light, vec3 position, vec3 normal, vec3 albedo, float roughness, float metallic, float ao,

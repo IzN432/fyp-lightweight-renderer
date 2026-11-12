@@ -36,7 +36,7 @@ void buildAreaLightQuadMesh(Mesh &mesh, const TransformComponent &transform, con
                             MaterialHandle materialHandle, const AreaLightVisualConfig &config);
 
 // Builds the material that makes the quad read as "the light" rather than a lit surface: black
-// diffuse (it reflects nothing of its own) with emissive = light.color * light.intensity, so its
+// diffuse (it reflects nothing of its own) with emissive = light.color * areaLightRadiance(light), so its
 // brightness in the final image tracks what CalcAreaLight computes for the same light.
 Material buildAreaLightMaterial(const AreaLight &light, const AreaLightVisualConfig &config);
 

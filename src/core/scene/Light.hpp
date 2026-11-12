@@ -53,6 +53,18 @@ struct AreaLight : public BaseLight
     bool operator==(const AreaLight &) const = default;
 };
 
+// An area light's `intensity` is its on-axis radiant intensity -- the same quantity a point or spot
+// light's intensity is -- so a far-away area light reads like a point light of the same intensity,
+// and resizing the quad redistributes the light without changing how much there is. The emitter's
+// radiance is that spread over the quad's area. The light buffer carries the raw intensity and
+// CalcAreaLight (lighting.glslh) does this same division on the GPU; this CPU copy exists for the
+// visible quad's emissive, which is built on the CPU -- keep the two in step. The floor keeps a
+// zero-sized quad from dividing by zero.
+inline float areaLightRadiance(const AreaLight &light)
+{
+    return light.intensity / std::max(light.size.x * light.size.y, 1e-4f);
+}
+
 struct DirectionalLight : public BaseLight
 {
     // Half the angle the emitter subtends, as seen from the scene — 0.265 for the sun. Unlike a spot
