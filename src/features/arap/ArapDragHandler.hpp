@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ArapSolver.hpp"
+#include "ArapSurfaceFrames.hpp"
 
 #include "core/editor/VertexDragHandler.hpp"
 #include "core/editor/VertexManager.hpp"
@@ -41,6 +42,7 @@ private:
     size_t            m_liveSolveVertexThreshold;
 
     std::vector<glm::vec3> m_beforeDrag;
+    SurfaceFrames          m_framesBeforeDrag;
     // Backing storage for indices() — SelectionManager::getIndicesWithRole returns by value, but
     // the base class interface returns by const ref (matches SelectionManager's own selected/
     // highlighted accessors), so this is recomputed and cached on each call.

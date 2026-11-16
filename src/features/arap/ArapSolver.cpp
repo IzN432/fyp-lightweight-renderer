@@ -10,6 +10,20 @@
 namespace lr
 {
 
+Eigen::MatrixXi weldedFaces(const Mesh &mesh)
+{
+    const Eigen::Index faceCount = static_cast<Eigen::Index>(mesh.faces().size());
+    Eigen::MatrixXi    F(faceCount, 3);
+    for (Eigen::Index f = 0; f < faceCount; ++f)
+    {
+        const glm::uvec3 &face = mesh.faces()[f];
+        F(f, 0)                = static_cast<int>(mesh.positionIndices()[face.x]);
+        F(f, 1)                = static_cast<int>(mesh.positionIndices()[face.y]);
+        F(f, 2)                = static_cast<int>(mesh.positionIndices()[face.z]);
+    }
+    return F;
+}
+
 ArapSolver::ArapSolver()
 {
     const auto backend = createArapBackend();
@@ -23,12 +37,14 @@ std::string_view ArapSolver::backendName() const
     return m_backendName;
 }
 
-bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &anchorIndices,
+bool ArapSolver::precompute(const Mesh &mesh, Eigen::MatrixXi faces, const std::vector<uint32_t> &anchorIndices,
                             const std::vector<uint32_t> &handleIndices)
 {
     const auto precomputeStart = std::chrono::steady_clock::now();
     m_precomputed  = false;
     m_components.clear();
+    m_faces = std::move(faces);
+    m_solvedVertices.assign(mesh.positions().size(), false);
     m_stats        = {};
     m_totalSolveMs = 0.0;
 
@@ -48,14 +64,11 @@ bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &ancho
         V.row(i) << positions[i].x, positions[i].y, positions[i].z;
     }
 
-    const Eigen::Index faceCount = static_cast<Eigen::Index>(mesh.faces().size());
-    Eigen::MatrixXi    F(faceCount, 3);
-    for (Eigen::Index f = 0; f < faceCount; ++f)
+    const Eigen::MatrixXi &F         = m_faces;
+    const Eigen::Index     faceCount = F.rows();
+    if (F.cols() != 3 || faceCount != static_cast<Eigen::Index>(mesh.faces().size()))
     {
-        const glm::uvec3 &face = mesh.faces()[f];
-        F(f, 0)                = static_cast<int>(mesh.positionIndices()[face.x]);
-        F(f, 1)                = static_cast<int>(mesh.positionIndices()[face.y]);
-        F(f, 2)                = static_cast<int>(mesh.positionIndices()[face.z]);
+        return false;
     }
 
     // std::set both dedupes and sorts — guards against an overlapping anchor/handle set as well as
@@ -200,6 +213,10 @@ bool ArapSolver::precompute(const Mesh &mesh, const std::vector<uint32_t> &ancho
                                        std::chrono::steady_clock::now() - precomputeStart)
                                        .count();
             return false;
+        }
+        for (uint32_t vertex : vertices)
+        {
+            m_solvedVertices[vertex] = true;
         }
         m_components.push_back(std::move(problem));
     }

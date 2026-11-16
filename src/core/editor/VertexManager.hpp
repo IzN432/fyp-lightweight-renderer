@@ -21,6 +21,10 @@ public:
 
     const std::vector<glm::vec3> &getPositions() const { return m_mesh->positions(); }
 
+    // The bound mesh, for editors that must keep other attributes (e.g. normals) in step with the
+    // positions they move.
+    Mesh &mesh() const { return *m_mesh; }
+
     void updatePosition(uint32_t index, const glm::vec3 &newPosition);
     void translateSelectedVertices(const std::unordered_set<uint32_t> &indices, const glm::vec3 &translation);
 

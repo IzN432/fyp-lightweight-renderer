@@ -286,6 +286,7 @@ add_library(lr_arap_feature STATIC
     src/features/arap/ArapSolver.cpp
     src/features/arap/ArapDragHandler.cpp
     src/features/arap/ArapDeformCommand.cpp
+    src/features/arap/ArapSurfaceFrames.cpp
     src/features/arap/ArapTool.cpp
 )
 target_include_directories(lr_arap_feature PUBLIC src)

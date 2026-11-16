@@ -154,7 +154,7 @@ try
 
     const std::vector<uint32_t> handles{handle};
     lr::ArapSolver solver;
-    if (!solver.precompute(mesh, anchors, handles))
+    if (!solver.precompute(mesh, lr::weldedFaces(mesh), anchors, handles))
     {
         throw std::runtime_error("ARAP precomputation failed");
     }

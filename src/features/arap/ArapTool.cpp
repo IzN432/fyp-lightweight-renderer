@@ -119,7 +119,7 @@ void ArapTool::onSolveClicked()
     const auto anchors = m_selectionManager.getIndicesWithRole(m_anchorRole);
     const auto handles = m_selectionManager.getIndicesWithRole(m_handleRole);
 
-    m_lastSolveFailed = !m_solver.precompute(*m_mesh, anchors, handles);
+    m_lastSolveFailed = !m_solver.precompute(*m_mesh, weldedFaces(*m_mesh), anchors, handles);
 }
 
 void ArapTool::onOverlayGui(const glm::mat4 &viewProj, VkExtent2D extent)

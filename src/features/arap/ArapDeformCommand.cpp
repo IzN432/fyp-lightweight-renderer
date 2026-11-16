@@ -15,6 +15,7 @@ void ArapDeformCommand::execute()
         positions.push_back(diff.after);
     }
     m_vertexManager.setPositions(indices, positions);
+    restoreSurfaceFrames(m_vertexManager.mesh(), m_framesAfter);
 }
 
 void ArapDeformCommand::undo()
@@ -29,6 +30,7 @@ void ArapDeformCommand::undo()
         positions.push_back(diff.before);
     }
     m_vertexManager.setPositions(indices, positions);
+    restoreSurfaceFrames(m_vertexManager.mesh(), m_framesBefore);
 }
 
 } // namespace lr

@@ -16,7 +16,11 @@ const std::unordered_set<uint32_t> &ArapDragHandler::indices() const
     return m_indicesCache;
 }
 
-void ArapDragHandler::beginDrag() { m_beforeDrag = m_vertexManager.getPositions(); }
+void ArapDragHandler::beginDrag()
+{
+    m_beforeDrag       = m_vertexManager.getPositions();
+    m_framesBeforeDrag = captureSurfaceFrames(m_vertexManager.mesh());
+}
 
 void ArapDragHandler::translate(const glm::vec3 &frameDelta)
 {
@@ -43,6 +47,13 @@ void ArapDragHandler::translate(const glm::vec3 &frameDelta)
             allIndices[i] = i;
         }
         m_vertexManager.setPositions(allIndices, result);
+        // Normals are cheap (one pass over the faces), so they follow the surface live. Tangents
+        // wait for endDrag(); geometry.frag re-orthogonalises the stale tangent against the new
+        // normal meanwhile, so the TBN basis stays valid.
+        if (m_solver.isPrecomputed())
+        {
+            recomputeNormals(m_vertexManager.mesh(), m_solver.faces(), m_solver.solvedVertices());
+        }
     } else
     {
         // Too large to solve live — just move the handles themselves; the rest of the mesh stays
@@ -88,6 +99,12 @@ void ArapDragHandler::endDrag(const glm::vec3 &totalDelta)
         allIndices[i] = i;
     }
     m_vertexManager.setPositions(allIndices, result);
+    if (m_solver.isPrecomputed())
+    {
+        Mesh &mesh = m_vertexManager.mesh();
+        recomputeNormals(mesh, m_solver.faces(), m_solver.solvedVertices());
+        regenerateTangents(mesh, m_solver.solvedVertices());
+    }
 
     // `positions` is a live reference into VertexManager's internal array, so it already reflects
     // the setPositions() call above — safe to diff against it directly.
@@ -103,7 +120,8 @@ void ArapDragHandler::endDrag(const glm::vec3 &totalDelta)
     if (!diffs.empty())
     {
         m_commandManager.appendCommandWithoutExecuting(
-            std::make_unique<ArapDeformCommand>(m_vertexManager, std::move(diffs)));
+            std::make_unique<ArapDeformCommand>(m_vertexManager, std::move(diffs), std::move(m_framesBeforeDrag),
+                                                captureSurfaceFrames(m_vertexManager.mesh())));
     }
 
     m_solver.recordInteraction(

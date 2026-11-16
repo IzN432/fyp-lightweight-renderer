@@ -35,6 +35,10 @@ struct ArapPerformanceStats
 
 class ArapBackend;
 
+// The mesh's triangles over its unique-position (welded) vertex space, i.e. faces() routed through
+// positionIndices(). This is the topology ARAP solves on and that deformed normals are rebuilt from.
+Eigen::MatrixXi weldedFaces(const Mesh &mesh);
+
 // Converts engine Mesh/GLM data to Eigen and delegates the numerical work to the selected backend.
 // Pure numerics — no dependency on SelectionManager, VertexManager, gizmos, or undo.
 class ArapSolver
@@ -48,11 +52,18 @@ public:
 
     // anchorIndices/handleIndices index into mesh.positions() (the deduped vertex space). Only
     // components containing handles are solved; other disconnected components stay unchanged.
+    // faces must be weldedFaces(mesh); it is taken as input so the caller builds it once and the
+    // solver keeps it (see faces()) for consumers such as the normal update.
     // Returns false if an active component has no anchor or backend precomputation fails.
-    bool precompute(const Mesh &mesh, const std::vector<uint32_t> &anchorIndices,
+    bool precompute(const Mesh &mesh, Eigen::MatrixXi faces, const std::vector<uint32_t> &anchorIndices,
                     const std::vector<uint32_t> &handleIndices);
 
     bool isPrecomputed() const { return m_precomputed; }
+    // The welded faces handed to the last precompute().
+    const Eigen::MatrixXi &faces() const { return m_faces; }
+    // Per unique position: true when it belongs to a component the solver deforms. Positions in
+    // inactive components never move, so their surface attributes must be left as they are.
+    const std::vector<bool> &solvedVertices() const { return m_solvedVertices; }
     std::string_view backendName() const;
     void invalidate() { m_precomputed = false; }
     const ArapPerformanceStats &performanceStats() const { return m_stats; }
@@ -77,6 +88,8 @@ private:
     };
 
     std::vector<Component> m_components;
+    Eigen::MatrixXi        m_faces;
+    std::vector<bool>      m_solvedVertices;
     std::string            m_backendName;
     bool                 m_precomputed = false;
     ArapPerformanceStats m_stats;
