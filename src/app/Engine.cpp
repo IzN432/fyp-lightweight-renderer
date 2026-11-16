@@ -49,6 +49,7 @@
 #include <spdlog/spdlog.h>
 
 #include <cmath>
+#include <cstdio>
 #include <exception>
 #include <filesystem>
 #include <optional>
@@ -620,6 +621,17 @@ void Engine::run()
                 }
                 ImGui::EndMenu();
             }
+
+            // Right-aligned in the menu bar rather than a floating overlay, so it never covers the
+            // Scene panel docked in the top-right corner. ImGui's Framerate is a rolling average.
+            const float framerate = ImGui::GetIO().Framerate;
+            char        frameStats[48];
+            std::snprintf(frameStats, sizeof(frameStats), "%.0f fps (%.2f ms)", framerate,
+                          framerate > 0.0f ? 1000.0f / framerate : 0.0f);
+            const float statsWidth = ImGui::CalcTextSize(frameStats).x + ImGui::GetStyle().ItemSpacing.x;
+            ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - statsWidth);
+            ImGui::TextUnformatted(frameStats);
+
             ImGui::EndMainMenuBar();
         }
 
